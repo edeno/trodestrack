@@ -273,7 +273,7 @@ def compare_integration_methods(
     """
     import jax.numpy as jnp
 
-    from ..imu.preintegration import preintegrate_imu_scan
+    from trodestrack.imu.preintegration import preintegrate_imu_scan
 
     # Baseline integration
     baseline_result = baseline_trapezoidal_integration(
