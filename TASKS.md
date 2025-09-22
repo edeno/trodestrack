@@ -45,11 +45,11 @@
 
 - [x] Implement unit conversions (raw → g → m/s²; raw → deg/s → rad/s) (in SpikeGadgetsIMUData).
 - [x] Implement downsampling & alignment utilities (basic version in SpikeGadgetsIMUData).
-- [ ] Implement IMU pre-integration with `jax.lax.scan`.
-- [ ] Write tests vs numerical integration baseline.
-- [ ] Golden tests: compare JAX pre-integration against high-res numerical baseline on 3 motion profiles (steady, step-turn, sinusoid).
+- [x] Implement IMU pre-integration with `jax.lax.scan`.
+- [x] Write tests vs numerical integration baseline.
+- [x] Golden tests: compare JAX pre-integration against high-res numerical baseline on 3 motion profiles (steady, step-turn, sinusoid).
 
-**NOTE:** Basic unit conversions exist in SpikeGadgetsIMUData, but dedicated IMU pre-integration module in `imu/` directory is not implemented yet.
+**COMPLETED:** Full IMU pre-integration module implemented in `imu/` directory with JAX-compiled functions, comprehensive tests including golden baselines, and 64-bit precision for numerical accuracy. The implementation supports bias correction, velocity damping, and efficient scan-based integration.
 
 ---
 
