@@ -12,7 +12,7 @@ from typing import NamedTuple, Optional, Tuple
 import jax
 import jax.numpy as jnp
 
-from .dynamics import predict_state, predict_covariance, compute_process_noise, rotation_matrix_2d
+from .dynamics import predict_state, predict_covariance, compute_process_noise, rotation_matrix_2d, wrap_angle
 from .gating import mahalanobis_gate
 from .measurements import (
     create_combined_measurement,
@@ -160,8 +160,8 @@ def _predict_state_jax(
     # Position update: x_{k+1} = x_k + v_k * dt + 0.5 * a * dt²
     pos_new = pos + vel * dt + 0.5 * accel_corrected_cm * dt**2
 
-    # Heading update: θ_{k+1} = θ_k + ω * dt
-    theta_new = theta + gyro_corrected * dt
+    # Heading update: θ_{k+1} = wrap(θ_k + ω * dt)
+    theta_new = wrap_angle(theta + gyro_corrected * dt)
 
     # Biases remain unchanged (random walk model)
     return jnp.array([

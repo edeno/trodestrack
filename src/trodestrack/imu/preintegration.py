@@ -247,8 +247,11 @@ def preintegrate_imu_scan(
     initial_velocity = jnp.asarray(initial_velocity, dtype=jnp.float64)
     accel_bias = jnp.asarray(accel_bias, dtype=jnp.float64)
 
-    # Convert initial velocity from cm/s to m/s for consistency
-    initial_velocity_ms = initial_velocity / 100.0
+    # Convert initial velocity from cm/s to m/s for internal consistency
+    # NOTE: All internal calculations use SI units (m, m/s, m/s²)
+    # External interface expects cm for position and cm/s for velocity
+    VELOCITY_CONVERSION = 100.0  # cm/s to m/s
+    initial_velocity_ms = initial_velocity / VELOCITY_CONVERSION
 
     # Calculate time steps
     dts = jnp.diff(timestamps)
@@ -273,9 +276,10 @@ def preintegrate_imu_scan(
     scan_inputs = (imu_data[1:], dts)
     final_state, _ = lax.scan(scan_fn, initial_state, scan_inputs)
 
-    # Convert results back to cm for position/velocity
-    delta_position_cm = final_state.position * 100.0  # m to cm
-    delta_velocity_cm = (final_state.velocity - initial_velocity_ms) * 100.0  # m/s to cm/s
+    # Convert results back to cm for position/velocity (external interface units)
+    POSITION_CONVERSION = 100.0  # m to cm
+    delta_position_cm = final_state.position * POSITION_CONVERSION
+    delta_velocity_cm = (final_state.velocity - initial_velocity_ms) * VELOCITY_CONVERSION
 
     total_time = timestamps[-1] - timestamps[0]
 

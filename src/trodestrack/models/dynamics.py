@@ -18,6 +18,20 @@ jax.config.update("jax_enable_x64", True)
 
 
 @jax.jit
+def wrap_angle(angle: float) -> float:
+    """Wrap angle to [-π, π] range using JAX operations.
+
+    Args:
+        angle: Angle in radians
+
+    Returns:
+        Wrapped angle in [-π, π]
+    """
+    # Use jnp.remainder for consistent wrapping
+    return jnp.remainder(angle + jnp.pi, 2 * jnp.pi) - jnp.pi
+
+
+@jax.jit
 def rotation_matrix_2d(theta: float) -> jnp.ndarray:
     """Create 2D rotation matrix from heading angle.
 
@@ -30,6 +44,29 @@ def rotation_matrix_2d(theta: float) -> jnp.ndarray:
     cos_theta = jnp.cos(theta)
     sin_theta = jnp.sin(theta)
     return jnp.array([[cos_theta, -sin_theta], [sin_theta, cos_theta]], dtype=jnp.float64)
+
+
+def _check_damping_stability(dt: float, velocity_damping: float) -> None:
+    """Check that velocity damping is numerically stable.
+
+    For stability, we need: 0 <= damping_factor = (1 - λ*dt) <= 1
+    This requires: 0 <= λ*dt <= 1, or λ <= 1/dt
+
+    Args:
+        dt: Time step (seconds)
+        velocity_damping: Damping coefficient λ (1/s)
+
+    Raises:
+        ValueError: If damping would cause instability
+    """
+    max_stable_damping = 1.0 / dt
+    if velocity_damping > max_stable_damping:
+        raise ValueError(
+            f"Velocity damping λ={velocity_damping:.3f} too large for dt={dt:.4f}s. "
+            f"Maximum stable damping: λ <= {max_stable_damping:.3f}"
+        )
+    if velocity_damping < 0:
+        raise ValueError(f"Velocity damping λ={velocity_damping:.3f} must be non-negative")
 
 
 def predict_state(
@@ -57,6 +94,9 @@ def predict_state(
     Returns:
         Predicted state
     """
+    # Check damping stability
+    _check_damping_stability(dt, velocity_damping)
+
     # Bias-corrected measurements
     accel_corrected = accel - jnp.array([state.b_ax, state.b_ay])
     gyro_corrected = gyro[0] - state.b_gz
@@ -82,8 +122,8 @@ def predict_state(
     position = jnp.array([state.x, state.y])
     position_new = position + velocity * dt + 0.5 * accel_corrected_cm * dt**2
 
-    # Heading update: θ_{k+1} = θ_k + ω * dt
-    heading_new = state.theta + gyro_corrected * dt
+    # Heading update: θ_{k+1} = wrap(θ_k + ω * dt)
+    heading_new = wrap_angle(state.theta + gyro_corrected * dt)
 
     # Biases remain unchanged (random walk model - noise added in process noise)
     return State2D(
@@ -182,7 +222,7 @@ def compute_state_jacobian(
         # Update dynamics
         vel_new = vel_damped + accel_corrected_cm * dt
         pos_new = pos + vel * dt + 0.5 * accel_corrected_cm * dt**2
-        theta_new = theta + gyro_corrected * dt
+        theta_new = wrap_angle(theta + gyro_corrected * dt)
 
         # Biases unchanged
         return jnp.array([
@@ -221,17 +261,18 @@ def compute_process_noise(
     # Convert accelerometer noise to cm/s²
     accel_noise_cm = accel_noise_std * 100.0
 
-    # Position noise from accelerometer (double integration)
-    # Var(Δx) ≈ (1/4) * σ_a² * dt⁴ (double integration of white noise)
-    pos_noise_var = 0.25 * accel_noise_cm**2 * dt**4
+    # Position noise from accelerometer (double integration of white noise)
+    # For continuous white noise: Var(Δx) = (1/3) * σ_a² * dt³ (not dt⁴)
+    # This is the correct Van Loan discrete-time process noise for double integrator
+    pos_noise_var = (1.0/3.0) * accel_noise_cm**2 * dt**3
 
-    # Velocity noise from accelerometer (single integration)
-    # Var(Δv) = σ_a² * dt²
-    vel_noise_var = accel_noise_cm**2 * dt**2
+    # Velocity noise from accelerometer (single integration of white noise)
+    # For continuous white noise: Var(Δv) = σ_a² * dt (not dt²)
+    vel_noise_var = accel_noise_cm**2 * dt
 
-    # Heading noise from gyroscope
-    # Var(Δθ) = σ_ω² * dt²
-    heading_noise_var = gyro_noise_std**2 * dt**2
+    # Heading noise from gyroscope (single integration of white noise)
+    # For continuous white noise: Var(Δθ) = σ_ω² * dt (not dt²)
+    heading_noise_var = gyro_noise_std**2 * dt
 
     # Bias drift (random walk)
     # Var(Δb) = σ_drift² * dt
@@ -250,8 +291,8 @@ def compute_process_noise(
     ]))
 
     # Add cross-correlation between position and velocity (from acceleration)
-    # Cov(Δx, Δv) ≈ (1/2) * σ_a² * dt³
-    pos_vel_cov = 0.5 * accel_noise_cm**2 * dt**3
+    # For continuous white noise: Cov(Δx, Δv) = (1/2) * σ_a² * dt² (not dt³)
+    pos_vel_cov = 0.5 * accel_noise_cm**2 * dt**2
 
     # Set cross-correlation terms
     Q = Q.at[0, 2].set(pos_vel_cov)  # Cov(x, vx)

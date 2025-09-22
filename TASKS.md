@@ -111,12 +111,45 @@
 - Same measurement interface as EKF for drop-in replacement
 - 17 comprehensive test cases including vs-EKF comparisons
 
-**✅ CRITICAL BUG FIX - Acceleration Rotation Consistency:**
+**✅ CRITICAL BUG FIXES - Mathematical & Numerical Robustness:**
+
+*Acceleration Rotation Consistency:*
 - Fixed acceleration rotation inconsistency between `predict_state` and IMU preintegration
 - Added proper rotation from IMU/body frame to world frame using heading angle θ
 - Updated dynamics.py, ekf.py, and ukf.py to include `R @ accel_corrected` transformation
 - Ensures physical consistency across all filtering algorithms
-- All 246 tests pass with corrected physics implementation
+
+*Process Noise Time Scaling:*
+- Fixed incorrect white noise time scaling in `compute_process_noise()`
+- Position noise: `dt⁴ → dt³` (correct Van Loan discrete-time scaling)
+- Velocity noise: `dt² → dt` (correct continuous white noise integration)
+- Heading noise: `dt² → dt` (correct continuous white noise integration)
+- Cross-correlation: `dt³ → dt²` (consistent with corrected scaling)
+
+*Damping Stability Protection:*
+- Added `_check_damping_stability()` to prevent numerical instabilities
+- Validates that velocity damping satisfies `λ·dt ≤ 1` for stability
+- Clear error messages for unstable parameter combinations
+- Comprehensive test coverage for stability edge cases
+
+*Consistent Angle Wrapping:*
+- Implemented uniform `wrap_angle()` function using JAX `jnp.remainder`
+- Applied throughout dynamics, EKF, and UKF prediction steps
+- Ensures heading stays in `[-π, π]` range consistently across all algorithms
+
+*JAX-Pure Chi-Squared Implementation:*
+- Replaced SciPy dependency with JAX-compatible lookup table
+- Accurate for common DOF (1-5) and p-values (0.05, 0.01, 0.001)
+- Conservative fallback for edge cases using `2*DOF` or `3*DOF` heuristics
+- JAX-compiled for performance with no external dependencies
+
+*IMU Unit Boundary Clarification:*
+- Added clear unit conversion constants with documentation
+- Internal calculations use SI units (m, m/s, m/s²) for consistency
+- External interface maintains cm/cm/s for backward compatibility
+- Prevents unit confusion at API boundaries
+
+- **All 247 tests pass** with mathematically correct and numerically stable implementation
 
 **🔄 REMAINING TASKS:**
 - RTS smoother implementation for backward-pass optimization
@@ -124,10 +157,13 @@
 - Performance optimizations for Jacobian/covariance reuse
 
 **📊 MILESTONE 6 IMPACT:**
-- **35 new test cases** added (18 EKF + 17 UKF tests)
-- **Total project tests: 246** (all passing)
+- **36 new test cases** added (18 EKF + 17 UKF + 1 damping stability test)
+- **Total project tests: 247** (all passing)
 - **JAX-compiled algorithms** ready for high-performance online and offline tracking
 - **Production-ready filtering** with robust error handling and measurement confidence scaling
+- **Mathematically correct** process noise scaling and dynamics integration
+- **Numerically stable** with damping stability checks and consistent angle wrapping
+- **JAX-pure implementation** with no SciPy dependencies in critical paths
 - **Foundation complete** for Milestone 7 runtime APIs
 
 ---

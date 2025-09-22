@@ -11,7 +11,6 @@ from typing import Tuple
 
 import jax
 import jax.numpy as jnp
-from scipy.stats import chi2
 
 # Enable 64-bit precision for numerical accuracy
 jax.config.update("jax_enable_x64", True)
@@ -72,8 +71,12 @@ def mahalanobis_gate(
     return distance <= threshold
 
 
+@jax.jit
 def chi_squared_threshold(dof: int, p_value: float = 0.05) -> float:
-    """Compute chi-squared threshold for gating.
+    """Compute chi-squared threshold for gating using lookup table.
+
+    JAX does not provide ppf (inverse CDF) for chi-squared distribution,
+    so we use a lookup table for common cases with reasonable fallback.
 
     Args:
         dof: Degrees of freedom (measurement dimension)
@@ -82,8 +85,29 @@ def chi_squared_threshold(dof: int, p_value: float = 0.05) -> float:
     Returns:
         Chi-squared threshold value
     """
-    # Use scipy for accurate chi-squared quantile
-    return chi2.ppf(1 - p_value, dof)
+    # Lookup table for common DOF and p-values (precomputed with SciPy)
+    # Rows: p-values [0.05, 0.01, 0.001], Columns: DOF [1, 2, 3, 4, 5]
+    thresholds = jnp.array([
+        [3.841459, 5.991465, 7.814728, 9.487729, 11.070498],  # p=0.05
+        [6.634897, 9.210340, 11.344867, 13.276704, 15.086272], # p=0.01
+        [10.827566, 13.815511, 16.266189, 18.466776, 20.514982] # p=0.001
+    ])
+
+    p_values = jnp.array([0.05, 0.01, 0.001])
+
+    # Find closest p-value in table
+    p_idx = jnp.argmin(jnp.abs(p_values - p_value))
+
+    # Handle DOF 1-5 with table lookup, use conservative fallback for others
+    def get_threshold():
+        return jnp.where(
+            (dof >= 1) & (dof <= 5),
+            thresholds[p_idx, dof - 1],
+            # Conservative fallback: 2*DOF for p=0.05, 3*DOF for smaller p
+            jnp.where(p_value <= 0.01, 3.0 * dof, 2.0 * dof)
+        )
+
+    return get_threshold()
 
 
 def create_measurement_mask(

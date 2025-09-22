@@ -175,6 +175,27 @@ class TestDynamics:
 
         np.testing.assert_allclose([predicted.x, predicted.y], [expected_x, expected_y], rtol=1e-10, atol=1e-12)
 
+    def test_damping_stability_check(self):
+        """Test that damping stability check catches unstable parameters."""
+        state = State2D(x=0.0, y=0.0, vx=10.0, vy=5.0, theta=0.0, b_gz=0.0, b_ax=0.0, b_ay=0.0)
+        accel = jnp.zeros(2)
+        gyro = jnp.array([0.0])
+
+        # Test stable damping (should work)
+        dt = 0.1  # 100ms
+        stable_damping = 5.0  # λ = 5 < 1/0.1 = 10
+        predicted = predict_state(state, dt, accel, gyro, stable_damping)
+        assert predicted.vx < state.vx  # Velocity should decrease
+
+        # Test unstable damping (should raise error)
+        unstable_damping = 15.0  # λ = 15 > 1/0.1 = 10
+        with pytest.raises(ValueError, match="too large for dt"):
+            predict_state(state, dt, accel, gyro, unstable_damping)
+
+        # Test negative damping (should raise error)
+        with pytest.raises(ValueError, match="must be non-negative"):
+            predict_state(state, dt, accel, gyro, -1.0)
+
 
 class TestJacobians:
     """Test Jacobian computation for EKF."""

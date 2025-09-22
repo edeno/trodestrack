@@ -13,7 +13,7 @@ import jax
 import jax.numpy as jnp
 from jax.scipy.linalg import cholesky
 
-from .dynamics import compute_process_noise, rotation_matrix_2d
+from .dynamics import compute_process_noise, rotation_matrix_2d, wrap_angle
 from .gating import mahalanobis_gate
 from .measurements import (
     create_measurement_noise,
@@ -177,7 +177,7 @@ def propagate_sigma_points(
         # Update dynamics
         vel_new = vel_damped + accel_corrected_cm * dt
         pos_new = pos + vel * dt + 0.5 * accel_corrected_cm * dt**2
-        theta_new = theta + gyro_corrected * dt
+        theta_new = wrap_angle(theta + gyro_corrected * dt)
 
         # Biases unchanged
         return jnp.array([
