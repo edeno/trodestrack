@@ -1,16 +1,18 @@
 """Synthetic IMU data generation."""
 
-import numpy as np
 from typing import Dict
-from ..io.spikegadgets import SpikeGadgetsIMUData
-from .config import SimConfig
+
+import numpy as np
+
 from ..constants import (
-    STANDARD_GRAVITY_MS2,
-    SPIKEGADGETS_ACCEL_SCALE_FACTOR_G_PER_LSB,
-    SPIKEGADGETS_GYRO_SCALE_FACTOR_DEGPS_PER_LSB,
     CM_TO_M,
     IMU_AXES,
+    SPIKEGADGETS_ACCEL_SCALE_FACTOR_G_PER_LSB,
+    SPIKEGADGETS_GYRO_SCALE_FACTOR_DEGPS_PER_LSB,
+    STANDARD_GRAVITY_MS2,
 )
+from ..io.spikegadgets import SpikeGadgetsIMUData
+from .config import SimConfig
 
 
 def generate_synthetic_imu(
@@ -128,11 +130,19 @@ def generate_synthetic_imu(
 
     # Convert to raw units (using SpikeGadgets conversion factors)
     accel_raw = np.column_stack(
-        [accel_g_x / SPIKEGADGETS_ACCEL_SCALE_FACTOR_G_PER_LSB, accel_g_y / SPIKEGADGETS_ACCEL_SCALE_FACTOR_G_PER_LSB, accel_g_z / SPIKEGADGETS_ACCEL_SCALE_FACTOR_G_PER_LSB]  # g to raw
+        [
+            accel_g_x / SPIKEGADGETS_ACCEL_SCALE_FACTOR_G_PER_LSB,
+            accel_g_y / SPIKEGADGETS_ACCEL_SCALE_FACTOR_G_PER_LSB,
+            accel_g_z / SPIKEGADGETS_ACCEL_SCALE_FACTOR_G_PER_LSB,
+        ]  # g to raw
     ).astype(np.int32)
 
     gyro_raw = np.column_stack(
-        [gyro_deg_x / SPIKEGADGETS_GYRO_SCALE_FACTOR_DEGPS_PER_LSB, gyro_deg_y / SPIKEGADGETS_GYRO_SCALE_FACTOR_DEGPS_PER_LSB, gyro_deg_z / SPIKEGADGETS_GYRO_SCALE_FACTOR_DEGPS_PER_LSB]  # deg/s to raw
+        [
+            gyro_deg_x / SPIKEGADGETS_GYRO_SCALE_FACTOR_DEGPS_PER_LSB,
+            gyro_deg_y / SPIKEGADGETS_GYRO_SCALE_FACTOR_DEGPS_PER_LSB,
+            gyro_deg_z / SPIKEGADGETS_GYRO_SCALE_FACTOR_DEGPS_PER_LSB,
+        ]  # deg/s to raw
     ).astype(np.int32)
 
     # Store true biases in metadata for testing
@@ -140,9 +150,7 @@ def generate_synthetic_imu(
         "true_accel_bias": np.column_stack([accel_bias_x, accel_bias_y, accel_bias_z]),
         "true_gyro_bias": np.column_stack([gyro_bias_x, gyro_bias_y, gyro_bias_z]),
         "true_omega_z": omega_z,
-        "true_accel_body": np.column_stack(
-            [accel_body_x_mis, accel_body_y_mis, accel_body_z_mis]
-        ),
+        "true_accel_body": np.column_stack([accel_body_x_mis, accel_body_y_mis, accel_body_z_mis]),
         "misalignment_deg": config.imu.misalignment_deg,
         "noise_std_accel": config.imu.accel_noise_std,
         "noise_std_gyro": config.imu.gyro_noise_std,

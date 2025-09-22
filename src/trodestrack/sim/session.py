@@ -1,20 +1,22 @@
 """Complete synthetic session generation."""
 
+from typing import Any, Dict
+
 import numpy as np
-from typing import Dict, Any
+
+from ..constants import (
+    ACCELERATION_DIVISOR,
+    ARENA_BOUNDARY_MARGIN_CM,
+    MAX_INITIAL_SPEED_CM_S,
+    MIN_INITIAL_SPEED_CM_S,
+    MIN_VELOCITY_THRESHOLD_CM_S,
+    PI_RADIANS,
+    SPATIAL_DIMENSIONS,
+    TURN_ANGLE_STD_RAD,
+)
 from .config import SimConfig
 from .imu import generate_synthetic_imu
 from .video import generate_synthetic_video
-from ..constants import (
-    SPATIAL_DIMENSIONS,
-    ARENA_BOUNDARY_MARGIN_CM,
-    MIN_INITIAL_SPEED_CM_S,
-    MAX_INITIAL_SPEED_CM_S,
-    TURN_ANGLE_STD_RAD,
-    ACCELERATION_DIVISOR,
-    MIN_VELOCITY_THRESHOLD_CM_S,
-    PI_RADIANS,
-)
 
 
 def generate_synthetic_session(config: SimConfig) -> Dict[str, Any]:
@@ -109,9 +111,7 @@ def _generate_ground_truth_trajectory(config: SimConfig) -> Dict[str, np.ndarray
             )
             accel_direction = np.random.uniform(0, 2 * PI_RADIANS)
 
-            accel = accel_magnitude * np.array(
-                [np.cos(accel_direction), np.sin(accel_direction)]
-            )
+            accel = accel_magnitude * np.array([np.cos(accel_direction), np.sin(accel_direction)])
 
             # Update velocity with acceleration
             new_vel = vel + accel * dt

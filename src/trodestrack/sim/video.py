@@ -1,16 +1,18 @@
 """Synthetic video data generation."""
 
-import numpy as np
 from typing import Dict
-from ..io.trodes import TrodesLEDData
-from .config import SimConfig
+
+import numpy as np
+
 from ..constants import (
     DEFAULT_CM_TO_PIXELS,
     MIN_OCCLUSION_CONFIDENCE,
-    ZERO_CONFIDENCE,
     SPATIAL_DIMENSIONS,
     TIME_DIVISOR,
+    ZERO_CONFIDENCE,
 )
+from ..io.trodes import TrodesLEDData
+from .config import SimConfig
 
 
 def generate_synthetic_video(
@@ -71,9 +73,7 @@ def generate_synthetic_video(
     cos_heading = np.cos(video_headings)
     sin_heading = np.sin(video_headings)
 
-    front_led_offset = np.column_stack(
-        [half_distance * cos_heading, half_distance * sin_heading]
-    )
+    front_led_offset = np.column_stack([half_distance * cos_heading, half_distance * sin_heading])
     back_led_offset = -front_led_offset
 
     # True LED positions (no noise yet)
@@ -99,7 +99,9 @@ def generate_synthetic_video(
     front_noise = (
         np.random.normal(0, 1, (n_frames, SPATIAL_DIMENSIONS)) * noise_scale_front[:, np.newaxis]
     )
-    back_noise = np.random.normal(0, 1, (n_frames, SPATIAL_DIMENSIONS)) * noise_scale_back[:, np.newaxis]
+    back_noise = (
+        np.random.normal(0, 1, (n_frames, SPATIAL_DIMENSIONS)) * noise_scale_back[:, np.newaxis]
+    )
 
     front_led += front_noise
     back_led += back_noise

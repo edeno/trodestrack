@@ -27,8 +27,6 @@ import jax.numpy as jnp
 import numpy as np
 from jax import lax
 
-from ..constants import DEGREES_TO_RADIANS, STANDARD_GRAVITY_MS2
-
 
 class IMUPreintegrationResult(NamedTuple):
     """Result of IMU pre-integration between two time points.

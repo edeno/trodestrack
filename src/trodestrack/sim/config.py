@@ -1,6 +1,7 @@
 """Configuration schemas for synthetic data generation."""
 
 from typing import List
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -8,9 +9,7 @@ class TrajectoryConfig(BaseModel):
     """Configuration for synthetic trajectory generation."""
 
     max_speed: float = Field(default=40.0, gt=0, description="Maximum speed in cm/s")
-    max_acceleration: float = Field(
-        default=80.0, gt=0, description="Maximum acceleration in cm/s²"
-    )
+    max_acceleration: float = Field(default=80.0, gt=0, description="Maximum acceleration in cm/s²")
     turn_probability: float = Field(
         default=0.01,
         ge=0,
@@ -93,9 +92,7 @@ class SimConfig(BaseModel):
     duration: float = Field(gt=0, description="Session duration in seconds")
     video_fps: float = Field(gt=0, description="Video frame rate in Hz")
     imu_rate: float = Field(gt=0, description="IMU sampling rate in Hz")
-    arena_size: List[float] = Field(
-        description="Arena dimensions [width, height] in cm"
-    )
+    arena_size: List[float] = Field(description="Arena dimensions [width, height] in cm")
     seed: int = Field(description="Random seed for reproducibility")
 
     # Optional nested configurations

@@ -14,7 +14,7 @@ from trodestrack.io.alignment import (
     estimate_clock_offset,
     validate_alignment,
 )
-from trodestrack.io.dlc import DLCKeypointData, load_dlc_csv
+from trodestrack.io.dlc import DLCKeypointData
 from trodestrack.io.spikegadgets import (
     SpikeGadgetsIMUData,
     load_spikegadgets_binary,

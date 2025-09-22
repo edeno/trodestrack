@@ -14,14 +14,11 @@ import jax
 # Enable 64-bit precision for tests
 jax.config.update("jax_enable_x64", True)
 
-import warnings
-
 import jax.numpy as jnp
 import numpy as np
 import pytest
 from scipy.integrate import solve_ivp
 
-from trodestrack.constants import DEGREES_TO_RADIANS
 from trodestrack.imu.preintegration import preintegrate_imu_scan
 
 

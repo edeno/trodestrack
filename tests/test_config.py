@@ -1,6 +1,5 @@
 """Tests for configuration system."""
 
-import tempfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
 

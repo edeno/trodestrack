@@ -1,9 +1,8 @@
 """IMU utility functions for preprocessing and alignment."""
 
 import warnings
-from typing import Optional, Tuple
+from typing import Tuple
 
-import jax.numpy as jnp
 import numpy as np
 
 from ..constants import STANDARD_GRAVITY_MS2
