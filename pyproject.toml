@@ -5,7 +5,29 @@ description = "Add your description here"
 readme = "README.md"
 authors = [{ name = "Eric Denovellis", email = "eric.denovellis@ucsf.edu" }]
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "jax>=0.4.0",
+    "jaxlib>=0.4.0",
+    "numpy>=1.24.0",
+    "scipy>=1.10.0",
+    "chex>=0.1.0",
+    "optax>=0.1.0",
+    "pydantic>=2.0.0",
+    "pyyaml>=6.0.0",
+    "pandas>=2.0.0",
+    "matplotlib>=3.7.0",
+    "tqdm>=4.65.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-benchmark>=4.0.0",
+    "hypothesis>=6.0.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
 
 [project.scripts]
 trodestrack = "trodestrack:main"
@@ -13,3 +35,13 @@ trodestrack = "trodestrack:main"
 [build-system]
 requires = ["uv_build>=0.8.19,<0.9.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "black>=25.9.0",
+    "hypothesis>=6.140.0",
+    "mypy>=1.18.2",
+    "pytest>=8.4.2",
+    "pytest-benchmark>=5.1.0",
+    "ruff>=0.13.1",
+]
