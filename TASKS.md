@@ -17,11 +17,12 @@
 ## Milestone 2 — Configuration & Data IO
 
 - [x] Implement `config/` schemas using Pydantic.
-- [ ] Create loaders in `io/` for:
-  - [ ] Trodes LED outputs.
-  - [ ] DeepLabCut keypoints.
-  - [ ] SpikeGadgets IMU streams.
+- [x] Create loaders in `io/` for:
+  - [x] Trodes LED outputs.
+  - [x] DeepLabCut keypoints.
+  - [x] SpikeGadgets IMU streams.
 - [x] Write unit tests for IO and config validation.
+- [x] Implement timestamp alignment utilities.
 - [ ] Add synthetic data generator (video + IMU).
   - [ ] Add sim/ module to generate synthetic sessions (IMU + video).
   - [ ] Implement SimConfig schema (extends SessionConfig).
@@ -34,7 +35,7 @@
 ## Milestone 3 — Geometry & Calibration
 
 - [ ] Implement homography computation and arena bounds utilities in `geom/`.
-- [ ] Build CLI tool: `trodestrack calib-homography`.
+- [x] Build CLI tool: `trodestrack calib-homography` (parser only - implementation needed).
 - [ ] Add roundtrip tests (pixel → cm → pixel).
 - [ ] Document calibration workflow.
 
@@ -42,8 +43,8 @@
 
 ## Milestone 4 — IMU Preprocessing
 
-- [ ] Implement unit conversions (raw → g → m/s²; raw → deg/s → rad/s).
-- [ ] Implement downsampling & alignment utilities.
+- [x] Implement unit conversions (raw → g → m/s²; raw → deg/s → rad/s) (in SpikeGadgetsIMUData).
+- [x] Implement downsampling & alignment utilities (basic version in SpikeGadgetsIMUData).
 - [ ] Implement IMU pre-integration with `jax.lax.scan`.
 - [ ] Write tests vs numerical integration baseline.
 - [ ] Golden tests: compare JAX pre-integration against high-res numerical baseline on 3 motion profiles (steady, step-turn, sinusoid).
@@ -59,6 +60,8 @@
 - [ ] Add velocity pseudo-measurements.
 - [ ] Unit and property tests (e.g., angle wrap, confidence scaling).
 
+**NOTE:** `models/` directory exists but is empty - no implementation yet.
+
 ---
 
 ## Milestone 6 — Filtering & Smoothing
@@ -69,7 +72,9 @@
 - [ ] Store/reuse Jacobians & covariances for efficiency.
 - [ ] Write scenario tests (occlusion, swaps, drift recovery).
 - [ ] Linear-Gaussian sanity check: EKF output matches closed-form Kalman filter.
-- [ ] RTS smoother improves RMSE ≥20% vs EKF on synthetic “twitchy” session.
+- [ ] RTS smoother improves RMSE ≥20% vs EKF on synthetic "twitchy" session.
+
+**NOTE:** No filtering implementation exists yet - needs `models/` and `runtime/` modules.
 
 ---
 
@@ -78,11 +83,13 @@
 - [ ] Implement offline API: `smooth_session(cfg)`.
 - [ ] Implement online API: `OnlineTracker(cfg)`.
 - [ ] Implement CLI commands:
-  - [ ] `trodestrack smooth`
-  - [ ] `trodestrack online`
-  - [ ] `trodestrack report`
-  - [ ] `trodestrack calib-homography`
+  - [x] `trodestrack smooth` (parser + placeholder implementation)
+  - [x] `trodestrack online` (parser + placeholder implementation)
+  - [x] `trodestrack report` (parser + placeholder implementation)
+  - [x] `trodestrack calib-homography` (parser + placeholder implementation)
 - [x] Add smoke test for `main()`.
+
+**NOTE:** CLI parsers exist but actual command implementations are placeholders.
 
 ---
 

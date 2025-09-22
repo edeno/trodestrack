@@ -1,0 +1,394 @@
+"""SpikeGadgets IMU data loader."""
+
+import numpy as np
+from pathlib import Path
+from typing import Optional, Dict, Any, Tuple
+import warnings
+import struct
+
+
+class SpikeGadgetsIMUData:
+    """Container for SpikeGadgets IMU data."""
+
+    def __init__(
+        self,
+        timestamps: np.ndarray,
+        accel_raw: np.ndarray,
+        gyro_raw: np.ndarray,
+        mag_raw: Optional[np.ndarray] = None,
+        sampling_rate: float = 30000.0,
+        metadata: Optional[Dict[str, Any]] = None
+    ):
+        """Initialize SpikeGadgets IMU data container.
+
+        Args:
+            timestamps: Sample timestamps (seconds)
+            accel_raw: Raw accelerometer data (N, 3) array [x, y, z]
+            gyro_raw: Raw gyroscope data (N, 3) array [x, y, z]
+            mag_raw: Optional raw magnetometer data (N, 3) array [x, y, z]
+            sampling_rate: IMU sampling rate in Hz
+            metadata: Optional metadata dictionary
+        """
+        self.timestamps = np.asarray(timestamps)
+        self.accel_raw = np.asarray(accel_raw)
+        self.gyro_raw = np.asarray(gyro_raw)
+        self.mag_raw = np.asarray(mag_raw) if mag_raw is not None else None
+        self.sampling_rate = sampling_rate
+        self.metadata = metadata or {}
+
+        # Validate shapes
+        n_samples = len(self.timestamps)
+        if len(self.accel_raw) != n_samples:
+            raise ValueError("Accelerometer data length mismatch")
+        if len(self.gyro_raw) != n_samples:
+            raise ValueError("Gyroscope data length mismatch")
+        if self.mag_raw is not None and len(self.mag_raw) != n_samples:
+            raise ValueError("Magnetometer data length mismatch")
+
+        if self.accel_raw.shape != (n_samples, 3):
+            raise ValueError("Accelerometer data must be (N, 3) array")
+        if self.gyro_raw.shape != (n_samples, 3):
+            raise ValueError("Gyroscope data must be (N, 3) array")
+        if self.mag_raw is not None and self.mag_raw.shape != (n_samples, 3):
+            raise ValueError("Magnetometer data must be (N, 3) array")
+
+    @property
+    def n_samples(self) -> int:
+        """Number of IMU samples."""
+        return len(self.timestamps)
+
+    @property
+    def duration(self) -> float:
+        """Duration of the recording in seconds."""
+        if self.n_samples == 0:
+            return 0.0
+        return float(self.timestamps[-1] - self.timestamps[0])
+
+    @property
+    def has_magnetometer(self) -> bool:
+        """Whether magnetometer data is available."""
+        return self.mag_raw is not None
+
+    def get_accel_g(self, scale_factor: float = 0.000061) -> np.ndarray:
+        """Convert raw accelerometer to g units.
+
+        Args:
+            scale_factor: Raw to g conversion factor
+
+        Returns:
+            Accelerometer data in g units
+        """
+        return self.accel_raw * scale_factor
+
+    def get_accel_ms2(self, scale_factor: float = 0.000061) -> np.ndarray:
+        """Convert raw accelerometer to m/s² units.
+
+        Args:
+            scale_factor: Raw to g conversion factor
+
+        Returns:
+            Accelerometer data in m/s² units
+        """
+        g_to_ms2 = 9.80665
+        return self.get_accel_g(scale_factor) * g_to_ms2
+
+    def get_gyro_deg_s(self, scale_factor: float = 0.061) -> np.ndarray:
+        """Convert raw gyroscope to deg/s units.
+
+        Args:
+            scale_factor: Raw to deg/s conversion factor
+
+        Returns:
+            Gyroscope data in deg/s units
+        """
+        return self.gyro_raw * scale_factor
+
+    def get_gyro_rad_s(self, scale_factor: float = 0.061) -> np.ndarray:
+        """Convert raw gyroscope to rad/s units.
+
+        Args:
+            scale_factor: Raw to deg/s conversion factor
+
+        Returns:
+            Gyroscope data in rad/s units
+        """
+        deg_to_rad = np.pi / 180.0
+        return self.get_gyro_deg_s(scale_factor) * deg_to_rad
+
+    def downsample(self, target_rate: float) -> 'SpikeGadgetsIMUData':
+        """Downsample IMU data to target rate.
+
+        Args:
+            target_rate: Target sampling rate in Hz
+
+        Returns:
+            New SpikeGadgetsIMUData instance with downsampled data
+        """
+        if target_rate >= self.sampling_rate:
+            warnings.warn("Target rate >= current rate, returning original data")
+            return self
+
+        # Calculate decimation factor
+        decimation_factor = int(self.sampling_rate / target_rate)
+
+        # Downsample by taking every nth sample
+        indices = np.arange(0, self.n_samples, decimation_factor)
+
+        downsampled_timestamps = self.timestamps[indices]
+        downsampled_accel = self.accel_raw[indices]
+        downsampled_gyro = self.gyro_raw[indices]
+        downsampled_mag = self.mag_raw[indices] if self.has_magnetometer else None
+
+        # Update metadata
+        new_metadata = self.metadata.copy()
+        new_metadata.update({
+            'original_rate': self.sampling_rate,
+            'decimation_factor': decimation_factor,
+            'effective_rate': self.sampling_rate / decimation_factor
+        })
+
+        return SpikeGadgetsIMUData(
+            timestamps=downsampled_timestamps,
+            accel_raw=downsampled_accel,
+            gyro_raw=downsampled_gyro,
+            mag_raw=downsampled_mag,
+            sampling_rate=target_rate,
+            metadata=new_metadata
+        )
+
+    def get_time_range(self, start_time: float, end_time: float) -> 'SpikeGadgetsIMUData':
+        """Extract data within specified time range.
+
+        Args:
+            start_time: Start time in seconds
+            end_time: End time in seconds
+
+        Returns:
+            New SpikeGadgetsIMUData instance with time-sliced data
+        """
+        mask = (self.timestamps >= start_time) & (self.timestamps <= end_time)
+        indices = np.where(mask)[0]
+
+        if len(indices) == 0:
+            raise ValueError("No data found in specified time range")
+
+        sliced_timestamps = self.timestamps[indices]
+        sliced_accel = self.accel_raw[indices]
+        sliced_gyro = self.gyro_raw[indices]
+        sliced_mag = self.mag_raw[indices] if self.has_magnetometer else None
+
+        # Update metadata
+        new_metadata = self.metadata.copy()
+        new_metadata.update({
+            'time_slice': (start_time, end_time),
+            'original_n_samples': self.n_samples
+        })
+
+        return SpikeGadgetsIMUData(
+            timestamps=sliced_timestamps,
+            accel_raw=sliced_accel,
+            gyro_raw=sliced_gyro,
+            mag_raw=sliced_mag,
+            sampling_rate=self.sampling_rate,
+            metadata=new_metadata
+        )
+
+
+def load_spikegadgets_binary(file_path: Path) -> SpikeGadgetsIMUData:
+    """Load SpikeGadgets IMU data from binary file.
+
+    Expected binary format:
+    - 4-byte timestamp (uint32)
+    - 6 x 2-byte IMU values (int16): accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z
+    - Optional: 3 x 2-byte magnetometer values (int16): mag_x, mag_y, mag_z
+
+    Args:
+        file_path: Path to SpikeGadgets binary file
+
+    Returns:
+        SpikeGadgetsIMUData container
+
+    Raises:
+        FileNotFoundError: If file doesn't exist
+        ValueError: If binary format is invalid
+    """
+    if not file_path.exists():
+        raise FileNotFoundError(f"SpikeGadgets file not found: {file_path}")
+
+    try:
+        with open(file_path, 'rb') as f:
+            data = f.read()
+
+        # Determine record size based on file size
+        # Basic format: 4 bytes timestamp + 6*2 bytes IMU = 16 bytes
+        # With magnetometer: 4 bytes timestamp + 9*2 bytes IMU+mag = 22 bytes
+
+        basic_record_size = 16  # timestamp + 6 IMU values
+        mag_record_size = 22    # timestamp + 9 IMU+mag values
+
+        if len(data) % basic_record_size == 0:
+            record_size = basic_record_size
+            has_mag = False
+        elif len(data) % mag_record_size == 0:
+            record_size = mag_record_size
+            has_mag = True
+        else:
+            raise ValueError("Binary file size doesn't match expected record format")
+
+        n_records = len(data) // record_size
+
+        # Unpack binary data
+        timestamps = []
+        accel_data = []
+        gyro_data = []
+        mag_data = [] if has_mag else None
+
+        for i in range(n_records):
+            offset = i * record_size
+            record = data[offset:offset + record_size]
+
+            if has_mag:
+                # Unpack: timestamp (uint32) + 9 IMU values (int16)
+                values = struct.unpack('<I9h', record)
+                timestamp = values[0]
+                accel_raw = values[1:4]
+                gyro_raw = values[4:7]
+                mag_raw = values[7:10]
+
+                mag_data.append(mag_raw)
+            else:
+                # Unpack: timestamp (uint32) + 6 IMU values (int16)
+                values = struct.unpack('<I6h', record)
+                timestamp = values[0]
+                accel_raw = values[1:4]
+                gyro_raw = values[4:7]
+
+            timestamps.append(timestamp)
+            accel_data.append(accel_raw)
+            gyro_data.append(gyro_raw)
+
+        # Convert to numpy arrays
+        timestamps = np.array(timestamps, dtype=np.float64)
+        accel_raw = np.array(accel_data, dtype=np.float64)
+        gyro_raw = np.array(gyro_data, dtype=np.float64)
+        mag_raw = np.array(mag_data, dtype=np.float64) if has_mag else None
+
+        # Convert timestamps from SpikeGadgets units to seconds
+        # Assume 30 kHz clock (typical for SpikeGadgets)
+        clock_rate = 30000.0
+        timestamps = timestamps / clock_rate
+
+        # Create metadata
+        metadata = {
+            'file_path': str(file_path),
+            'n_samples': n_records,
+            'format': 'spikegadgets_binary',
+            'has_magnetometer': has_mag,
+            'clock_rate': clock_rate,
+            'record_size': record_size
+        }
+
+        return SpikeGadgetsIMUData(
+            timestamps=timestamps,
+            accel_raw=accel_raw,
+            gyro_raw=gyro_raw,
+            mag_raw=mag_raw,
+            sampling_rate=clock_rate,
+            metadata=metadata
+        )
+
+    except Exception as e:
+        raise ValueError(f"Failed to read SpikeGadgets binary file: {e}")
+
+
+def load_spikegadgets_csv(file_path: Path) -> SpikeGadgetsIMUData:
+    """Load SpikeGadgets IMU data from CSV file.
+
+    Expected CSV format:
+    - timestamp, accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z
+    - Optional: timestamp, accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z, mag_x, mag_y, mag_z
+
+    Args:
+        file_path: Path to SpikeGadgets CSV file
+
+    Returns:
+        SpikeGadgetsIMUData container
+
+    Raises:
+        FileNotFoundError: If file doesn't exist
+        ValueError: If CSV format is invalid
+    """
+    if not file_path.exists():
+        raise FileNotFoundError(f"SpikeGadgets file not found: {file_path}")
+
+    try:
+        import pandas as pd
+        df = pd.read_csv(file_path)
+    except Exception as e:
+        raise ValueError(f"Failed to read CSV file: {e}")
+
+    # Check for required columns
+    required_cols = ['timestamp', 'accel_x', 'accel_y', 'accel_z',
+                     'gyro_x', 'gyro_y', 'gyro_z']
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        raise ValueError(f"Missing required columns: {missing_cols}")
+
+    # Extract data
+    timestamps = df['timestamp'].values
+    accel_raw = df[['accel_x', 'accel_y', 'accel_z']].values
+    gyro_raw = df[['gyro_x', 'gyro_y', 'gyro_z']].values
+
+    # Check for magnetometer data
+    mag_cols = ['mag_x', 'mag_y', 'mag_z']
+    if all(col in df.columns for col in mag_cols):
+        mag_raw = df[mag_cols].values
+        has_mag = True
+    else:
+        mag_raw = None
+        has_mag = False
+
+    # Estimate sampling rate
+    if len(timestamps) > 1:
+        dt = np.median(np.diff(timestamps))
+        sampling_rate = 1.0 / dt
+    else:
+        sampling_rate = 30000.0  # Default assumption
+
+    # Create metadata
+    metadata = {
+        'file_path': str(file_path),
+        'n_samples': len(df),
+        'format': 'spikegadgets_csv',
+        'has_magnetometer': has_mag,
+        'estimated_rate': sampling_rate,
+        'columns': list(df.columns)
+    }
+
+    return SpikeGadgetsIMUData(
+        timestamps=timestamps,
+        accel_raw=accel_raw,
+        gyro_raw=gyro_raw,
+        mag_raw=mag_raw,
+        sampling_rate=sampling_rate,
+        metadata=metadata
+    )
+
+
+def load_spikegadgets(file_path: Path) -> SpikeGadgetsIMUData:
+    """Load SpikeGadgets IMU data with automatic format detection.
+
+    Args:
+        file_path: Path to SpikeGadgets file (.bin or .csv)
+
+    Returns:
+        SpikeGadgetsIMUData container
+    """
+    file_path = Path(file_path)
+
+    if file_path.suffix.lower() == '.csv':
+        return load_spikegadgets_csv(file_path)
+    elif file_path.suffix.lower() in ['.bin', '.dat']:
+        return load_spikegadgets_binary(file_path)
+    else:
+        raise ValueError(f"Unsupported SpikeGadgets file format: {file_path.suffix}")
