@@ -1,0 +1,526 @@
+"""Extended Kalman Filter implementation for 2D tracking.
+
+This module implements the EKF algorithm for online state estimation, featuring:
+- JAX-compiled prediction and update steps
+- Robust measurement handling with gating
+- Efficient Jacobian computation via automatic differentiation
+- Support for missing measurements and occlusions
+"""
+
+from typing import NamedTuple, Optional, Tuple
+
+import jax
+import jax.numpy as jnp
+
+from .dynamics import predict_state, predict_covariance, compute_process_noise
+from .gating import mahalanobis_gate
+from .measurements import (
+    create_combined_measurement,
+    create_combined_jacobian,
+    create_measurement_noise,
+    position_measurement,
+    _create_position_jacobian,
+    _create_position_heading_jacobian,
+)
+from .state import State2D, state_to_array, array_to_state
+
+# Enable 64-bit precision for numerical accuracy
+jax.config.update("jax_enable_x64", True)
+
+
+class EKFState(NamedTuple):
+    """EKF state representation.
+
+    Attributes:
+        state: Current state estimate
+        covariance: State covariance matrix (8x8)
+        log_likelihood: Cumulative log-likelihood
+    """
+    state: jnp.ndarray  # 8-dimensional state vector
+    covariance: jnp.ndarray  # 8x8 covariance matrix
+    log_likelihood: float
+
+
+class EKFResult(NamedTuple):
+    """Result from EKF update step.
+
+    Attributes:
+        state: Updated EKF state
+        innovation: Measurement innovation (residual)
+        innovation_covariance: Innovation covariance matrix
+        kalman_gain: Kalman gain matrix
+        gated: Whether measurement was gated (rejected)
+    """
+    state: EKFState
+    innovation: jnp.ndarray
+    innovation_covariance: jnp.ndarray
+    kalman_gain: jnp.ndarray
+    gated: bool
+
+
+@jax.jit
+def ekf_predict(
+    ekf_state: EKFState,
+    dt: float,
+    accel: jnp.ndarray,
+    gyro: jnp.ndarray,
+    velocity_damping: float,
+    accel_noise_std: float,
+    gyro_noise_std: float,
+    bias_drift_std: float,
+) -> EKFState:
+    """EKF prediction step.
+
+    Args:
+        ekf_state: Current EKF state
+        dt: Time step (seconds)
+        accel: Accelerometer measurement [ax, ay] (m/s²)
+        gyro: Gyroscope measurement [gz] (rad/s)
+        velocity_damping: Velocity damping coefficient λ
+        accel_noise_std: Accelerometer noise std dev (m/s²)
+        gyro_noise_std: Gyroscope noise std dev (rad/s)
+        bias_drift_std: Bias drift std dev (per √s)
+
+    Returns:
+        Predicted EKF state
+    """
+    # Use pure JAX array operations instead of State2D conversion
+    predicted_state = _predict_state_jax(
+        ekf_state.state, dt, accel, gyro, velocity_damping
+    )
+
+    # Predict covariance using linearized dynamics
+    process_noise = compute_process_noise(
+        dt, accel_noise_std, gyro_noise_std, bias_drift_std
+    )
+
+    predicted_covariance = predict_covariance(
+        ekf_state.covariance,
+        ekf_state.state,
+        dt,
+        accel,
+        gyro,
+        velocity_damping,
+        process_noise,
+    )
+
+    return EKFState(
+        state=predicted_state,
+        covariance=predicted_covariance,
+        log_likelihood=ekf_state.log_likelihood,
+    )
+
+
+@jax.jit
+def _predict_state_jax(
+    state_array: jnp.ndarray,
+    dt: float,
+    accel: jnp.ndarray,
+    gyro: jnp.ndarray,
+    velocity_damping: float,
+) -> jnp.ndarray:
+    """JAX-optimized state prediction function.
+
+    Args:
+        state_array: State vector [x, y, vx, vy, θ, b_gz, b_ax, b_ay]
+        dt: Time step
+        accel: Accelerometer measurement [ax, ay]
+        gyro: Gyroscope measurement [gz]
+        velocity_damping: Velocity damping coefficient
+
+    Returns:
+        Predicted state vector
+    """
+    # Extract state components
+    pos = state_array[:2]
+    vel = state_array[2:4]
+    theta = state_array[4]
+    b_gz = state_array[5]
+    b_ax = state_array[6]
+    b_ay = state_array[7]
+
+    # Bias-corrected measurements
+    accel_corrected = accel - jnp.array([b_ax, b_ay])
+    gyro_corrected = gyro[0] - b_gz
+
+    # Convert acceleration to cm/s² for consistency with position units
+    accel_corrected_cm = accel_corrected * 100.0
+
+    # Apply velocity damping: v_damped = v * (1 - λ*dt)
+    damping_factor = 1.0 - velocity_damping * dt
+    vel_damped = vel * damping_factor
+
+    # Velocity update: v_{k+1} = v_damped + a * dt
+    vel_new = vel_damped + accel_corrected_cm * dt
+
+    # Position update: x_{k+1} = x_k + v_k * dt + 0.5 * a * dt²
+    pos_new = pos + vel * dt + 0.5 * accel_corrected_cm * dt**2
+
+    # Heading update: θ_{k+1} = θ_k + ω * dt
+    theta_new = theta + gyro_corrected * dt
+
+    # Biases remain unchanged (random walk model)
+    return jnp.array([
+        pos_new[0], pos_new[1], vel_new[0], vel_new[1],
+        theta_new, b_gz, b_ax, b_ay
+    ])
+
+
+def ekf_update(
+    ekf_state: EKFState,
+    measurement: jnp.ndarray,
+    measurement_noise: jnp.ndarray,
+    has_heading: bool,
+    gate_threshold: float = 9.21,  # Chi-squared with p=0.01 for 2-3 DOF
+) -> EKFResult:
+    """EKF measurement update step.
+
+    Args:
+        ekf_state: Predicted EKF state
+        measurement: Measurement vector (position + optional heading)
+        measurement_noise: Measurement noise covariance matrix R
+        has_heading: Whether measurement includes heading
+        gate_threshold: Chi-squared threshold for gating
+
+    Returns:
+        EKF update result
+    """
+    # Use specialized functions for each case to avoid conditional logic in JAX
+    if has_heading:
+        return _ekf_update_position_heading(
+            ekf_state, measurement, measurement_noise, gate_threshold
+        )
+    else:
+        return _ekf_update_position_only(
+            ekf_state, measurement, measurement_noise, gate_threshold
+        )
+
+
+@jax.jit
+def _ekf_update_position_only(
+    ekf_state: EKFState,
+    measurement: jnp.ndarray,
+    measurement_noise: jnp.ndarray,
+    gate_threshold: float,
+) -> EKFResult:
+    """JAX-compiled EKF update for position-only measurements."""
+    # Compute measurement Jacobian (position only)
+    H = _create_position_jacobian(ekf_state.state)
+
+    # Predicted measurement (position only)
+    predicted_measurement = ekf_state.state[:2]
+
+    # Innovation (measurement residual)
+    innovation = measurement - predicted_measurement
+
+    # Innovation covariance: S = H * P * H^T + R
+    innovation_covariance = H @ ekf_state.covariance @ H.T + measurement_noise
+
+    # Mahalanobis gating
+    mahalanobis_dist = innovation.T @ jnp.linalg.inv(innovation_covariance) @ innovation
+    gated = mahalanobis_dist > gate_threshold
+
+    # Kalman gain: K = P * H^T * S^{-1}
+    kalman_gain = ekf_state.covariance @ H.T @ jnp.linalg.inv(innovation_covariance)
+
+    # State update: x = x + K * innovation (only if not gated)
+    updated_state = jnp.where(
+        gated,
+        ekf_state.state,
+        ekf_state.state + kalman_gain @ innovation
+    )
+
+    # Covariance update: P = (I - K * H) * P (only if not gated)
+    I = jnp.eye(8)
+    updated_covariance = jnp.where(
+        gated,
+        ekf_state.covariance,
+        (I - kalman_gain @ H) @ ekf_state.covariance
+    )
+
+    # Log-likelihood update (only if not gated)
+    log_det_S = jnp.linalg.slogdet(innovation_covariance)[1]
+    measurement_dim = 2
+    log_likelihood_update = -0.5 * (
+        measurement_dim * jnp.log(2 * jnp.pi) + log_det_S + mahalanobis_dist
+    )
+
+    updated_log_likelihood = jnp.where(
+        gated,
+        ekf_state.log_likelihood,
+        ekf_state.log_likelihood + log_likelihood_update
+    )
+
+    updated_ekf_state = EKFState(
+        state=updated_state,
+        covariance=updated_covariance,
+        log_likelihood=updated_log_likelihood,
+    )
+
+    return EKFResult(
+        state=updated_ekf_state,
+        innovation=innovation,
+        innovation_covariance=innovation_covariance,
+        kalman_gain=kalman_gain,
+        gated=gated,
+    )
+
+
+@jax.jit
+def _ekf_update_position_heading(
+    ekf_state: EKFState,
+    measurement: jnp.ndarray,
+    measurement_noise: jnp.ndarray,
+    gate_threshold: float,
+) -> EKFResult:
+    """JAX-compiled EKF update for position + heading measurements."""
+    # Compute measurement Jacobian (position + heading)
+    H = _create_position_heading_jacobian(ekf_state.state)
+
+    # Predicted measurement (position + heading)
+    predicted_measurement = jnp.concatenate([
+        ekf_state.state[:2],  # position [x, y]
+        jnp.array([ekf_state.state[4]])  # heading [θ]
+    ])
+
+    # Innovation (measurement residual)
+    innovation = measurement - predicted_measurement
+
+    # Wrap heading innovation to [-π, π]
+    wrapped_heading_innov = jnp.arctan2(
+        jnp.sin(innovation[2]), jnp.cos(innovation[2])
+    )
+    innovation = innovation.at[2].set(wrapped_heading_innov)
+
+    # Innovation covariance: S = H * P * H^T + R
+    innovation_covariance = H @ ekf_state.covariance @ H.T + measurement_noise
+
+    # Mahalanobis gating
+    mahalanobis_dist = innovation.T @ jnp.linalg.inv(innovation_covariance) @ innovation
+    gated = mahalanobis_dist > gate_threshold
+
+    # Kalman gain: K = P * H^T * S^{-1}
+    kalman_gain = ekf_state.covariance @ H.T @ jnp.linalg.inv(innovation_covariance)
+
+    # State update: x = x + K * innovation (only if not gated)
+    updated_state = jnp.where(
+        gated,
+        ekf_state.state,
+        ekf_state.state + kalman_gain @ innovation
+    )
+
+    # Covariance update: P = (I - K * H) * P (only if not gated)
+    I = jnp.eye(8)
+    updated_covariance = jnp.where(
+        gated,
+        ekf_state.covariance,
+        (I - kalman_gain @ H) @ ekf_state.covariance
+    )
+
+    # Log-likelihood update (only if not gated)
+    log_det_S = jnp.linalg.slogdet(innovation_covariance)[1]
+    measurement_dim = 3
+    log_likelihood_update = -0.5 * (
+        measurement_dim * jnp.log(2 * jnp.pi) + log_det_S + mahalanobis_dist
+    )
+
+    updated_log_likelihood = jnp.where(
+        gated,
+        ekf_state.log_likelihood,
+        ekf_state.log_likelihood + log_likelihood_update
+    )
+
+    updated_ekf_state = EKFState(
+        state=updated_state,
+        covariance=updated_covariance,
+        log_likelihood=updated_log_likelihood,
+    )
+
+    return EKFResult(
+        state=updated_ekf_state,
+        innovation=innovation,
+        innovation_covariance=innovation_covariance,
+        kalman_gain=kalman_gain,
+        gated=gated,
+    )
+
+
+def create_initial_ekf_state(
+    initial_state: State2D,
+    initial_covariance: jnp.ndarray,
+) -> EKFState:
+    """Create initial EKF state from State2D and covariance.
+
+    Args:
+        initial_state: Initial state estimate
+        initial_covariance: Initial covariance matrix
+
+    Returns:
+        Initial EKF state
+    """
+    return EKFState(
+        state=state_to_array(initial_state),
+        covariance=initial_covariance,
+        log_likelihood=0.0,
+    )
+
+
+class EKFFilter:
+    """Extended Kalman Filter for 2D tracking.
+
+    This class provides a stateful interface to the EKF algorithm with
+    configuration management and measurement processing.
+    """
+
+    def __init__(
+        self,
+        initial_state: State2D,
+        initial_covariance: jnp.ndarray,
+        velocity_damping: float = 0.1,
+        accel_noise_std: float = 0.5,
+        gyro_noise_std: float = 0.1,
+        bias_drift_std: float = 0.01,
+        position_noise_std: float = 1.0,
+        heading_noise_std: float = 0.1,
+        gate_threshold: float = 9.21,
+    ):
+        """Initialize EKF filter.
+
+        Args:
+            initial_state: Initial state estimate
+            initial_covariance: Initial covariance matrix
+            velocity_damping: Velocity damping coefficient λ
+            accel_noise_std: Accelerometer noise std dev (m/s²)
+            gyro_noise_std: Gyroscope noise std dev (rad/s)
+            bias_drift_std: Bias drift std dev (per √s)
+            position_noise_std: Position measurement noise std dev (cm)
+            heading_noise_std: Heading measurement noise std dev (rad)
+            gate_threshold: Chi-squared threshold for measurement gating
+        """
+        self.ekf_state = create_initial_ekf_state(initial_state, initial_covariance)
+
+        # Process noise parameters
+        self.velocity_damping = velocity_damping
+        self.accel_noise_std = accel_noise_std
+        self.gyro_noise_std = gyro_noise_std
+        self.bias_drift_std = bias_drift_std
+
+        # Measurement noise parameters
+        self.position_noise_std = position_noise_std
+        self.heading_noise_std = heading_noise_std
+
+        # Gating threshold
+        self.gate_threshold = gate_threshold
+
+    def predict(
+        self,
+        dt: float,
+        accel: jnp.ndarray,
+        gyro: jnp.ndarray,
+    ) -> None:
+        """Perform prediction step.
+
+        Args:
+            dt: Time step (seconds)
+            accel: Accelerometer measurement [ax, ay] (m/s²)
+            gyro: Gyroscope measurement [gz] (rad/s)
+        """
+        self.ekf_state = ekf_predict(
+            self.ekf_state,
+            dt,
+            accel,
+            gyro,
+            self.velocity_damping,
+            self.accel_noise_std,
+            self.gyro_noise_std,
+            self.bias_drift_std,
+        )
+
+    def update(
+        self,
+        position: Optional[jnp.ndarray] = None,
+        heading: Optional[float] = None,
+        confidence: float = 1.0,
+    ) -> EKFResult:
+        """Perform measurement update step.
+
+        Args:
+            position: Position measurement [x, y] in cm (None if missing)
+            heading: Heading measurement in radians (None if missing)
+            confidence: Detection confidence [0, 1]
+
+        Returns:
+            EKF update result
+        """
+        # Skip update if no measurements available
+        if position is None and heading is None:
+            # Return no-update result
+            return EKFResult(
+                state=self.ekf_state,
+                innovation=jnp.array([]),
+                innovation_covariance=jnp.array([[]]),
+                kalman_gain=jnp.array([[]]),
+                gated=False,
+            )
+
+        # Create measurement vector
+        if position is not None and heading is not None:
+            measurement = jnp.concatenate([position, jnp.array([heading])])
+            has_heading = True
+        elif position is not None:
+            measurement = position
+            has_heading = False
+        else:
+            # Heading-only measurement (rare case)
+            # Create dummy position measurement with high noise
+            dummy_position = self.ekf_state.state[:2]
+            measurement = jnp.concatenate([dummy_position, jnp.array([heading])])
+            has_heading = True
+            confidence = 0.01  # Very low confidence for dummy position
+
+        # Create measurement noise matrix
+        measurement_noise = create_measurement_noise(
+            self.position_noise_std,
+            confidence,
+            has_heading,
+            self.heading_noise_std if has_heading else None,
+        )
+
+        # Perform update
+        result = ekf_update(
+            self.ekf_state,
+            measurement,
+            measurement_noise,
+            has_heading,
+            self.gate_threshold,
+        )
+
+        # Update internal state if not gated
+        if not result.gated:
+            self.ekf_state = result.state
+
+        return result
+
+    def get_current_state(self) -> State2D:
+        """Get current state estimate as State2D object.
+
+        Returns:
+            Current state estimate
+        """
+        return array_to_state(self.ekf_state.state)
+
+    def get_current_covariance(self) -> jnp.ndarray:
+        """Get current covariance matrix.
+
+        Returns:
+            Current covariance matrix
+        """
+        return self.ekf_state.covariance
+
+    def get_log_likelihood(self) -> float:
+        """Get cumulative log-likelihood.
+
+        Returns:
+            Cumulative log-likelihood
+        """
+        return float(self.ekf_state.log_likelihood)

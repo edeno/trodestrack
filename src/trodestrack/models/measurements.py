@@ -128,22 +128,38 @@ def create_measurement_noise(
     Returns:
         Measurement noise matrix R
     """
-    # Scale position noise by confidence (lower confidence = higher noise)
-    scaled_position_std = position_noise_std / confidence
-    position_var = scaled_position_std ** 2
-
     if has_heading:
         if heading_noise_std is None:
             raise ValueError("heading_noise_std required when has_heading=True")
-
-        # 3x3 matrix for [x, y, θ]
-        heading_var = heading_noise_std ** 2
-        R = jnp.diag(jnp.array([position_var, position_var, heading_var]))
+        return _create_position_heading_noise(
+            position_noise_std, confidence, heading_noise_std
+        )
     else:
-        # 2x2 matrix for [x, y] only
-        R = jnp.diag(jnp.array([position_var, position_var]))
+        return _create_position_noise(position_noise_std, confidence)
 
-    return R
+
+@jax.jit
+def _create_position_noise(
+    position_noise_std: float,
+    confidence: float,
+) -> jnp.ndarray:
+    """Create position-only measurement noise matrix."""
+    scaled_position_std = position_noise_std / confidence
+    position_var = scaled_position_std ** 2
+    return jnp.diag(jnp.array([position_var, position_var]))
+
+
+@jax.jit
+def _create_position_heading_noise(
+    position_noise_std: float,
+    confidence: float,
+    heading_noise_std: float,
+) -> jnp.ndarray:
+    """Create position + heading measurement noise matrix."""
+    scaled_position_std = position_noise_std / confidence
+    position_var = scaled_position_std ** 2
+    heading_var = heading_noise_std ** 2
+    return jnp.diag(jnp.array([position_var, position_var, heading_var]))
 
 
 def create_combined_measurement(
@@ -178,12 +194,21 @@ def create_combined_jacobian(
     Returns:
         Combined Jacobian matrix
     """
-    H_pos = compute_position_jacobian(state_array)
-
     if has_heading:
-        H_heading = compute_heading_jacobian(state_array)
-        H = jnp.vstack([H_pos, H_heading])
+        return _create_position_heading_jacobian(state_array)
     else:
-        H = H_pos
+        return _create_position_jacobian(state_array)
 
-    return H
+
+@jax.jit
+def _create_position_jacobian(state_array: jnp.ndarray) -> jnp.ndarray:
+    """Create position-only Jacobian."""
+    return compute_position_jacobian(state_array)
+
+
+@jax.jit
+def _create_position_heading_jacobian(state_array: jnp.ndarray) -> jnp.ndarray:
+    """Create position + heading Jacobian."""
+    H_pos = compute_position_jacobian(state_array)
+    H_heading = compute_heading_jacobian(state_array)
+    return jnp.vstack([H_pos, H_heading])

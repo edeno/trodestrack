@@ -46,6 +46,26 @@ from .velocity import (
     compute_velocity_from_recent_positions,
 )
 
+from .ekf import (
+    EKFState,
+    EKFResult,
+    EKFFilter,
+    ekf_predict,
+    ekf_update,
+    create_initial_ekf_state,
+)
+
+from .ukf import (
+    UKFState,
+    UKFResult,
+    UKFFilter,
+    UKFParams,
+    ukf_predict,
+    ukf_update,
+    create_initial_ukf_state,
+    generate_sigma_points,
+)
+
 __all__ = [
     # State representation
     "State2D",
@@ -83,4 +103,20 @@ __all__ = [
     "velocity_pseudo_measurement_update",
     "should_use_velocity_constraint",
     "compute_velocity_from_recent_positions",
+    # Kalman Filtering
+    "EKFState",
+    "EKFResult",
+    "EKFFilter",
+    "ekf_predict",
+    "ekf_update",
+    "create_initial_ekf_state",
+    # Unscented Kalman Filtering
+    "UKFState",
+    "UKFResult",
+    "UKFFilter",
+    "UKFParams",
+    "ukf_predict",
+    "ukf_update",
+    "create_initial_ukf_state",
+    "generate_sigma_points",
 ]
