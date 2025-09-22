@@ -62,14 +62,25 @@
 
 ## Milestone 5 — State-Space Models
 
-- [ ] Define state representation (8-dim vector, biases).
-- [ ] Implement dynamics models for prediction step.
-- [ ] Implement measurement models (position, heading).
-- [ ] Add Mahalanobis gating and masking.
-- [ ] Add velocity pseudo-measurements.
-- [ ] Unit and property tests (e.g., angle wrap, confidence scaling).
+- [x] Define state representation (8-dim vector, biases).
+- [x] Implement dynamics models for prediction step.
+- [x] Implement measurement models (position, heading).
+- [x] Add Mahalanobis gating and masking.
+- [x] Add velocity pseudo-measurements.
+- [x] Unit and property tests (e.g., angle wrap, confidence scaling).
 
-**NOTE:** `models/` directory exists but is empty - no implementation yet.
+**STATUS:** ✅ COMPLETED - All 70 model tests pass. Complete implementation with JAX-based filtering components:
+
+**Major Achievement - Complete State-Space Model Implementation:**
+
+- **State Representation**: 8-dimensional state vector (position, velocity, heading, biases) with Pydantic validation
+- **Dynamics Models**: JAX-compiled prediction step with IMU pre-integration, bias compensation, and velocity damping
+- **Measurement Models**: Position and heading observations with confidence scaling and LED validation
+- **Robust Gating**: Mahalanobis distance computation with chi-squared gating for outlier rejection
+- **Measurement Masking**: Comprehensive handling of missing/invalid measurements with confidence filtering
+- **Velocity Constraints**: Pseudo-measurements for enhanced state estimation when vision is reliable
+- **Comprehensive Testing**: 70 test cases including property-based testing with Hypothesis
+- **64-bit Precision**: JAX configuration for numerical accuracy throughout all computations
 
 ---
 
