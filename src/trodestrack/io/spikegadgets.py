@@ -237,41 +237,37 @@ def load_spikegadgets_binary(file_path: Path) -> SpikeGadgetsIMUData:
 
         n_records = len(data) // record_size
 
-        # Unpack binary data
-        timestamps = []
-        accel_data = []
-        gyro_data = []
-        mag_data = [] if has_mag else None
+        # Unpack binary data vectorized
+        if has_mag:
+            # Unpack all records at once: timestamp (uint32) + 9 IMU values (int16)
+            format_str = f'<{n_records}I{n_records * 9}h'
+            values = struct.unpack(format_str, data)
 
-        for i in range(n_records):
-            offset = i * record_size
-            record = data[offset:offset + record_size]
+            # Reshape into records
+            timestamps = np.array(values[:n_records], dtype=np.uint32)
+            imu_values = np.array(values[n_records:], dtype=np.int16).reshape(n_records, 9)
 
-            if has_mag:
-                # Unpack: timestamp (uint32) + 9 IMU values (int16)
-                values = struct.unpack('<I9h', record)
-                timestamp = values[0]
-                accel_raw = values[1:4]
-                gyro_raw = values[4:7]
-                mag_raw = values[7:10]
+            accel_data = imu_values[:, 0:3]
+            gyro_data = imu_values[:, 3:6]
+            mag_data = imu_values[:, 6:9]
+        else:
+            # Unpack all records at once: timestamp (uint32) + 6 IMU values (int16)
+            format_str = f'<{n_records}I{n_records * 6}h'
+            values = struct.unpack(format_str, data)
 
-                mag_data.append(mag_raw)
-            else:
-                # Unpack: timestamp (uint32) + 6 IMU values (int16)
-                values = struct.unpack('<I6h', record)
-                timestamp = values[0]
-                accel_raw = values[1:4]
-                gyro_raw = values[4:7]
+            # Reshape into records
+            timestamps = np.array(values[:n_records], dtype=np.uint32)
+            imu_values = np.array(values[n_records:], dtype=np.int16).reshape(n_records, 6)
 
-            timestamps.append(timestamp)
-            accel_data.append(accel_raw)
-            gyro_data.append(gyro_raw)
+            accel_data = imu_values[:, 0:3]
+            gyro_data = imu_values[:, 3:6]
+            mag_data = None
 
         # Convert to numpy arrays
-        timestamps = np.array(timestamps, dtype=np.float64)
-        accel_raw = np.array(accel_data, dtype=np.float64)
-        gyro_raw = np.array(gyro_data, dtype=np.float64)
-        mag_raw = np.array(mag_data, dtype=np.float64) if has_mag else None
+        timestamps = timestamps.astype(np.float64)
+        accel_raw = accel_data.astype(np.float64)
+        gyro_raw = gyro_data.astype(np.float64)
+        mag_raw = mag_data.astype(np.float64) if has_mag else None
 
         # Convert timestamps from SpikeGadgets units to seconds
         # Assume 30 kHz clock (typical for SpikeGadgets)

@@ -70,14 +70,16 @@ def generate_synthetic_video(ground_truth: Dict[str, np.ndarray], config: SimCon
     front_confidence = np.copy(base_confidence)
     back_confidence = np.copy(base_confidence)
 
-    # Apply noise based on confidence (lower confidence = more noise)
-    for i in range(n_frames):
-        # Noise scales inversely with confidence
-        noise_scale_front = config.video.position_noise_std * (1.0 / front_confidence[i])
-        noise_scale_back = config.video.position_noise_std * (1.0 / back_confidence[i])
+    # Apply noise based on confidence (lower confidence = more noise) - vectorized
+    noise_scale_front = config.video.position_noise_std * (1.0 / front_confidence)
+    noise_scale_back = config.video.position_noise_std * (1.0 / back_confidence)
 
-        front_led[i] += np.random.normal(0, noise_scale_front, 2)
-        back_led[i] += np.random.normal(0, noise_scale_back, 2)
+    # Generate all noise at once
+    front_noise = np.random.normal(0, 1, (n_frames, 2)) * noise_scale_front[:, np.newaxis]
+    back_noise = np.random.normal(0, 1, (n_frames, 2)) * noise_scale_back[:, np.newaxis]
+
+    front_led += front_noise
+    back_led += back_noise
 
     # Apply occlusions
     occlusion_frames = _generate_occlusions(

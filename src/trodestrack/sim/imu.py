@@ -138,20 +138,18 @@ def _generate_bias_time_series(n_samples: int, dt: float, initial_std: float, dr
     bias_y = np.random.normal(0, initial_std)
     bias_z = np.random.normal(0, initial_std)
 
-    # Generate random walk drift
+    # Generate random walk drift vectorized
     drift_noise_std = drift_std * np.sqrt(dt)
 
-    bias_x_series = np.zeros(n_samples)
-    bias_y_series = np.zeros(n_samples)
-    bias_z_series = np.zeros(n_samples)
+    # Generate all random walk increments at once
+    increments = np.random.normal(0, drift_noise_std, (n_samples - 1, 3))
 
-    bias_x_series[0] = bias_x
-    bias_y_series[0] = bias_y
-    bias_z_series[0] = bias_z
+    # Initialize bias series with initial values
+    bias_series = np.zeros((n_samples, 3))
+    bias_series[0] = [bias_x, bias_y, bias_z]
 
-    for i in range(1, n_samples):
-        bias_x_series[i] = bias_x_series[i-1] + np.random.normal(0, drift_noise_std)
-        bias_y_series[i] = bias_y_series[i-1] + np.random.normal(0, drift_noise_std)
-        bias_z_series[i] = bias_z_series[i-1] + np.random.normal(0, drift_noise_std)
+    # Vectorized cumulative sum for random walk
+    bias_series[1:] = np.cumsum(increments, axis=0)
+    bias_series = bias_series + bias_series[0]  # Add initial bias
 
-    return bias_x_series, bias_y_series, bias_z_series
+    return bias_series[:, 0], bias_series[:, 1], bias_series[:, 2]

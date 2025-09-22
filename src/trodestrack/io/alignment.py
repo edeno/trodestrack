@@ -53,23 +53,27 @@ def _align_nearest(
     Returns:
         Tuple of (video_indices, imu_indices)
     """
-    video_indices = []
-    imu_indices = []
+    # Vectorized nearest neighbor search
+    video_timestamps = np.asarray(video_timestamps)
+    imu_timestamps = np.asarray(imu_timestamps)
 
-    for i, video_time in enumerate(video_timestamps):
-        # Find nearest IMU sample
-        time_diffs = np.abs(imu_timestamps - video_time)
-        nearest_idx = np.argmin(time_diffs)
-        min_gap = time_diffs[nearest_idx]
+    # Compute all pairwise distances using broadcasting
+    time_diffs = np.abs(video_timestamps[:, np.newaxis] - imu_timestamps[np.newaxis, :])
 
-        # Check gap constraint
-        if max_gap is not None and min_gap > max_gap:
-            continue
+    # Find nearest IMU indices for all video timestamps
+    nearest_imu_indices = np.argmin(time_diffs, axis=1)
+    min_gaps = time_diffs[np.arange(len(video_timestamps)), nearest_imu_indices]
 
-        video_indices.append(i)
-        imu_indices.append(nearest_idx)
+    # Apply gap constraint
+    if max_gap is not None:
+        valid_mask = min_gaps <= max_gap
+        video_indices = np.where(valid_mask)[0]
+        imu_indices = nearest_imu_indices[valid_mask]
+    else:
+        video_indices = np.arange(len(video_timestamps))
+        imu_indices = nearest_imu_indices
 
-    return np.array(video_indices), np.array(imu_indices)
+    return video_indices, imu_indices
 
 
 def _align_interpolate(
