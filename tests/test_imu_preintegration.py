@@ -13,7 +13,6 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from trodestrack.constants import DEGREES_TO_RADIANS, STANDARD_GRAVITY_MS2
 from trodestrack.imu.preintegration import (
     IMUPreintegrationResult,
     PreintegrationState,
