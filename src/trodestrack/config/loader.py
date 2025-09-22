@@ -1,11 +1,12 @@
 """Configuration loading and validation utilities."""
 
-import yaml
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Dict
 
-from .schemas import SessionConfig
+import yaml
+
 from ..constants import DEFAULT_PIXEL_PER_CM
+from .schemas import SessionConfig
 
 
 def load_config(config_path: Path) -> SessionConfig:
@@ -136,6 +137,4 @@ def create_default_config(
 
     output = OutputConfig(output_dir=output_dir)
 
-    return SessionConfig(
-        video_file=video_file, imu_file=imu_file, mapping=mapping, output=output
-    )
+    return SessionConfig(video_file=video_file, imu_file=imu_file, mapping=mapping, output=output)

@@ -1,16 +1,17 @@
 """Tests for synthetic data generation."""
 
-import pytest
-import numpy as np
-from pathlib import Path
 import tempfile
+from pathlib import Path
+from typing import Any, Dict
+
+import numpy as np
+import pytest
 import yaml
-from typing import Dict, Any
 
 from trodestrack.sim.config import SimConfig
 from trodestrack.sim.imu import generate_synthetic_imu
-from trodestrack.sim.video import generate_synthetic_video
 from trodestrack.sim.session import generate_synthetic_session
+from trodestrack.sim.video import generate_synthetic_video
 
 
 class TestSimConfig:
@@ -175,9 +176,7 @@ class TestSyntheticIMU:
 
         # Check that accelerometer data is reasonable (not all zeros, within expected range)
         accel_ms2 = imu_data.get_accel_ms2()
-        assert np.all(
-            np.abs(accel_ms2[:, :2]) < 50.0
-        )  # Horizontal accel should be reasonable
+        assert np.all(np.abs(accel_ms2[:, :2]) < 50.0)  # Horizontal accel should be reasonable
         assert np.all(np.abs(accel_ms2[:, 2] - 9.81) < 5.0)  # Z should be near gravity
 
         # Check that there is some noise (not constant)
@@ -252,9 +251,7 @@ class TestSyntheticIMU:
             "headings": headings,
         }
 
-    def _compute_expected_accel(
-        self, ground_truth: Dict[str, np.ndarray]
-    ) -> np.ndarray:
+    def _compute_expected_accel(self, ground_truth: Dict[str, np.ndarray]) -> np.ndarray:
         """Helper to compute expected acceleration from trajectory."""
         velocities = ground_truth["velocities"]
         dt = ground_truth["timestamps"][1] - ground_truth["timestamps"][0]
@@ -310,18 +307,10 @@ class TestSyntheticVideo:
 
         # Check confidence range (excluding dropout frames which have 0 confidence)
         non_dropout_mask = video_data.front_confidence > 0
-        assert np.all(
-            video_data.front_confidence[non_dropout_mask] >= config.video.confidence_min
-        )
-        assert np.all(
-            video_data.front_confidence[non_dropout_mask] <= config.video.confidence_max
-        )
-        assert np.all(
-            video_data.back_confidence[non_dropout_mask] >= config.video.confidence_min
-        )
-        assert np.all(
-            video_data.back_confidence[non_dropout_mask] <= config.video.confidence_max
-        )
+        assert np.all(video_data.front_confidence[non_dropout_mask] >= config.video.confidence_min)
+        assert np.all(video_data.front_confidence[non_dropout_mask] <= config.video.confidence_max)
+        assert np.all(video_data.back_confidence[non_dropout_mask] >= config.video.confidence_min)
+        assert np.all(video_data.back_confidence[non_dropout_mask] <= config.video.confidence_max)
 
         # Higher confidence should correlate with lower position noise
         # (This is a statistical relationship, so we test it loosely)
@@ -380,18 +369,14 @@ class TestSyntheticVideo:
         video_data = generate_synthetic_video(ground_truth, config)
 
         # Calculate LED distances (excluding NaN frames)
-        led_distances = np.linalg.norm(
-            video_data.front_led - video_data.back_led, axis=1
-        )
+        led_distances = np.linalg.norm(video_data.front_led - video_data.back_led, axis=1)
 
         # Filter out NaN values
         valid_distances = led_distances[~np.isnan(led_distances)]
 
         # Should be approximately the configured distance (allowing for noise)
         mean_distance = np.mean(valid_distances)
-        assert (
-            abs(mean_distance - config.led.front_back_distance) < 5.0
-        )  # Within 5 pixels
+        assert abs(mean_distance - config.led.front_back_distance) < 5.0  # Within 5 pixels
 
     def _generate_trajectory(self, config: SimConfig) -> Dict[str, np.ndarray]:
         """Helper to generate ground truth trajectory."""

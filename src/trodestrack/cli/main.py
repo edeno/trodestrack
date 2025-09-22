@@ -27,14 +27,10 @@ def create_parser() -> argparse.ArgumentParser:
         "-q", "--quiet", action="store_true", help="Suppress non-error output"
     )
 
-    subparsers = parser.add_subparsers(
-        dest="command", help="Available commands", required=True
-    )
+    subparsers = parser.add_subparsers(dest="command", help="Available commands", required=True)
 
     # Smooth command
-    smooth_parser = subparsers.add_parser(
-        "smooth", help="Run offline smoothing on a session"
-    )
+    smooth_parser = subparsers.add_parser("smooth", help="Run offline smoothing on a session")
     smooth_parser.add_argument(
         "--config",
         "-c",
@@ -57,18 +53,14 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     # Report command
-    report_parser = subparsers.add_parser(
-        "report", help="Generate analysis report from results"
-    )
+    report_parser = subparsers.add_parser("report", help="Generate analysis report from results")
     report_parser.add_argument(
         "--run-dir",
         type=Path,
         required=True,
         help="Directory containing tracking results",
     )
-    report_parser.add_argument(
-        "--output", "-o", type=Path, help="Output path for report (PDF)"
-    )
+    report_parser.add_argument("--output", "-o", type=Path, help="Output path for report (PDF)")
 
     # Calibration command
     calib_parser = subparsers.add_parser(
@@ -174,7 +166,10 @@ def cmd_calib_homography(args: argparse.Namespace) -> int:
         logger.info(f"Output homography file: {output_path}")
 
         # Import calibration tool
-        from trodestrack.cli.calibration import run_interactive_calibration, check_dependencies
+        from trodestrack.cli.calibration import (
+            check_dependencies,
+            run_interactive_calibration,
+        )
 
         # Check dependencies
         deps_available, missing = check_dependencies()
@@ -192,7 +187,7 @@ def cmd_calib_homography(args: argparse.Namespace) -> int:
             image_path=args.video,
             output_path=output_path,
             arena_width_cm=arena_width,
-            arena_height_cm=arena_height
+            arena_height_cm=arena_height,
         )
 
         if success:
@@ -220,7 +215,7 @@ def setup_logging(verbose: bool = False, quiet: bool = False) -> None:
     logging.basicConfig(
         level=level,
         format="%(levelname)s: %(message)s",
-        handlers=[logging.StreamHandler(sys.stderr)]
+        handlers=[logging.StreamHandler(sys.stderr)],
     )
 
 
@@ -230,8 +225,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     # Setup logging based on verbosity flags
-    setup_logging(verbose=getattr(args, 'verbose', False),
-                  quiet=getattr(args, 'quiet', False))
+    setup_logging(verbose=getattr(args, "verbose", False), quiet=getattr(args, "quiet", False))
 
     # Dispatch to command handlers
     command_handlers = {

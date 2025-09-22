@@ -1,17 +1,18 @@
 """Tests for CLI interface."""
 
-import pytest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from trodestrack.cli.main import (
-    create_parser,
-    main,
-    cmd_smooth,
+    cmd_calib_homography,
     cmd_online,
     cmd_report,
-    cmd_calib_homography,
+    cmd_smooth,
+    create_parser,
+    main,
 )
 from trodestrack.config.loader import create_default_config
 
@@ -36,9 +37,7 @@ class TestCLIParser:
         assert args.config == Path("session.yaml")
         assert args.output is None
 
-        args = parser.parse_args(
-            ["smooth", "--config", "session.yaml", "--output", "results/"]
-        )
+        args = parser.parse_args(["smooth", "--config", "session.yaml", "--output", "results/"])
         assert args.output == Path("results/")
 
     def test_online_command_args(self):

@@ -1,18 +1,19 @@
 """SpikeGadgets IMU data loader."""
 
-import numpy as np
-from pathlib import Path
-from typing import Optional, Dict, Any
-import warnings
 import struct
+import warnings
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+import numpy as np
 
 from ..constants import (
-    SPIKEGADGETS_DEFAULT_CLOCK_RATE_HZ,
+    DEGREES_TO_RADIANS,
     SPIKEGADGETS_ACCEL_SCALE_FACTOR_G_PER_LSB,
     SPIKEGADGETS_BASIC_RECORD_SIZE,
+    SPIKEGADGETS_DEFAULT_CLOCK_RATE_HZ,
     SPIKEGADGETS_MAG_RECORD_SIZE,
     STANDARD_GRAVITY_MS2,
-    DEGREES_TO_RADIANS,
 )
 
 
@@ -85,7 +86,9 @@ class SpikeGadgetsIMUData:
         """Whether magnetometer data is available."""
         return self.mag_raw is not None
 
-    def get_accel_g(self, scale_factor: float = SPIKEGADGETS_ACCEL_SCALE_FACTOR_G_PER_LSB) -> np.ndarray:
+    def get_accel_g(
+        self, scale_factor: float = SPIKEGADGETS_ACCEL_SCALE_FACTOR_G_PER_LSB
+    ) -> np.ndarray:
         """Convert raw accelerometer measurements to g units.
 
         Parameters
@@ -215,9 +218,7 @@ class SpikeGadgetsIMUData:
             metadata=new_metadata,
         )
 
-    def get_time_range(
-        self, start_time: float, end_time: float
-    ) -> "SpikeGadgetsIMUData":
+    def get_time_range(self, start_time: float, end_time: float) -> "SpikeGadgetsIMUData":
         """Extract data within specified time range.
 
         Args:
@@ -261,9 +262,7 @@ SATURATION_THRESHOLD = 0.95  # Warn if >95% of range is used
 
 
 def _validate_imu_data_ranges(
-    accel_data: np.ndarray,
-    gyro_data: np.ndarray,
-    mag_data: Optional[np.ndarray] = None
+    accel_data: np.ndarray, gyro_data: np.ndarray, mag_data: Optional[np.ndarray] = None
 ) -> None:
     """Validate IMU data ranges and check for saturation/overflow.
 
@@ -286,6 +285,7 @@ def _validate_imu_data_ranges(
     UserWarning
         If data appears saturated (near int16 limits)
     """
+
     def check_saturation(data: np.ndarray, name: str) -> None:
         """Check for saturation in sensor data."""
         min_val, max_val = np.min(data), np.max(data)
@@ -367,10 +367,14 @@ def load_spikegadgets_binary(file_path: Path) -> SpikeGadgetsIMUData:
 
         # Validate file integrity
         if n_records == 0:
-            raise ValueError(f"File too small: contains 0 complete records (file size: {len(data)} bytes, record size: {record_size} bytes)")
+            raise ValueError(
+                f"File too small: contains 0 complete records (file size: {len(data)} bytes, record size: {record_size} bytes)"
+            )
 
         if len(data) != n_records * record_size:
-            raise ValueError(f"Corrupt IMU file: size not exact multiple of record size (file: {len(data)} bytes, expected: {n_records * record_size} bytes)")
+            raise ValueError(
+                f"Corrupt IMU file: size not exact multiple of record size (file: {len(data)} bytes, expected: {n_records * record_size} bytes)"
+            )
 
         # Unpack binary data vectorized
         if has_mag:
@@ -380,9 +384,7 @@ def load_spikegadgets_binary(file_path: Path) -> SpikeGadgetsIMUData:
 
             # Reshape into records
             timestamps = np.array(values[:n_records], dtype=np.uint32)
-            imu_values = np.array(values[n_records:], dtype=np.int16).reshape(
-                n_records, 9
-            )
+            imu_values = np.array(values[n_records:], dtype=np.int16).reshape(n_records, 9)
 
             accel_data = imu_values[:, 0:3]
             gyro_data = imu_values[:, 3:6]
@@ -394,9 +396,7 @@ def load_spikegadgets_binary(file_path: Path) -> SpikeGadgetsIMUData:
 
             # Reshape into records
             timestamps = np.array(values[:n_records], dtype=np.uint32)
-            imu_values = np.array(values[n_records:], dtype=np.int16).reshape(
-                n_records, 6
-            )
+            imu_values = np.array(values[n_records:], dtype=np.int16).reshape(n_records, 6)
 
             accel_data = imu_values[:, 0:3]
             gyro_data = imu_values[:, 3:6]

@@ -1,25 +1,26 @@
 """Tests for data I/O loaders."""
 
-import pytest
-import numpy as np
-import pandas as pd
+import struct
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import struct
 
-from trodestrack.io.trodes import TrodesLEDData, load_trodes_led_csv
-from trodestrack.io.dlc import DLCKeypointData, load_dlc_csv
-from trodestrack.io.spikegadgets import (
-    SpikeGadgetsIMUData,
-    load_spikegadgets_csv,
-    load_spikegadgets_binary,
-)
+import numpy as np
+import pandas as pd
+import pytest
+
 from trodestrack.io.alignment import (
     align_timestamps,
     check_timestamp_synchronization,
     estimate_clock_offset,
     validate_alignment,
 )
+from trodestrack.io.dlc import DLCKeypointData, load_dlc_csv
+from trodestrack.io.spikegadgets import (
+    SpikeGadgetsIMUData,
+    load_spikegadgets_binary,
+    load_spikegadgets_csv,
+)
+from trodestrack.io.trodes import TrodesLEDData, load_trodes_led_csv
 
 
 class TestTrodesLEDData:
@@ -200,9 +201,7 @@ class TestDLCKeypointData:
             "tail": np.array([0.85, 0.75, 0.65]),
         }
 
-        data = DLCKeypointData(
-            timestamps=timestamps, keypoints=keypoints, confidences=confidences
-        )
+        data = DLCKeypointData(timestamps=timestamps, keypoints=keypoints, confidences=confidences)
 
         assert data.n_frames == 3
         assert set(data.keypoint_names) == {"nose", "tail"}
@@ -214,9 +213,7 @@ class TestDLCKeypointData:
         keypoints = {"nose": np.array([[100, 200], [110, 210]])}
         confidences = {"nose": np.array([0.9, 0.8])}
 
-        data = DLCKeypointData(
-            timestamps=timestamps, keypoints=keypoints, confidences=confidences
-        )
+        data = DLCKeypointData(timestamps=timestamps, keypoints=keypoints, confidences=confidences)
 
         pos, conf = data.get_keypoint("nose")
         np.testing.assert_array_equal(pos, keypoints["nose"])
@@ -234,9 +231,7 @@ class TestDLCKeypointData:
         }
         confidences = {"front": np.array([0.9, 0.8]), "back": np.array([0.85, 0.75])}
 
-        data = DLCKeypointData(
-            timestamps=timestamps, keypoints=keypoints, confidences=confidences
-        )
+        data = DLCKeypointData(timestamps=timestamps, keypoints=keypoints, confidences=confidences)
 
         front_pos, back_pos, front_conf, back_conf = data.get_led_data("front", "back")
 
@@ -250,9 +245,7 @@ class TestSpikeGadgetsIMUData:
     def test_initialization(self):
         """Test SpikeGadgetsIMUData initialization."""
         timestamps = np.array([0.0, 1 / 30000, 2 / 30000])
-        accel_raw = np.array(
-            [[1000, 2000, 3000], [1100, 2100, 3100], [1200, 2200, 3200]]
-        )
+        accel_raw = np.array([[1000, 2000, 3000], [1100, 2100, 3100], [1200, 2200, 3200]])
         gyro_raw = np.array([[100, 200, 300], [110, 210, 310], [120, 220, 320]])
 
         data = SpikeGadgetsIMUData(
@@ -272,9 +265,7 @@ class TestSpikeGadgetsIMUData:
         accel_raw = np.array([[16384, 0, 0], [0, 16384, 0]])  # 1g in each direction
         gyro_raw = np.array([[16384, 0, 0], [0, 16384, 0]])  # Some rotation
 
-        data = SpikeGadgetsIMUData(
-            timestamps=timestamps, accel_raw=accel_raw, gyro_raw=gyro_raw
-        )
+        data = SpikeGadgetsIMUData(timestamps=timestamps, accel_raw=accel_raw, gyro_raw=gyro_raw)
 
         # Test accelerometer conversion
         accel_g = data.get_accel_g()

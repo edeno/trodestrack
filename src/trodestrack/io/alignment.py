@@ -1,13 +1,15 @@
 """Timestamp alignment utilities for synchronizing video and IMU data."""
 
-import numpy as np
-from typing import Tuple, Optional, Dict, Any
 import warnings
+from typing import Any, Dict, Optional, Tuple
+
+import numpy as np
+
 from ..constants import (
-    DEFAULT_SYNC_SAMPLE_FRAMES,
     DEFAULT_ALIGNMENT_MAX_ERROR_S,
-    DEFAULT_SYNC_TOLERANCE_S,
     DEFAULT_DRIFT_RATE,
+    DEFAULT_SYNC_SAMPLE_FRAMES,
+    DEFAULT_SYNC_TOLERANCE_S,
 )
 
 
@@ -338,7 +340,7 @@ def check_timestamp_synchronization(
     imu_timestamps: np.ndarray,
     tolerance: float = DEFAULT_SYNC_TOLERANCE_S,
     ptp_enabled: bool = False,
-    skip_validation: bool = False
+    skip_validation: bool = False,
 ) -> Dict[str, Any]:
     """Check if video and IMU timestamps are hardware synchronized.
 
@@ -464,9 +466,7 @@ def estimate_clock_offset(
         raise ValueError(f"Unknown offset estimation method: {method}")
 
 
-def _estimate_offset_xcorr(
-    video_timestamps: np.ndarray, imu_timestamps: np.ndarray
-) -> float:
+def _estimate_offset_xcorr(video_timestamps: np.ndarray, imu_timestamps: np.ndarray) -> float:
     """Estimate offset using cross-correlation of timestamp derivatives.
 
     Args:
@@ -570,10 +570,12 @@ def validate_alignment(
 
     # Add PTP-specific metrics if enabled
     if ptp_enabled:
-        result.update({
-            "median_error": median_error,
-            "p95_error": p95_error,
-            "ptp_optimized": True,
-        })
+        result.update(
+            {
+                "median_error": median_error,
+                "p95_error": p95_error,
+                "ptp_optimized": True,
+            }
+        )
 
     return result

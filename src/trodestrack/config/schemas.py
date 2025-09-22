@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class IMUConfig(BaseModel):
@@ -18,9 +18,7 @@ class IMUConfig(BaseModel):
     accel_scale: float = Field(
         default=0.000061, description="Raw accelerometer to g conversion factor"
     )
-    gyro_scale: float = Field(
-        default=0.061, description="Raw gyroscope to deg/s conversion factor"
-    )
+    gyro_scale: float = Field(default=0.061, description="Raw gyroscope to deg/s conversion factor")
 
 
 class LEDConfig(BaseModel):
@@ -73,9 +71,7 @@ class MappingConfig(BaseModel):
 class FilterConfig(BaseModel):
     """Configuration for Kalman filtering."""
 
-    filter_type: str = Field(
-        default="ekf", description="Filter type to use", pattern="^(ekf|ukf)$"
-    )
+    filter_type: str = Field(default="ekf", description="Filter type to use", pattern="^(ekf|ukf)$")
     process_noise: dict = Field(
         default_factory=lambda: {
             "position": 0.01,
@@ -116,25 +112,25 @@ class SynchronizationConfig(BaseModel):
     method: str = Field(
         default="hardware_sync",
         description="Synchronization method",
-        pattern="^(hardware_sync|ptp|software_align|none)$"
+        pattern="^(hardware_sync|ptp|software_align|none)$",
     )
     ptp_enabled: bool = Field(
         default=False,
-        description="Whether Precision Time Protocol (PTP) is enabled for microsecond-level sync"
+        description="Whether Precision Time Protocol (PTP) is enabled for microsecond-level sync",
     )
     tolerance_s: Optional[float] = Field(
         default=None,
         description="Custom synchronization tolerance in seconds (auto-detected based on method if None)",
-        gt=0.0
+        gt=0.0,
     )
     max_alignment_error_s: Optional[float] = Field(
         default=None,
         description="Maximum allowed alignment error in seconds (auto-detected if None)",
-        gt=0.0
+        gt=0.0,
     )
     skip_validation: bool = Field(
         default=False,
-        description="Skip expensive synchronization validation checks (recommended for PTP systems)"
+        description="Skip expensive synchronization validation checks (recommended for PTP systems)",
     )
 
     @field_validator("tolerance_s")
@@ -158,55 +154,51 @@ class SynchronizationConfig(BaseModel):
     def model_post_init(self, __context) -> None:
         """Set PTP-specific defaults after model initialization."""
         from ..constants import (
-            PTP_SYNC_TOLERANCE_S, PTP_ALIGNMENT_MAX_ERROR_S,
-            DEFAULT_SYNC_TOLERANCE_S, DEFAULT_ALIGNMENT_MAX_ERROR_S
+            DEFAULT_ALIGNMENT_MAX_ERROR_S,
+            DEFAULT_SYNC_TOLERANCE_S,
+            PTP_ALIGNMENT_MAX_ERROR_S,
+            PTP_SYNC_TOLERANCE_S,
         )
 
         # Auto-detect PTP from method if not explicitly set
         if self.method == "ptp":
-            object.__setattr__(self, 'ptp_enabled', True)
+            object.__setattr__(self, "ptp_enabled", True)
 
         # Set tolerance based on PTP setting if not specified
         if self.tolerance_s is None:
             if self.ptp_enabled:
-                object.__setattr__(self, 'tolerance_s', PTP_SYNC_TOLERANCE_S)
+                object.__setattr__(self, "tolerance_s", PTP_SYNC_TOLERANCE_S)
             else:
-                object.__setattr__(self, 'tolerance_s', DEFAULT_SYNC_TOLERANCE_S)
+                object.__setattr__(self, "tolerance_s", DEFAULT_SYNC_TOLERANCE_S)
 
         # Set max alignment error based on PTP setting if not specified
         if self.max_alignment_error_s is None:
             if self.ptp_enabled:
-                object.__setattr__(self, 'max_alignment_error_s', PTP_ALIGNMENT_MAX_ERROR_S)
+                object.__setattr__(self, "max_alignment_error_s", PTP_ALIGNMENT_MAX_ERROR_S)
             else:
-                object.__setattr__(self, 'max_alignment_error_s', DEFAULT_ALIGNMENT_MAX_ERROR_S)
+                object.__setattr__(self, "max_alignment_error_s", DEFAULT_ALIGNMENT_MAX_ERROR_S)
 
         # Enable skip_validation by default for PTP systems unless explicitly disabled
         if self.ptp_enabled and self.skip_validation is False:
             # Only auto-enable if user hasn't explicitly set it to False
-            object.__setattr__(self, 'skip_validation', True)
+            object.__setattr__(self, "skip_validation", True)
 
 
 class OutputConfig(BaseModel):
     """Configuration for output files and logging."""
 
     output_dir: Path = Field(description="Directory for output files")
-    save_states: bool = Field(
-        default=True, description="Save state estimates to parquet"
-    )
+    save_states: bool = Field(default=True, description="Save state estimates to parquet")
     save_residuals: bool = Field(
         default=True, description="Save measurement residuals and diagnostics"
     )
-    save_plots: bool = Field(
-        default=True, description="Generate and save diagnostic plots"
-    )
+    save_plots: bool = Field(default=True, description="Generate and save diagnostic plots")
     log_level: str = Field(
         default="INFO",
         description="Logging level",
         pattern="^(DEBUG|INFO|WARNING|ERROR)$",
     )
-    random_seed: Optional[int] = Field(
-        default=None, description="Random seed for reproducibility"
-    )
+    random_seed: Optional[int] = Field(default=None, description="Random seed for reproducibility")
 
 
 class SessionConfig(BaseModel):
@@ -231,9 +223,7 @@ class SessionConfig(BaseModel):
     led: Optional[LEDConfig] = Field(
         default=None, description="LED tracking configuration (if using LEDs)"
     )
-    imu: IMUConfig = Field(
-        default_factory=IMUConfig, description="IMU processing configuration"
-    )
+    imu: IMUConfig = Field(default_factory=IMUConfig, description="IMU processing configuration")
     synchronization: SynchronizationConfig = Field(
         default_factory=SynchronizationConfig, description="Timestamp synchronization configuration"
     )
@@ -259,6 +249,4 @@ class SessionConfig(BaseModel):
         # LED config is optional, but if provided, should be valid
         return v
 
-    model_config = ConfigDict(
-        validate_assignment=True, extra="forbid"  # Reject unknown fields
-    )
+    model_config = ConfigDict(validate_assignment=True, extra="forbid")  # Reject unknown fields

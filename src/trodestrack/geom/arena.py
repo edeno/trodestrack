@@ -76,9 +76,7 @@ class ArenaValidator:
         return (self.x_min, self.y_min, self.x_max, self.y_max)
 
 
-def check_arena_bounds(
-    points: np.ndarray, bounds: Tuple[float, float, float, float]
-) -> np.ndarray:
+def check_arena_bounds(points: np.ndarray, bounds: Tuple[float, float, float, float]) -> np.ndarray:
     """
     Check if points are within arena bounds.
 

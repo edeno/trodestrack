@@ -1,10 +1,11 @@
 """Trodes LED output data loader."""
 
-import pandas as pd
-import numpy as np
-from pathlib import Path
-from typing import Optional, Dict, Any
 import warnings
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+import numpy as np
+import pandas as pd
 
 
 class TrodesLEDData:
@@ -204,9 +205,7 @@ def load_trodes_led_h5(file_path: Path) -> TrodesLEDData:
     try:
         import h5py
     except ImportError:
-        raise ImportError(
-            "h5py required for HDF5 support. Install with: pip install h5py"
-        )
+        raise ImportError("h5py required for HDF5 support. Install with: pip install h5py")
 
     if not file_path.exists():
         raise FileNotFoundError(f"Trodes LED file not found: {file_path}")

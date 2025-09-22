@@ -16,14 +16,16 @@ Key features:
 """
 
 import jax
+
 # Enable 64-bit precision for numerical accuracy
 jax.config.update("jax_enable_x64", True)
 
-import jax.numpy as jnp
-from jax import lax
-import chex
 from typing import NamedTuple, Optional
+
+import chex
+import jax.numpy as jnp
 import numpy as np
+from jax import lax
 
 from ..constants import DEGREES_TO_RADIANS, STANDARD_GRAVITY_MS2
 
@@ -44,6 +46,7 @@ class IMUPreintegrationResult(NamedTuple):
     n_samples : int
         Number of IMU samples integrated
     """
+
     delta_position: jnp.ndarray
     delta_velocity: jnp.ndarray
     delta_heading: float
@@ -65,10 +68,28 @@ class PreintegrationState(NamedTuple):
     time : float
         Current time since integration start
     """
+
     position: jnp.ndarray
     velocity: jnp.ndarray
     heading: float
     time: float
+
+
+@jax.jit
+def wrap_angle_jax(angle: float) -> float:
+    """Wrap angle to [-π, π] range using JAX operations.
+
+    Parameters
+    ----------
+    angle : float
+        Angle in radians
+
+    Returns
+    -------
+    float
+        Wrapped angle in [-π, π]
+    """
+    return ((angle + jnp.pi) % (2 * jnp.pi)) - jnp.pi
 
 
 @jax.jit
@@ -87,8 +108,7 @@ def rotation_matrix_2d(theta: float) -> jnp.ndarray:
     """
     cos_theta = jnp.cos(theta)
     sin_theta = jnp.sin(theta)
-    return jnp.array([[cos_theta, -sin_theta],
-                      [sin_theta, cos_theta]], dtype=jnp.float64)
+    return jnp.array([[cos_theta, -sin_theta], [sin_theta, cos_theta]], dtype=jnp.float64)
 
 
 @jax.jit
@@ -98,7 +118,7 @@ def preintegration_step(
     gyro_bias: float,
     accel_bias: jnp.ndarray,
     damping_lambda: float,
-    dt: float
+    dt: float,
 ) -> PreintegrationState:
     """Single step of IMU pre-integration.
 
@@ -125,18 +145,18 @@ def preintegration_step(
     """
     # Extract IMU measurements (convert to proper units if needed)
     accel_xy = imu_sample[:2]  # Already in m/s² from preprocessing
-    gyro_z = imu_sample[5]     # Already in rad/s from preprocessing
+    gyro_z = imu_sample[5]  # Already in rad/s from preprocessing
 
     # Apply bias correction
     omega_z_corrected = gyro_z - gyro_bias
     accel_corrected = accel_xy - accel_bias
 
     # Update heading using corrected gyroscope
-    new_heading = state.heading + omega_z_corrected * dt
+    new_heading = wrap_angle_jax(state.heading + omega_z_corrected * dt)
 
     # Rotate accelerometer measurements to world frame
     # Use heading at middle of interval for better accuracy
-    mid_heading = state.heading + 0.5 * omega_z_corrected * dt
+    mid_heading = wrap_angle_jax(state.heading + 0.5 * omega_z_corrected * dt)
     R = rotation_matrix_2d(mid_heading)
     accel_world = R @ accel_corrected
 
@@ -155,10 +175,7 @@ def preintegration_step(
     new_time = state.time + dt
 
     return PreintegrationState(
-        position=new_position,
-        velocity=new_velocity,
-        heading=new_heading,
-        time=new_time
+        position=new_position, velocity=new_velocity, heading=new_heading, time=new_time
     )
 
 
@@ -169,7 +186,7 @@ def preintegrate_imu_scan(
     initial_velocity: Optional[jnp.ndarray] = None,
     gyro_bias: float = 0.0,
     accel_bias: Optional[jnp.ndarray] = None,
-    damping_lambda: float = 0.0
+    damping_lambda: float = 0.0,
 ) -> IMUPreintegrationResult:
     """Pre-integrate IMU measurements using JAX scan.
 
@@ -219,7 +236,7 @@ def preintegrate_imu_scan(
             delta_velocity=jnp.zeros(2, dtype=jnp.float64),
             delta_heading=0.0,
             dt=0.0,
-            n_samples=n_samples
+            n_samples=n_samples,
         )
 
     # Set defaults
@@ -243,7 +260,7 @@ def preintegrate_imu_scan(
         position=jnp.zeros(2, dtype=jnp.float64),  # Start at origin
         velocity=initial_velocity_ms,
         heading=float(initial_heading),
-        time=0.0
+        time=0.0,
     )
 
     # Define scan function
@@ -267,9 +284,9 @@ def preintegrate_imu_scan(
     return IMUPreintegrationResult(
         delta_position=delta_position_cm,
         delta_velocity=delta_velocity_cm,
-        delta_heading=final_state.heading - initial_heading,
+        delta_heading=wrap_angle_jax(final_state.heading - initial_heading),
         dt=total_time,
-        n_samples=n_samples
+        n_samples=n_samples,
     )
 
 
@@ -282,7 +299,7 @@ def preintegrate_between_frames(
     initial_velocity: Optional[jnp.ndarray] = None,
     gyro_bias: float = 0.0,
     accel_bias: Optional[jnp.ndarray] = None,
-    damping_lambda: float = 0.0
+    damping_lambda: float = 0.0,
 ) -> IMUPreintegrationResult:
     """Pre-integrate IMU data between two specific time points.
 
@@ -335,7 +352,7 @@ def preintegrate_between_frames(
             delta_velocity=jnp.zeros(2),
             delta_heading=0.0,
             dt=dt,
-            n_samples=len(indices)
+            n_samples=len(indices),
         )
 
     # Extract relevant data
@@ -350,13 +367,12 @@ def preintegrate_between_frames(
         initial_velocity=initial_velocity,
         gyro_bias=gyro_bias,
         accel_bias=accel_bias,
-        damping_lambda=damping_lambda
+        damping_lambda=damping_lambda,
     )
 
 
 def convert_spikegadgets_to_preintegration_units(
-    accel_ms2: np.ndarray,
-    gyro_rad_s: np.ndarray
+    accel_ms2: np.ndarray, gyro_rad_s: np.ndarray
 ) -> jnp.ndarray:
     """Convert SpikeGadgets IMU data to pre-integration units.
 

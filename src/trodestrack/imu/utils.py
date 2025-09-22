@@ -1,17 +1,16 @@
 """IMU utility functions for preprocessing and alignment."""
 
-import numpy as np
-import jax.numpy as jnp
-from typing import Tuple, Optional
 import warnings
+from typing import Optional, Tuple
+
+import jax.numpy as jnp
+import numpy as np
 
 from ..constants import STANDARD_GRAVITY_MS2
 
 
 def remove_gravity_estimate(
-    accel_data: np.ndarray,
-    axis: int = 2,
-    window_size: int = 1000
+    accel_data: np.ndarray, axis: int = 2, window_size: int = 1000
 ) -> np.ndarray:
     """Remove gravity component from accelerometer data using rolling mean.
 
@@ -45,15 +44,17 @@ def remove_gravity_estimate(
         # Use pandas-style rolling mean for gravity estimate
         try:
             import pandas as pd
+
             gravity_series = pd.Series(accel_data[:, axis])
-            gravity_estimate = gravity_series.rolling(
-                window=window_size, center=True, min_periods=1
-            ).mean().values
+            gravity_estimate = (
+                gravity_series.rolling(window=window_size, center=True, min_periods=1).mean().values
+            )
         except ImportError:
             # Fallback to simple uniform filter
             from scipy.ndimage import uniform_filter1d
+
             gravity_estimate = uniform_filter1d(
-                accel_data[:, axis], size=window_size, mode='nearest'
+                accel_data[:, axis], size=window_size, mode="nearest"
             )
     else:
         # Use global mean for short sequences
@@ -66,9 +67,7 @@ def remove_gravity_estimate(
 
 
 def detect_imu_misalignment(
-    accel_data: np.ndarray,
-    expected_gravity: float = STANDARD_GRAVITY_MS2,
-    tolerance: float = 0.2
+    accel_data: np.ndarray, expected_gravity: float = STANDARD_GRAVITY_MS2, tolerance: float = 0.2
 ) -> Tuple[bool, float]:
     """Detect potential IMU misalignment by checking gravity magnitude.
 
@@ -120,9 +119,7 @@ def detect_imu_misalignment(
 
 
 def estimate_gyroscope_bias(
-    gyro_data: np.ndarray,
-    stationary_threshold: float = 0.1,
-    min_samples: int = 100
+    gyro_data: np.ndarray, stationary_threshold: float = 0.1, min_samples: int = 100
 ) -> Tuple[np.ndarray, bool]:
     """Estimate gyroscope bias from stationary periods.
 
@@ -174,10 +171,7 @@ def estimate_gyroscope_bias(
     return bias_estimate, is_reliable
 
 
-def compute_imu_alignment_matrix(
-    gravity_vector: np.ndarray,
-    target_axis: int = 2
-) -> np.ndarray:
+def compute_imu_alignment_matrix(gravity_vector: np.ndarray, target_axis: int = 2) -> np.ndarray:
     """Compute rotation matrix to align IMU gravity vector with target axis.
 
     Parameters
@@ -237,24 +231,21 @@ def compute_imu_alignment_matrix(
     angle = np.arccos(np.clip(cos_angle, -1, 1))
 
     # Rodrigues' rotation formula
-    K = np.array([
-        [0, -rotation_axis[2], rotation_axis[1]],
-        [rotation_axis[2], 0, -rotation_axis[0]],
-        [-rotation_axis[1], rotation_axis[0], 0]
-    ])
+    K = np.array(
+        [
+            [0, -rotation_axis[2], rotation_axis[1]],
+            [rotation_axis[2], 0, -rotation_axis[0]],
+            [-rotation_axis[1], rotation_axis[0], 0],
+        ]
+    )
 
-    R = (np.eye(3) +
-         np.sin(angle) * K +
-         (1 - np.cos(angle)) * np.dot(K, K))
+    R = np.eye(3) + np.sin(angle) * K + (1 - np.cos(angle)) * np.dot(K, K)
 
     return R
 
 
 def validate_imu_data_quality(
-    accel_data: np.ndarray,
-    gyro_data: np.ndarray,
-    timestamps: np.ndarray,
-    sampling_rate: float
+    accel_data: np.ndarray, gyro_data: np.ndarray, timestamps: np.ndarray, sampling_rate: float
 ) -> dict:
     """Validate IMU data quality and return diagnostic information.
 
@@ -286,58 +277,58 @@ def validate_imu_data_quality(
 
     # Check data shapes
     n_samples = len(timestamps)
-    diagnostics['n_samples'] = n_samples
-    diagnostics['duration_s'] = timestamps[-1] - timestamps[0] if n_samples > 1 else 0.0
+    diagnostics["n_samples"] = n_samples
+    diagnostics["duration_s"] = timestamps[-1] - timestamps[0] if n_samples > 1 else 0.0
 
     # Check timing consistency
     if n_samples > 1:
         dt_expected = 1.0 / sampling_rate
         dt_actual = np.median(np.diff(timestamps))
         dt_error = abs(dt_actual - dt_expected) / dt_expected
-        diagnostics['timing_error_percent'] = dt_error * 100
+        diagnostics["timing_error_percent"] = dt_error * 100
 
         # Check for timing gaps
         dt_gaps = np.diff(timestamps)
         large_gaps = dt_gaps > 2 * dt_expected
-        diagnostics['timing_gaps_count'] = np.sum(large_gaps)
-        diagnostics['max_gap_s'] = np.max(dt_gaps)
+        diagnostics["timing_gaps_count"] = np.sum(large_gaps)
+        diagnostics["max_gap_s"] = np.max(dt_gaps)
 
     # Check data ranges
-    diagnostics['accel_range_ms2'] = [np.min(accel_data), np.max(accel_data)]
-    diagnostics['gyro_range_rad_s'] = [np.min(gyro_data), np.max(gyro_data)]
+    diagnostics["accel_range_ms2"] = [np.min(accel_data), np.max(accel_data)]
+    diagnostics["gyro_range_rad_s"] = [np.min(gyro_data), np.max(gyro_data)]
 
     # Check for saturated samples
     accel_saturated = np.any(np.abs(accel_data) > 150)  # Reasonable accel limit
-    gyro_saturated = np.any(np.abs(gyro_data) > 35)    # Reasonable gyro limit (2000 deg/s)
-    diagnostics['accel_saturated'] = accel_saturated
-    diagnostics['gyro_saturated'] = gyro_saturated
+    gyro_saturated = np.any(np.abs(gyro_data) > 35)  # Reasonable gyro limit (2000 deg/s)
+    diagnostics["accel_saturated"] = accel_saturated
+    diagnostics["gyro_saturated"] = gyro_saturated
 
     # Gravity alignment check
     is_misaligned, gravity_error = detect_imu_misalignment(accel_data)
-    diagnostics['gravity_misaligned'] = is_misaligned
-    diagnostics['gravity_error_percent'] = gravity_error * 100
+    diagnostics["gravity_misaligned"] = is_misaligned
+    diagnostics["gravity_error_percent"] = gravity_error * 100
 
     # Bias estimation
     gyro_bias, bias_reliable = estimate_gyroscope_bias(gyro_data)
-    diagnostics['gyro_bias_rad_s'] = gyro_bias
-    diagnostics['gyro_bias_reliable'] = bias_reliable
+    diagnostics["gyro_bias_rad_s"] = gyro_bias
+    diagnostics["gyro_bias_reliable"] = bias_reliable
 
     # Overall quality assessment
     issues = []
-    if diagnostics.get('timing_error_percent', 0) > 1:
-        issues.append('timing_inconsistent')
-    if diagnostics.get('timing_gaps_count', 0) > 0:
-        issues.append('timing_gaps')
+    if diagnostics.get("timing_error_percent", 0) > 1:
+        issues.append("timing_inconsistent")
+    if diagnostics.get("timing_gaps_count", 0) > 0:
+        issues.append("timing_gaps")
     if accel_saturated:
-        issues.append('accel_saturated')
+        issues.append("accel_saturated")
     if gyro_saturated:
-        issues.append('gyro_saturated')
+        issues.append("gyro_saturated")
     if is_misaligned:
-        issues.append('gravity_misaligned')
+        issues.append("gravity_misaligned")
     if not bias_reliable:
-        issues.append('unreliable_bias')
+        issues.append("unreliable_bias")
 
-    diagnostics['quality_issues'] = issues
-    diagnostics['quality_good'] = len(issues) == 0
+    diagnostics["quality_issues"] = issues
+    diagnostics["quality_good"] = len(issues) == 0
 
     return diagnostics

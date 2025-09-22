@@ -1,20 +1,21 @@
 """Tests for configuration system."""
 
-import pytest
-import yaml
+import tempfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import tempfile
 
+import pytest
+import yaml
+
+from trodestrack.config.loader import create_default_config, load_config, save_config
 from trodestrack.config.schemas import (
-    SessionConfig,
-    MappingConfig,
     FilterConfig,
-    LEDConfig,
     IMUConfig,
+    LEDConfig,
+    MappingConfig,
     OutputConfig,
+    SessionConfig,
 )
-from trodestrack.config.loader import load_config, save_config, create_default_config
 
 
 class TestSchemas:
@@ -160,10 +161,7 @@ class TestConfigLoader:
             assert loaded_config.imu_file == original_config.imu_file.resolve()
             assert loaded_config.output.output_dir == original_config.output.output_dir.resolve()
             assert loaded_config.video_fps == original_config.video_fps
-            assert (
-                loaded_config.mapping.pixel_per_cm
-                == original_config.mapping.pixel_per_cm
-            )
+            assert loaded_config.mapping.pixel_per_cm == original_config.mapping.pixel_per_cm
             assert (
                 loaded_config.led.front_back_distance_cm
                 == original_config.led.front_back_distance_cm

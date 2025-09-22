@@ -11,17 +11,16 @@ Main components:
 from .preintegration import (
     IMUPreintegrationResult,
     PreintegrationState,
-    preintegrate_imu_scan,
-    preintegrate_between_frames,
     convert_spikegadgets_to_preintegration_units,
+    preintegrate_between_frames,
+    preintegrate_imu_scan,
     rotation_matrix_2d,
 )
-
 from .utils import (
-    remove_gravity_estimate,
+    compute_imu_alignment_matrix,
     detect_imu_misalignment,
     estimate_gyroscope_bias,
-    compute_imu_alignment_matrix,
+    remove_gravity_estimate,
     validate_imu_data_quality,
 )
 

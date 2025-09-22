@@ -2,19 +2,20 @@
 
 import numpy as np
 import pytest
-from hypothesis import given, strategies as st
+from hypothesis import given
+from hypothesis import strategies as st
 
-from trodestrack.geom.homography import (
-    HomographyTransform,
-    compute_homography_from_corners,
-    transform_points_pixel_to_cm,
-    transform_points_cm_to_pixel,
-)
 from trodestrack.geom.arena import (
     ArenaValidator,
     check_arena_bounds,
     clip_to_arena_bounds,
     get_arena_center,
+)
+from trodestrack.geom.homography import (
+    HomographyTransform,
+    compute_homography_from_corners,
+    transform_points_cm_to_pixel,
+    transform_points_pixel_to_cm,
 )
 
 
@@ -60,7 +61,9 @@ class TestHomographyTransform:
         cm_points = transform.pixel_to_cm(pixel_points)
         np.testing.assert_allclose(cm_points, expected_cm, rtol=1e-6)
 
-    @given(st.lists(st.lists(st.floats(-1000, 1000), min_size=2, max_size=2), min_size=1, max_size=10))
+    @given(
+        st.lists(st.lists(st.floats(-1000, 1000), min_size=2, max_size=2), min_size=1, max_size=10)
+    )
     def test_homography_roundtrip_property(self, points):
         """Property test: any valid transform should roundtrip."""
         # Use a generic transformation matrix (scale + rotation + translation)

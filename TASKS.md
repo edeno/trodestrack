@@ -39,6 +39,8 @@
 - [x] Add roundtrip tests (pixel → cm → pixel).
 - [x] Document calibration workflow.
 
+**STATUS:** ✅ COMPLETED - All 17 geometry tests pass. Complete implementation with JAX-based coordinate transforms, DLT homography computation, interactive CLI calibration tool, and comprehensive testing.
+
 ---
 
 ## Milestone 4 — IMU Preprocessing
@@ -47,9 +49,12 @@
 - [x] Implement downsampling & alignment utilities (basic version in SpikeGadgetsIMUData).
 - [x] Implement IMU pre-integration with `jax.lax.scan`.
 - [x] Write tests vs numerical integration baseline.
-- [x] Golden tests: compare JAX pre-integration against high-res numerical baseline on 3 motion profiles (steady, step-turn, sinusoid).
+- [ ] Golden tests: compare JAX pre-integration against high-res numerical baseline on 3 motion profiles (steady, step-turn, sinusoid).
 
-**COMPLETED:** Full IMU pre-integration module implemented in `imu/` directory with JAX-compiled functions, comprehensive tests including golden baselines, and 64-bit precision for numerical accuracy. The implementation supports bias correction, velocity damping, and efficient scan-based integration.
+**STATUS:** 🔄 MOSTLY COMPLETE - Core IMU pre-integration implemented and working (25/26 tests pass, 5/7 golden tests pass). Issues remaining:
+- One property-based test failing due to timestamp/sample count mismatch
+- Two golden tests failing: sinusoidal motion tolerance and regression test timing precision
+- Need to fix edge cases and improve numerical accuracy for complex motion profiles
 
 ---
 

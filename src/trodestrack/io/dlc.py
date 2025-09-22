@@ -1,10 +1,11 @@
 """DeepLabCut keypoint data loader."""
 
-import pandas as pd
-import numpy as np
-from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple
 import warnings
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+import pandas as pd
 
 
 class DLCKeypointData:
@@ -27,9 +28,7 @@ class DLCKeypointData:
         """
         self.timestamps = np.asarray(timestamps)
         self.keypoints = {name: np.asarray(pos) for name, pos in keypoints.items()}
-        self.confidences = {
-            name: np.asarray(conf) for name, conf in confidences.items()
-        }
+        self.confidences = {name: np.asarray(conf) for name, conf in confidences.items()}
         self.metadata = metadata or {}
 
         # Validate shapes
@@ -264,10 +263,9 @@ def load_dlc_h5(file_path: Path) -> DLCKeypointData:
     """
     # h5py is required by pandas for HDF5 support
     import importlib.util
+
     if importlib.util.find_spec("h5py") is None:
-        raise ImportError(
-            "h5py required for HDF5 support. Install with: pip install h5py"
-        )
+        raise ImportError("h5py required for HDF5 support. Install with: pip install h5py")
 
     if not file_path.exists():
         raise FileNotFoundError(f"DLC file not found: {file_path}")

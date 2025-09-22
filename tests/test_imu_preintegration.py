@@ -1,25 +1,28 @@
 """Tests for IMU pre-integration functionality."""
 
 import jax
+
 # Enable 64-bit precision for tests
 jax.config.update("jax_enable_x64", True)
 
-import pytest
-import numpy as np
-import jax.numpy as jnp
-from hypothesis import given, strategies as st
 import warnings
 
+import jax.numpy as jnp
+import numpy as np
+import pytest
+from hypothesis import given
+from hypothesis import strategies as st
+
+from trodestrack.constants import DEGREES_TO_RADIANS, STANDARD_GRAVITY_MS2
 from trodestrack.imu.preintegration import (
     IMUPreintegrationResult,
     PreintegrationState,
-    preintegrate_imu_scan,
-    preintegrate_between_frames,
     convert_spikegadgets_to_preintegration_units,
-    rotation_matrix_2d,
+    preintegrate_between_frames,
+    preintegrate_imu_scan,
     preintegration_step,
+    rotation_matrix_2d,
 )
-from trodestrack.constants import STANDARD_GRAVITY_MS2, DEGREES_TO_RADIANS
 
 
 class TestRotationMatrix2D:
@@ -56,7 +59,7 @@ class TestRotationMatrix2D:
         det = jnp.linalg.det(R)
         np.testing.assert_allclose(det, 1.0, atol=1e-10)
 
-    @given(st.floats(-2*np.pi, 2*np.pi, allow_nan=False, allow_infinity=False))
+    @given(st.floats(-2 * np.pi, 2 * np.pi, allow_nan=False, allow_infinity=False))
     def test_rotation_matrix_properties(self, angle):
         """Property test for rotation matrix properties."""
         R = rotation_matrix_2d(angle)
@@ -79,10 +82,7 @@ class TestPreintegrationStep:
     def test_preintegration_step_zero_motion(self):
         """Test step with zero IMU measurements."""
         initial_state = PreintegrationState(
-            position=jnp.zeros(2),
-            velocity=jnp.zeros(2),
-            heading=0.0,
-            time=0.0
+            position=jnp.zeros(2), velocity=jnp.zeros(2), heading=0.0, time=0.0
         )
 
         # Zero IMU sample
@@ -90,9 +90,12 @@ class TestPreintegrationStep:
         dt = 0.01
 
         new_state = preintegration_step(
-            initial_state, imu_sample,
-            gyro_bias=0.0, accel_bias=jnp.zeros(2),
-            damping_lambda=0.0, dt=dt
+            initial_state,
+            imu_sample,
+            gyro_bias=0.0,
+            accel_bias=jnp.zeros(2),
+            damping_lambda=0.0,
+            dt=dt,
         )
 
         # Should remain at origin with zero motion
@@ -104,10 +107,7 @@ class TestPreintegrationStep:
     def test_preintegration_step_constant_acceleration(self):
         """Test step with constant acceleration."""
         initial_state = PreintegrationState(
-            position=jnp.zeros(2),
-            velocity=jnp.zeros(2),
-            heading=0.0,
-            time=0.0
+            position=jnp.zeros(2), velocity=jnp.zeros(2), heading=0.0, time=0.0
         )
 
         # Constant acceleration in x direction
@@ -116,9 +116,12 @@ class TestPreintegrationStep:
         dt = 0.1
 
         new_state = preintegration_step(
-            initial_state, imu_sample,
-            gyro_bias=0.0, accel_bias=jnp.zeros(2),
-            damping_lambda=0.0, dt=dt
+            initial_state,
+            imu_sample,
+            gyro_bias=0.0,
+            accel_bias=jnp.zeros(2),
+            damping_lambda=0.0,
+            dt=dt,
         )
 
         # Expected: v = a*t, x = 0.5*a*t²
@@ -131,10 +134,7 @@ class TestPreintegrationStep:
     def test_preintegration_step_constant_rotation(self):
         """Test step with constant angular velocity."""
         initial_state = PreintegrationState(
-            position=jnp.zeros(2),
-            velocity=jnp.zeros(2),
-            heading=0.0,
-            time=0.0
+            position=jnp.zeros(2), velocity=jnp.zeros(2), heading=0.0, time=0.0
         )
 
         # Constant angular velocity
@@ -143,9 +143,12 @@ class TestPreintegrationStep:
         dt = 0.1
 
         new_state = preintegration_step(
-            initial_state, imu_sample,
-            gyro_bias=0.0, accel_bias=jnp.zeros(2),
-            damping_lambda=0.0, dt=dt
+            initial_state,
+            imu_sample,
+            gyro_bias=0.0,
+            accel_bias=jnp.zeros(2),
+            damping_lambda=0.0,
+            dt=dt,
         )
 
         # Expected heading change
@@ -155,10 +158,7 @@ class TestPreintegrationStep:
     def test_preintegration_step_with_bias(self):
         """Test step with gyroscope and accelerometer bias."""
         initial_state = PreintegrationState(
-            position=jnp.zeros(2),
-            velocity=jnp.zeros(2),
-            heading=0.0,
-            time=0.0
+            position=jnp.zeros(2), velocity=jnp.zeros(2), heading=0.0, time=0.0
         )
 
         # IMU measurements with bias
@@ -172,9 +172,12 @@ class TestPreintegrationStep:
         dt = 0.1
 
         new_state = preintegration_step(
-            initial_state, imu_sample,
-            gyro_bias=gyro_bias, accel_bias=accel_bias,
-            damping_lambda=0.0, dt=dt
+            initial_state,
+            imu_sample,
+            gyro_bias=gyro_bias,
+            accel_bias=accel_bias,
+            damping_lambda=0.0,
+            dt=dt,
         )
 
         # After bias correction, should get original values
@@ -188,10 +191,15 @@ class TestPreintegrationStep:
         mid_heading = 0.5 * expected_omega * dt
         cos_mid = jnp.cos(mid_heading)
         sin_mid = jnp.sin(mid_heading)
-        expected_velocity = jnp.array([
-            cos_mid * expected_accel[0] - sin_mid * expected_accel[1],
-            sin_mid * expected_accel[0] + cos_mid * expected_accel[1]
-        ]) * dt
+        expected_velocity = (
+            jnp.array(
+                [
+                    cos_mid * expected_accel[0] - sin_mid * expected_accel[1],
+                    sin_mid * expected_accel[0] + cos_mid * expected_accel[1],
+                ]
+            )
+            * dt
+        )
 
         np.testing.assert_allclose(new_state.heading, expected_heading, atol=1e-8)
         np.testing.assert_allclose(new_state.velocity, expected_velocity, atol=1e-8)
@@ -200,10 +208,7 @@ class TestPreintegrationStep:
         """Test step with velocity damping."""
         initial_velocity = jnp.array([1.0, 0.5]) / 100  # Convert to m/s
         initial_state = PreintegrationState(
-            position=jnp.zeros(2),
-            velocity=initial_velocity,
-            heading=0.0,
-            time=0.0
+            position=jnp.zeros(2), velocity=initial_velocity, heading=0.0, time=0.0
         )
 
         # Zero acceleration, but with damping
@@ -212,9 +217,12 @@ class TestPreintegrationStep:
         dt = 0.1
 
         new_state = preintegration_step(
-            initial_state, imu_sample,
-            gyro_bias=0.0, accel_bias=jnp.zeros(2),
-            damping_lambda=damping_lambda, dt=dt
+            initial_state,
+            imu_sample,
+            gyro_bias=0.0,
+            accel_bias=jnp.zeros(2),
+            damping_lambda=damping_lambda,
+            dt=dt,
         )
 
         # Velocity should decay: v(t) = v0 * exp(-λt) ≈ v0 * (1 - λt) for small t
@@ -315,9 +323,7 @@ class TestPreintegrationScan:
         # Initial velocity
         initial_velocity = jnp.array([10.0, 5.0])  # cm/s
 
-        result = preintegrate_imu_scan(
-            imu_data, timestamps, initial_velocity=initial_velocity
-        )
+        result = preintegrate_imu_scan(imu_data, timestamps, initial_velocity=initial_velocity)
 
         # Expected: constant velocity motion
         expected_position = initial_velocity * duration
@@ -336,9 +342,7 @@ class TestPreintegrationBetweenFrames:
         timestamps = jnp.linspace(0, 1, 100)
 
         with pytest.raises(ValueError, match="Invalid time range"):
-            preintegrate_between_frames(
-                imu_data, timestamps, start_time=1.0, end_time=0.5
-            )
+            preintegrate_between_frames(imu_data, timestamps, start_time=1.0, end_time=0.5)
 
     def test_preintegrate_between_frames_no_data(self):
         """Test handling when no IMU samples in time range."""
@@ -346,9 +350,7 @@ class TestPreintegrationBetweenFrames:
         timestamps = jnp.linspace(0, 1, 100)
 
         # Time range with no samples
-        result = preintegrate_between_frames(
-            imu_data, timestamps, start_time=1.5, end_time=2.0
-        )
+        result = preintegrate_between_frames(imu_data, timestamps, start_time=1.5, end_time=2.0)
 
         assert result.n_samples == 0
         np.testing.assert_allclose(result.delta_position, jnp.zeros(2))
@@ -397,7 +399,7 @@ class TestNumericalIntegrationBaseline:
         initial_velocity: np.ndarray = None,
         gyro_bias: float = 0.0,
         accel_bias: np.ndarray = None,
-        damping_lambda: float = 0.0
+        damping_lambda: float = 0.0,
     ) -> dict:
         """Reference numerical integration implementation."""
         if initial_velocity is None:
@@ -411,7 +413,7 @@ class TestNumericalIntegrationBaseline:
         heading = initial_heading
 
         for i in range(1, len(timestamps)):
-            dt = timestamps[i] - timestamps[i-1]
+            dt = timestamps[i] - timestamps[i - 1]
 
             # Extract measurements
             accel_xy = imu_data[i, :2] - accel_bias
@@ -423,10 +425,12 @@ class TestNumericalIntegrationBaseline:
             # Rotate acceleration to world frame
             cos_h = np.cos(heading)
             sin_h = np.sin(heading)
-            accel_world = np.array([
-                cos_h * accel_xy[0] - sin_h * accel_xy[1],
-                sin_h * accel_xy[0] + cos_h * accel_xy[1]
-            ])
+            accel_world = np.array(
+                [
+                    cos_h * accel_xy[0] - sin_h * accel_xy[1],
+                    sin_h * accel_xy[0] + cos_h * accel_xy[1],
+                ]
+            )
 
             # Apply damping and update velocity
             velocity_damping = -damping_lambda * velocity
@@ -437,10 +441,10 @@ class TestNumericalIntegrationBaseline:
             position += velocity * dt
 
         return {
-            'delta_position': position * 100,  # Convert to cm
-            'delta_velocity': (velocity - initial_velocity / 100.0) * 100,  # Convert to cm/s
-            'delta_heading': heading - initial_heading,
-            'dt': timestamps[-1] - timestamps[0]
+            "delta_position": position * 100,  # Convert to cm
+            "delta_velocity": (velocity - initial_velocity / 100.0) * 100,  # Convert to cm/s
+            "delta_heading": heading - initial_heading,
+            "dt": timestamps[-1] - timestamps[0],
         }
 
     def test_jax_vs_numerical_constant_motion(self):
@@ -470,13 +474,13 @@ class TestNumericalIntegrationBaseline:
 
         # Compare results (should be very close for simple motion)
         np.testing.assert_allclose(
-            jax_result.delta_position, numerical_result['delta_position'], rtol=2e-2
+            jax_result.delta_position, numerical_result["delta_position"], rtol=2e-2
         )
         np.testing.assert_allclose(
-            jax_result.delta_velocity, numerical_result['delta_velocity'], rtol=2e-2
+            jax_result.delta_velocity, numerical_result["delta_velocity"], rtol=2e-2
         )
         np.testing.assert_allclose(
-            jax_result.delta_heading, numerical_result['delta_heading'], rtol=2e-2
+            jax_result.delta_heading, numerical_result["delta_heading"], rtol=2e-2
         )
 
     def test_jax_vs_numerical_with_bias(self):
@@ -507,19 +511,21 @@ class TestNumericalIntegrationBaseline:
 
         # Numerical baseline
         numerical_result = self.numerical_integration_baseline(
-            np.array(imu_data), np.array(timestamps),
-            gyro_bias=gyro_bias, accel_bias=np.array(accel_bias)
+            np.array(imu_data),
+            np.array(timestamps),
+            gyro_bias=gyro_bias,
+            accel_bias=np.array(accel_bias),
         )
 
         # Compare results
         np.testing.assert_allclose(
-            jax_result.delta_position, numerical_result['delta_position'], rtol=2e-2
+            jax_result.delta_position, numerical_result["delta_position"], rtol=2e-2
         )
         np.testing.assert_allclose(
-            jax_result.delta_velocity, numerical_result['delta_velocity'], rtol=2e-2
+            jax_result.delta_velocity, numerical_result["delta_velocity"], rtol=2e-2
         )
         np.testing.assert_allclose(
-            jax_result.delta_heading, numerical_result['delta_heading'], rtol=2e-2
+            jax_result.delta_heading, numerical_result["delta_heading"], rtol=2e-2
         )
 
     def test_jax_vs_numerical_complex_motion(self):
@@ -551,13 +557,13 @@ class TestNumericalIntegrationBaseline:
 
         # For complex motion, allow slightly larger tolerance due to integration differences
         np.testing.assert_allclose(
-            jax_result.delta_position, numerical_result['delta_position'], rtol=5e-2, atol=1e-12
+            jax_result.delta_position, numerical_result["delta_position"], rtol=5e-2, atol=1e-12
         )
         np.testing.assert_allclose(
-            jax_result.delta_velocity, numerical_result['delta_velocity'], rtol=5e-2, atol=1e-12
+            jax_result.delta_velocity, numerical_result["delta_velocity"], rtol=5e-2, atol=1e-12
         )
         np.testing.assert_allclose(
-            jax_result.delta_heading, numerical_result['delta_heading'], rtol=5e-2, atol=1e-12
+            jax_result.delta_heading, numerical_result["delta_heading"], rtol=5e-2, atol=1e-12
         )
 
 
@@ -612,14 +618,13 @@ class TestPropertyBased:
             warnings.simplefilter("ignore")
 
             n_steps = 10
-            timestamps = jnp.arange(0, n_steps * dt_step, dt_step)
+            # Ensure timestamps and data have exactly the same length
+            timestamps = jnp.linspace(0, n_steps * dt_step, n_steps, endpoint=False)
             imu_data = jnp.zeros((n_steps, 6))
 
             initial_velocity = jnp.array([initial_vx, initial_vy])
 
-            result = preintegrate_imu_scan(
-                imu_data, timestamps, initial_velocity=initial_velocity
-            )
+            result = preintegrate_imu_scan(imu_data, timestamps, initial_velocity=initial_velocity)
 
             # With zero acceleration and rotation, velocity should remain constant
             # So delta_velocity should be zero

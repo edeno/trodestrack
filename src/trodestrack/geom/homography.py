@@ -132,7 +132,9 @@ def compute_homography_from_corners(
 
         # Check for degenerate configuration (smallest singular value too small)
         if s[-1] < 1e-10:
-            raise ValueError("Cannot compute homography from given corners (degenerate configuration)")
+            raise ValueError(
+                "Cannot compute homography from given corners (degenerate configuration)"
+            )
 
         h = Vt[-1]  # Last row of V^T (corresponding to smallest singular value)
 
@@ -141,7 +143,9 @@ def compute_homography_from_corners(
 
         # Check if H[2, 2] is close to zero (another degenerate case)
         if abs(H[2, 2]) < 1e-10:
-            raise ValueError("Cannot compute homography from given corners (degenerate configuration)")
+            raise ValueError(
+                "Cannot compute homography from given corners (degenerate configuration)"
+            )
 
         # Normalize so that H[2, 2] = 1
         H = H / H[2, 2]
@@ -149,7 +153,9 @@ def compute_homography_from_corners(
         return H
 
     except np.linalg.LinAlgError as e:
-        raise ValueError("Cannot compute homography from given corners (degenerate configuration)") from e
+        raise ValueError(
+            "Cannot compute homography from given corners (degenerate configuration)"
+        ) from e
 
 
 def transform_points_pixel_to_cm(

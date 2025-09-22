@@ -1,18 +1,19 @@
 """Tests for IMU utility functions."""
 
-import pytest
-import numpy as np
-from unittest.mock import patch
 import warnings
+from unittest.mock import patch
 
+import numpy as np
+import pytest
+
+from trodestrack.constants import STANDARD_GRAVITY_MS2
 from trodestrack.imu.utils import (
-    remove_gravity_estimate,
+    compute_imu_alignment_matrix,
     detect_imu_misalignment,
     estimate_gyroscope_bias,
-    compute_imu_alignment_matrix,
+    remove_gravity_estimate,
     validate_imu_data_quality,
 )
-from trodestrack.constants import STANDARD_GRAVITY_MS2
 
 
 class TestRemoveGravityEstimate:
@@ -155,9 +156,7 @@ class TestEstimateGyroscopeBias:
         # Create stationary data (just bias + small noise)
         gyro_data = np.random.randn(n_samples, 3) * 0.01 + true_bias
 
-        estimated_bias, is_reliable = estimate_gyroscope_bias(
-            gyro_data, stationary_threshold=0.1
-        )
+        estimated_bias, is_reliable = estimate_gyroscope_bias(gyro_data, stationary_threshold=0.1)
 
         assert is_reliable
         np.testing.assert_allclose(estimated_bias, true_bias, atol=0.01)
@@ -294,20 +293,20 @@ class TestValidateIMUDataQuality:
         timestamps = np.arange(0, n_samples * dt, dt)[:n_samples]
 
         # Good quality IMU data
-        accel_data = np.random.randn(n_samples, 3) * 0.5  # Smaller noise for better gravity alignment
+        accel_data = (
+            np.random.randn(n_samples, 3) * 0.5
+        )  # Smaller noise for better gravity alignment
         accel_data[:, 2] += STANDARD_GRAVITY_MS2  # Add gravity
         gyro_data = np.random.randn(n_samples, 3) * 0.05  # Small gyro noise for stationary periods
 
-        diagnostics = validate_imu_data_quality(
-            accel_data, gyro_data, timestamps, sampling_rate
-        )
+        diagnostics = validate_imu_data_quality(accel_data, gyro_data, timestamps, sampling_rate)
 
-        assert diagnostics['quality_good']
-        assert len(diagnostics['quality_issues']) == 0
-        assert diagnostics['n_samples'] == n_samples
-        assert diagnostics['timing_error_percent'] < 1.0
-        assert not diagnostics['accel_saturated']
-        assert not diagnostics['gyro_saturated']
+        assert diagnostics["quality_good"]
+        assert len(diagnostics["quality_issues"]) == 0
+        assert diagnostics["n_samples"] == n_samples
+        assert diagnostics["timing_error_percent"] < 1.0
+        assert not diagnostics["accel_saturated"]
+        assert not diagnostics["gyro_saturated"]
 
     def test_validate_timing_issues(self):
         """Test validation with timing issues."""
@@ -315,16 +314,14 @@ class TestValidateIMUDataQuality:
         sampling_rate = 1000.0
 
         # Create irregular timestamps
-        timestamps = np.cumsum(np.random.exponential(1.0/sampling_rate, n_samples))
+        timestamps = np.cumsum(np.random.exponential(1.0 / sampling_rate, n_samples))
         accel_data = np.random.randn(n_samples, 3) * 2.0
         gyro_data = np.random.randn(n_samples, 3) * 0.5
 
-        diagnostics = validate_imu_data_quality(
-            accel_data, gyro_data, timestamps, sampling_rate
-        )
+        diagnostics = validate_imu_data_quality(accel_data, gyro_data, timestamps, sampling_rate)
 
-        assert not diagnostics['quality_good']
-        assert 'timing_inconsistent' in diagnostics['quality_issues']
+        assert not diagnostics["quality_good"]
+        assert "timing_inconsistent" in diagnostics["quality_issues"]
 
     def test_validate_saturated_data(self):
         """Test validation with saturated data."""
@@ -339,13 +336,11 @@ class TestValidateIMUDataQuality:
 
         gyro_data = np.random.randn(n_samples, 3) * 0.5
 
-        diagnostics = validate_imu_data_quality(
-            accel_data, gyro_data, timestamps, sampling_rate
-        )
+        diagnostics = validate_imu_data_quality(accel_data, gyro_data, timestamps, sampling_rate)
 
-        assert not diagnostics['quality_good']
-        assert 'accel_saturated' in diagnostics['quality_issues']
-        assert diagnostics['accel_saturated']
+        assert not diagnostics["quality_good"]
+        assert "accel_saturated" in diagnostics["quality_issues"]
+        assert diagnostics["accel_saturated"]
 
     def test_validate_gravity_misalignment(self):
         """Test validation with gravity misalignment."""
@@ -366,9 +361,9 @@ class TestValidateIMUDataQuality:
                 accel_data, gyro_data, timestamps, sampling_rate
             )
 
-        assert not diagnostics['quality_good']
-        assert 'gravity_misaligned' in diagnostics['quality_issues']
-        assert diagnostics['gravity_misaligned']
+        assert not diagnostics["quality_good"]
+        assert "gravity_misaligned" in diagnostics["quality_issues"]
+        assert diagnostics["gravity_misaligned"]
 
     def test_validate_unreliable_bias(self):
         """Test validation with unreliable bias estimation."""
@@ -389,9 +384,9 @@ class TestValidateIMUDataQuality:
                 accel_data, gyro_data, timestamps, sampling_rate
             )
 
-        assert not diagnostics['quality_good']
-        assert 'unreliable_bias' in diagnostics['quality_issues']
-        assert not diagnostics['gyro_bias_reliable']
+        assert not diagnostics["quality_good"]
+        assert "unreliable_bias" in diagnostics["quality_issues"]
+        assert not diagnostics["gyro_bias_reliable"]
 
     def test_validate_timing_gaps(self):
         """Test validation with timing gaps."""
@@ -406,14 +401,12 @@ class TestValidateIMUDataQuality:
         accel_data = np.random.randn(n_samples, 3) * 2.0
         gyro_data = np.random.randn(n_samples, 3) * 0.5
 
-        diagnostics = validate_imu_data_quality(
-            accel_data, gyro_data, timestamps, sampling_rate
-        )
+        diagnostics = validate_imu_data_quality(accel_data, gyro_data, timestamps, sampling_rate)
 
-        assert not diagnostics['quality_good']
-        assert 'timing_gaps' in diagnostics['quality_issues']
-        assert diagnostics['timing_gaps_count'] > 0
-        assert diagnostics['max_gap_s'] > 5.0
+        assert not diagnostics["quality_good"]
+        assert "timing_gaps" in diagnostics["quality_issues"]
+        assert diagnostics["timing_gaps_count"] > 0
+        assert diagnostics["max_gap_s"] > 5.0
 
     def test_validate_comprehensive_diagnostics(self):
         """Test that all diagnostic fields are present."""
@@ -425,16 +418,25 @@ class TestValidateIMUDataQuality:
         accel_data = np.random.randn(n_samples, 3) * 2.0
         gyro_data = np.random.randn(n_samples, 3) * 0.5
 
-        diagnostics = validate_imu_data_quality(
-            accel_data, gyro_data, timestamps, sampling_rate
-        )
+        diagnostics = validate_imu_data_quality(accel_data, gyro_data, timestamps, sampling_rate)
 
         # Check that all expected fields are present
         expected_fields = [
-            'n_samples', 'duration_s', 'timing_error_percent', 'timing_gaps_count',
-            'max_gap_s', 'accel_range_ms2', 'gyro_range_rad_s', 'accel_saturated',
-            'gyro_saturated', 'gravity_misaligned', 'gravity_error_percent',
-            'gyro_bias_rad_s', 'gyro_bias_reliable', 'quality_issues', 'quality_good'
+            "n_samples",
+            "duration_s",
+            "timing_error_percent",
+            "timing_gaps_count",
+            "max_gap_s",
+            "accel_range_ms2",
+            "gyro_range_rad_s",
+            "accel_saturated",
+            "gyro_saturated",
+            "gravity_misaligned",
+            "gravity_error_percent",
+            "gyro_bias_rad_s",
+            "gyro_bias_reliable",
+            "quality_issues",
+            "quality_good",
         ]
 
         for field in expected_fields:
