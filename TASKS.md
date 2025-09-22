@@ -23,12 +23,12 @@
   - [x] SpikeGadgets IMU streams.
 - [x] Write unit tests for IO and config validation.
 - [x] Implement timestamp alignment utilities.
-- [ ] Add synthetic data generator (video + IMU).
-  - [ ] Add sim/ module to generate synthetic sessions (IMU + video).
-  - [ ] Implement SimConfig schema (extends SessionConfig).
-  - [ ] Simulated IMU: configurable rates, biases, misalignment, noise, drift.
-  - [ ] Simulated video: 30 Hz detections, pixel noise, confidence scaling, occlusions, swaps, dropped frames.
-  - [ ] Unit tests for reproducibility with fixed seeds.
+- [x] Add synthetic data generator (video + IMU).
+  - [x] Add sim/ module to generate synthetic sessions (IMU + video).
+  - [x] Implement SimConfig schema (extends SessionConfig).
+  - [x] Simulated IMU: configurable rates, biases, misalignment, noise, drift.
+  - [x] Simulated video: 30 Hz detections, pixel noise, confidence scaling, occlusions, swaps, dropped frames.
+  - [x] Unit tests for reproducibility with fixed seeds.
 
 ---
 

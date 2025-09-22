@@ -34,10 +34,18 @@
 - **CLI commands are parser-only**: No actual functionality behind the commands
 - **No core mathematical algorithms**: No EKF, UKF, pre-integration, homography, etc.
 
-**📋 IMMEDIATE PRIORITIES:**
-- Implement synthetic data generator (`sim/` module) to enable testing
+**✅ MAJOR UPDATE - MILESTONE 2 COMPLETE:**
+- **Synthetic data generator implemented**: Complete `sim/` module with comprehensive test coverage
+- **SimConfig schema**: Full configuration system for synthetic data generation
+- **Synthetic IMU**: Realistic IMU data with biases, noise, drift, misalignment
+- **Synthetic video**: LED tracking with occlusions, swaps, dropouts, confidence scaling
+- **Complete session generator**: End-to-end synthetic data pipeline for testing
+- **Test suite expanded to 64 passing tests** (15 new tests for synthetic data)
+
+**📋 NEXT PRIORITIES:**
+- **Milestone 3**: Geometry & Calibration (homography computation, arena bounds)
+- **Milestone 4**: IMU preprocessing (JAX pre-integration)
 - Begin core mathematical components in `models/` and `geom/`
-- Focus on getting basic filtering pipeline working
 
 ### Development Environment
 - Using `uv` package manager for fast dependency resolution
