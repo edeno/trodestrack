@@ -1,15 +1,13 @@
 """Interactive homography calibration tool."""
 
-import sys
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Any
 
 import numpy as np
 import yaml
 
 try:
     import matplotlib.pyplot as plt
-    import matplotlib.patches as patches
     from matplotlib.widgets import Button
     MATPLOTLIB_AVAILABLE = True
 except ImportError:
@@ -52,10 +50,10 @@ class HomographyCalibrator:
         ])
 
         # UI state
-        self.fig = None
-        self.ax = None
-        self.image = None
-        self.points = []
+        self.fig: Optional[Any] = None
+        self.ax: Optional[Any] = None
+        self.image: Optional[Any] = None
+        self.points: List[Tuple[float, float]] = []
         self.completed = False
 
     def load_image(self) -> bool:
@@ -121,7 +119,7 @@ class HomographyCalibrator:
             # Compute homography matrix
             H = compute_homography_from_corners(pixel_corners, self.real_corners)
 
-            print(f"\nComputed homography matrix:")
+            print("\nComputed homography matrix:")
             print(H)
 
             # Store result
@@ -200,9 +198,9 @@ class HomographyCalibrator:
                     fontsize=10, verticalalignment='top', bbox=dict(boxstyle="round", facecolor='wheat', alpha=0.8))
 
         # Add buttons
-        ax_reset = plt.axes([0.15, 0.02, 0.1, 0.04])
-        ax_compute = plt.axes([0.3, 0.02, 0.15, 0.04])
-        ax_save = plt.axes([0.5, 0.02, 0.15, 0.04])
+        ax_reset = plt.axes([0.15, 0.02, 0.1, 0.04])  # type: ignore
+        ax_compute = plt.axes([0.3, 0.02, 0.15, 0.04])  # type: ignore
+        ax_save = plt.axes([0.5, 0.02, 0.15, 0.04])  # type: ignore
 
         self.button_reset = Button(ax_reset, 'Reset')
         self.button_compute = Button(ax_compute, 'Compute Homography')

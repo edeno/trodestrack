@@ -262,9 +262,9 @@ def load_dlc_h5(file_path: Path) -> DLCKeypointData:
         ImportError: If h5py not available
         ValueError: If HDF5 format is invalid
     """
-    try:
-        import h5py
-    except ImportError:
+    # h5py is required by pandas for HDF5 support
+    import importlib.util
+    if importlib.util.find_spec("h5py") is None:
         raise ImportError(
             "h5py required for HDF5 support. Install with: pip install h5py"
         )

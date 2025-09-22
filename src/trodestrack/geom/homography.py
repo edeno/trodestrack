@@ -107,7 +107,7 @@ def compute_homography_from_corners(
 
     # Build the A matrix for the DLT algorithm
     # Each point pair contributes 2 rows to the system Ah = 0
-    A = []
+    A: List[List[float]] = []
     for (px, py), (cx, cy) in zip(pixel_corners, cm_corners):
         # First row: -px*cx - py*cy - cx + u*px + v*py + u = 0
         # Second row: -px*cy - py*cy - cy + u*px + v*py + v = 0

@@ -91,7 +91,7 @@ def _resolve_path(path_str: str, base_dir: Path) -> Path:
 
 def _convert_paths_to_strings(config_dict: Dict[str, Any]) -> Dict[str, Any]:
     """Recursively convert Path objects to strings for YAML serialization."""
-    result = {}
+    result: Dict[str, Any] = {}
     for key, value in config_dict.items():
         if isinstance(value, Path):
             result[key] = str(value)

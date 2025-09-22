@@ -49,6 +49,8 @@
 - [ ] Write tests vs numerical integration baseline.
 - [ ] Golden tests: compare JAX pre-integration against high-res numerical baseline on 3 motion profiles (steady, step-turn, sinusoid).
 
+**NOTE:** Basic unit conversions exist in SpikeGadgetsIMUData, but dedicated IMU pre-integration module in `imu/` directory is not implemented yet.
+
 ---
 
 ## Milestone 5 — State-Space Models
@@ -83,13 +85,13 @@
 - [ ] Implement offline API: `smooth_session(cfg)`.
 - [ ] Implement online API: `OnlineTracker(cfg)`.
 - [ ] Implement CLI commands:
-  - [x] `trodestrack smooth` (parser + placeholder implementation)
-  - [x] `trodestrack online` (parser + placeholder implementation)
-  - [x] `trodestrack report` (parser + placeholder implementation)
-  - [x] `trodestrack calib-homography` (parser + placeholder implementation)
+  - [ ] `trodestrack smooth` (parser complete, implementation placeholder)
+  - [ ] `trodestrack online` (parser complete, implementation placeholder)
+  - [ ] `trodestrack report` (parser complete, implementation placeholder)
+  - [x] `trodestrack calib-homography` (fully implemented and functional)
 - [x] Add smoke test for `main()`.
 
-**NOTE:** CLI parsers exist but actual command implementations are placeholders.
+**NOTE:** CLI parsers exist and are fully functional, but runtime APIs (`smooth_session`, `OnlineTracker`) are not implemented yet. The `runtime/` directory is empty.
 
 ---
 
