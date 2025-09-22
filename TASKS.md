@@ -52,6 +52,7 @@
 - [ ] Golden tests: compare JAX pre-integration against high-res numerical baseline on 3 motion profiles (steady, step-turn, sinusoid).
 
 **STATUS:** 🔄 MOSTLY COMPLETE - Core IMU pre-integration implemented and working (25/26 tests pass, 5/7 golden tests pass). Issues remaining:
+
 - One property-based test failing due to timestamp/sample count mismatch
 - Two golden tests failing: sinusoidal motion tolerance and regression test timing precision
 - Need to fix edge cases and improve numerical accuracy for complex motion profiles
