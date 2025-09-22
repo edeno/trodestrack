@@ -103,6 +103,13 @@
 - **Drop-in Compatibility**: Same interface as EKF for easy algorithm switching
 - **17 Test Cases**: Full test coverage including UKF vs EKF comparisons
 
+**✅ CRITICAL BUG FIX - Acceleration Rotation Consistency:**
+- **Physics Correction**: Fixed acceleration rotation inconsistency between `predict_state` and IMU preintegration
+- **Consistent Frame Transforms**: Added proper rotation from IMU/body frame to world frame using heading θ
+- **Comprehensive Fix**: Updated dynamics.py, ekf.py, and ukf.py with `R @ accel_corrected` transformation
+- **Verified Correctness**: All 246 tests pass with corrected physics implementation
+- **Production Ready**: Filtering algorithms now have consistent and physically correct acceleration handling
+
 **🔄 CURRENT DEVELOPMENT FOCUS:**
 
 **Begin Milestone 6 Completion:**

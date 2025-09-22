@@ -13,7 +13,7 @@ import jax
 import jax.numpy as jnp
 from jax.scipy.linalg import cholesky
 
-from .dynamics import compute_process_noise
+from .dynamics import compute_process_noise, rotation_matrix_2d
 from .gating import mahalanobis_gate
 from .measurements import (
     create_measurement_noise,
@@ -163,8 +163,12 @@ def propagate_sigma_points(
         accel_corrected = accel - jnp.array([b_ax, b_ay])
         gyro_corrected = gyro[0] - b_gz
 
+        # Rotate acceleration from IMU/body frame to world frame
+        R = rotation_matrix_2d(theta)
+        accel_world = R @ accel_corrected
+
         # Convert to cm/s²
-        accel_corrected_cm = accel_corrected * 100.0
+        accel_corrected_cm = accel_world * 100.0
 
         # Apply damping
         damping_factor = 1.0 - velocity_damping * dt

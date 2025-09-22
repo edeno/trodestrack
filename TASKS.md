@@ -111,6 +111,13 @@
 - Same measurement interface as EKF for drop-in replacement
 - 17 comprehensive test cases including vs-EKF comparisons
 
+**✅ CRITICAL BUG FIX - Acceleration Rotation Consistency:**
+- Fixed acceleration rotation inconsistency between `predict_state` and IMU preintegration
+- Added proper rotation from IMU/body frame to world frame using heading angle θ
+- Updated dynamics.py, ekf.py, and ukf.py to include `R @ accel_corrected` transformation
+- Ensures physical consistency across all filtering algorithms
+- All 246 tests pass with corrected physics implementation
+
 **🔄 REMAINING TASKS:**
 - RTS smoother implementation for backward-pass optimization
 - Scenario tests for real-world edge cases

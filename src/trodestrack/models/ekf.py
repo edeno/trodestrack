@@ -12,7 +12,7 @@ from typing import NamedTuple, Optional, Tuple
 import jax
 import jax.numpy as jnp
 
-from .dynamics import predict_state, predict_covariance, compute_process_noise
+from .dynamics import predict_state, predict_covariance, compute_process_noise, rotation_matrix_2d
 from .gating import mahalanobis_gate
 from .measurements import (
     create_combined_measurement,
@@ -143,8 +143,12 @@ def _predict_state_jax(
     accel_corrected = accel - jnp.array([b_ax, b_ay])
     gyro_corrected = gyro[0] - b_gz
 
+    # Rotate acceleration from IMU/body frame to world frame
+    R = rotation_matrix_2d(theta)
+    accel_world = R @ accel_corrected
+
     # Convert acceleration to cm/s² for consistency with position units
-    accel_corrected_cm = accel_corrected * 100.0
+    accel_corrected_cm = accel_world * 100.0
 
     # Apply velocity damping: v_damped = v * (1 - λ*dt)
     damping_factor = 1.0 - velocity_damping * dt

@@ -17,6 +17,21 @@ from .state import State2D, state_to_array, array_to_state
 jax.config.update("jax_enable_x64", True)
 
 
+@jax.jit
+def rotation_matrix_2d(theta: float) -> jnp.ndarray:
+    """Create 2D rotation matrix from heading angle.
+
+    Args:
+        theta: Heading angle in radians
+
+    Returns:
+        2D rotation matrix (2x2)
+    """
+    cos_theta = jnp.cos(theta)
+    sin_theta = jnp.sin(theta)
+    return jnp.array([[cos_theta, -sin_theta], [sin_theta, cos_theta]], dtype=jnp.float64)
+
+
 def predict_state(
     state: State2D,
     dt: float,
@@ -46,8 +61,12 @@ def predict_state(
     accel_corrected = accel - jnp.array([state.b_ax, state.b_ay])
     gyro_corrected = gyro[0] - state.b_gz
 
+    # Rotate acceleration from IMU/body frame to world frame using current heading
+    R = rotation_matrix_2d(state.theta)
+    accel_world = R @ accel_corrected
+
     # Convert acceleration to cm/s² for consistency with position units
-    accel_corrected_cm = accel_corrected * 100.0
+    accel_corrected_cm = accel_world * 100.0
 
     # Current velocity
     velocity = jnp.array([state.vx, state.vy])
@@ -149,8 +168,12 @@ def compute_state_jacobian(
         accel_corrected = accel - jnp.array([b_ax, b_ay])
         gyro_corrected = gyro[0] - b_gz
 
+        # Rotate acceleration from IMU/body frame to world frame
+        R = rotation_matrix_2d(theta)
+        accel_world = R @ accel_corrected
+
         # Convert to cm/s²
-        accel_corrected_cm = accel_corrected * 100.0
+        accel_corrected_cm = accel_world * 100.0
 
         # Apply damping
         damping_factor = 1.0 - velocity_damping * dt
