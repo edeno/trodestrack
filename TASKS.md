@@ -2,11 +2,15 @@
 
 ## Milestone 1 — Project Setup & Infrastructure
 
-- [ ] Initialize repository with `pyproject.toml`, MIT license, README.
-- [ ] Configure black, mypy, pytest, hypothesis, pytest-benchmark.
-- [ ] Set up GitHub Actions CI (unit, style, type, property, benchmark).
-- [ ] Define initial `trodestrack/` package structure.
-- [ ] Add placeholder `__init__.py` files (empty).
+- [x] Initialize repository with `pyproject.toml`, MIT license, README.
+- [x] Configure black, mypy, pytest, hypothesis, pytest-benchmark.
+- [x] Set up GitHub Actions CI (unit, style, type, property, benchmark).
+- [x] Define initial `trodestrack/` package structure.
+- [x] Add placeholder `__init__.py` files (empty).
+- [x] Implement main() function with CLI entry point.
+- [x] Add core dependencies (JAX ecosystem, scientific Python).
+- [x] Create modular package structure (config, io, geom, imu, models, runtime, qa, cli, examples).
+- [x] Add smoke test for main() function.
 
 ---
 
@@ -78,7 +82,7 @@
   - [ ] `trodestrack online`
   - [ ] `trodestrack report`
   - [ ] `trodestrack calib-homography`
-- [ ] Add smoke test for `main()`.
+- [x] Add smoke test for `main()`.
 
 ---
 
