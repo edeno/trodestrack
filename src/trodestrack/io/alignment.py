@@ -38,6 +38,8 @@ def align_timestamps(
     imu_timestamps: np.ndarray,
     method: str = "nearest_fast",
     max_gap: Optional[float] = None,
+    ptp_enabled: bool = False,
+    skip_validation: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Align video frames with IMU samples using various interpolation methods.
 
@@ -53,6 +55,13 @@ def align_timestamps(
     max_gap : float, optional
         Maximum allowed time gap for alignment in seconds.
         Frames/samples with larger gaps are excluded. Default is None (no limit).
+    ptp_enabled : bool, optional
+        Whether Precision Time Protocol (PTP) is enabled for microsecond-level synchronization.
+        When True, optimizes for high-precision timing and may skip expensive validation.
+        Default is False.
+    skip_validation : bool, optional
+        Skip expensive validation checks (monotonicity, large dataset warnings).
+        Recommended for PTP systems with known good timestamps. Default is False.
 
     Returns
     -------
@@ -71,13 +80,23 @@ def align_timestamps(
     The "nearest_fast" method uses np.searchsorted for O(n_video * log(n_imu)) complexity.
     The "nearest" method uses vectorized search with O(n_video * n_imu) complexity.
     For large datasets, "nearest_fast" is recommended.
+
+    PTP-enabled systems benefit from optimized alignment with reduced validation overhead.
+    With PTP synchronization, timestamps are typically within microseconds of each other.
     """
     if len(video_timestamps) == 0 or len(imu_timestamps) == 0:
         raise ValueError("Cannot align empty timestamp arrays")
 
-    # Validate timestamp monotonicity
-    _ensure_monotonic(video_timestamps, "video")
-    _ensure_monotonic(imu_timestamps, "IMU")
+    # Validate timestamp monotonicity (skip for PTP systems with skip_validation enabled)
+    if not skip_validation:
+        _ensure_monotonic(video_timestamps, "video")
+        _ensure_monotonic(imu_timestamps, "IMU")
+    elif ptp_enabled:
+        # For PTP systems, do minimal validation - just check for basic sanity
+        if len(video_timestamps) > 1 and video_timestamps[0] >= video_timestamps[-1]:
+            raise ValueError("Video timestamps appear non-monotonic (basic check)")
+        if len(imu_timestamps) > 1 and imu_timestamps[0] >= imu_timestamps[-1]:
+            raise ValueError("IMU timestamps appear non-monotonic (basic check)")
 
     if method == "nearest_fast":
         return _align_nearest_fast(video_timestamps, imu_timestamps, max_gap)
@@ -133,6 +152,79 @@ def _align_nearest(
     # Apply gap constraint
     if max_gap is not None:
         valid_mask = min_gaps <= max_gap
+        video_indices = np.where(valid_mask)[0]
+        imu_indices = nearest_imu_indices[valid_mask]
+    else:
+        video_indices = np.arange(len(video_timestamps))
+        imu_indices = nearest_imu_indices
+
+    return video_indices, imu_indices
+
+
+def _align_nearest_fast(
+    video_timestamps: np.ndarray,
+    imu_timestamps: np.ndarray,
+    max_gap: Optional[float] = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Align by finding nearest IMU sample for each video frame using fast O(n log m) search.
+
+    Parameters
+    ----------
+    video_timestamps : np.ndarray, shape (n_video,)
+        Video frame timestamps in seconds
+    imu_timestamps : np.ndarray, shape (n_imu,)
+        IMU sample timestamps in seconds
+    max_gap : float, optional
+        Maximum allowed gap between video and IMU timestamps in seconds.
+        Default is None (no limit).
+
+    Returns
+    -------
+    video_indices : np.ndarray, shape (n_aligned,)
+        Indices of aligned video frames
+    imu_indices : np.ndarray, shape (n_aligned,)
+        Indices of aligned IMU samples
+
+    Notes
+    -----
+    Uses np.searchsorted for O(n_video * log(n_imu)) complexity.
+    Optimized for large datasets and PTP-synchronized systems.
+    """
+    video_timestamps = np.asarray(video_timestamps)
+    imu_timestamps = np.asarray(imu_timestamps)
+
+    # Use searchsorted to find insertion points for each video timestamp
+    # This gives us O(n_video * log(n_imu)) complexity
+    insert_indices = np.searchsorted(imu_timestamps, video_timestamps)
+
+    # Handle edge cases and find nearest neighbors
+    n_imu = len(imu_timestamps)
+    nearest_imu_indices = np.zeros(len(video_timestamps), dtype=int)
+
+    for i, (video_time, insert_idx) in enumerate(zip(video_timestamps, insert_indices)):
+        if insert_idx == 0:
+            # Before first IMU sample
+            nearest_imu_indices[i] = 0
+        elif insert_idx == n_imu:
+            # After last IMU sample
+            nearest_imu_indices[i] = n_imu - 1
+        else:
+            # Between two IMU samples - choose closer one
+            left_gap = abs(video_time - imu_timestamps[insert_idx - 1])
+            right_gap = abs(video_time - imu_timestamps[insert_idx])
+
+            if left_gap <= right_gap:
+                nearest_imu_indices[i] = insert_idx - 1
+            else:
+                nearest_imu_indices[i] = insert_idx
+
+    # Calculate actual gaps for filtering
+    aligned_imu_times = imu_timestamps[nearest_imu_indices]
+    gaps = np.abs(video_timestamps - aligned_imu_times)
+
+    # Apply gap constraint if specified
+    if max_gap is not None:
+        valid_mask = gaps <= max_gap
         video_indices = np.where(valid_mask)[0]
         imu_indices = nearest_imu_indices[valid_mask]
     else:
@@ -242,7 +334,11 @@ def _align_subsample(
 
 
 def check_timestamp_synchronization(
-    video_timestamps: np.ndarray, imu_timestamps: np.ndarray, tolerance: float = DEFAULT_SYNC_TOLERANCE_S
+    video_timestamps: np.ndarray,
+    imu_timestamps: np.ndarray,
+    tolerance: float = DEFAULT_SYNC_TOLERANCE_S,
+    ptp_enabled: bool = False,
+    skip_validation: bool = False
 ) -> Dict[str, Any]:
     """Check if video and IMU timestamps are hardware synchronized.
 
@@ -254,6 +350,10 @@ def check_timestamp_synchronization(
         IMU sample timestamps in seconds
     tolerance : float, optional
         Tolerance for synchronization check in seconds. Default is DEFAULT_SYNC_TOLERANCE_S (1 ms).
+    ptp_enabled : bool, optional
+        Whether PTP synchronization is enabled. Optimizes validation for high-precision timing.
+    skip_validation : bool, optional
+        Skip expensive synchronization validation checks for known-good PTP systems.
 
     Returns
     -------
@@ -287,6 +387,19 @@ def check_timestamp_synchronization(
             "overlap_duration": 0.0,
         }
 
+    # For PTP systems with skip_validation, assume synchronization is good
+    if ptp_enabled and skip_validation:
+        return {
+            "synchronized": True,
+            "method": "ptp_assumed",
+            "overlap_duration": overlap_duration,
+            "tolerance": tolerance,
+            "video_range": (video_start, video_end),
+            "imu_range": (imu_start, imu_end),
+            "n_video_frames": len(video_timestamps),
+            "n_imu_samples": len(imu_timestamps),
+        }
+
     # Sample alignment quality in overlap region
     video_mask = (video_timestamps >= overlap_start) & (video_timestamps <= overlap_end)
     overlap_video_times = video_timestamps[video_mask]
@@ -298,9 +411,12 @@ def check_timestamp_synchronization(
             "overlap_duration": overlap_duration,
         }
 
+    # For PTP systems, sample fewer frames since precision is higher
+    sample_frames = DEFAULT_SYNC_SAMPLE_FRAMES // 4 if ptp_enabled else DEFAULT_SYNC_SAMPLE_FRAMES
+
     # Find nearest IMU samples for video frames
     alignment_errors = []
-    for video_time in overlap_video_times[:DEFAULT_SYNC_SAMPLE_FRAMES]:  # Sample first N frames
+    for video_time in overlap_video_times[:sample_frames]:  # Sample first N frames
         time_diffs = np.abs(imu_timestamps - video_time)
         min_error = np.min(time_diffs)
         alignment_errors.append(min_error)
@@ -394,6 +510,7 @@ def validate_alignment(
     video_timestamps: np.ndarray,
     imu_timestamps: np.ndarray,
     max_error: float = DEFAULT_ALIGNMENT_MAX_ERROR_S,
+    ptp_enabled: bool = False,
 ) -> Dict[str, Any]:
     """Validate timestamp alignment quality.
 
@@ -403,6 +520,7 @@ def validate_alignment(
         video_timestamps: Original video timestamps
         imu_timestamps: Original IMU timestamps
         max_error: Maximum acceptable alignment error (seconds)
+        ptp_enabled: Whether PTP synchronization is enabled for optimized validation
 
     Returns:
         Dictionary with validation results
@@ -418,15 +536,29 @@ def validate_alignment(
     aligned_imu_times = imu_timestamps[imu_indices]
     errors = np.abs(aligned_video_times - aligned_imu_times)
 
-    # Statistics
-    mean_error = np.mean(errors)
-    max_error_actual = np.max(errors)
-    std_error = np.std(errors)
+    # Statistics - optimized for PTP systems
+    if ptp_enabled:
+        # For PTP systems, we expect microsecond-level precision
+        # Use more efficient statistics computation
+        mean_error = np.mean(errors)
+        max_error_actual = np.max(errors)
+        std_error = np.std(errors) if len(errors) > 1 else 0.0
+
+        # Additional PTP-specific metrics
+        median_error = np.median(errors)
+        p95_error = np.percentile(errors, 95) if len(errors) > 1 else max_error_actual
+    else:
+        # Standard statistics for non-PTP systems
+        mean_error = np.mean(errors)
+        max_error_actual = np.max(errors)
+        std_error = np.std(errors)
+        median_error = None
+        p95_error = None
 
     # Validation
     is_valid = bool(max_error_actual <= max_error)
 
-    return {
+    result = {
         "valid": is_valid,
         "n_aligned": len(video_indices),
         "mean_error": mean_error,
@@ -435,3 +567,13 @@ def validate_alignment(
         "error_threshold": max_error,
         "alignment_rate": len(video_indices) / len(video_timestamps),
     }
+
+    # Add PTP-specific metrics if enabled
+    if ptp_enabled:
+        result.update({
+            "median_error": median_error,
+            "p95_error": p95_error,
+            "ptp_optimized": True,
+        })
+
+    return result

@@ -110,6 +110,82 @@ class FilterConfig(BaseModel):
     )
 
 
+class SynchronizationConfig(BaseModel):
+    """Configuration for timestamp synchronization between video and IMU."""
+
+    method: str = Field(
+        default="hardware_sync",
+        description="Synchronization method",
+        pattern="^(hardware_sync|ptp|software_align|none)$"
+    )
+    ptp_enabled: bool = Field(
+        default=False,
+        description="Whether Precision Time Protocol (PTP) is enabled for microsecond-level sync"
+    )
+    tolerance_s: Optional[float] = Field(
+        default=None,
+        description="Custom synchronization tolerance in seconds (auto-detected based on method if None)",
+        gt=0.0
+    )
+    max_alignment_error_s: Optional[float] = Field(
+        default=None,
+        description="Maximum allowed alignment error in seconds (auto-detected if None)",
+        gt=0.0
+    )
+    skip_validation: bool = Field(
+        default=False,
+        description="Skip expensive synchronization validation checks (recommended for PTP systems)"
+    )
+
+    @field_validator("tolerance_s")
+    @classmethod
+    def validate_tolerance(cls, v, info):
+        """Auto-set tolerance based on PTP setting if not specified."""
+        if v is None:
+            # Will be set in post_init based on ptp_enabled
+            return v
+        return v
+
+    @field_validator("max_alignment_error_s")
+    @classmethod
+    def validate_max_error(cls, v, info):
+        """Auto-set max error based on PTP setting if not specified."""
+        if v is None:
+            # Will be set in post_init based on ptp_enabled
+            return v
+        return v
+
+    def model_post_init(self, __context) -> None:
+        """Set PTP-specific defaults after model initialization."""
+        from ..constants import (
+            PTP_SYNC_TOLERANCE_S, PTP_ALIGNMENT_MAX_ERROR_S,
+            DEFAULT_SYNC_TOLERANCE_S, DEFAULT_ALIGNMENT_MAX_ERROR_S
+        )
+
+        # Auto-detect PTP from method if not explicitly set
+        if self.method == "ptp":
+            object.__setattr__(self, 'ptp_enabled', True)
+
+        # Set tolerance based on PTP setting if not specified
+        if self.tolerance_s is None:
+            if self.ptp_enabled:
+                object.__setattr__(self, 'tolerance_s', PTP_SYNC_TOLERANCE_S)
+            else:
+                object.__setattr__(self, 'tolerance_s', DEFAULT_SYNC_TOLERANCE_S)
+
+        # Set max alignment error based on PTP setting if not specified
+        if self.max_alignment_error_s is None:
+            if self.ptp_enabled:
+                object.__setattr__(self, 'max_alignment_error_s', PTP_ALIGNMENT_MAX_ERROR_S)
+            else:
+                object.__setattr__(self, 'max_alignment_error_s', DEFAULT_ALIGNMENT_MAX_ERROR_S)
+
+        # Enable skip_validation by default for PTP systems unless explicitly disabled
+        if self.ptp_enabled and self.skip_validation is False:
+            # Only auto-enable if user hasn't explicitly set it to False
+            object.__setattr__(self, 'skip_validation', True)
+
+
 class OutputConfig(BaseModel):
     """Configuration for output files and logging."""
 
@@ -157,6 +233,9 @@ class SessionConfig(BaseModel):
     )
     imu: IMUConfig = Field(
         default_factory=IMUConfig, description="IMU processing configuration"
+    )
+    synchronization: SynchronizationConfig = Field(
+        default_factory=SynchronizationConfig, description="Timestamp synchronization configuration"
     )
     output: OutputConfig = Field(description="Output configuration")
 

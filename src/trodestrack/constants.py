@@ -71,6 +71,11 @@ DEFAULT_SYNC_SAMPLE_FRAMES = 100  # Number of frames to sample for synchronizati
 DEFAULT_ALIGNMENT_MAX_ERROR_S = 0.01  # Default maximum alignment error in seconds (10 ms)
 DEFAULT_SYNC_TOLERANCE_S = 0.001  # Default synchronization tolerance in seconds (1 ms)
 
+# PTP (Precision Time Protocol) constants
+PTP_SYNC_TOLERANCE_S: Final[float] = 0.000001  # PTP synchronization tolerance in seconds (1 μs)
+PTP_ALIGNMENT_MAX_ERROR_S: Final[float] = 0.000010  # PTP maximum alignment error (10 μs)
+PTP_ENABLED_INDICATOR = "ptp"  # Indicator for PTP-enabled systems
+
 # Clock correction constants
 DEFAULT_DRIFT_RATE = 0.0  # Default clock drift rate (no drift)
 
