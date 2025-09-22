@@ -355,7 +355,7 @@ class TestGoldenMotionProfiles:
         )
 
         # Deterministic trapezoidal baseline
-        from .baseline_integrator import baseline_trapezoidal_integration
+        from baseline_integrator import baseline_trapezoidal_integration
 
         baseline_result = baseline_trapezoidal_integration(
             np.array(imu_data),
@@ -428,7 +428,7 @@ class TestGoldenMotionProfiles:
         )
 
         # Deterministic trapezoidal baseline with same parameters
-        from .baseline_integrator import baseline_trapezoidal_integration
+        from baseline_integrator import baseline_trapezoidal_integration
 
         baseline_result = baseline_trapezoidal_integration(
             np.array(imu_data),

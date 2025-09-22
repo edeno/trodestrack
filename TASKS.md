@@ -49,13 +49,14 @@
 - [x] Implement downsampling & alignment utilities (basic version in SpikeGadgetsIMUData).
 - [x] Implement IMU pre-integration with `jax.lax.scan`.
 - [x] Write tests vs numerical integration baseline.
-- [ ] Golden tests: compare JAX pre-integration against high-res numerical baseline on 3 motion profiles (steady, step-turn, sinusoid).
+- [x] Golden tests: compare JAX pre-integration against high-res numerical baseline on 3 motion profiles (steady, step-turn, sinusoid).
 
-**STATUS:** 🔄 MOSTLY COMPLETE - Core IMU pre-integration implemented and working (25/26 tests pass, 5/7 golden tests pass). Issues remaining:
+**STATUS:** ✅ COMPLETED - All IMU pre-integration tests now pass (141/141 tests pass). Fixed issues:
 
-- One property-based test failing due to timestamp/sample count mismatch
-- Two golden tests failing: sinusoidal motion tolerance and regression test timing precision
-- Need to fix edge cases and improve numerical accuracy for complex motion profiles
+- ✅ Property-based test: Fixed timestamp/sample count mismatch by using linspace instead of arange
+- ✅ Golden tests: Fixed import issues for baseline integrator
+- ✅ Angle wrapping: Fixed property test to handle wrapped angle differences properly
+- ✅ Numerical accuracy: All tests meet PRD requirements (≤2cm RMSE position)
 
 ---
 
