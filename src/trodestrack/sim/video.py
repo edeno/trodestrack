@@ -1,20 +1,42 @@
 """Synthetic video data generation."""
 
 import numpy as np
-from typing import Dict, Any
+from typing import Dict
 from ..io.trodes import TrodesLEDData
 from .config import SimConfig
+from ..constants import (
+    DEFAULT_CM_TO_PIXELS,
+    MIN_OCCLUSION_CONFIDENCE,
+    ZERO_CONFIDENCE,
+    SPATIAL_DIMENSIONS,
+    TIME_DIVISOR,
+)
 
 
-def generate_synthetic_video(ground_truth: Dict[str, np.ndarray], config: SimConfig) -> TrodesLEDData:
+def generate_synthetic_video(
+    ground_truth: Dict[str, np.ndarray], config: SimConfig
+) -> TrodesLEDData:
     """Generate synthetic video data from ground truth trajectory.
 
-    Args:
-        ground_truth: Dictionary containing ground truth trajectory data
-        config: Simulation configuration
+    Parameters
+    ----------
+    ground_truth : dict of str to np.ndarray
+        Dictionary containing ground truth trajectory data with keys:
+        - "timestamps" : (n_samples,) array of time points in seconds
+        - "positions" : (n_samples, 2) array of x,y positions in cm
+        - "headings" : (n_samples,) array of heading angles in radians
+    config : SimConfig
+        Simulation configuration parameters
 
-    Returns:
-        TrodesLEDData with synthetic video measurements
+    Returns
+    -------
+    TrodesLEDData
+        Synthetic LED position measurements with noise, occlusions, and confidence values
+
+    Notes
+    -----
+    Uses config.seed + 1 for reproducible random number generation.
+    Applies position-dependent noise scaling based on confidence values.
     """
     # Set random seed for reproducibility
     np.random.seed(config.seed + 1)  # Different seed than IMU
@@ -29,28 +51,29 @@ def generate_synthetic_video(ground_truth: Dict[str, np.ndarray], config: SimCon
     video_timestamps = np.linspace(0, config.duration, n_frames)
 
     # Interpolate ground truth to video timestamps
-    video_positions = np.column_stack([
-        np.interp(video_timestamps, gt_timestamps, gt_positions[:, 0]),
-        np.interp(video_timestamps, gt_timestamps, gt_positions[:, 1])
-    ])
+    video_positions = np.column_stack(
+        [
+            np.interp(video_timestamps, gt_timestamps, gt_positions[:, 0]),
+            np.interp(video_timestamps, gt_timestamps, gt_positions[:, 1]),
+        ]
+    )
     video_headings = np.interp(video_timestamps, gt_timestamps, gt_headings)
 
-    # Convert positions from cm to pixels (assume 1 cm = 2 pixels for now)
-    cm_to_pixels = 2.0
+    # Convert positions from cm to pixels
+    cm_to_pixels = DEFAULT_CM_TO_PIXELS
     video_positions_px = video_positions * cm_to_pixels
 
     # Generate LED positions based on heading and front-back distance
     led_distance_px = config.led.front_back_distance
-    half_distance = led_distance_px / 2.0
+    half_distance = led_distance_px / TIME_DIVISOR
 
     # Front LED is ahead in heading direction, back LED is behind
     cos_heading = np.cos(video_headings)
     sin_heading = np.sin(video_headings)
 
-    front_led_offset = np.column_stack([
-        half_distance * cos_heading,
-        half_distance * sin_heading
-    ])
+    front_led_offset = np.column_stack(
+        [half_distance * cos_heading, half_distance * sin_heading]
+    )
     back_led_offset = -front_led_offset
 
     # True LED positions (no noise yet)
@@ -59,9 +82,7 @@ def generate_synthetic_video(ground_truth: Dict[str, np.ndarray], config: SimCon
 
     # Generate confidence values
     base_confidence = np.random.uniform(
-        config.video.confidence_min,
-        config.video.confidence_max,
-        n_frames
+        config.video.confidence_min, config.video.confidence_max, n_frames
     )
 
     # Initialize output arrays
@@ -75,20 +96,24 @@ def generate_synthetic_video(ground_truth: Dict[str, np.ndarray], config: SimCon
     noise_scale_back = config.video.position_noise_std * (1.0 / back_confidence)
 
     # Generate all noise at once
-    front_noise = np.random.normal(0, 1, (n_frames, 2)) * noise_scale_front[:, np.newaxis]
-    back_noise = np.random.normal(0, 1, (n_frames, 2)) * noise_scale_back[:, np.newaxis]
+    front_noise = (
+        np.random.normal(0, 1, (n_frames, SPATIAL_DIMENSIONS)) * noise_scale_front[:, np.newaxis]
+    )
+    back_noise = np.random.normal(0, 1, (n_frames, SPATIAL_DIMENSIONS)) * noise_scale_back[:, np.newaxis]
 
     front_led += front_noise
     back_led += back_noise
 
     # Apply occlusions
     occlusion_frames = _generate_occlusions(
-        n_frames, config.video.occlusion_probability,
-        config.video.occlusion_duration_mean, config.video_fps
+        n_frames,
+        config.video.occlusion_probability,
+        config.video.occlusion_duration_mean,
+        config.video_fps,
     )
 
     # Reduce confidence during occlusions (but keep above minimum)
-    occlusion_confidence = max(config.video.confidence_min, 0.05)
+    occlusion_confidence = max(config.video.confidence_min, MIN_OCCLUSION_CONFIDENCE)
     front_confidence[occlusion_frames] = occlusion_confidence
     back_confidence[occlusion_frames] = occlusion_confidence
 
@@ -107,8 +132,8 @@ def generate_synthetic_video(ground_truth: Dict[str, np.ndarray], config: SimCon
 
     # Apply frame dropouts
     dropout_frames = np.random.random(n_frames) < config.video.dropout_probability
-    front_confidence[dropout_frames] = 0.0
-    back_confidence[dropout_frames] = 0.0
+    front_confidence[dropout_frames] = ZERO_CONFIDENCE
+    back_confidence[dropout_frames] = ZERO_CONFIDENCE
     # Set positions to NaN for dropped frames
     front_led[dropout_frames] = np.nan
     back_led[dropout_frames] = np.nan
@@ -123,7 +148,7 @@ def generate_synthetic_video(ground_truth: Dict[str, np.ndarray], config: SimCon
         "swap_frames": swap_frames,
         "dropout_frames": dropout_frames,
         "cm_to_pixels": cm_to_pixels,
-        "led_distance_px": led_distance_px
+        "led_distance_px": led_distance_px,
     }
 
     return TrodesLEDData(
@@ -132,22 +157,34 @@ def generate_synthetic_video(ground_truth: Dict[str, np.ndarray], config: SimCon
         back_led=back_led,
         front_confidence=front_confidence,
         back_confidence=back_confidence,
-        metadata=metadata
+        metadata=metadata,
     )
 
 
-def _generate_occlusions(n_frames: int, occlusion_prob: float,
-                        duration_mean: float, fps: float) -> np.ndarray:
-    """Generate occlusion mask with realistic duration.
+def _generate_occlusions(
+    n_frames: int, occlusion_prob: float, duration_mean: float, fps: float
+) -> np.ndarray:
+    """Generate occlusion mask for video frames.
 
-    Args:
-        n_frames: Total number of frames
-        occlusion_prob: Probability of starting an occlusion per frame
-        duration_mean: Mean occlusion duration in seconds
-        fps: Video frame rate
+    Parameters
+    ----------
+    n_frames : int
+        Total number of video frames
+    occlusion_prob : float
+        Probability of occlusion starting at any frame (0.0 to 1.0)
+    duration_mean : float
+        Mean duration of occlusions in seconds
+    fps : float
+        Video frame rate in frames per second
 
-    Returns:
-        Boolean array indicating occluded frames
+    Returns
+    -------
+    np.ndarray, shape (n_frames,)
+        Boolean mask where True indicates occluded frames
+
+    Notes
+    -----
+    Occlusion durations follow exponential distribution with given mean.
     """
     occlusion_mask = np.zeros(n_frames, dtype=bool)
 

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Dict, Any
 
 from .schemas import SessionConfig
+from ..constants import DEFAULT_PIXEL_PER_CM
 
 
 def load_config(config_path: Path) -> SessionConfig:
@@ -24,7 +25,7 @@ def load_config(config_path: Path) -> SessionConfig:
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
-    with open(config_path, 'r') as f:
+    with open(config_path, "r") as f:
         config_dict = yaml.safe_load(f)
 
     # Convert string paths to Path objects
@@ -45,15 +46,13 @@ def save_config(config: SessionConfig, output_path: Path) -> None:
     config_dict = _convert_paths_to_strings(config_dict)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, 'w') as f:
+    with open(output_path, "w") as f:
         yaml.dump(config_dict, f, default_flow_style=False, indent=2)
 
 
 def _convert_paths(config_dict: Dict[str, Any]) -> Dict[str, Any]:
     """Recursively convert string paths to Path objects."""
-    path_fields = {
-        'video_file', 'imu_file', 'output_dir'
-    }
+    path_fields = {"video_file", "imu_file", "output_dir"}
 
     for key, value in config_dict.items():
         if key in path_fields and isinstance(value, str):
@@ -79,10 +78,7 @@ def _convert_paths_to_strings(config_dict: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def create_default_config(
-    video_file: Path,
-    imu_file: Path,
-    output_dir: Path,
-    mapping_type: str = "homography"
+    video_file: Path, imu_file: Path, output_dir: Path, mapping_type: str = "homography"
 ) -> SessionConfig:
     """Create a default configuration with minimal required parameters.
 
@@ -101,19 +97,19 @@ def create_default_config(
     if mapping_type == "homography":
         mapping = MappingConfig(
             type="homography",
-            homography_matrix=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]  # Identity
+            homography_matrix=[
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+            ],  # Identity
         )
     else:
         mapping = MappingConfig(
-            type="ruler_scale",
-            pixel_per_cm=10.0  # Example: 10 pixels per cm
+            type="ruler_scale", pixel_per_cm=DEFAULT_PIXEL_PER_CM  # Example: 10 pixels per cm
         )
 
     output = OutputConfig(output_dir=output_dir)
 
     return SessionConfig(
-        video_file=video_file,
-        imu_file=imu_file,
-        mapping=mapping,
-        output=output
+        video_file=video_file, imu_file=imu_file, mapping=mapping, output=output
     )

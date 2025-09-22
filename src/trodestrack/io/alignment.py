@@ -3,27 +3,51 @@
 import numpy as np
 from typing import Tuple, Optional, Dict, Any
 import warnings
+from ..constants import (
+    DEFAULT_SYNC_SAMPLE_FRAMES,
+    DEFAULT_ALIGNMENT_MAX_ERROR_S,
+    DEFAULT_SYNC_TOLERANCE_S,
+    DEFAULT_DRIFT_RATE,
+)
 
 
 def align_timestamps(
     video_timestamps: np.ndarray,
     imu_timestamps: np.ndarray,
     method: str = "nearest",
-    max_gap: Optional[float] = None
+    max_gap: Optional[float] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Align video frames with IMU samples.
+    """Align video frames with IMU samples using various interpolation methods.
 
-    Args:
-        video_timestamps: Video frame timestamps (seconds)
-        imu_timestamps: IMU sample timestamps (seconds)
-        method: Alignment method ("nearest", "interpolate", "subsample")
-        max_gap: Maximum allowed time gap for alignment (seconds)
+    Parameters
+    ----------
+    video_timestamps : np.ndarray, shape (n_video,)
+        Video frame timestamps in seconds
+    imu_timestamps : np.ndarray, shape (n_imu,)
+        IMU sample timestamps in seconds
+    method : str, optional
+        Alignment method, one of {"nearest", "interpolate", "subsample"}.
+        Default is "nearest".
+    max_gap : float, optional
+        Maximum allowed time gap for alignment in seconds.
+        Frames/samples with larger gaps are excluded. Default is None (no limit).
 
-    Returns:
-        Tuple of (aligned_video_indices, aligned_imu_indices)
+    Returns
+    -------
+    video_indices : np.ndarray, shape (n_aligned,)
+        Indices of aligned video frames
+    imu_indices : np.ndarray, shape (n_aligned,)
+        Indices of aligned IMU samples
 
-    Raises:
-        ValueError: If alignment method is invalid or timestamps are incompatible
+    Raises
+    ------
+    ValueError
+        If alignment method is invalid or timestamp arrays are empty
+
+    Notes
+    -----
+    The "nearest" method uses vectorized nearest neighbor search with O(n_video * n_imu)
+    complexity. For large datasets, consider subsampling first.
     """
     if len(video_timestamps) == 0 or len(imu_timestamps) == 0:
         raise ValueError("Cannot align empty timestamp arrays")
@@ -41,17 +65,30 @@ def align_timestamps(
 def _align_nearest(
     video_timestamps: np.ndarray,
     imu_timestamps: np.ndarray,
-    max_gap: Optional[float] = None
+    max_gap: Optional[float] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Align by finding nearest IMU sample for each video frame.
 
-    Args:
-        video_timestamps: Video frame timestamps
-        imu_timestamps: IMU sample timestamps
-        max_gap: Maximum allowed gap between video and IMU timestamps
+    Parameters
+    ----------
+    video_timestamps : np.ndarray, shape (n_video,)
+        Video frame timestamps in seconds
+    imu_timestamps : np.ndarray, shape (n_imu,)
+        IMU sample timestamps in seconds
+    max_gap : float, optional
+        Maximum allowed gap between video and IMU timestamps in seconds.
+        Default is None (no limit).
 
-    Returns:
-        Tuple of (video_indices, imu_indices)
+    Returns
+    -------
+    video_indices : np.ndarray, shape (n_aligned,)
+        Indices of aligned video frames
+    imu_indices : np.ndarray, shape (n_aligned,)
+        Indices of aligned IMU samples
+
+    Notes
+    -----
+    Uses vectorized nearest neighbor search with O(n_video * n_imu) complexity.
     """
     # Vectorized nearest neighbor search
     video_timestamps = np.asarray(video_timestamps)
@@ -79,20 +116,31 @@ def _align_nearest(
 def _align_interpolate(
     video_timestamps: np.ndarray,
     imu_timestamps: np.ndarray,
-    max_gap: Optional[float] = None
+    max_gap: Optional[float] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Align by interpolating IMU data to video timestamps.
 
-    Note: This returns video indices and interpolation weights for IMU data.
+    Parameters
+    ----------
+    video_timestamps : np.ndarray, shape (n_video,)
+        Video frame timestamps in seconds
+    imu_timestamps : np.ndarray, shape (n_imu,)
+        IMU sample timestamps in seconds
+    max_gap : float, optional
+        Maximum allowed gap for extrapolation in seconds
+
+    Returns
+    -------
+    video_indices : np.ndarray, shape (n_aligned,)
+        Indices of aligned video frames
+    imu_interpolation_info : np.ndarray, shape (n_aligned,)
+        IMU interpolation information
+
+    Notes
+    -----
+    This returns video indices and interpolation weights for IMU data.
     The actual interpolation should be done by the caller.
-
-    Args:
-        video_timestamps: Video frame timestamps
-        imu_timestamps: IMU sample timestamps
-        max_gap: Maximum allowed gap for extrapolation
-
-    Returns:
-        Tuple of (video_indices, imu_interpolation_info)
+    Currently falls back to nearest neighbor alignment.
     """
     # For now, implement as nearest neighbor with interpolation info
     # Full interpolation requires knowing the IMU data shape
@@ -103,17 +151,30 @@ def _align_interpolate(
 def _align_subsample(
     video_timestamps: np.ndarray,
     imu_timestamps: np.ndarray,
-    max_gap: Optional[float] = None
+    max_gap: Optional[float] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Align by subsampling IMU to video rate.
 
-    Args:
-        video_timestamps: Video frame timestamps
-        imu_timestamps: IMU sample timestamps
-        max_gap: Maximum allowed gap
+    Parameters
+    ----------
+    video_timestamps : np.ndarray, shape (n_video,)
+        Video frame timestamps in seconds
+    imu_timestamps : np.ndarray, shape (n_imu,)
+        IMU sample timestamps in seconds
+    max_gap : float, optional
+        Maximum allowed gap between aligned timestamps in seconds
 
-    Returns:
-        Tuple of (video_indices, imu_indices)
+    Returns
+    -------
+    video_indices : np.ndarray, shape (n_aligned,)
+        Indices of aligned video frames
+    imu_indices : np.ndarray, shape (n_aligned,)
+        Indices of subsampled IMU samples
+
+    Notes
+    -----
+    Estimates video rate and subsamples IMU accordingly.
+    Falls back to nearest neighbor if IMU rate is too low.
     """
     # Estimate video frame rate
     if len(video_timestamps) > 1:
@@ -152,19 +213,32 @@ def _align_subsample(
 
 
 def check_timestamp_synchronization(
-    video_timestamps: np.ndarray,
-    imu_timestamps: np.ndarray,
-    tolerance: float = 0.001
+    video_timestamps: np.ndarray, imu_timestamps: np.ndarray, tolerance: float = DEFAULT_SYNC_TOLERANCE_S
 ) -> Dict[str, Any]:
     """Check if video and IMU timestamps are hardware synchronized.
 
-    Args:
-        video_timestamps: Video frame timestamps
-        imu_timestamps: IMU sample timestamps
-        tolerance: Tolerance for synchronization check (seconds)
+    Parameters
+    ----------
+    video_timestamps : np.ndarray, shape (n_video,)
+        Video frame timestamps in seconds
+    imu_timestamps : np.ndarray, shape (n_imu,)
+        IMU sample timestamps in seconds
+    tolerance : float, optional
+        Tolerance for synchronization check in seconds. Default is DEFAULT_SYNC_TOLERANCE_S (1 ms).
 
-    Returns:
-        Dictionary with synchronization analysis results
+    Returns
+    -------
+    dict
+        Synchronization analysis results containing:
+        - "is_synchronized" : bool
+        - "overlap_duration" : float, duration of overlapping timestamps
+        - "alignment_error_stats" : dict with mean, std, max alignment errors
+        - "clock_offset_estimate" : float, estimated constant offset
+
+    Notes
+    -----
+    Uses alignment error statistics to determine if timestamps appear to originate
+    from the same hardware clock (e.g., SpikeGadgets synchronization).
     """
     # Find overlapping time range
     video_start, video_end = video_timestamps[0], video_timestamps[-1]
@@ -177,11 +251,11 @@ def check_timestamp_synchronization(
     # Check if there's sufficient overlap
     if overlap_duration <= 0:
         return {
-            'synchronized': False,
-            'reason': 'No temporal overlap',
-            'video_range': (video_start, video_end),
-            'imu_range': (imu_start, imu_end),
-            'overlap_duration': 0.0
+            "synchronized": False,
+            "reason": "No temporal overlap",
+            "video_range": (video_start, video_end),
+            "imu_range": (imu_start, imu_end),
+            "overlap_duration": 0.0,
         }
 
     # Sample alignment quality in overlap region
@@ -190,14 +264,14 @@ def check_timestamp_synchronization(
 
     if len(overlap_video_times) < 2:
         return {
-            'synchronized': False,
-            'reason': 'Insufficient video frames in overlap',
-            'overlap_duration': overlap_duration
+            "synchronized": False,
+            "reason": "Insufficient video frames in overlap",
+            "overlap_duration": overlap_duration,
         }
 
     # Find nearest IMU samples for video frames
     alignment_errors = []
-    for video_time in overlap_video_times[:100]:  # Sample first 100 frames
+    for video_time in overlap_video_times[:DEFAULT_SYNC_SAMPLE_FRAMES]:  # Sample first N frames
         time_diffs = np.abs(imu_timestamps - video_time)
         min_error = np.min(time_diffs)
         alignment_errors.append(min_error)
@@ -210,22 +284,22 @@ def check_timestamp_synchronization(
     is_synchronized = bool(max_error < tolerance)
 
     return {
-        'synchronized': is_synchronized,
-        'mean_alignment_error': mean_error,
-        'max_alignment_error': max_error,
-        'tolerance': tolerance,
-        'overlap_duration': overlap_duration,
-        'video_range': (video_start, video_end),
-        'imu_range': (imu_start, imu_end),
-        'n_video_frames': len(video_timestamps),
-        'n_imu_samples': len(imu_timestamps)
+        "synchronized": is_synchronized,
+        "mean_alignment_error": mean_error,
+        "max_alignment_error": max_error,
+        "tolerance": tolerance,
+        "overlap_duration": overlap_duration,
+        "video_range": (video_start, video_end),
+        "imu_range": (imu_start, imu_end),
+        "n_video_frames": len(video_timestamps),
+        "n_imu_samples": len(imu_timestamps),
     }
 
 
 def estimate_clock_offset(
     video_timestamps: np.ndarray,
     imu_timestamps: np.ndarray,
-    method: str = "cross_correlation"
+    method: str = "cross_correlation",
 ) -> float:
     """Estimate clock offset between video and IMU timestamps.
 
@@ -246,8 +320,7 @@ def estimate_clock_offset(
 
 
 def _estimate_offset_xcorr(
-    video_timestamps: np.ndarray,
-    imu_timestamps: np.ndarray
+    video_timestamps: np.ndarray, imu_timestamps: np.ndarray
 ) -> float:
     """Estimate offset using cross-correlation of timestamp derivatives.
 
@@ -265,9 +338,7 @@ def _estimate_offset_xcorr(
 
 
 def apply_clock_correction(
-    timestamps: np.ndarray,
-    offset: float,
-    drift_rate: float = 0.0
+    timestamps: np.ndarray, offset: float, drift_rate: float = DEFAULT_DRIFT_RATE
 ) -> np.ndarray:
     """Apply clock offset and drift correction to timestamps.
 
@@ -293,7 +364,7 @@ def validate_alignment(
     imu_indices: np.ndarray,
     video_timestamps: np.ndarray,
     imu_timestamps: np.ndarray,
-    max_error: float = 0.01
+    max_error: float = DEFAULT_ALIGNMENT_MAX_ERROR_S,
 ) -> Dict[str, Any]:
     """Validate timestamp alignment quality.
 
@@ -311,11 +382,7 @@ def validate_alignment(
         raise ValueError("Video and IMU index arrays must have same length")
 
     if len(video_indices) == 0:
-        return {
-            'valid': False,
-            'reason': 'No aligned samples',
-            'n_aligned': 0
-        }
+        return {"valid": False, "reason": "No aligned samples", "n_aligned": 0}
 
     # Calculate alignment errors
     aligned_video_times = video_timestamps[video_indices]
@@ -331,11 +398,11 @@ def validate_alignment(
     is_valid = bool(max_error_actual <= max_error)
 
     return {
-        'valid': is_valid,
-        'n_aligned': len(video_indices),
-        'mean_error': mean_error,
-        'max_error': max_error_actual,
-        'std_error': std_error,
-        'error_threshold': max_error,
-        'alignment_rate': len(video_indices) / len(video_timestamps)
+        "valid": is_valid,
+        "n_aligned": len(video_indices),
+        "mean_error": mean_error,
+        "max_error": max_error_actual,
+        "std_error": std_error,
+        "error_threshold": max_error,
+        "alignment_rate": len(video_indices) / len(video_timestamps),
     }
