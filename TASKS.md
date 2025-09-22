@@ -34,10 +34,10 @@
 
 ## Milestone 3 — Geometry & Calibration
 
-- [ ] Implement homography computation and arena bounds utilities in `geom/`.
-- [x] Build CLI tool: `trodestrack calib-homography` (parser only - implementation needed).
-- [ ] Add roundtrip tests (pixel → cm → pixel).
-- [ ] Document calibration workflow.
+- [x] Implement homography computation and arena bounds utilities in `geom/`.
+- [x] Build CLI tool: `trodestrack calib-homography` (fully implemented with interactive calibration).
+- [x] Add roundtrip tests (pixel → cm → pixel).
+- [x] Document calibration workflow.
 
 ---
 

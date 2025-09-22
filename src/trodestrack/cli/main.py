@@ -83,6 +83,12 @@ def create_parser() -> argparse.ArgumentParser:
     calib_parser.add_argument(
         "--output", "-o", type=Path, help="Output path for homography YAML file"
     )
+    calib_parser.add_argument(
+        "--arena-width", type=float, default=200.0, help="Arena width in cm (default: 200.0)"
+    )
+    calib_parser.add_argument(
+        "--arena-height", type=float, default=150.0, help="Arena height in cm (default: 150.0)"
+    )
 
     return parser
 
@@ -167,9 +173,34 @@ def cmd_calib_homography(args: argparse.Namespace) -> int:
         logger.info(f"Starting homography calibration with: {args.video}")
         logger.info(f"Output homography file: {output_path}")
 
-        # TODO: Implement interactive homography tool
-        logger.warning("Interactive homography calibration not yet implemented")
-        return 0
+        # Import calibration tool
+        from trodestrack.cli.calibration import run_interactive_calibration, check_dependencies
+
+        # Check dependencies
+        deps_available, missing = check_dependencies()
+        if not deps_available:
+            logger.error(f"Missing required packages: {', '.join(missing)}")
+            logger.error("Install with: uv add " + " ".join(missing))
+            return 1
+
+        # Get arena dimensions from command line args
+        arena_width = args.arena_width
+        arena_height = args.arena_height
+
+        # Run interactive calibration
+        success = run_interactive_calibration(
+            image_path=args.video,
+            output_path=output_path,
+            arena_width_cm=arena_width,
+            arena_height_cm=arena_height
+        )
+
+        if success:
+            logger.info(f"Homography calibration completed successfully: {output_path}")
+            return 0
+        else:
+            logger.error("Homography calibration failed or was cancelled")
+            return 1
 
     except Exception as e:
         logger.error(f"Error in calibration command: {e}")

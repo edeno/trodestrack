@@ -8,5 +8,37 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Testing artifacts
+.pytest_cache/
+.hypothesis/
+.coverage
+htmlcov/
+
+# Development artifacts
 .DS_Store
 *.zip
+
+# IDE/Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Jupyter notebooks
+.ipynb_checkpoints/
+
+# Data files (typically large)
+*.h5
+*.hdf5
+*.mat
+*.npy
+*.npz
+
+# Generated calibration files
+homography.yaml
+calibration_*.yaml
+
+# Log files
+*.log
