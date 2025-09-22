@@ -9,12 +9,16 @@ import struct
 
 from trodestrack.io.trodes import TrodesLEDData, load_trodes_led_csv
 from trodestrack.io.dlc import DLCKeypointData, load_dlc_csv
-from trodestrack.io.spikegadgets import SpikeGadgetsIMUData, load_spikegadgets_csv, load_spikegadgets_binary
+from trodestrack.io.spikegadgets import (
+    SpikeGadgetsIMUData,
+    load_spikegadgets_csv,
+    load_spikegadgets_binary,
+)
 from trodestrack.io.alignment import (
     align_timestamps,
     check_timestamp_synchronization,
     estimate_clock_offset,
-    validate_alignment
+    validate_alignment,
 )
 
 
@@ -34,7 +38,7 @@ class TestTrodesLEDData:
             front_led=front_led,
             back_led=back_led,
             front_confidence=front_conf,
-            back_confidence=back_conf
+            back_confidence=back_conf,
         )
 
         assert data.n_frames == 3
@@ -55,7 +59,7 @@ class TestTrodesLEDData:
                 front_led=front_led,
                 back_led=back_led,
                 front_confidence=front_conf,
-                back_confidence=back_conf
+                back_confidence=back_conf,
             )
 
     def test_led_vector_and_heading(self):
@@ -71,7 +75,7 @@ class TestTrodesLEDData:
             front_led=front_led,
             back_led=back_led,
             front_confidence=front_conf,
-            back_confidence=back_conf
+            back_confidence=back_conf,
         )
 
         vectors = data.get_led_vector()
@@ -79,7 +83,7 @@ class TestTrodesLEDData:
         np.testing.assert_array_almost_equal(vectors, expected_vectors)
 
         headings = data.get_heading()
-        expected_headings = np.array([0.0, np.pi/2])
+        expected_headings = np.array([0.0, np.pi / 2])
         np.testing.assert_array_almost_equal(headings, expected_headings)
 
     def test_valid_frames(self):
@@ -95,7 +99,7 @@ class TestTrodesLEDData:
             front_led=front_led,
             back_led=back_led,
             front_confidence=front_conf,
-            back_confidence=back_conf
+            back_confidence=back_conf,
         )
 
         valid_frames = data.get_valid_frames(confidence_threshold=0.5)
@@ -113,13 +117,13 @@ class TestTrodesLoader:
 
             # Create test CSV
             data = {
-                'timestamp': [0.0, 0.033, 0.066],
-                'front_x': [100, 110, 120],
-                'front_y': [200, 210, 220],
-                'back_x': [80, 90, 100],
-                'back_y': [180, 190, 200],
-                'front_conf': [0.9, 0.8, 0.7],
-                'back_conf': [0.85, 0.75, 0.65]
+                "timestamp": [0.0, 0.033, 0.066],
+                "front_x": [100, 110, 120],
+                "front_y": [200, 210, 220],
+                "back_x": [80, 90, 100],
+                "back_y": [180, 190, 200],
+                "front_conf": [0.9, 0.8, 0.7],
+                "back_conf": [0.85, 0.75, 0.65],
             }
             df = pd.DataFrame(data)
             df.to_csv(csv_file, index=False)
@@ -128,7 +132,7 @@ class TestTrodesLoader:
             led_data = load_trodes_led_csv(csv_file)
 
             assert led_data.n_frames == 3
-            assert led_data.metadata['has_confidence'] is True
+            assert led_data.metadata["has_confidence"] is True
             np.testing.assert_array_equal(led_data.timestamps, [0.0, 0.033, 0.066])
 
     def test_load_csv_no_confidence(self):
@@ -138,11 +142,11 @@ class TestTrodesLoader:
 
             # Create test CSV without confidence
             data = {
-                'timestamp': [0.0, 0.033, 0.066],
-                'front_x': [100, 110, 120],
-                'front_y': [200, 210, 220],
-                'back_x': [80, 90, 100],
-                'back_y': [180, 190, 200]
+                "timestamp": [0.0, 0.033, 0.066],
+                "front_x": [100, 110, 120],
+                "front_y": [200, 210, 220],
+                "back_x": [80, 90, 100],
+                "back_y": [180, 190, 200],
             }
             df = pd.DataFrame(data)
             df.to_csv(csv_file, index=False)
@@ -151,7 +155,7 @@ class TestTrodesLoader:
             with pytest.warns(UserWarning, match="No confidence columns found"):
                 led_data = load_trodes_led_csv(csv_file)
 
-            assert led_data.metadata['has_confidence'] is False
+            assert led_data.metadata["has_confidence"] is False
             np.testing.assert_array_equal(led_data.front_confidence, [1.0, 1.0, 1.0])
 
     def test_load_csv_with_nan(self):
@@ -161,13 +165,13 @@ class TestTrodesLoader:
 
             # Create test CSV with NaN
             data = {
-                'timestamp': [0.0, 0.033, 0.066],
-                'front_x': [100, np.nan, 120],
-                'front_y': [200, np.nan, 220],
-                'back_x': [80, 90, 100],
-                'back_y': [180, 190, 200],
-                'front_conf': [0.9, 0.8, 0.7],
-                'back_conf': [0.85, 0.75, 0.65]
+                "timestamp": [0.0, 0.033, 0.066],
+                "front_x": [100, np.nan, 120],
+                "front_y": [200, np.nan, 220],
+                "back_x": [80, 90, 100],
+                "back_y": [180, 190, 200],
+                "front_conf": [0.9, 0.8, 0.7],
+                "back_conf": [0.85, 0.75, 0.65],
             }
             df = pd.DataFrame(data)
             df.to_csv(csv_file, index=False)
@@ -188,65 +192,56 @@ class TestDLCKeypointData:
         """Test DLCKeypointData initialization."""
         timestamps = np.array([0.0, 0.033, 0.066])
         keypoints = {
-            'nose': np.array([[100, 200], [110, 210], [120, 220]]),
-            'tail': np.array([[80, 180], [90, 190], [100, 200]])
+            "nose": np.array([[100, 200], [110, 210], [120, 220]]),
+            "tail": np.array([[80, 180], [90, 190], [100, 200]]),
         }
         confidences = {
-            'nose': np.array([0.9, 0.8, 0.7]),
-            'tail': np.array([0.85, 0.75, 0.65])
+            "nose": np.array([0.9, 0.8, 0.7]),
+            "tail": np.array([0.85, 0.75, 0.65]),
         }
 
         data = DLCKeypointData(
-            timestamps=timestamps,
-            keypoints=keypoints,
-            confidences=confidences
+            timestamps=timestamps, keypoints=keypoints, confidences=confidences
         )
 
         assert data.n_frames == 3
-        assert set(data.keypoint_names) == {'nose', 'tail'}
+        assert set(data.keypoint_names) == {"nose", "tail"}
         assert data.fps == pytest.approx(30.3, rel=0.1)
 
     def test_get_keypoint(self):
         """Test keypoint retrieval."""
         timestamps = np.array([0.0, 0.033])
-        keypoints = {'nose': np.array([[100, 200], [110, 210]])}
-        confidences = {'nose': np.array([0.9, 0.8])}
+        keypoints = {"nose": np.array([[100, 200], [110, 210]])}
+        confidences = {"nose": np.array([0.9, 0.8])}
 
         data = DLCKeypointData(
-            timestamps=timestamps,
-            keypoints=keypoints,
-            confidences=confidences
+            timestamps=timestamps, keypoints=keypoints, confidences=confidences
         )
 
-        pos, conf = data.get_keypoint('nose')
-        np.testing.assert_array_equal(pos, keypoints['nose'])
-        np.testing.assert_array_equal(conf, confidences['nose'])
+        pos, conf = data.get_keypoint("nose")
+        np.testing.assert_array_equal(pos, keypoints["nose"])
+        np.testing.assert_array_equal(conf, confidences["nose"])
 
         with pytest.raises(KeyError):
-            data.get_keypoint('nonexistent')
+            data.get_keypoint("nonexistent")
 
     def test_led_data_extraction(self):
         """Test extracting LED-like data from keypoints."""
         timestamps = np.array([0.0, 0.033])
         keypoints = {
-            'front': np.array([[100, 200], [110, 210]]),
-            'back': np.array([[80, 180], [90, 190]])
+            "front": np.array([[100, 200], [110, 210]]),
+            "back": np.array([[80, 180], [90, 190]]),
         }
-        confidences = {
-            'front': np.array([0.9, 0.8]),
-            'back': np.array([0.85, 0.75])
-        }
+        confidences = {"front": np.array([0.9, 0.8]), "back": np.array([0.85, 0.75])}
 
         data = DLCKeypointData(
-            timestamps=timestamps,
-            keypoints=keypoints,
-            confidences=confidences
+            timestamps=timestamps, keypoints=keypoints, confidences=confidences
         )
 
-        front_pos, back_pos, front_conf, back_conf = data.get_led_data('front', 'back')
+        front_pos, back_pos, front_conf, back_conf = data.get_led_data("front", "back")
 
-        np.testing.assert_array_equal(front_pos, keypoints['front'])
-        np.testing.assert_array_equal(back_pos, keypoints['back'])
+        np.testing.assert_array_equal(front_pos, keypoints["front"])
+        np.testing.assert_array_equal(back_pos, keypoints["back"])
 
 
 class TestSpikeGadgetsIMUData:
@@ -254,15 +249,17 @@ class TestSpikeGadgetsIMUData:
 
     def test_initialization(self):
         """Test SpikeGadgetsIMUData initialization."""
-        timestamps = np.array([0.0, 1/30000, 2/30000])
-        accel_raw = np.array([[1000, 2000, 3000], [1100, 2100, 3100], [1200, 2200, 3200]])
+        timestamps = np.array([0.0, 1 / 30000, 2 / 30000])
+        accel_raw = np.array(
+            [[1000, 2000, 3000], [1100, 2100, 3100], [1200, 2200, 3200]]
+        )
         gyro_raw = np.array([[100, 200, 300], [110, 210, 310], [120, 220, 320]])
 
         data = SpikeGadgetsIMUData(
             timestamps=timestamps,
             accel_raw=accel_raw,
             gyro_raw=gyro_raw,
-            sampling_rate=30000.0
+            sampling_rate=30000.0,
         )
 
         assert data.n_samples == 3
@@ -271,14 +268,12 @@ class TestSpikeGadgetsIMUData:
 
     def test_unit_conversions(self):
         """Test IMU unit conversions."""
-        timestamps = np.array([0.0, 1/30000])
+        timestamps = np.array([0.0, 1 / 30000])
         accel_raw = np.array([[16384, 0, 0], [0, 16384, 0]])  # 1g in each direction
-        gyro_raw = np.array([[16384, 0, 0], [0, 16384, 0]])   # Some rotation
+        gyro_raw = np.array([[16384, 0, 0], [0, 16384, 0]])  # Some rotation
 
         data = SpikeGadgetsIMUData(
-            timestamps=timestamps,
-            accel_raw=accel_raw,
-            gyro_raw=gyro_raw
+            timestamps=timestamps, accel_raw=accel_raw, gyro_raw=gyro_raw
         )
 
         # Test accelerometer conversion
@@ -305,7 +300,7 @@ class TestSpikeGadgetsIMUData:
             timestamps=timestamps,
             accel_raw=accel_raw,
             gyro_raw=gyro_raw,
-            sampling_rate=30000.0
+            sampling_rate=30000.0,
         )
 
         # Downsample to 1kHz
@@ -313,7 +308,7 @@ class TestSpikeGadgetsIMUData:
 
         assert downsampled.sampling_rate == 1000.0
         assert downsampled.n_samples == 1000
-        assert 'decimation_factor' in downsampled.metadata
+        assert "decimation_factor" in downsampled.metadata
 
 
 class TestSpikeGadgetsLoaders:
@@ -326,13 +321,13 @@ class TestSpikeGadgetsLoaders:
 
             # Create test CSV
             data = {
-                'timestamp': [0.0, 1/30000, 2/30000],
-                'accel_x': [1000, 1100, 1200],
-                'accel_y': [2000, 2100, 2200],
-                'accel_z': [3000, 3100, 3200],
-                'gyro_x': [100, 110, 120],
-                'gyro_y': [200, 210, 220],
-                'gyro_z': [300, 310, 320]
+                "timestamp": [0.0, 1 / 30000, 2 / 30000],
+                "accel_x": [1000, 1100, 1200],
+                "accel_y": [2000, 2100, 2200],
+                "accel_z": [3000, 3100, 3200],
+                "gyro_x": [100, 110, 120],
+                "gyro_y": [200, 210, 220],
+                "gyro_z": [300, 310, 320],
             }
             df = pd.DataFrame(data)
             df.to_csv(csv_file, index=False)
@@ -350,14 +345,14 @@ class TestSpikeGadgetsLoaders:
             bin_file = Path(temp_dir) / "test_imu.bin"
 
             # Create test binary data (without magnetometer)
-            with open(bin_file, 'wb') as f:
+            with open(bin_file, "wb") as f:
                 for i in range(3):
                     timestamp = i  # Raw timestamp
-                    accel = [1000 + i*100, 2000 + i*100, 3000 + i*100]
-                    gyro = [100 + i*10, 200 + i*10, 300 + i*10]
+                    accel = [1000 + i * 100, 2000 + i * 100, 3000 + i * 100]
+                    gyro = [100 + i * 10, 200 + i * 10, 300 + i * 10]
 
                     # Pack: timestamp (uint32) + 6 IMU values (int16)
-                    record = struct.pack('<I6h', timestamp, *accel, *gyro)
+                    record = struct.pack("<I6h", timestamp, *accel, *gyro)
                     f.write(record)
 
             # Load data
@@ -365,7 +360,7 @@ class TestSpikeGadgetsLoaders:
 
             assert imu_data.n_samples == 3
             assert not imu_data.has_magnetometer
-            assert imu_data.metadata['record_size'] == 16
+            assert imu_data.metadata["record_size"] == 16
 
 
 class TestTimestampAlignment:
@@ -412,8 +407,8 @@ class TestTimestampAlignment:
             video_timestamps, imu_timestamps, tolerance=0.001
         )
 
-        assert sync_result['synchronized'] is True
-        assert sync_result['overlap_duration'] > 0.06
+        assert sync_result["synchronized"] is True
+        assert sync_result["overlap_duration"] > 0.06
 
         # Poorly synchronized case
         video_timestamps_offset = video_timestamps + 1.0  # 1 second offset
@@ -421,7 +416,7 @@ class TestTimestampAlignment:
             video_timestamps_offset, imu_timestamps, tolerance=0.001
         )
 
-        assert sync_result_bad['synchronized'] is False
+        assert sync_result_bad["synchronized"] is False
 
     def test_clock_offset_estimation(self):
         """Test clock offset estimation."""
@@ -446,11 +441,9 @@ class TestTimestampAlignment:
         imu_indices = np.array([0, 1, 2])
 
         validation = validate_alignment(
-            video_indices, imu_indices,
-            video_timestamps, imu_timestamps,
-            max_error=0.01
+            video_indices, imu_indices, video_timestamps, imu_timestamps, max_error=0.01
         )
 
-        assert validation['valid'] is True
-        assert validation['n_aligned'] == 3
-        assert validation['max_error'] < 0.01
+        assert validation["valid"] is True
+        assert validation["n_aligned"] == 3
+        assert validation["max_error"] < 0.01

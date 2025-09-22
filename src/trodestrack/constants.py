@@ -1,18 +1,19 @@
 """Physical and numerical constants for trodestrack package."""
 
 import numpy as np
+from typing import Final
 
 
 # Physical constants
-STANDARD_GRAVITY_MS2 = 9.80665  # Standard gravitational acceleration in m/s²
-PI_RADIANS = np.pi  # π radians
-DEGREES_TO_RADIANS = np.pi / 180.0  # Conversion factor from degrees to radians
-RADIANS_TO_DEGREES = 180.0 / np.pi  # Conversion factor from radians to degrees
+STANDARD_GRAVITY_MS2: Final[float] = 9.80665  # Standard gravitational acceleration in m/s²
+PI_RADIANS: Final[float] = np.pi  # π radians
+DEGREES_TO_RADIANS: Final[float] = np.pi / 180.0  # Conversion factor from degrees to radians
+RADIANS_TO_DEGREES: Final[float] = 180.0 / np.pi  # Conversion factor from radians to degrees
 
 # SpikeGadgets hardware constants
-SPIKEGADGETS_DEFAULT_CLOCK_RATE = 30000.0  # Default SpikeGadgets clock rate in Hz
-SPIKEGADGETS_ACCEL_SCALE_FACTOR = 0.000061  # Raw accelerometer to g conversion
-SPIKEGADGETS_GYRO_SCALE_FACTOR = 0.061  # Raw gyroscope to deg/s conversion
+SPIKEGADGETS_DEFAULT_CLOCK_RATE_HZ: Final[float] = 30000.0  # Default SpikeGadgets clock rate in Hz
+SPIKEGADGETS_ACCEL_SCALE_FACTOR_G_PER_LSB: Final[float] = 0.000061  # Raw accelerometer to g conversion
+SPIKEGADGETS_GYRO_SCALE_FACTOR_DEGPS_PER_LSB: Final[float] = 0.061  # Raw gyroscope to deg/s conversion
 
 # Binary format constants
 SPIKEGADGETS_TIMESTAMP_BYTES = 4  # uint32 timestamp
@@ -42,7 +43,7 @@ MIN_INITIAL_SPEED_CM_S = 5.0  # Minimum initial speed in cm/s
 MAX_INITIAL_SPEED_CM_S = 20.0  # Maximum initial speed in cm/s
 TURN_ANGLE_STD_RAD = 0.5  # Standard deviation for random turns in radians
 ACCELERATION_DIVISOR = 10.0  # Divisor for random acceleration magnitude
-MIN_VELOCITY_THRESHOLD = 1e-6  # Minimum velocity to avoid division by zero
+MIN_VELOCITY_THRESHOLD_CM_S: Final[float] = 1e-6  # Minimum velocity in cm/s to avoid division by zero
 
 # Noise and confidence defaults
 MIN_OCCLUSION_CONFIDENCE = 0.05  # Minimum confidence during occlusions

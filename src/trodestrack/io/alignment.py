@@ -11,10 +11,32 @@ from ..constants import (
 )
 
 
+def _ensure_monotonic(timestamps: np.ndarray, name: str) -> None:
+    """Ensure timestamps are strictly increasing and finite.
+
+    Parameters
+    ----------
+    timestamps : np.ndarray
+        Timestamp array to validate
+    name : str
+        Name of the timestamp array for error messages
+
+    Raises
+    ------
+    ValueError
+        If timestamps are not strictly increasing or contain NaN/inf values
+    """
+    if np.any(~np.isfinite(timestamps)):
+        raise ValueError(f"{name} timestamps must be finite (no NaN or inf values)")
+
+    if len(timestamps) > 1 and np.any(np.diff(timestamps) <= 0):
+        raise ValueError(f"{name} timestamps must be strictly increasing")
+
+
 def align_timestamps(
     video_timestamps: np.ndarray,
     imu_timestamps: np.ndarray,
-    method: str = "nearest",
+    method: str = "nearest_fast",
     max_gap: Optional[float] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Align video frames with IMU samples using various interpolation methods.
@@ -26,8 +48,8 @@ def align_timestamps(
     imu_timestamps : np.ndarray, shape (n_imu,)
         IMU sample timestamps in seconds
     method : str, optional
-        Alignment method, one of {"nearest", "interpolate", "subsample"}.
-        Default is "nearest".
+        Alignment method, one of {"nearest_fast", "nearest", "interpolate", "subsample"}.
+        Default is "nearest_fast" for O(n log m) performance.
     max_gap : float, optional
         Maximum allowed time gap for alignment in seconds.
         Frames/samples with larger gaps are excluded. Default is None (no limit).
@@ -46,13 +68,20 @@ def align_timestamps(
 
     Notes
     -----
-    The "nearest" method uses vectorized nearest neighbor search with O(n_video * n_imu)
-    complexity. For large datasets, consider subsampling first.
+    The "nearest_fast" method uses np.searchsorted for O(n_video * log(n_imu)) complexity.
+    The "nearest" method uses vectorized search with O(n_video * n_imu) complexity.
+    For large datasets, "nearest_fast" is recommended.
     """
     if len(video_timestamps) == 0 or len(imu_timestamps) == 0:
         raise ValueError("Cannot align empty timestamp arrays")
 
-    if method == "nearest":
+    # Validate timestamp monotonicity
+    _ensure_monotonic(video_timestamps, "video")
+    _ensure_monotonic(imu_timestamps, "IMU")
+
+    if method == "nearest_fast":
+        return _align_nearest_fast(video_timestamps, imu_timestamps, max_gap)
+    elif method == "nearest":
         return _align_nearest(video_timestamps, imu_timestamps, max_gap)
     elif method == "interpolate":
         return _align_interpolate(video_timestamps, imu_timestamps, max_gap)

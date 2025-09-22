@@ -23,7 +23,7 @@ class TestSimConfig:
             "video_fps": 30.0,
             "imu_rate": 30000.0,
             "arena_size": [200.0, 200.0],
-            "seed": 42
+            "seed": 42,
         }
         config = SimConfig(**config_data)
         assert config.duration == 30.0
@@ -43,7 +43,7 @@ class TestSimConfig:
             "trajectory": {
                 "max_speed": 50.0,
                 "max_acceleration": 100.0,
-                "turn_probability": 0.02
+                "turn_probability": 0.02,
             },
             "imu": {
                 "accel_noise_std": 0.1,
@@ -51,7 +51,7 @@ class TestSimConfig:
                 "accel_bias_std": 0.02,
                 "gyro_bias_std": 0.01,
                 "bias_drift_std": 0.001,
-                "misalignment_deg": 2.0
+                "misalignment_deg": 2.0,
             },
             "video": {
                 "position_noise_std": 2.0,
@@ -60,12 +60,9 @@ class TestSimConfig:
                 "occlusion_probability": 0.05,
                 "occlusion_duration_mean": 1.0,
                 "led_swap_probability": 0.01,
-                "dropout_probability": 0.02
+                "dropout_probability": 0.02,
             },
-            "led": {
-                "front_back_distance": 25.0,
-                "swap_detection_threshold": 0.8
-            }
+            "led": {"front_back_distance": 25.0, "swap_detection_threshold": 0.8},
         }
         config = SimConfig(**config_data)
         assert config.trajectory.max_speed == 50.0
@@ -79,18 +76,33 @@ class TestSimConfig:
 
         # Test negative duration
         with pytest.raises(ValidationError):
-            SimConfig(duration=-1.0, video_fps=30.0, imu_rate=30000.0,
-                     arena_size=[200.0, 200.0], seed=42)
+            SimConfig(
+                duration=-1.0,
+                video_fps=30.0,
+                imu_rate=30000.0,
+                arena_size=[200.0, 200.0],
+                seed=42,
+            )
 
         # Test zero fps
         with pytest.raises(ValidationError):
-            SimConfig(duration=30.0, video_fps=0.0, imu_rate=30000.0,
-                     arena_size=[200.0, 200.0], seed=42)
+            SimConfig(
+                duration=30.0,
+                video_fps=0.0,
+                imu_rate=30000.0,
+                arena_size=[200.0, 200.0],
+                seed=42,
+            )
 
         # Test invalid arena size
         with pytest.raises(ValidationError):
-            SimConfig(duration=30.0, video_fps=30.0, imu_rate=30000.0,
-                     arena_size=[-100.0, 200.0], seed=42)
+            SimConfig(
+                duration=30.0,
+                video_fps=30.0,
+                imu_rate=30000.0,
+                arena_size=[-100.0, 200.0],
+                seed=42,
+            )
 
     def test_sim_config_yaml_serialization(self):
         """Test YAML serialization and deserialization."""
@@ -99,16 +111,16 @@ class TestSimConfig:
             "video_fps": 30.0,
             "imu_rate": 30000.0,
             "arena_size": [200.0, 200.0],
-            "seed": 42
+            "seed": 42,
         }
         config = SimConfig(**config_data)
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             yaml.dump(config.model_dump(), f)
             temp_path = Path(f.name)
 
         try:
-            with open(temp_path, 'r') as f:
+            with open(temp_path, "r") as f:
                 loaded_data = yaml.safe_load(f)
             loaded_config = SimConfig(**loaded_data)
             assert loaded_config.duration == config.duration
@@ -123,8 +135,11 @@ class TestSyntheticIMU:
     def test_generate_synthetic_imu_basic(self):
         """Test basic IMU data generation."""
         config = SimConfig(
-            duration=1.0, video_fps=30.0, imu_rate=1000.0,
-            arena_size=[200.0, 200.0], seed=42
+            duration=1.0,
+            video_fps=30.0,
+            imu_rate=1000.0,
+            arena_size=[200.0, 200.0],
+            seed=42,
         )
 
         # Generate ground truth trajectory
@@ -143,8 +158,11 @@ class TestSyntheticIMU:
     def test_synthetic_imu_noise_characteristics(self):
         """Test that synthetic IMU has expected noise characteristics."""
         config = SimConfig(
-            duration=10.0, video_fps=30.0, imu_rate=1000.0,
-            arena_size=[200.0, 200.0], seed=42
+            duration=10.0,
+            video_fps=30.0,
+            imu_rate=1000.0,
+            arena_size=[200.0, 200.0],
+            seed=42,
         )
         config.imu.accel_noise_std = 0.1
         config.imu.gyro_noise_std = 0.05
@@ -157,7 +175,9 @@ class TestSyntheticIMU:
 
         # Check that accelerometer data is reasonable (not all zeros, within expected range)
         accel_ms2 = imu_data.get_accel_ms2()
-        assert np.all(np.abs(accel_ms2[:, :2]) < 50.0)  # Horizontal accel should be reasonable
+        assert np.all(
+            np.abs(accel_ms2[:, :2]) < 50.0
+        )  # Horizontal accel should be reasonable
         assert np.all(np.abs(accel_ms2[:, 2] - 9.81) < 5.0)  # Z should be near gravity
 
         # Check that there is some noise (not constant)
@@ -168,8 +188,11 @@ class TestSyntheticIMU:
     def test_synthetic_imu_bias_drift(self):
         """Test that IMU biases drift over time."""
         config = SimConfig(
-            duration=30.0, video_fps=30.0, imu_rate=1000.0,
-            arena_size=[200.0, 200.0], seed=42
+            duration=30.0,
+            video_fps=30.0,
+            imu_rate=1000.0,
+            arena_size=[200.0, 200.0],
+            seed=42,
         )
         config.imu.bias_drift_std = 0.01
 
@@ -185,13 +208,16 @@ class TestSyntheticIMU:
 
         # Biases should change over time (not constant)
         assert np.std(accel_bias[:, 0]) > 0.001  # Some drift
-        assert np.std(gyro_bias[:, 2]) > 0.001   # Z-axis gyro bias
+        assert np.std(gyro_bias[:, 2]) > 0.001  # Z-axis gyro bias
 
     def test_synthetic_imu_reproducibility(self):
         """Test that synthetic IMU generation is reproducible with same seed."""
         config = SimConfig(
-            duration=1.0, video_fps=30.0, imu_rate=1000.0,
-            arena_size=[200.0, 200.0], seed=42
+            duration=1.0,
+            video_fps=30.0,
+            imu_rate=1000.0,
+            arena_size=[200.0, 200.0],
+            seed=42,
         )
 
         ground_truth = self._generate_trajectory(config)
@@ -206,10 +232,15 @@ class TestSyntheticIMU:
         """Helper to generate ground truth trajectory."""
         # This is a placeholder - will be implemented later
         t = np.linspace(0, config.duration, int(config.duration * config.imu_rate))
-        positions = np.column_stack([
-            50 * np.sin(2 * np.pi * t / 10),  # x
-            50 * np.cos(2 * np.pi * t / 10)   # y
-        ]) + 100  # Center in arena
+        positions = (
+            np.column_stack(
+                [
+                    50 * np.sin(2 * np.pi * t / 10),  # x
+                    50 * np.cos(2 * np.pi * t / 10),  # y
+                ]
+            )
+            + 100
+        )  # Center in arena
 
         velocities = np.gradient(positions, axis=0) / (t[1] - t[0])
         headings = np.arctan2(velocities[:, 1], velocities[:, 0])
@@ -218,20 +249,21 @@ class TestSyntheticIMU:
             "timestamps": t,
             "positions": positions,
             "velocities": velocities,
-            "headings": headings
+            "headings": headings,
         }
 
-    def _compute_expected_accel(self, ground_truth: Dict[str, np.ndarray]) -> np.ndarray:
+    def _compute_expected_accel(
+        self, ground_truth: Dict[str, np.ndarray]
+    ) -> np.ndarray:
         """Helper to compute expected acceleration from trajectory."""
         velocities = ground_truth["velocities"]
         dt = ground_truth["timestamps"][1] - ground_truth["timestamps"][0]
         accelerations = np.gradient(velocities, axis=0) / dt
 
         # Add gravity to z-axis
-        accel_3d = np.column_stack([
-            accelerations,
-            -9.80665 * np.ones(len(accelerations))  # Gravity
-        ])
+        accel_3d = np.column_stack(
+            [accelerations, -9.80665 * np.ones(len(accelerations))]  # Gravity
+        )
         return accel_3d
 
 
@@ -241,8 +273,11 @@ class TestSyntheticVideo:
     def test_generate_synthetic_video_basic(self):
         """Test basic video data generation."""
         config = SimConfig(
-            duration=1.0, video_fps=30.0, imu_rate=1000.0,
-            arena_size=[200.0, 200.0], seed=42
+            duration=1.0,
+            video_fps=30.0,
+            imu_rate=1000.0,
+            arena_size=[200.0, 200.0],
+            seed=42,
         )
 
         ground_truth = self._generate_trajectory(config)
@@ -259,8 +294,11 @@ class TestSyntheticVideo:
     def test_synthetic_video_noise_and_confidence(self):
         """Test video noise and confidence relationships."""
         config = SimConfig(
-            duration=5.0, video_fps=30.0, imu_rate=1000.0,
-            arena_size=[200.0, 200.0], seed=42
+            duration=5.0,
+            video_fps=30.0,
+            imu_rate=1000.0,
+            arena_size=[200.0, 200.0],
+            seed=42,
         )
         config.video.position_noise_std = 3.0
         config.video.confidence_min = 0.1
@@ -272,10 +310,18 @@ class TestSyntheticVideo:
 
         # Check confidence range (excluding dropout frames which have 0 confidence)
         non_dropout_mask = video_data.front_confidence > 0
-        assert np.all(video_data.front_confidence[non_dropout_mask] >= config.video.confidence_min)
-        assert np.all(video_data.front_confidence[non_dropout_mask] <= config.video.confidence_max)
-        assert np.all(video_data.back_confidence[non_dropout_mask] >= config.video.confidence_min)
-        assert np.all(video_data.back_confidence[non_dropout_mask] <= config.video.confidence_max)
+        assert np.all(
+            video_data.front_confidence[non_dropout_mask] >= config.video.confidence_min
+        )
+        assert np.all(
+            video_data.front_confidence[non_dropout_mask] <= config.video.confidence_max
+        )
+        assert np.all(
+            video_data.back_confidence[non_dropout_mask] >= config.video.confidence_min
+        )
+        assert np.all(
+            video_data.back_confidence[non_dropout_mask] <= config.video.confidence_max
+        )
 
         # Higher confidence should correlate with lower position noise
         # (This is a statistical relationship, so we test it loosely)
@@ -295,8 +341,11 @@ class TestSyntheticVideo:
     def test_synthetic_video_occlusions(self):
         """Test video occlusion generation."""
         config = SimConfig(
-            duration=10.0, video_fps=30.0, imu_rate=1000.0,
-            arena_size=[200.0, 200.0], seed=42
+            duration=10.0,
+            video_fps=30.0,
+            imu_rate=1000.0,
+            arena_size=[200.0, 200.0],
+            seed=42,
         )
         config.video.occlusion_probability = 0.1  # High occlusion rate for testing
 
@@ -305,8 +354,7 @@ class TestSyntheticVideo:
 
         # Check that some frames have low confidence (indicating occlusions)
         low_confidence_frames = np.sum(
-            (video_data.front_confidence < 0.2) |
-            (video_data.back_confidence < 0.2)
+            (video_data.front_confidence < 0.2) | (video_data.back_confidence < 0.2)
         )
         total_frames = len(video_data.timestamps)
 
@@ -314,13 +362,16 @@ class TestSyntheticVideo:
         # Note: with 0.1 probability per frame, we expect roughly 10% of frames affected
         assert low_confidence_frames > 0.01 * total_frames  # At least 1% occluded
         # Allow up to 80% since occlusions can be long and overlap with dropouts
-        assert low_confidence_frames < 0.8 * total_frames   # Not more than 80%
+        assert low_confidence_frames < 0.8 * total_frames  # Not more than 80%
 
     def test_synthetic_video_led_spacing(self):
         """Test that LED spacing is approximately correct."""
         config = SimConfig(
-            duration=2.0, video_fps=30.0, imu_rate=1000.0,
-            arena_size=[200.0, 200.0], seed=42
+            duration=2.0,
+            video_fps=30.0,
+            imu_rate=1000.0,
+            arena_size=[200.0, 200.0],
+            seed=42,
         )
         config.led.front_back_distance = 20.0  # pixels
         config.video.dropout_probability = 0.0  # Disable dropouts for this test
@@ -338,16 +389,23 @@ class TestSyntheticVideo:
 
         # Should be approximately the configured distance (allowing for noise)
         mean_distance = np.mean(valid_distances)
-        assert abs(mean_distance - config.led.front_back_distance) < 5.0  # Within 5 pixels
+        assert (
+            abs(mean_distance - config.led.front_back_distance) < 5.0
+        )  # Within 5 pixels
 
     def _generate_trajectory(self, config: SimConfig) -> Dict[str, np.ndarray]:
         """Helper to generate ground truth trajectory."""
         # This is a placeholder - will be implemented later
         t = np.linspace(0, config.duration, int(config.duration * config.video_fps))
-        positions = np.column_stack([
-            50 * np.sin(2 * np.pi * t / 10),  # x
-            50 * np.cos(2 * np.pi * t / 10)   # y
-        ]) + 100  # Center in arena
+        positions = (
+            np.column_stack(
+                [
+                    50 * np.sin(2 * np.pi * t / 10),  # x
+                    50 * np.cos(2 * np.pi * t / 10),  # y
+                ]
+            )
+            + 100
+        )  # Center in arena
 
         velocities = np.gradient(positions, axis=0) / (t[1] - t[0])
         headings = np.arctan2(velocities[:, 1], velocities[:, 0])
@@ -356,7 +414,7 @@ class TestSyntheticVideo:
             "timestamps": t,
             "positions": positions,
             "velocities": velocities,
-            "headings": headings
+            "headings": headings,
         }
 
 
@@ -366,8 +424,11 @@ class TestSyntheticSession:
     def test_generate_synthetic_session_basic(self):
         """Test basic synthetic session generation."""
         config = SimConfig(
-            duration=2.0, video_fps=30.0, imu_rate=1000.0,
-            arena_size=[200.0, 200.0], seed=42
+            duration=2.0,
+            video_fps=30.0,
+            imu_rate=1000.0,
+            arena_size=[200.0, 200.0],
+            seed=42,
         )
 
         session_data = generate_synthetic_session(config)
@@ -388,8 +449,11 @@ class TestSyntheticSession:
     def test_synthetic_session_reproducibility(self):
         """Test that synthetic sessions are reproducible with same seed."""
         config = SimConfig(
-            duration=1.0, video_fps=30.0, imu_rate=1000.0,
-            arena_size=[200.0, 200.0], seed=42
+            duration=1.0,
+            video_fps=30.0,
+            imu_rate=1000.0,
+            arena_size=[200.0, 200.0],
+            seed=42,
         )
 
         session1 = generate_synthetic_session(config)
@@ -397,21 +461,22 @@ class TestSyntheticSession:
 
         # Ground truth should be identical
         np.testing.assert_array_equal(
-            session1["ground_truth"]["positions"],
-            session2["ground_truth"]["positions"]
+            session1["ground_truth"]["positions"], session2["ground_truth"]["positions"]
         )
 
         # IMU data should be identical
         np.testing.assert_array_equal(
-            session1["imu_data"].accel_raw,
-            session2["imu_data"].accel_raw
+            session1["imu_data"].accel_raw, session2["imu_data"].accel_raw
         )
 
     def test_synthetic_session_time_alignment(self):
         """Test that IMU and video timestamps are properly aligned."""
         config = SimConfig(
-            duration=5.0, video_fps=30.0, imu_rate=1000.0,
-            arena_size=[200.0, 200.0], seed=42
+            duration=5.0,
+            video_fps=30.0,
+            imu_rate=1000.0,
+            arena_size=[200.0, 200.0],
+            seed=42,
         )
 
         session_data = generate_synthetic_session(config)

@@ -11,7 +11,7 @@ from trodestrack.cli.main import (
     cmd_smooth,
     cmd_online,
     cmd_report,
-    cmd_calib_homography
+    cmd_calib_homography,
 )
 from trodestrack.config.loader import create_default_config
 
@@ -36,7 +36,9 @@ class TestCLIParser:
         assert args.config == Path("session.yaml")
         assert args.output is None
 
-        args = parser.parse_args(["smooth", "--config", "session.yaml", "--output", "results/"])
+        args = parser.parse_args(
+            ["smooth", "--config", "session.yaml", "--output", "results/"]
+        )
         assert args.output == Path("results/")
 
     def test_online_command_args(self):
@@ -95,11 +97,12 @@ class TestCLICommands:
             config = create_default_config(
                 video_file=video_file,
                 imu_file=imu_file,
-                output_dir=temp_path / "output"
+                output_dir=temp_path / "output",
             )
 
             config_file = temp_path / "config.yaml"
             from trodestrack.config.loader import save_config
+
             save_config(config, config_file)
 
             # Mock arguments
@@ -134,11 +137,12 @@ class TestCLICommands:
             config = create_default_config(
                 video_file=video_file,
                 imu_file=imu_file,
-                output_dir=temp_path / "output"
+                output_dir=temp_path / "output",
             )
 
             config_file = temp_path / "config.yaml"
             from trodestrack.config.loader import save_config
+
             save_config(config, config_file)
 
             args = MagicMock()
@@ -194,12 +198,13 @@ class TestCLIIntegration:
             config = create_default_config(
                 video_file=video_file,
                 imu_file=imu_file,
-                output_dir=temp_path / "output"
+                output_dir=temp_path / "output",
             )
 
             # Save configuration
             config_file = temp_path / "session.yaml"
             from trodestrack.config.loader import save_config
+
             save_config(config, config_file)
 
             # Test CLI can load and use the config
@@ -220,14 +225,23 @@ class TestCLIIntegration:
             config = create_default_config(
                 video_file=video_file,
                 imu_file=imu_file,
-                output_dir=temp_path / "original_output"
+                output_dir=temp_path / "original_output",
             )
 
             config_file = temp_path / "config.yaml"
             from trodestrack.config.loader import save_config
+
             save_config(config, config_file)
 
             # Test output override
             override_output = temp_path / "override_output"
-            result = main(["smooth", "--config", str(config_file), "--output", str(override_output)])
+            result = main(
+                [
+                    "smooth",
+                    "--config",
+                    str(config_file),
+                    "--output",
+                    str(override_output),
+                ]
+            )
             assert result == 0

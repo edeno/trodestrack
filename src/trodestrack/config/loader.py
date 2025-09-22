@@ -28,8 +28,9 @@ def load_config(config_path: Path) -> SessionConfig:
     with open(config_path, "r") as f:
         config_dict = yaml.safe_load(f)
 
-    # Convert string paths to Path objects
-    config_dict = _convert_paths(config_dict)
+    # Convert string paths to Path objects relative to config file directory
+    config_base_dir = config_path.resolve().parent
+    config_dict = _convert_paths(config_dict, config_base_dir)
 
     return SessionConfig(**config_dict)
 
@@ -50,17 +51,42 @@ def save_config(config: SessionConfig, output_path: Path) -> None:
         yaml.dump(config_dict, f, default_flow_style=False, indent=2)
 
 
-def _convert_paths(config_dict: Dict[str, Any]) -> Dict[str, Any]:
-    """Recursively convert string paths to Path objects."""
+def _convert_paths(config_dict: Dict[str, Any], base_dir: Path) -> Dict[str, Any]:
+    """Recursively convert string paths to Path objects relative to base directory.
+
+    Args:
+        config_dict: Configuration dictionary to process
+        base_dir: Base directory for resolving relative paths
+
+    Returns:
+        Updated configuration dictionary with Path objects
+    """
     path_fields = {"video_file", "imu_file", "output_dir"}
 
     for key, value in config_dict.items():
         if key in path_fields and isinstance(value, str):
-            config_dict[key] = Path(value)
+            config_dict[key] = _resolve_path(value, base_dir)
         elif isinstance(value, dict):
-            config_dict[key] = _convert_paths(value)
+            config_dict[key] = _convert_paths(value, base_dir)
 
     return config_dict
+
+
+def _resolve_path(path_str: str, base_dir: Path) -> Path:
+    """Resolve a path string relative to base directory.
+
+    Args:
+        path_str: Path string that may be relative or absolute
+        base_dir: Base directory for resolving relative paths
+
+    Returns:
+        Resolved absolute Path object
+    """
+    path = Path(path_str)
+    if path.is_absolute():
+        return path.resolve()
+    else:
+        return (base_dir / path).resolve()
 
 
 def _convert_paths_to_strings(config_dict: Dict[str, Any]) -> Dict[str, Any]:

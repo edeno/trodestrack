@@ -3,7 +3,7 @@
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any
 import warnings
 
 
@@ -17,7 +17,7 @@ class TrodesLEDData:
         back_led: np.ndarray,
         front_confidence: np.ndarray,
         back_confidence: np.ndarray,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ):
         """Initialize Trodes LED data container.
 
@@ -38,10 +38,15 @@ class TrodesLEDData:
 
         # Validate shapes
         n_frames = len(self.timestamps)
-        if not all(len(arr) == n_frames for arr in [
-            self.front_led, self.back_led,
-            self.front_confidence, self.back_confidence
-        ]):
+        if not all(
+            len(arr) == n_frames
+            for arr in [
+                self.front_led,
+                self.back_led,
+                self.front_confidence,
+                self.back_confidence,
+            ]
+        ):
             raise ValueError("All arrays must have the same length")
 
         if self.front_led.shape != (n_frames, 2):
@@ -77,9 +82,8 @@ class TrodesLEDData:
         Returns:
             Boolean array indicating valid frames
         """
-        return (
-            (self.front_confidence >= confidence_threshold) &
-            (self.back_confidence >= confidence_threshold)
+        return (self.front_confidence >= confidence_threshold) & (
+            self.back_confidence >= confidence_threshold
         )
 
     def get_led_vector(self) -> np.ndarray:
@@ -134,20 +138,20 @@ def load_trodes_led_csv(file_path: Path) -> TrodesLEDData:
         raise ValueError(f"Failed to read CSV file: {e}")
 
     # Check for required columns
-    required_cols = ['timestamp', 'front_x', 'front_y', 'back_x', 'back_y']
+    required_cols = ["timestamp", "front_x", "front_y", "back_x", "back_y"]
     missing_cols = [col for col in required_cols if col not in df.columns]
     if missing_cols:
         raise ValueError(f"Missing required columns: {missing_cols}")
 
     # Extract data
-    timestamps = df['timestamp'].values
-    front_led = df[['front_x', 'front_y']].values
-    back_led = df[['back_x', 'back_y']].values
+    timestamps = df["timestamp"].values
+    front_led = df[["front_x", "front_y"]].values
+    back_led = df[["back_x", "back_y"]].values
 
     # Handle confidence columns
-    if 'front_conf' in df.columns and 'back_conf' in df.columns:
-        front_confidence = df['front_conf'].values
-        back_confidence = df['back_conf'].values
+    if "front_conf" in df.columns and "back_conf" in df.columns:
+        front_confidence = df["front_conf"].values
+        back_confidence = df["back_conf"].values
     else:
         # Default confidence to 1.0 if not provided
         front_confidence = np.ones(len(df))
@@ -167,10 +171,10 @@ def load_trodes_led_csv(file_path: Path) -> TrodesLEDData:
 
     # Create metadata
     metadata = {
-        'file_path': str(file_path),
-        'n_frames': len(df),
-        'columns': list(df.columns),
-        'has_confidence': 'front_conf' in df.columns
+        "file_path": str(file_path),
+        "n_frames": len(df),
+        "columns": list(df.columns),
+        "has_confidence": "front_conf" in df.columns,
     }
 
     return TrodesLEDData(
@@ -179,7 +183,7 @@ def load_trodes_led_csv(file_path: Path) -> TrodesLEDData:
         back_led=back_led,
         front_confidence=front_confidence,
         back_confidence=back_confidence,
-        metadata=metadata
+        metadata=metadata,
     )
 
 
@@ -200,27 +204,29 @@ def load_trodes_led_h5(file_path: Path) -> TrodesLEDData:
     try:
         import h5py
     except ImportError:
-        raise ImportError("h5py required for HDF5 support. Install with: pip install h5py")
+        raise ImportError(
+            "h5py required for HDF5 support. Install with: pip install h5py"
+        )
 
     if not file_path.exists():
         raise FileNotFoundError(f"Trodes LED file not found: {file_path}")
 
     try:
-        with h5py.File(file_path, 'r') as f:
+        with h5py.File(file_path, "r") as f:
             # Expected structure: /led_tracking/{timestamps, front_led, back_led, confidence}
-            if 'led_tracking' not in f:
+            if "led_tracking" not in f:
                 raise ValueError("HDF5 file missing 'led_tracking' group")
 
-            group = f['led_tracking']
+            group = f["led_tracking"]
 
-            timestamps = group['timestamps'][:]
-            front_led = group['front_led'][:]
-            back_led = group['back_led'][:]
+            timestamps = group["timestamps"][:]
+            front_led = group["front_led"][:]
+            back_led = group["back_led"][:]
 
             # Handle optional confidence data
-            if 'front_conf' in group and 'back_conf' in group:
-                front_confidence = group['front_conf'][:]
-                back_confidence = group['back_conf'][:]
+            if "front_conf" in group and "back_conf" in group:
+                front_confidence = group["front_conf"][:]
+                back_confidence = group["back_conf"][:]
             else:
                 front_confidence = np.ones(len(timestamps))
                 back_confidence = np.ones(len(timestamps))
@@ -228,10 +234,10 @@ def load_trodes_led_h5(file_path: Path) -> TrodesLEDData:
 
             # Create metadata
             metadata = {
-                'file_path': str(file_path),
-                'n_frames': len(timestamps),
-                'format': 'hdf5',
-                'has_confidence': 'front_conf' in group
+                "file_path": str(file_path),
+                "n_frames": len(timestamps),
+                "format": "hdf5",
+                "has_confidence": "front_conf" in group,
             }
 
             return TrodesLEDData(
@@ -240,7 +246,7 @@ def load_trodes_led_h5(file_path: Path) -> TrodesLEDData:
                 back_led=back_led,
                 front_confidence=front_confidence,
                 back_confidence=back_confidence,
-                metadata=metadata
+                metadata=metadata,
             )
 
     except Exception as e:
@@ -258,9 +264,9 @@ def load_trodes_led(file_path: Path) -> TrodesLEDData:
     """
     file_path = Path(file_path)
 
-    if file_path.suffix.lower() == '.csv':
+    if file_path.suffix.lower() == ".csv":
         return load_trodes_led_csv(file_path)
-    elif file_path.suffix.lower() in ['.h5', '.hdf5']:
+    elif file_path.suffix.lower() in [".h5", ".hdf5"]:
         return load_trodes_led_h5(file_path)
     else:
         raise ValueError(f"Unsupported file format: {file_path.suffix}")

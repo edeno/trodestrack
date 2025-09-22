@@ -6,8 +6,8 @@ from ..io.spikegadgets import SpikeGadgetsIMUData
 from .config import SimConfig
 from ..constants import (
     STANDARD_GRAVITY_MS2,
-    SPIKEGADGETS_ACCEL_SCALE_FACTOR,
-    SPIKEGADGETS_GYRO_SCALE_FACTOR,
+    SPIKEGADGETS_ACCEL_SCALE_FACTOR_G_PER_LSB,
+    SPIKEGADGETS_GYRO_SCALE_FACTOR_DEGPS_PER_LSB,
     CM_TO_M,
     IMU_AXES,
 )
@@ -128,11 +128,11 @@ def generate_synthetic_imu(
 
     # Convert to raw units (using SpikeGadgets conversion factors)
     accel_raw = np.column_stack(
-        [accel_g_x / SPIKEGADGETS_ACCEL_SCALE_FACTOR, accel_g_y / SPIKEGADGETS_ACCEL_SCALE_FACTOR, accel_g_z / SPIKEGADGETS_ACCEL_SCALE_FACTOR]  # g to raw
+        [accel_g_x / SPIKEGADGETS_ACCEL_SCALE_FACTOR_G_PER_LSB, accel_g_y / SPIKEGADGETS_ACCEL_SCALE_FACTOR_G_PER_LSB, accel_g_z / SPIKEGADGETS_ACCEL_SCALE_FACTOR_G_PER_LSB]  # g to raw
     ).astype(np.int32)
 
     gyro_raw = np.column_stack(
-        [gyro_deg_x / SPIKEGADGETS_GYRO_SCALE_FACTOR, gyro_deg_y / SPIKEGADGETS_GYRO_SCALE_FACTOR, gyro_deg_z / SPIKEGADGETS_GYRO_SCALE_FACTOR]  # deg/s to raw
+        [gyro_deg_x / SPIKEGADGETS_GYRO_SCALE_FACTOR_DEGPS_PER_LSB, gyro_deg_y / SPIKEGADGETS_GYRO_SCALE_FACTOR_DEGPS_PER_LSB, gyro_deg_z / SPIKEGADGETS_GYRO_SCALE_FACTOR_DEGPS_PER_LSB]  # deg/s to raw
     ).astype(np.int32)
 
     # Store true biases in metadata for testing

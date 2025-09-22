@@ -12,13 +12,9 @@ from trodestrack.config.schemas import (
     FilterConfig,
     LEDConfig,
     IMUConfig,
-    OutputConfig
+    OutputConfig,
 )
-from trodestrack.config.loader import (
-    load_config,
-    save_config,
-    create_default_config
-)
+from trodestrack.config.loader import load_config, save_config, create_default_config
 
 
 class TestSchemas:
@@ -28,21 +24,14 @@ class TestSchemas:
         """Test homography mapping configuration."""
         config = MappingConfig(
             type="homography",
-            homography_matrix=[
-                [1.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0],
-                [0.0, 0.0, 1.0]
-            ]
+            homography_matrix=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
         )
         assert config.type == "homography"
         assert len(config.homography_matrix) == 3
 
     def test_mapping_config_ruler_scale(self):
         """Test ruler scale mapping configuration."""
-        config = MappingConfig(
-            type="ruler_scale",
-            pixel_per_cm=10.5
-        )
+        config = MappingConfig(type="ruler_scale", pixel_per_cm=10.5)
         assert config.type == "ruler_scale"
         assert config.pixel_per_cm == 10.5
 
@@ -58,10 +47,7 @@ class TestSchemas:
 
         # Invalid homography matrix size
         with pytest.raises(ValueError, match="must be 3x3"):
-            MappingConfig(
-                type="homography",
-                homography_matrix=[[1.0, 0.0], [0.0, 1.0]]
-            )
+            MappingConfig(type="homography", homography_matrix=[[1.0, 0.0], [0.0, 1.0]])
 
     def test_filter_config_defaults(self):
         """Test filter configuration defaults."""
@@ -114,11 +100,8 @@ class TestSessionConfig:
             config = SessionConfig(
                 video_file=video_file,
                 imu_file=imu_file,
-                mapping=MappingConfig(
-                    type="ruler_scale",
-                    pixel_per_cm=10.0
-                ),
-                output=OutputConfig(output_dir=temp_path / "output")
+                mapping=MappingConfig(type="ruler_scale", pixel_per_cm=10.0),
+                output=OutputConfig(output_dir=temp_path / "output"),
             )
 
             assert config.video_file == video_file
@@ -137,7 +120,7 @@ class TestSessionConfig:
                     video_file=temp_path / "nonexistent.csv",
                     imu_file=temp_path / "imu.bin",
                     mapping=MappingConfig(type="ruler_scale", pixel_per_cm=10.0),
-                    output=OutputConfig(output_dir=temp_path)
+                    output=OutputConfig(output_dir=temp_path),
                 )
 
 
@@ -160,12 +143,9 @@ class TestConfigLoader:
                 video_file=video_file,
                 imu_file=imu_file,
                 video_fps=25.0,
-                mapping=MappingConfig(
-                    type="ruler_scale",
-                    pixel_per_cm=15.0
-                ),
+                mapping=MappingConfig(type="ruler_scale", pixel_per_cm=15.0),
                 output=OutputConfig(output_dir=temp_path / "output"),
-                led=LEDConfig(front_back_distance_cm=3.0)
+                led=LEDConfig(front_back_distance_cm=3.0),
             )
 
             # Save config
@@ -175,11 +155,19 @@ class TestConfigLoader:
             # Load config
             loaded_config = load_config(config_file)
 
-            # Verify round-trip
-            assert loaded_config.video_file == original_config.video_file
+            # Verify round-trip (compare resolved paths since loader resolves them)
+            assert loaded_config.video_file == original_config.video_file.resolve()
+            assert loaded_config.imu_file == original_config.imu_file.resolve()
+            assert loaded_config.output.output_dir == original_config.output.output_dir.resolve()
             assert loaded_config.video_fps == original_config.video_fps
-            assert loaded_config.mapping.pixel_per_cm == original_config.mapping.pixel_per_cm
-            assert loaded_config.led.front_back_distance_cm == original_config.led.front_back_distance_cm
+            assert (
+                loaded_config.mapping.pixel_per_cm
+                == original_config.mapping.pixel_per_cm
+            )
+            assert (
+                loaded_config.led.front_back_distance_cm
+                == original_config.led.front_back_distance_cm
+            )
 
     def test_load_nonexistent_config(self):
         """Test loading non-existent config file."""
@@ -204,7 +192,7 @@ class TestConfigLoader:
                 video_file=video_file,
                 imu_file=imu_file,
                 output_dir=output_dir,
-                mapping_type="homography"
+                mapping_type="homography",
             )
 
             assert config.mapping.type == "homography"
@@ -215,7 +203,7 @@ class TestConfigLoader:
                 video_file=video_file,
                 imu_file=imu_file,
                 output_dir=output_dir,
-                mapping_type="ruler_scale"
+                mapping_type="ruler_scale",
             )
 
             assert config.mapping.type == "ruler_scale"
@@ -236,14 +224,14 @@ class TestConfigLoader:
             config = create_default_config(
                 video_file=video_file,
                 imu_file=imu_file,
-                output_dir=temp_path / "output"
+                output_dir=temp_path / "output",
             )
 
             config_file = temp_path / "config.yaml"
             save_config(config, config_file)
 
             # Verify YAML structure
-            with open(config_file, 'r') as f:
+            with open(config_file, "r") as f:
                 yaml_data = yaml.safe_load(f)
 
             assert "video_file" in yaml_data

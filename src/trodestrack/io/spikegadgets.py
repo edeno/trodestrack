@@ -7,9 +7,9 @@ import warnings
 import struct
 
 from ..constants import (
-    SPIKEGADGETS_DEFAULT_CLOCK_RATE,
-    SPIKEGADGETS_ACCEL_SCALE_FACTOR,
-    SPIKEGADGETS_GYRO_SCALE_FACTOR,
+    SPIKEGADGETS_DEFAULT_CLOCK_RATE_HZ,
+    SPIKEGADGETS_ACCEL_SCALE_FACTOR_G_PER_LSB,
+    SPIKEGADGETS_GYRO_SCALE_FACTOR_DEGPS_PER_LSB,
     SPIKEGADGETS_BASIC_RECORD_SIZE,
     SPIKEGADGETS_MAG_RECORD_SIZE,
     STANDARD_GRAVITY_MS2,
@@ -27,7 +27,7 @@ class SpikeGadgetsIMUData:
         accel_raw: np.ndarray,
         gyro_raw: np.ndarray,
         mag_raw: Optional[np.ndarray] = None,
-        sampling_rate: float = SPIKEGADGETS_DEFAULT_CLOCK_RATE,
+        sampling_rate: float = SPIKEGADGETS_DEFAULT_CLOCK_RATE_HZ,
         metadata: Optional[Dict[str, Any]] = None,
     ):
         """Initialize SpikeGadgets IMU data container.
@@ -87,7 +87,7 @@ class SpikeGadgetsIMUData:
         """Whether magnetometer data is available."""
         return self.mag_raw is not None
 
-    def get_accel_g(self, scale_factor: float = SPIKEGADGETS_ACCEL_SCALE_FACTOR) -> np.ndarray:
+    def get_accel_g(self, scale_factor: float = SPIKEGADGETS_ACCEL_SCALE_FACTOR_G_PER_LSB) -> np.ndarray:
         """Convert raw accelerometer measurements to g units.
 
         Parameters
@@ -256,6 +256,65 @@ class SpikeGadgetsIMUData:
         )
 
 
+# Constants for data validation
+INT16_MIN = -32768
+INT16_MAX = 32767
+SATURATION_THRESHOLD = 0.95  # Warn if >95% of range is used
+
+
+def _validate_imu_data_ranges(
+    accel_data: np.ndarray,
+    gyro_data: np.ndarray,
+    mag_data: Optional[np.ndarray] = None
+) -> None:
+    """Validate IMU data ranges and check for saturation/overflow.
+
+    Parameters
+    ----------
+    accel_data : np.ndarray, shape (n_samples, 3)
+        Raw accelerometer data
+    gyro_data : np.ndarray, shape (n_samples, 3)
+        Raw gyroscope data
+    mag_data : np.ndarray, shape (n_samples, 3), optional
+        Raw magnetometer data
+
+    Raises
+    ------
+    ValueError
+        If data contains values outside int16 range
+
+    Warns
+    -----
+    UserWarning
+        If data appears saturated (near int16 limits)
+    """
+    def check_saturation(data: np.ndarray, name: str) -> None:
+        """Check for saturation in sensor data."""
+        min_val, max_val = np.min(data), np.max(data)
+
+        # Check for overflow
+        if min_val < INT16_MIN or max_val > INT16_MAX:
+            raise ValueError(
+                f"{name} data contains values outside int16 range: [{min_val}, {max_val}]"
+            )
+
+        # Check for saturation
+        saturation_min = INT16_MIN * SATURATION_THRESHOLD
+        saturation_max = INT16_MAX * SATURATION_THRESHOLD
+
+        if min_val <= saturation_min or max_val >= saturation_max:
+            saturated_samples = np.sum((data <= saturation_min) | (data >= saturation_max))
+            warnings.warn(
+                f"{name} data may be saturated: {saturated_samples} samples near int16 limits "
+                f"(range: [{min_val}, {max_val}], limits: [{INT16_MIN}, {INT16_MAX}])"
+            )
+
+    check_saturation(accel_data, "Accelerometer")
+    check_saturation(gyro_data, "Gyroscope")
+    if mag_data is not None:
+        check_saturation(mag_data, "Magnetometer")
+
+
 def load_spikegadgets_binary(file_path: Path) -> SpikeGadgetsIMUData:
     """Load SpikeGadgets IMU data from binary file.
 
@@ -295,9 +354,25 @@ def load_spikegadgets_binary(file_path: Path) -> SpikeGadgetsIMUData:
             record_size = mag_record_size
             has_mag = True
         else:
-            raise ValueError("Binary file size doesn't match expected record format")
+            # Provide detailed error message about file format mismatch
+            file_size = len(data)
+            basic_remainder = file_size % basic_record_size
+            mag_remainder = file_size % mag_record_size
+            raise ValueError(
+                f"Binary file size ({file_size} bytes) doesn't match expected record format. "
+                f"Remainder: {basic_remainder} bytes for basic format (expected 0), "
+                f"{mag_remainder} bytes for magnetometer format (expected 0). "
+                f"Expected record sizes: {basic_record_size} or {mag_record_size} bytes."
+            )
 
         n_records = len(data) // record_size
+
+        # Validate file integrity
+        if n_records == 0:
+            raise ValueError(f"File too small: contains 0 complete records (file size: {len(data)} bytes, record size: {record_size} bytes)")
+
+        if len(data) != n_records * record_size:
+            raise ValueError(f"Corrupt IMU file: size not exact multiple of record size (file: {len(data)} bytes, expected: {n_records * record_size} bytes)")
 
         # Unpack binary data vectorized
         if has_mag:
@@ -329,7 +404,10 @@ def load_spikegadgets_binary(file_path: Path) -> SpikeGadgetsIMUData:
             gyro_data = imu_values[:, 3:6]
             mag_data = None
 
-        # Convert to numpy arrays
+        # Validate data ranges and check for potential int16 overflow
+        _validate_imu_data_ranges(accel_data, gyro_data, mag_data if has_mag else None)
+
+        # Convert to numpy arrays with explicit dtype
         timestamps = timestamps.astype(np.float64)
         accel_raw = accel_data.astype(np.float64)
         gyro_raw = gyro_data.astype(np.float64)
@@ -337,7 +415,7 @@ def load_spikegadgets_binary(file_path: Path) -> SpikeGadgetsIMUData:
 
         # Convert timestamps from SpikeGadgets units to seconds
         # Use default SpikeGadgets clock rate
-        clock_rate = SPIKEGADGETS_DEFAULT_CLOCK_RATE
+        clock_rate = SPIKEGADGETS_DEFAULT_CLOCK_RATE_HZ
         timestamps = timestamps / clock_rate
 
         # Create metadata
@@ -359,6 +437,10 @@ def load_spikegadgets_binary(file_path: Path) -> SpikeGadgetsIMUData:
             metadata=metadata,
         )
 
+    except struct.error as e:
+        raise ValueError(f"Binary format error in SpikeGadgets file: {e}")
+    except MemoryError as e:
+        raise ValueError(f"File too large to load into memory: {e}")
     except Exception as e:
         raise ValueError(f"Failed to read SpikeGadgets binary file: {e}")
 

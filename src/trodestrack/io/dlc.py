@@ -15,7 +15,7 @@ class DLCKeypointData:
         timestamps: np.ndarray,
         keypoints: Dict[str, np.ndarray],
         confidences: Dict[str, np.ndarray],
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ):
         """Initialize DLC keypoint data container.
 
@@ -27,7 +27,9 @@ class DLCKeypointData:
         """
         self.timestamps = np.asarray(timestamps)
         self.keypoints = {name: np.asarray(pos) for name, pos in keypoints.items()}
-        self.confidences = {name: np.asarray(conf) for name, conf in confidences.items()}
+        self.confidences = {
+            name: np.asarray(conf) for name, conf in confidences.items()
+        }
         self.metadata = metadata or {}
 
         # Validate shapes
@@ -67,7 +69,7 @@ class DLCKeypointData:
     def get_valid_frames(
         self,
         keypoint_names: Optional[List[str]] = None,
-        confidence_threshold: float = 0.5
+        confidence_threshold: float = 0.5,
     ) -> np.ndarray:
         """Get boolean mask for frames with sufficient keypoint confidence.
 
@@ -103,9 +105,7 @@ class DLCKeypointData:
         return self.keypoints[name], self.confidences[name]
 
     def get_led_data(
-        self,
-        front_keypoint: str = "front",
-        back_keypoint: str = "back"
+        self, front_keypoint: str = "front", back_keypoint: str = "back"
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Extract LED-like data from specific keypoints.
 
@@ -129,9 +129,7 @@ class DLCKeypointData:
         return front_pos, back_pos, front_conf, back_conf
 
     def get_heading_from_keypoints(
-        self,
-        front_keypoint: str = "front",
-        back_keypoint: str = "back"
+        self, front_keypoint: str = "front", back_keypoint: str = "back"
     ) -> np.ndarray:
         """Get heading angle from keypoint vector.
 
@@ -147,9 +145,7 @@ class DLCKeypointData:
         return np.arctan2(led_vector[:, 1], led_vector[:, 0])
 
     def get_center_position(
-        self,
-        front_keypoint: str = "front",
-        back_keypoint: str = "back"
+        self, front_keypoint: str = "front", back_keypoint: str = "back"
     ) -> np.ndarray:
         """Get center position between two keypoints.
 
@@ -197,7 +193,7 @@ def load_dlc_csv(file_path: Path) -> DLCKeypointData:
     bodyparts = df.columns.levels[1]
 
     # Generate timestamps if not provided
-    if df.index.name == 'frame':
+    if df.index.name == "frame":
         # Assume frame numbers, need to convert to timestamps
         # This requires fps information - use metadata or assume 30 fps
         fps = 30.0  # Default assumption
@@ -213,9 +209,9 @@ def load_dlc_csv(file_path: Path) -> DLCKeypointData:
     for bodypart in bodyparts:
         try:
             # Get x, y coordinates and likelihood
-            x_col = (scorer, bodypart, 'x')
-            y_col = (scorer, bodypart, 'y')
-            likelihood_col = (scorer, bodypart, 'likelihood')
+            x_col = (scorer, bodypart, "x")
+            y_col = (scorer, bodypart, "y")
+            likelihood_col = (scorer, bodypart, "likelihood")
 
             if all(col in df.columns for col in [x_col, y_col, likelihood_col]):
                 x_vals = df[x_col].values
@@ -237,18 +233,18 @@ def load_dlc_csv(file_path: Path) -> DLCKeypointData:
 
     # Create metadata
     metadata = {
-        'file_path': str(file_path),
-        'n_frames': len(df),
-        'scorer': scorer,
-        'bodyparts': list(bodyparts),
-        'format': 'dlc_csv'
+        "file_path": str(file_path),
+        "n_frames": len(df),
+        "scorer": scorer,
+        "bodyparts": list(bodyparts),
+        "format": "dlc_csv",
     }
 
     return DLCKeypointData(
         timestamps=timestamps,
         keypoints=keypoints,
         confidences=confidences,
-        metadata=metadata
+        metadata=metadata,
     )
 
 
@@ -269,21 +265,22 @@ def load_dlc_h5(file_path: Path) -> DLCKeypointData:
     try:
         import h5py
     except ImportError:
-        raise ImportError("h5py required for HDF5 support. Install with: pip install h5py")
+        raise ImportError(
+            "h5py required for HDF5 support. Install with: pip install h5py"
+        )
 
     if not file_path.exists():
         raise FileNotFoundError(f"DLC file not found: {file_path}")
 
     try:
-        with h5py.File(file_path, 'r') as f:
-            # Load data using pandas HDFStore format
-            df = pd.read_hdf(file_path)
+        # Load data using pandas HDFStore format
+        df = pd.read_hdf(file_path)
 
-            # Process similar to CSV but from HDF5
-            if isinstance(df.columns, pd.MultiIndex):
-                return _process_dlc_dataframe(df, file_path)
-            else:
-                raise ValueError("HDF5 file does not have expected MultiIndex columns")
+        # Process similar to CSV but from HDF5
+        if isinstance(df.columns, pd.MultiIndex):
+            return _process_dlc_dataframe(df, file_path)
+        else:
+            raise ValueError("HDF5 file does not have expected MultiIndex columns")
 
     except Exception as e:
         raise ValueError(f"Failed to read DLC HDF5 file: {e}")
@@ -329,7 +326,7 @@ def _process_dlc_dataframe(df: pd.DataFrame, file_path: Path) -> DLCKeypointData
     bodyparts = df.columns.levels[1]
 
     # Generate timestamps
-    if df.index.name == 'frame':
+    if df.index.name == "frame":
         fps = 30.0  # Default assumption
         timestamps = df.index.values / fps
         warnings.warn(f"No timestamp column found, assuming {fps} fps")
@@ -343,9 +340,9 @@ def _process_dlc_dataframe(df: pd.DataFrame, file_path: Path) -> DLCKeypointData
     for bodypart in bodyparts:
         try:
             # Get x, y coordinates and likelihood
-            x_col = (scorer, bodypart, 'x')
-            y_col = (scorer, bodypart, 'y')
-            likelihood_col = (scorer, bodypart, 'likelihood')
+            x_col = (scorer, bodypart, "x")
+            y_col = (scorer, bodypart, "y")
+            likelihood_col = (scorer, bodypart, "likelihood")
 
             if all(col in df.columns for col in [x_col, y_col, likelihood_col]):
                 x_vals = df[x_col].values
@@ -375,18 +372,18 @@ def _process_dlc_dataframe(df: pd.DataFrame, file_path: Path) -> DLCKeypointData
 
     # Create metadata
     metadata = {
-        'file_path': str(file_path),
-        'n_frames': len(df),
-        'scorer': scorer,
-        'bodyparts': list(bodyparts),
-        'format': 'dlc_processed'
+        "file_path": str(file_path),
+        "n_frames": len(df),
+        "scorer": scorer,
+        "bodyparts": list(bodyparts),
+        "format": "dlc_processed",
     }
 
     return DLCKeypointData(
         timestamps=timestamps,
         keypoints=keypoints,
         confidences=confidences,
-        metadata=metadata
+        metadata=metadata,
     )
 
 
@@ -401,11 +398,11 @@ def load_dlc(file_path: Path) -> DLCKeypointData:
     """
     file_path = Path(file_path)
 
-    if file_path.suffix.lower() == '.csv':
+    if file_path.suffix.lower() == ".csv":
         return load_dlc_csv(file_path)
-    elif file_path.suffix.lower() in ['.h5', '.hdf5']:
+    elif file_path.suffix.lower() in [".h5", ".hdf5"]:
         return load_dlc_h5(file_path)
-    elif file_path.suffix.lower() in ['.pkl', '.pickle']:
+    elif file_path.suffix.lower() in [".pkl", ".pickle"]:
         return load_dlc_pickle(file_path)
     else:
         raise ValueError(f"Unsupported DLC file format: {file_path.suffix}")

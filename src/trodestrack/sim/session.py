@@ -12,7 +12,7 @@ from ..constants import (
     MAX_INITIAL_SPEED_CM_S,
     TURN_ANGLE_STD_RAD,
     ACCELERATION_DIVISOR,
-    MIN_VELOCITY_THRESHOLD,
+    MIN_VELOCITY_THRESHOLD_CM_S,
     PI_RADIANS,
 )
 
@@ -127,7 +127,7 @@ def _generate_ground_truth_trajectory(config: SimConfig) -> Dict[str, np.ndarray
         positions[i] = pos + velocities[i] * dt
 
         # Update heading from velocity
-        if np.linalg.norm(velocities[i]) > MIN_VELOCITY_THRESHOLD:  # Avoid division by zero
+        if np.linalg.norm(velocities[i]) > MIN_VELOCITY_THRESHOLD_CM_S:  # Avoid division by zero
             headings[i] = np.arctan2(velocities[i, 1], velocities[i, 0])
         else:
             headings[i] = headings[i - 1]  # Keep previous heading if not moving
