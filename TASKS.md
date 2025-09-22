@@ -16,12 +16,12 @@
 
 ## Milestone 2 — Configuration & Data IO
 
-- [ ] Implement `config/` schemas using Pydantic.
+- [x] Implement `config/` schemas using Pydantic.
 - [ ] Create loaders in `io/` for:
   - [ ] Trodes LED outputs.
   - [ ] DeepLabCut keypoints.
   - [ ] SpikeGadgets IMU streams.
-- [ ] Write unit tests for IO and config validation.
+- [x] Write unit tests for IO and config validation.
 - [ ] Add synthetic data generator (video + IMU).
   - [ ] Add sim/ module to generate synthetic sessions (IMU + video).
   - [ ] Implement SimConfig schema (extends SessionConfig).
