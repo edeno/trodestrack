@@ -11,6 +11,7 @@ from typing import Optional, Tuple
 
 import jax
 import jax.numpy as jnp
+from jax.typing import ArrayLike
 
 from ._solvers import mahalanobis_distance as safe_mahalanobis_distance
 
@@ -18,7 +19,7 @@ from ._solvers import mahalanobis_distance as safe_mahalanobis_distance
 def mahalanobis_distance(
     residual: jnp.ndarray,
     covariance: jnp.ndarray,
-) -> float:
+) -> ArrayLike:
     """Compute Mahalanobis distance of residual.
 
     Args:
@@ -36,7 +37,7 @@ def mahalanobis_gate(
     residual: jnp.ndarray,
     covariance: jnp.ndarray,
     threshold: float,
-) -> bool:
+) -> ArrayLike:
     """Apply Mahalanobis gating to measurement.
 
     Args:
@@ -183,7 +184,7 @@ def validate_and_gate_measurement(
     min_confidence: float = 0.5,
     gating_threshold: Optional[float] = None,
     measurement_dim: Optional[int] = None,
-) -> Tuple[bool, float]:
+) -> Tuple[ArrayLike, ArrayLike]:
     """Validate and gate a single measurement.
 
     Args:

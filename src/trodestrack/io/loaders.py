@@ -111,10 +111,12 @@ def _load_video_npz(file_path: Path) -> Dict[str, Any]:
     }
 
     # Validate data shapes
-    n_frames = len(result["timestamps"])
-    if result["positions"].shape != (n_frames, 2):
+    timestamps = result["timestamps"]
+    positions = result["positions"]
+    n_frames = len(timestamps)
+    if positions.shape != (n_frames, 2):
         raise ValueError(
-            f"Invalid positions shape: expected ({n_frames}, 2), got {result['positions'].shape}"
+            f"Invalid positions shape: expected ({n_frames}, 2), got {positions.shape}"
         )
 
     return result
@@ -158,14 +160,14 @@ def _load_video_csv(file_path: Path) -> Dict[str, Any]:
         timestamps = np.arange(len(df)) / 30.0  # Assume 30 FPS
         logger.warning("No timestamp column found, using frame index at 30 FPS")
     else:
-        timestamps = df[timestamp_col].values
+        timestamps = np.asarray(df[timestamp_col].values, dtype=np.float64)
 
     if x_col is None or y_col is None:
         raise ValueError("Could not find x and y position columns in CSV")
 
-    positions = np.column_stack([df[x_col].values, df[y_col].values])
-    confidences = df[confidence_col].values if confidence_col else np.ones(len(df))
-    headings = df[heading_col].values if heading_col else None
+    positions = np.column_stack([np.asarray(df[x_col].values), np.asarray(df[y_col].values)])
+    confidences = np.asarray(df[confidence_col].values) if confidence_col else np.ones(len(df))
+    headings = np.asarray(df[heading_col].values) if heading_col else None
 
     # Convert to JAX arrays for better performance
     return {

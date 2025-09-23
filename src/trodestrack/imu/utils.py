@@ -275,7 +275,7 @@ def validate_imu_data_quality(
     - Gravity alignment check
     - Bias estimation
     """
-    diagnostics = {}
+    diagnostics: dict[str, Any] = {}
 
     # Check data shapes
     n_samples = len(timestamps)

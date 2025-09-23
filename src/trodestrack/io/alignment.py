@@ -419,13 +419,13 @@ def check_timestamp_synchronization(
     sample_frames = DEFAULT_SYNC_SAMPLE_FRAMES // 4 if ptp_enabled else DEFAULT_SYNC_SAMPLE_FRAMES
 
     # Find nearest IMU samples for video frames
-    alignment_errors = []
+    alignment_errors_list = []
     for video_time in overlap_video_times[:sample_frames]:  # Sample first N frames
         time_diffs = np.abs(imu_timestamps - video_time)
         min_error = np.min(time_diffs)
-        alignment_errors.append(min_error)
+        alignment_errors_list.append(min_error)
 
-    alignment_errors = np.array(alignment_errors)
+    alignment_errors = np.array(alignment_errors_list)
     mean_error = np.mean(alignment_errors)
     max_error = np.max(alignment_errors)
 

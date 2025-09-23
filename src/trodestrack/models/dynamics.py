@@ -8,12 +8,13 @@ This module implements the prediction step of the EKF/UKF, including:
 
 import jax
 import jax.numpy as jnp
+from jax.typing import ArrayLike
 
 from .state import State2D
 
 
 @jax.jit
-def wrap_angle(angle: float) -> float:
+def wrap_angle(angle: ArrayLike) -> ArrayLike:
     """Wrap angle to [-π, π] range using JAX operations.
 
     Args:

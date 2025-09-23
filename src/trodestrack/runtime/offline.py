@@ -138,10 +138,12 @@ def _load_and_sync_data(config: SessionConfig) -> Tuple[Optional[dict], Optional
         if config.mapping.type == "homography":
             logger.info("Applying homography coordinate transformation")
             # Apply homography transformation
-            homography_matrix = jnp.array(config.mapping.homography_matrix)
-            video_data["positions"] = transform_points_pixel_to_cm(
-                video_data["positions"], homography_matrix
-            )
+            if config.mapping.homography_matrix is not None:
+                video_data["positions"] = transform_points_pixel_to_cm(
+                    video_data["positions"], config.mapping.homography_matrix
+                )
+            else:
+                raise ValueError("Homography matrix is required for homography mapping type")
         elif config.mapping.type == "ruler_scale":
             logger.info("Applying ruler-scale coordinate transformation")
             # Convert pixels to cm using scale
@@ -232,11 +234,16 @@ def _run_filtering_pass(
         frame_timestamps = video_data["timestamps"]
     else:
         # Create artificial frames at video rate for IMU-only processing
-        duration = imu_data["timestamps"][-1] - imu_data["timestamps"][0]
-        n_frames = int(duration * config.video_fps)
-        frame_timestamps = jnp.linspace(
-            imu_data["timestamps"][0], imu_data["timestamps"][-1], n_frames
-        )
+        if imu_data is not None:
+            duration = imu_data["timestamps"][-1] - imu_data["timestamps"][0]
+            n_frames = int(duration * config.video_fps)
+            frame_timestamps = jnp.linspace(
+                imu_data["timestamps"][0], imu_data["timestamps"][-1], n_frames
+            )
+        else:
+            # Default to 1 second at video FPS if no IMU data
+            n_frames = int(config.video_fps)
+            frame_timestamps = jnp.linspace(0.0, 1.0, n_frames)
 
     n_frames = len(frame_timestamps)
     logger.info(f"Processing {n_frames} frames")

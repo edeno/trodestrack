@@ -199,7 +199,7 @@ class SpikeGadgetsIMUData:
         downsampled_timestamps = self.timestamps[indices]
         downsampled_accel = self.accel_raw[indices]
         downsampled_gyro = self.gyro_raw[indices]
-        downsampled_mag = self.mag_raw[indices] if self.has_magnetometer else None
+        downsampled_mag = self.mag_raw[indices] if (self.has_magnetometer and self.mag_raw is not None) else None
 
         # Update metadata
         new_metadata = self.metadata.copy()
@@ -239,7 +239,7 @@ class SpikeGadgetsIMUData:
         sliced_timestamps = self.timestamps[indices]
         sliced_accel = self.accel_raw[indices]
         sliced_gyro = self.gyro_raw[indices]
-        sliced_mag = self.mag_raw[indices] if self.has_magnetometer else None
+        sliced_mag = self.mag_raw[indices] if (self.has_magnetometer and self.mag_raw is not None) else None
 
         # Update metadata
         new_metadata = self.metadata.copy()
@@ -409,15 +409,15 @@ def load_spikegadgets_binary(file_path: Path) -> SpikeGadgetsIMUData:
         _validate_imu_data_ranges(accel_data, gyro_data, mag_data if has_mag else None)
 
         # Convert to numpy arrays with explicit dtype
-        timestamps = timestamps.astype(np.float64)
+        timestamps_float = timestamps.astype(np.float64)
         accel_raw = accel_data.astype(np.float64)
         gyro_raw = gyro_data.astype(np.float64)
-        mag_raw = mag_data.astype(np.float64) if has_mag else None
+        mag_raw = mag_data.astype(np.float64) if (has_mag and mag_data is not None) else None
 
         # Convert timestamps from SpikeGadgets units to seconds
         # Use default SpikeGadgets clock rate
         clock_rate = SPIKEGADGETS_DEFAULT_CLOCK_RATE_HZ
-        timestamps = timestamps / clock_rate
+        timestamps_seconds = timestamps_float / clock_rate
 
         # Create metadata
         metadata = {
@@ -430,7 +430,7 @@ def load_spikegadgets_binary(file_path: Path) -> SpikeGadgetsIMUData:
         }
 
         return SpikeGadgetsIMUData(
-            timestamps=timestamps,
+            timestamps=timestamps_seconds,
             accel_raw=accel_raw,
             gyro_raw=gyro_raw,
             mag_raw=mag_raw,
@@ -488,14 +488,14 @@ def load_spikegadgets_csv(file_path: Path) -> SpikeGadgetsIMUData:
         raise ValueError(f"Missing required columns: {missing_cols}")
 
     # Extract data
-    timestamps = df["timestamp"].values
-    accel_raw = df[["accel_x", "accel_y", "accel_z"]].values
-    gyro_raw = df[["gyro_x", "gyro_y", "gyro_z"]].values
+    timestamps = np.asarray(df["timestamp"].values)
+    accel_raw = np.asarray(df[["accel_x", "accel_y", "accel_z"]].values)
+    gyro_raw = np.asarray(df[["gyro_x", "gyro_y", "gyro_z"]].values)
 
     # Check for magnetometer data
     mag_cols = ["mag_x", "mag_y", "mag_z"]
     if all(col in df.columns for col in mag_cols):
-        mag_raw = df[mag_cols].values
+        mag_raw = np.asarray(df[mag_cols].values)
         has_mag = True
     else:
         mag_raw = None
@@ -503,7 +503,7 @@ def load_spikegadgets_csv(file_path: Path) -> SpikeGadgetsIMUData:
 
     # Estimate sampling rate
     if len(timestamps) > 1:
-        dt = np.median(np.diff(timestamps))
+        dt = np.median(np.diff(np.asarray(timestamps)))
         sampling_rate = float(1.0 / dt)
     else:
         sampling_rate = 30000.0  # Default assumption
