@@ -5,9 +5,10 @@ This module implements the EKF algorithm for online state estimation, featuring:
 - Robust measurement handling with gating
 - Efficient Jacobian computation via automatic differentiation
 - Support for missing measurements and occlusions
+- Functional interface for lax.scan forward pass
 """
 
-from typing import NamedTuple, Optional, Tuple
+from typing import NamedTuple, Optional, Tuple, Dict, Any
 
 import jax
 import jax.numpy as jnp
@@ -53,6 +54,36 @@ class EKFResult(NamedTuple):
     innovation_covariance: jnp.ndarray
     kalman_gain: jnp.ndarray
     gated: bool
+
+
+class EkfCarry(NamedTuple):
+    """Carry state for lax.scan EKF forward pass.
+
+    Attributes:
+        x: Current state estimate (8-dimensional)
+        P: Current covariance matrix (8x8)
+    """
+    x: jnp.ndarray
+    P: jnp.ndarray
+
+
+class EkfOutputs(NamedTuple):
+    """Outputs from EKF step for lax.scan.
+
+    Attributes:
+        x_filt: Filtered state estimate
+        P_filt: Filtered covariance matrix
+        x_pred: Predicted state estimate (before update)
+        P_pred: Predicted covariance matrix (before update)
+    """
+    x_filt: jnp.ndarray
+    P_filt: jnp.ndarray
+    x_pred: jnp.ndarray
+    P_pred: jnp.ndarray
+
+
+# Type alias for EKF step input
+EkfInput = Tuple[Dict[str, Any], float, Optional[jnp.ndarray], Dict[str, Any]]
 
 
 @jax.jit
@@ -364,6 +395,112 @@ def create_initial_ekf_state(
         covariance=initial_covariance,
         log_likelihood=0.0,
     )
+
+
+@jax.jit
+def ekf_step(carry: EkfCarry, inp: EkfInput) -> Tuple[EkfCarry, EkfOutputs]:
+    """Functional EKF step for lax.scan forward pass.
+
+    Args:
+        carry: Current EKF state (x, P)
+        inp: Input tuple (meas_struct, dt, imu_block, filter_cfg)
+
+    Returns:
+        Tuple of (new_carry, outputs) where:
+        - new_carry: Updated EKF state after filtering
+        - outputs: Filtered and predicted states/covariances
+    """
+    x, P = carry
+    meas_struct, dt, imu_block, filter_cfg = inp
+
+    # Extract filter configuration
+    velocity_damping = filter_cfg.get('velocity_damping', 0.1)
+    accel_noise_std = filter_cfg.get('accel_noise_std', 0.5)
+    gyro_noise_std = filter_cfg.get('gyro_noise_std', 0.1)
+    bias_drift_std = filter_cfg.get('bias_drift_std', 0.01)
+    position_noise_std = filter_cfg.get('position_noise_std', 1.0)
+    heading_noise_std = filter_cfg.get('heading_noise_std', 0.1)
+    gate_threshold = filter_cfg.get('gate_threshold', 9.21)
+
+    # Prediction step
+    # Extract IMU measurements (handle None case)
+    if imu_block is not None:
+        accel = imu_block[:2]  # [ax, ay]
+        gyro = imu_block[2:]   # [gz]
+    else:
+        # Use zero IMU measurements if not available
+        accel = jnp.zeros(2)
+        gyro = jnp.zeros(1)
+
+    # Predict state using existing JAX function
+    x_pred = _predict_state_jax(x, dt, accel, gyro, velocity_damping)
+
+    # Predict covariance using linearized dynamics
+    process_noise = compute_process_noise(dt, accel_noise_std, gyro_noise_std, bias_drift_std)
+    P_pred = predict_covariance(P, x, dt, accel, gyro, velocity_damping, process_noise)
+
+    # Measurement update step
+    # Extract measurements from meas_struct
+    position = meas_struct.get('position')
+    heading = meas_struct.get('heading')
+    confidence = meas_struct.get('confidence', 1.0)
+
+    # Create EKF state for measurement update
+    pred_ekf_state = EKFState(state=x_pred, covariance=P_pred, log_likelihood=0.0)
+
+    # Skip update if no measurements available
+    if position is None and heading is None:
+        # No measurement update - return prediction
+        x_filt = x_pred
+        P_filt = P_pred
+    else:
+        # Create measurement vector and noise
+        if position is not None and heading is not None:
+            measurement = jnp.concatenate([position, jnp.array([heading])])
+            has_heading = True
+        elif position is not None:
+            measurement = position
+            has_heading = False
+        else:
+            # Heading-only case (rare)
+            dummy_position = x_pred[:2]
+            measurement = jnp.concatenate([dummy_position, jnp.array([heading])])
+            has_heading = True
+            confidence = 0.01  # Very low confidence for dummy position
+
+        # Create measurement noise matrix
+        measurement_noise = create_measurement_noise(
+            position_noise_std,
+            confidence,
+            has_heading,
+            heading_noise_std if has_heading else None,
+        )
+
+        # Perform update
+        result = ekf_update(
+            pred_ekf_state,
+            measurement,
+            measurement_noise,
+            has_heading,
+            gate_threshold,
+        )
+
+        # Extract filtered state and covariance
+        x_filt = result.state.state
+        P_filt = result.state.covariance
+
+    # Create outputs
+    outputs = EkfOutputs(
+        x_filt=x_filt,
+        P_filt=P_filt,
+        x_pred=x_pred,
+        P_pred=P_pred,
+    )
+
+    # Create new carry state
+    new_carry = EkfCarry(x=x_filt, P=P_filt)
+
+    return new_carry, outputs
 
 
 class EKFFilter:
