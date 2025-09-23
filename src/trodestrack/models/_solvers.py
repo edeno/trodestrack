@@ -2,9 +2,11 @@
 
 import jax.numpy as jnp
 import jax.scipy.linalg as jlinalg
+from jax import Array
+from jax.typing import ArrayLike
 
 
-def _symmetrize_and_stabilize(A: jnp.ndarray, jitter: float = 1e-12) -> jnp.ndarray:
+def _symmetrize_and_stabilize(A: ArrayLike, jitter: float = 1e-12) -> Array:
     """Symmetrize matrix and add jitter for numerical stability.
 
     Parameters
@@ -23,7 +25,7 @@ def _symmetrize_and_stabilize(A: jnp.ndarray, jitter: float = 1e-12) -> jnp.ndar
     return A_sym + jitter * jnp.eye(A.shape[0])
 
 
-def safe_solve(A: jnp.ndarray, b: jnp.ndarray, jitter: float = 1e-12) -> jnp.ndarray:
+def safe_solve(A: ArrayLike, b: ArrayLike, jitter: float = 1e-12) -> Array:
     """Safely solve Ax = b with PSD hygiene.
 
     Parameters
@@ -44,7 +46,7 @@ def safe_solve(A: jnp.ndarray, b: jnp.ndarray, jitter: float = 1e-12) -> jnp.nda
     return jlinalg.solve(A_stable, b)
 
 
-def safe_cho_solve(A: jnp.ndarray, b: jnp.ndarray, jitter: float = 1e-12) -> jnp.ndarray:
+def safe_cho_solve(A: ArrayLike, b: ArrayLike, jitter: float = 1e-12) -> Array:
     """Safely solve Ax = b using Cholesky decomposition.
 
     Parameters
@@ -67,8 +69,8 @@ def safe_cho_solve(A: jnp.ndarray, b: jnp.ndarray, jitter: float = 1e-12) -> jnp
 
 
 def mahalanobis_distance(
-    residual: jnp.ndarray, covariance: jnp.ndarray, jitter: float = 1e-12
-) -> jnp.ndarray:
+    residual: ArrayLike, covariance: ArrayLike, jitter: float = 1e-12
+) -> Array:
     """Compute Mahalanobis distance using safe solve.
 
     Parameters
@@ -92,8 +94,8 @@ def mahalanobis_distance(
 
 
 def kalman_gain(
-    state_cov: jnp.ndarray, H: jnp.ndarray, measurement_cov: jnp.ndarray, jitter: float = 1e-12
-) -> jnp.ndarray:
+    state_cov: ArrayLike, H: ArrayLike, measurement_cov: ArrayLike, jitter: float = 1e-12
+) -> Array:
     """Compute Kalman gain K = P @ H.T @ S^{-1} using safe solve.
 
     Parameters

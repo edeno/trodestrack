@@ -45,11 +45,11 @@ from .measurements import (
 from .rts_smoother import (
     ForwardPassData,
     RTSResult,
-    rts_smooth_pure,
     RTSSmoother,
     compute_smoothing_improvement,
     rts_backward_step,
     rts_smooth,
+    rts_smooth_pure,
 )
 from .state import (
     STATE_DIM,

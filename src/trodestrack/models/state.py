@@ -14,6 +14,8 @@ Where:
 from typing import Optional, Tuple
 
 import jax.numpy as jnp
+from jax import Array
+from jax.typing import ArrayLike
 from pydantic import BaseModel, ConfigDict
 
 # State dimension as per PRD
@@ -34,19 +36,19 @@ class State2D(BaseModel):
         b_ay: Accelerometer y-axis bias (m/s²)
     """
 
-    x: float
-    y: float
-    vx: float
-    vy: float
-    theta: float
-    b_gz: float
-    b_ax: float
-    b_ay: float
+    x: ArrayLike
+    y: ArrayLike
+    vx: ArrayLike
+    vy: ArrayLike
+    theta: ArrayLike
+    b_gz: ArrayLike
+    b_ax: ArrayLike
+    b_ay: ArrayLike
 
     model_config = ConfigDict(frozen=True)  # Immutable state representation
 
 
-def state_to_array(state: State2D) -> jnp.ndarray:
+def state_to_array(state: State2D) -> Array:
     """Convert State2D to JAX array.
 
     Args:
@@ -61,7 +63,7 @@ def state_to_array(state: State2D) -> jnp.ndarray:
     )
 
 
-def array_to_state(arr: jnp.ndarray) -> State2D:
+def array_to_state(arr: ArrayLike) -> State2D:
     """Convert JAX array to State2D.
 
     Args:
@@ -77,25 +79,25 @@ def array_to_state(arr: jnp.ndarray) -> State2D:
         raise ValueError(f"Expected 8-dimensional array, got shape {arr.shape}")
 
     return State2D(
-        x=float(arr[0]),
-        y=float(arr[1]),
-        vx=float(arr[2]),
-        vy=float(arr[3]),
-        theta=float(arr[4]),
-        b_gz=float(arr[5]),
-        b_ax=float(arr[6]),
-        b_ay=float(arr[7]),
+        x=arr[0],
+        y=arr[1],
+        vx=arr[2],
+        vy=arr[3],
+        theta=arr[4],
+        b_gz=arr[5],
+        b_ax=arr[6],
+        b_ay=arr[7],
     )
 
 
 def create_initial_state(
-    positions: jnp.ndarray,
-    timestamps: jnp.ndarray,
-    confidences: jnp.ndarray,
-    homography: jnp.ndarray,
-    led_front: Optional[jnp.ndarray] = None,
-    led_back: Optional[jnp.ndarray] = None,
-) -> Tuple[State2D, jnp.ndarray]:
+    positions: ArrayLike,
+    timestamps: ArrayLike,
+    confidences: ArrayLike,
+    homography: ArrayLike,
+    led_front: Optional[ArrayLike] = None,
+    led_back: Optional[ArrayLike] = None,
+) -> Tuple[State2D, Array]:
     """Estimate initial state from early video frames.
 
     Args:

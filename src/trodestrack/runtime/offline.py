@@ -13,7 +13,8 @@ from typing import NamedTuple, Optional, Tuple
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax import lax
+from jax import Array, lax
+from jax.typing import ArrayLike
 
 from ..config.schemas import SessionConfig
 from ..geom.homography import transform_points_pixel_to_cm
@@ -38,11 +39,11 @@ class SmoothingResult(NamedTuple):
         diagnostics: Dictionary of diagnostic information
     """
 
-    filtered_states: jnp.ndarray
-    smoothed_states: jnp.ndarray
-    timestamps: jnp.ndarray
-    filtered_covariances: jnp.ndarray
-    smoothed_covariances: jnp.ndarray
+    filtered_states: Array
+    smoothed_states: Array
+    timestamps: Array
+    filtered_covariances: Array
+    smoothed_covariances: Array
     log_likelihood: float
     diagnostics: dict
 
@@ -226,7 +227,7 @@ def _run_filtering_pass(
     video_data: Optional[dict],
     imu_data: Optional[dict],
     sync_info: dict,
-) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+) -> Tuple[Array, Array, Array, Array, Array]:
     """Run the forward filtering pass with EKF."""
 
     # Determine frame timestamps
@@ -259,8 +260,8 @@ def _run_filtering_pass_consistent(
     config: SessionConfig,
     video_data: Optional[dict],
     imu_data: Optional[dict],
-    frame_timestamps: jnp.ndarray,
-) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    frame_timestamps: ArrayLike,
+) -> Tuple[Array, Array, Array, Array, Array]:
     """JAX lax.scan-based filtering implementation for all dataset sizes."""
     n_frames = len(frame_timestamps)
     logger.info(f"Processing {n_frames} frames with JAX lax.scan EKF")
@@ -318,19 +319,19 @@ def _run_filtering_pass_consistent(
     # This transposes the data to create a sequence of frame-wise tuples
     scan_inputs = (
         positions,  # (n_frames, 2)
-        headings,   # (n_frames,)
+        headings,  # (n_frames,)
         confidences,  # (n_frames,)
         position_mask,  # (n_frames,)
         heading_mask,  # (n_frames,)
         imu_blocks,  # (n_frames, 3)
         dts,  # (n_frames,)
         jnp.full(n_frames, velocity_damping),  # (n_frames,)
-        jnp.full(n_frames, accel_noise_std),   # (n_frames,)
-        jnp.full(n_frames, gyro_noise_std),    # (n_frames,)
-        jnp.full(n_frames, bias_drift_std),    # (n_frames,)
-        jnp.full(n_frames, position_noise_std), # (n_frames,)
+        jnp.full(n_frames, accel_noise_std),  # (n_frames,)
+        jnp.full(n_frames, gyro_noise_std),  # (n_frames,)
+        jnp.full(n_frames, bias_drift_std),  # (n_frames,)
+        jnp.full(n_frames, position_noise_std),  # (n_frames,)
         jnp.full(n_frames, heading_noise_std),  # (n_frames,)
-        jnp.full(n_frames, gate_threshold),     # (n_frames,)
+        jnp.full(n_frames, gate_threshold),  # (n_frames,)
     )
 
     # Initial carry state
@@ -362,12 +363,12 @@ def _run_filtering_pass_consistent(
 
 @jax.jit
 def _preintegrate_interval_jax(
-    imu_data: jnp.ndarray,
-    timestamps: jnp.ndarray,
+    imu_data: ArrayLike,
+    timestamps: ArrayLike,
     start_time: float,
     end_time: float,
     damping_lambda: float,
-) -> jnp.ndarray:
+) -> Array:
     """JAX-compiled function to preintegrate IMU for a single interval.
 
     Args:
@@ -412,20 +413,17 @@ def _preintegrate_interval_jax(
     # Conditional execution based on whether we have samples and valid dt
     has_data = (n_samples > 0) & (dt > 0.0)
     return jax.lax.cond(
-        has_data,
-        compute_interval,
-        return_zeros,
-        (imu_data, timestamps, time_mask, dt)
+        has_data, compute_interval, return_zeros, (imu_data, timestamps, time_mask, dt)
     )
 
 
 def _scan_imu_intervals(
     carry: float,
     frame_timestamp: float,
-    imu_data: jnp.ndarray,
-    timestamps: jnp.ndarray,
+    imu_data: ArrayLike,
+    timestamps: ArrayLike,
     damping_lambda: float,
-) -> Tuple[float, jnp.ndarray]:
+) -> Tuple[float, Array]:
     """Scan function for processing IMU intervals between frames.
 
     Args:
@@ -450,9 +448,9 @@ def _scan_imu_intervals(
 
 def _prepare_imu_blocks_for_frames(
     imu_data: dict,
-    frame_timestamps: jnp.ndarray,
+    frame_timestamps: ArrayLike,
     config: SessionConfig,
-) -> jnp.ndarray:
+) -> Array:
     """Prepare IMU measurement blocks for each frame using JAX lax.scan.
 
     Eliminates Python loops and exceptions for optimal JIT performance.
@@ -475,14 +473,14 @@ def _prepare_imu_blocks_for_frames(
 
 
 def _run_smoothing_pass(
-    filtered_states: jnp.ndarray,
-    filtered_covariances: jnp.ndarray,
-    predicted_states: jnp.ndarray,
-    predicted_covariances: jnp.ndarray,
+    filtered_states: ArrayLike,
+    filtered_covariances: ArrayLike,
+    predicted_states: ArrayLike,
+    predicted_covariances: ArrayLike,
     config: SessionConfig,
     imu_data: Optional[dict],
-    frame_timestamps: jnp.ndarray,
-) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    frame_timestamps: ArrayLike,
+) -> Tuple[Array, Array]:
     """Run the backward smoothing pass with RTS smoother."""
 
     if config.filter.filter_type == "ekf":
@@ -514,7 +512,7 @@ def _run_smoothing_pass(
     return smoothed_states, smoothed_covariances
 
 
-def _create_initial_covariance(initial_variances: dict) -> jnp.ndarray:
+def _create_initial_covariance(initial_variances: dict) -> Array:
     """Create initial covariance matrix from configuration."""
     return jnp.diag(
         jnp.array(
@@ -586,8 +584,8 @@ def _synchronize_timestamps(
 
 def _collect_diagnostics(
     config: SessionConfig,
-    filtered_states: jnp.ndarray,
-    smoothed_states: jnp.ndarray,
+    filtered_states: ArrayLike,
+    smoothed_states: ArrayLike,
     sync_info: dict,
     ekf_filter: EKFFilter,
 ) -> dict:
@@ -624,7 +622,7 @@ def _collect_diagnostics(
 
 
 def _compute_smoothing_improvement(
-    filtered_positions: jnp.ndarray, smoothed_positions: jnp.ndarray
+    filtered_positions: ArrayLike, smoothed_positions: ArrayLike
 ) -> float:
     """Compute RMS improvement from smoothing."""
     if len(filtered_positions) < 2:
@@ -637,9 +635,9 @@ def _compute_smoothing_improvement(
 
 def _save_results(
     config: SessionConfig,
-    filtered_states: jnp.ndarray,
-    smoothed_states: jnp.ndarray,
-    timestamps: jnp.ndarray,
+    filtered_states: ArrayLike,
+    smoothed_states: ArrayLike,
+    timestamps: ArrayLike,
     diagnostics: dict,
 ) -> None:
     """Save results to output directory."""

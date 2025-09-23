@@ -12,8 +12,8 @@ from typing import NamedTuple, Optional, Tuple
 import jax
 import jax.numpy as jnp
 from jax import Array
-from jax.typing import ArrayLike
 from jax.scipy.linalg import cholesky
+from jax.typing import ArrayLike
 
 from ._solvers import _symmetrize_and_stabilize, mahalanobis_distance, safe_solve
 from .dynamics import compute_process_noise, rotation_matrix_2d, wrap_angle
@@ -30,8 +30,8 @@ class UKFState(NamedTuple):
         log_likelihood: Cumulative log-likelihood
     """
 
-    state: jnp.ndarray  # 8-dimensional state vector
-    covariance: jnp.ndarray  # 8x8 covariance matrix
+    state: Array  # 8-dimensional state vector
+    covariance: Array  # 8x8 covariance matrix
     log_likelihood: float
 
 
@@ -47,10 +47,10 @@ class UKFResult(NamedTuple):
     """
 
     state: UKFState
-    innovation: jnp.ndarray
-    innovation_covariance: jnp.ndarray
-    kalman_gain: jnp.ndarray
-    gated: ArrayLike
+    innovation: Array
+    innovation_covariance: Array
+    kalman_gain: Array
+    gated: Array
 
 
 class UKFParams(NamedTuple):
@@ -69,10 +69,10 @@ class UKFParams(NamedTuple):
 
 @jax.jit
 def generate_sigma_points(
-    state: jnp.ndarray,
-    covariance: jnp.ndarray,
+    state: ArrayLike,
+    covariance: ArrayLike,
     params: UKFParams,
-) -> Tuple[jnp.ndarray, jnp.ndarray]:
+) -> Tuple[Array, Array]:
     """Generate sigma points and weights for UKF.
 
     Args:
@@ -126,12 +126,12 @@ def generate_sigma_points(
 
 @jax.jit
 def propagate_sigma_points(
-    sigma_points: jnp.ndarray,
+    sigma_points: ArrayLike,
     dt: float,
-    accel: jnp.ndarray,
-    gyro: jnp.ndarray,
+    accel: ArrayLike,
+    gyro: ArrayLike,
     velocity_damping: float,
-) -> jnp.ndarray:
+) -> Array:
     """Propagate sigma points through dynamics function.
 
     Args:
@@ -186,10 +186,10 @@ def propagate_sigma_points(
 
 @jax.jit
 def predict_from_sigma_points(
-    propagated_points: jnp.ndarray,
-    weights: Tuple[jnp.ndarray, jnp.ndarray],
-    process_noise: jnp.ndarray,
-) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    propagated_points: ArrayLike,
+    weights: Tuple[ArrayLike, ArrayLike],
+    process_noise: ArrayLike,
+) -> Tuple[Array, Array]:
     """Compute predicted mean and covariance from propagated sigma points.
 
     Args:
@@ -220,8 +220,8 @@ def predict_from_sigma_points(
 def ukf_predict(
     ukf_state: UKFState,
     dt: float,
-    accel: jnp.ndarray,
-    gyro: jnp.ndarray,
+    accel: ArrayLike,
+    gyro: ArrayLike,
     velocity_damping: float,
     accel_noise_std: float,
     gyro_noise_std: float,
@@ -267,8 +267,8 @@ def ukf_predict(
 
 @jax.jit
 def measurement_sigma_points_position(
-    sigma_points: jnp.ndarray,
-) -> jnp.ndarray:
+    sigma_points: ArrayLike,
+) -> Array:
     """Transform sigma points through position measurement function.
 
     Args:
@@ -282,8 +282,8 @@ def measurement_sigma_points_position(
 
 @jax.jit
 def measurement_sigma_points_position_heading(
-    sigma_points: jnp.ndarray,
-) -> jnp.ndarray:
+    sigma_points: ArrayLike,
+) -> Array:
     """Transform sigma points through position + heading measurement function.
 
     Args:
@@ -300,8 +300,8 @@ def measurement_sigma_points_position_heading(
 @jax.jit
 def _ukf_update_position_only(
     ukf_state: UKFState,
-    measurement: jnp.ndarray,
-    measurement_noise: jnp.ndarray,
+    measurement: ArrayLike,
+    measurement_noise: ArrayLike,
     gate_threshold: float,
     params: UKFParams,
 ) -> UKFResult:
@@ -382,8 +382,8 @@ def _ukf_update_position_only(
 @jax.jit
 def _ukf_update_position_heading(
     ukf_state: UKFState,
-    measurement: jnp.ndarray,
-    measurement_noise: jnp.ndarray,
+    measurement: ArrayLike,
+    measurement_noise: ArrayLike,
     gate_threshold: float,
     params: UKFParams,
 ) -> UKFResult:
@@ -472,8 +472,8 @@ def _ukf_update_position_heading(
 
 def ukf_update(
     ukf_state: UKFState,
-    measurement: jnp.ndarray,
-    measurement_noise: jnp.ndarray,
+    measurement: ArrayLike,
+    measurement_noise: ArrayLike,
     has_heading: bool,
     gate_threshold: float = 9.21,
     params: UKFParams = UKFParams(),
@@ -506,7 +506,7 @@ def ukf_update(
 
 def create_initial_ukf_state(
     initial_state: State2D,
-    initial_covariance: jnp.ndarray,
+    initial_covariance: ArrayLike,
 ) -> UKFState:
     """Create initial UKF state from State2D and covariance.
 
@@ -534,7 +534,7 @@ class UKFFilter:
     def __init__(
         self,
         initial_state: State2D,
-        initial_covariance: jnp.ndarray,
+        initial_covariance: ArrayLike,
         velocity_damping: float = 0.1,
         accel_noise_std: float = 0.5,
         gyro_noise_std: float = 0.1,
@@ -577,8 +577,8 @@ class UKFFilter:
     def predict(
         self,
         dt: float,
-        accel: jnp.ndarray,
-        gyro: jnp.ndarray,
+        accel: ArrayLike,
+        gyro: ArrayLike,
     ) -> None:
         """Perform prediction step.
 
@@ -601,7 +601,7 @@ class UKFFilter:
 
     def update(
         self,
-        position: Optional[jnp.ndarray] = None,
+        position: Optional[ArrayLike] = None,
         heading: Optional[float] = None,
         confidence: float = 1.0,
     ) -> UKFResult:
@@ -673,7 +673,7 @@ class UKFFilter:
         """
         return array_to_state(self.ukf_state.state)
 
-    def get_current_covariance(self) -> jnp.ndarray:
+    def get_current_covariance(self) -> Array:
         """Get current covariance matrix.
 
         Returns:

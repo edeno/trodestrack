@@ -18,7 +18,7 @@ from ._solvers import kalman_gain
 from .state import State2D, array_to_state, state_to_array
 
 
-def velocity_measurement(state: State2D) -> jnp.ndarray:
+def velocity_measurement(state: State2D) -> Array:
     """Extract velocity measurement from state.
 
     Args:
@@ -31,7 +31,7 @@ def velocity_measurement(state: State2D) -> jnp.ndarray:
 
 
 @jax.jit
-def compute_velocity_jacobian(state_array: jnp.ndarray) -> jnp.ndarray:
+def compute_velocity_jacobian(state_array: ArrayLike) -> Array:
     """Compute Jacobian of velocity measurement function.
 
     Args:
@@ -51,9 +51,9 @@ def compute_velocity_jacobian(state_array: jnp.ndarray) -> jnp.ndarray:
 
 
 def estimate_velocity_from_positions(
-    positions: jnp.ndarray,
-    timestamps: jnp.ndarray,
-) -> jnp.ndarray:
+    positions: ArrayLike,
+    timestamps: ArrayLike,
+) -> Array:
     """Estimate velocity from sequence of positions using least squares.
 
     Args:
@@ -103,7 +103,7 @@ def estimate_velocity_from_positions(
 def create_velocity_noise(
     velocity_noise_std: float,
     confidence: float,
-) -> jnp.ndarray:
+) -> Array:
     """Create velocity measurement noise matrix.
 
     Args:
@@ -151,10 +151,10 @@ def should_use_velocity_constraint(
 
 def velocity_pseudo_measurement_update(
     state: State2D,
-    state_covariance: jnp.ndarray,
-    observed_velocity: jnp.ndarray,
-    velocity_noise: jnp.ndarray,
-) -> Tuple[State2D, jnp.ndarray]:
+    state_covariance: ArrayLike,
+    observed_velocity: ArrayLike,
+    velocity_noise: ArrayLike,
+) -> Tuple[State2D, Array]:
     """Apply velocity pseudo-measurement update to state.
 
     This implements a standard Kalman filter update using velocity as
@@ -199,9 +199,9 @@ def velocity_pseudo_measurement_update(
 
 
 def compute_velocity_from_recent_positions(
-    positions: jnp.ndarray,
-    timestamps: jnp.ndarray,
-    confidences: jnp.ndarray,
+    positions: ArrayLike,
+    timestamps: ArrayLike,
+    confidences: ArrayLike,
     window_size: int = 5,
     min_confidence: float = 0.7,
 ) -> Tuple[Array, Array, bool]:

@@ -63,8 +63,8 @@ class PreintegrationState(NamedTuple):
         Current time since integration start
     """
 
-    position: jnp.ndarray
-    velocity: jnp.ndarray
+    position: Array
+    velocity: Array
     heading: float
     time: float
 
@@ -87,7 +87,7 @@ def wrap_angle_jax(angle: float) -> float:
 
 
 @jax.jit
-def rotation_matrix_2d(theta: float) -> jnp.ndarray:
+def rotation_matrix_2d(theta: float) -> Array:
     """Create 2D rotation matrix from heading angle.
 
     Parameters
@@ -108,9 +108,9 @@ def rotation_matrix_2d(theta: float) -> jnp.ndarray:
 @jax.jit
 def preintegration_step(
     state: PreintegrationState,
-    imu_sample: chex.Array,
-    gyro_bias: float,
-    accel_bias: jnp.ndarray,
+    imu_sample: ArrayLike,
+    gyro_bias: ArrayLike,
+    accel_bias: ArrayLike,
     damping_lambda: float,
     dt: float,
 ) -> PreintegrationState:
@@ -174,13 +174,13 @@ def preintegration_step(
 
 
 def preintegrate_imu_scan(
-    imu_data: jnp.ndarray,
-    timestamps: jnp.ndarray,
+    imu_data: ArrayLike,
+    timestamps: ArrayLike,
     initial_heading: float = 0.0,
-    initial_velocity: Optional[jnp.ndarray] = None,
-    gyro_bias: float = 0.0,
-    accel_bias: Optional[jnp.ndarray] = None,
-    damping_lambda: float = 0.0,
+    initial_velocity: Optional[ArrayLike] = None,
+    gyro_bias: ArrayLike = 0.0,
+    accel_bias: Optional[ArrayLike] = None,
+    damping_lambda: ArrayLike = 0.0,
 ) -> IMUPreintegrationResult:
     """Pre-integrate IMU measurements using JAX scan.
 
@@ -289,14 +289,14 @@ def preintegrate_imu_scan(
 
 
 def preintegrate_between_frames(
-    imu_data: jnp.ndarray,
-    timestamps: jnp.ndarray,
+    imu_data: ArrayLike,
+    timestamps: ArrayLike,
     start_time: float,
     end_time: float,
     initial_heading: float = 0.0,
-    initial_velocity: Optional[jnp.ndarray] = None,
+    initial_velocity: Optional[ArrayLike] = None,
     gyro_bias: float = 0.0,
-    accel_bias: Optional[jnp.ndarray] = None,
+    accel_bias: Optional[ArrayLike] = None,
     damping_lambda: float = 0.0,
 ) -> IMUPreintegrationResult:
     """Pre-integrate IMU data between two specific time points.
@@ -370,8 +370,8 @@ def preintegrate_between_frames(
 
 
 def convert_spikegadgets_to_preintegration_units(
-    accel_ms2: jnp.ndarray, gyro_rad_s: jnp.ndarray
-) -> jnp.ndarray:
+    accel_ms2: ArrayLike, gyro_rad_s: ArrayLike
+) -> Array:
     """Convert SpikeGadgets IMU data to pre-integration units.
 
     Parameters

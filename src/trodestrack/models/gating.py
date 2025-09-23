@@ -122,11 +122,11 @@ def create_measurement_mask(
 
 
 def apply_measurement_mask(
-    measurements: jnp.ndarray,
-    covariance: jnp.ndarray,
-    jacobian: jnp.ndarray,
-    mask: jnp.ndarray,
-) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    measurements: ArrayLike,
+    covariance: ArrayLike,
+    jacobian: ArrayLike,
+    mask: ArrayLike,
+) -> Tuple[Array, Array, Array]:
     """Apply measurement mask to filter out invalid measurements.
 
     Args:
@@ -160,10 +160,10 @@ def apply_measurement_mask(
 
 @jax.jit
 def compute_innovation_covariance(
-    measurement_jacobian: jnp.ndarray,
-    state_covariance: jnp.ndarray,
-    measurement_noise: jnp.ndarray,
-) -> jnp.ndarray:
+    measurement_jacobian: ArrayLike,
+    state_covariance: ArrayLike,
+    measurement_noise: ArrayLike,
+) -> Array:
     """Compute innovation covariance S = H @ P @ H^T + R.
 
     Args:

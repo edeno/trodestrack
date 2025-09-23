@@ -40,8 +40,8 @@ class EKFState(NamedTuple):
         log_likelihood: Cumulative log-likelihood
     """
 
-    state: jnp.ndarray  # 8-dimensional state vector
-    covariance: jnp.ndarray  # 8x8 covariance matrix
+    state: ArrayLike  # 8-dimensional state vector
+    covariance: ArrayLike  # 8x8 covariance matrix
     log_likelihood: float
 
 
@@ -57,9 +57,9 @@ class EKFResult(NamedTuple):
     """
 
     state: EKFState
-    innovation: jnp.ndarray
-    innovation_covariance: jnp.ndarray
-    kalman_gain: jnp.ndarray
+    innovation: ArrayLike
+    innovation_covariance: ArrayLike
+    kalman_gain: ArrayLike
     gated: ArrayLike
 
 
@@ -71,8 +71,8 @@ class EkfCarry(NamedTuple):
         P: Current covariance matrix (8x8)
     """
 
-    x: jnp.ndarray
-    P: jnp.ndarray
+    x: ArrayLike
+    P: ArrayLike
 
 
 class EkfOutputs(NamedTuple):
@@ -85,14 +85,14 @@ class EkfOutputs(NamedTuple):
         P_pred: Predicted covariance matrix (before update)
     """
 
-    x_filt: jnp.ndarray
-    P_filt: jnp.ndarray
-    x_pred: jnp.ndarray
-    P_pred: jnp.ndarray
+    x_filt: ArrayLike
+    P_filt: ArrayLike
+    x_pred: ArrayLike
+    P_pred: ArrayLike
 
 
 # Type alias for EKF step input
-EkfInput = Tuple[Dict[str, Any], float, Optional[jnp.ndarray], Dict[str, Any]]
+EkfInput = Tuple[Dict[str, Any], float, Optional[ArrayLike], Dict[str, Any]]
 
 
 @dataclass
@@ -110,15 +110,15 @@ class EkfScanInputs:
     """
 
     # Measurement data
-    positions: jnp.ndarray  # (n_frames, 2) - [x, y] positions
-    headings: jnp.ndarray   # (n_frames,) - heading angles
-    confidences: jnp.ndarray  # (n_frames,) - measurement confidences
-    position_valid: jnp.ndarray  # (n_frames,) - True if position is valid
-    heading_valid: jnp.ndarray   # (n_frames,) - True if heading is valid
+    positions: ArrayLike  # (n_frames, 2) - [x, y] positions
+    headings: ArrayLike  # (n_frames,) - heading angles
+    confidences: ArrayLike  # (n_frames,) - measurement confidences
+    position_valid: ArrayLike  # (n_frames,) - True if position is valid
+    heading_valid: ArrayLike  # (n_frames,) - True if heading is valid
 
     # IMU and timing
-    imu_blocks: jnp.ndarray  # (n_frames, 3) - [ax, ay, gz] for each frame
-    dt: jnp.ndarray  # (n_frames,) - time deltas
+    imu_blocks: ArrayLike  # (n_frames, 3) - [ax, ay, gz] for each frame
+    dt: ArrayLike  # (n_frames,) - time deltas
 
     # Filter configuration (constant values)
     velocity_damping: float
@@ -134,8 +134,8 @@ class EkfScanInputs:
 def ekf_predict(
     ekf_state: EKFState,
     dt: float,
-    accel: jnp.ndarray,
-    gyro: jnp.ndarray,
+    accel: ArrayLike,
+    gyro: ArrayLike,
     velocity_damping: float,
     accel_noise_std: float,
     gyro_noise_std: float,
@@ -181,12 +181,12 @@ def ekf_predict(
 
 @jax.jit
 def _predict_state_jax(
-    state_array: jnp.ndarray,
+    state_array: ArrayLike,
     dt: float,
-    accel: jnp.ndarray,
-    gyro: jnp.ndarray,
+    accel: ArrayLike,
+    gyro: ArrayLike,
     velocity_damping: float,
-) -> jnp.ndarray:
+) -> Array:
     """JAX-optimized state prediction function.
 
     Args:
@@ -237,8 +237,8 @@ def _predict_state_jax(
 
 def ekf_update(
     ekf_state: EKFState,
-    measurement: jnp.ndarray,
-    measurement_noise: jnp.ndarray,
+    measurement: ArrayLike,
+    measurement_noise: ArrayLike,
     has_heading: bool,
     gate_threshold: float = 9.21,  # Chi-squared with p=0.01 for 2-3 DOF
 ) -> EKFResult:
@@ -268,8 +268,8 @@ def ekf_update(
 @jax.jit
 def _ekf_update_position_only(
     ekf_state: EKFState,
-    measurement: jnp.ndarray,
-    measurement_noise: jnp.ndarray,
+    measurement: ArrayLike,
+    measurement_noise: ArrayLike,
     gate_threshold: float,
 ) -> EKFResult:
     """JAX-compiled EKF update for position-only measurements."""
@@ -328,8 +328,8 @@ def _ekf_update_position_only(
 @jax.jit
 def _ekf_update_position_heading(
     ekf_state: EKFState,
-    measurement: jnp.ndarray,
-    measurement_noise: jnp.ndarray,
+    measurement: ArrayLike,
+    measurement_noise: ArrayLike,
     gate_threshold: float,
 ) -> EKFResult:
     """JAX-compiled EKF update for position + heading measurements."""
@@ -440,7 +440,7 @@ def ekf_step(carry: EkfCarry, inp: EkfInput) -> Tuple[EkfCarry, EkfOutputs]:
     # Extract IMU measurements (imu_block is guaranteed to be a valid array in our pipeline)
     # If missing data is passed, it will be zeros which is handled correctly
     accel = imu_block[:2]  # [ax, ay]
-    gyro = imu_block[2:]   # [gz]
+    gyro = imu_block[2:]  # [gz]
 
     # Predict state using existing JAX function
     x_pred = _predict_state_jax(x, dt, accel, gyro, velocity_damping)
@@ -520,11 +520,11 @@ class MeasurementArrays(NamedTuple):
     All measurements use NaN to indicate missing values, and masks indicate validity.
     """
 
-    positions: jnp.ndarray  # Shape (n_frames, 2) - [x, y] positions
-    headings: jnp.ndarray  # Shape (n_frames,) - heading angles
-    confidences: jnp.ndarray  # Shape (n_frames,) - confidence values
-    position_mask: jnp.ndarray  # Shape (n_frames,) - True if position valid
-    heading_mask: jnp.ndarray  # Shape (n_frames,) - True if heading valid
+    positions: ArrayLike  # Shape (n_frames, 2) - [x, y] positions
+    headings: ArrayLike  # Shape (n_frames,) - heading angles
+    confidences: ArrayLike  # Shape (n_frames,) - confidence values
+    position_mask: ArrayLike  # Shape (n_frames,) - True if position valid
+    heading_mask: ArrayLike  # Shape (n_frames,) - True if heading valid
 
 
 @jax.jit
@@ -556,7 +556,7 @@ def ekf_step_functional(
 
     # Prediction step
     accel = imu_block[:2]  # [ax, ay]
-    gyro = imu_block[2:]   # [gz]
+    gyro = imu_block[2:]  # [gz]
 
     x_pred = _predict_state_jax(x, dt, accel, gyro, scan_inputs.velocity_damping)
 
@@ -572,7 +572,7 @@ def ekf_step_functional(
         lambda: _functional_measurement_update(
             x_pred, P_pred, position, heading, confidence, pos_valid, head_valid, scan_inputs
         ),
-        lambda: (x_pred, P_pred)  # No update if no position measurement
+        lambda: (x_pred, P_pred),  # No update if no position measurement
     )
 
     # Create outputs
@@ -584,38 +584,44 @@ def ekf_step_functional(
 
 @jax.jit
 def _functional_measurement_update(
-    x_pred: jnp.ndarray,
-    P_pred: jnp.ndarray,
-    position: jnp.ndarray,
+    x_pred: ArrayLike,
+    P_pred: ArrayLike,
+    position: ArrayLike,
     heading: float,
     confidence: float,
     pos_valid: bool,
     head_valid: bool,
     scan_inputs: EkfScanInputs,
-) -> Tuple[jnp.ndarray, jnp.ndarray]:
+) -> Tuple[Array, Array]:
     """Perform measurement update step."""
     # Create measurement vector - always use 3D format [x, y, heading]
-    measurement = jnp.array([
-        position[0],  # x position
-        position[1],  # y position
-        jnp.where(head_valid, heading, x_pred[4])  # heading (or prediction if invalid)
-    ])
+    measurement = jnp.array(
+        [
+            position[0],  # x position
+            position[1],  # y position
+            jnp.where(head_valid, heading, x_pred[4]),  # heading (or prediction if invalid)
+        ]
+    )
 
     # Create measurement noise - large noise for invalid measurements
     pos_noise_var = (scan_inputs.position_noise_std / confidence) ** 2
-    noise_diag = jnp.array([
-        pos_noise_var,  # x position noise
-        pos_noise_var,  # y position noise
-        jnp.where(head_valid, scan_inputs.heading_noise_std**2, 1e6)  # heading noise
-    ])
+    noise_diag = jnp.array(
+        [
+            pos_noise_var,  # x position noise
+            pos_noise_var,  # y position noise
+            jnp.where(head_valid, scan_inputs.heading_noise_std**2, 1e6),  # heading noise
+        ]
+    )
     R = jnp.diag(noise_diag)
 
     # Measurement Jacobian for [x, y, heading]
-    H = jnp.array([
-        [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # x position
-        [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # y position
-        [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],  # heading
-    ])
+    H = jnp.array(
+        [
+            [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # x position
+            [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # y position
+            [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],  # heading
+        ]
+    )
 
     # Predicted measurement
     h_pred = H @ x_pred
@@ -637,13 +643,13 @@ def _functional_measurement_update(
 
 
 def create_functional_scan_inputs(
-    positions: jnp.ndarray,
-    headings: jnp.ndarray,
-    confidences: jnp.ndarray,
-    position_valid: jnp.ndarray,
-    heading_valid: jnp.ndarray,
-    imu_blocks: jnp.ndarray,
-    dt: jnp.ndarray,
+    positions: ArrayLike,
+    headings: ArrayLike,
+    confidences: ArrayLike,
+    position_valid: ArrayLike,
+    heading_valid: ArrayLike,
+    imu_blocks: ArrayLike,
+    dt: ArrayLike,
     velocity_damping: float,
     accel_noise_std: float,
     gyro_noise_std: float,
@@ -694,8 +700,22 @@ def create_functional_scan_inputs(
 @jax.jit
 def ekf_step_pytree(
     carry: EkfCarry,
-    scan_input: Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray,
-                      jnp.ndarray, float, float, float, float, float, float, float, float],
+    scan_input: Tuple[
+        ArrayLike,
+        ArrayLike,
+        ArrayLike,
+        ArrayLike,
+        ArrayLike,
+        ArrayLike,
+        float,
+        float,
+        float,
+        float,
+        float,
+        float,
+        float,
+        float,
+    ],
 ) -> Tuple[EkfCarry, EkfOutputs]:
     """Functional EKF step that accepts frame-wise PyTree inputs for lax.scan.
 
@@ -708,13 +728,26 @@ def ekf_step_pytree(
         Tuple of (new_carry, outputs)
     """
     x, P = carry
-    (position, heading, confidence, pos_valid, head_valid, imu_block, dt,
-     velocity_damping, accel_noise_std, gyro_noise_std, bias_drift_std,
-     position_noise_std, heading_noise_std, gate_threshold) = scan_input
+    (
+        position,
+        heading,
+        confidence,
+        pos_valid,
+        head_valid,
+        imu_block,
+        dt,
+        velocity_damping,
+        accel_noise_std,
+        gyro_noise_std,
+        bias_drift_std,
+        position_noise_std,
+        heading_noise_std,
+        gate_threshold,
+    ) = scan_input
 
     # Prediction step
     accel = imu_block[:2]  # [ax, ay]
-    gyro = imu_block[2:]   # [gz]
+    gyro = imu_block[2:]  # [gz]
 
     x_pred = _predict_state_jax(x, dt, accel, gyro, velocity_damping)
 
@@ -726,10 +759,16 @@ def ekf_step_pytree(
     x_filt, P_filt = jax.lax.cond(
         pos_valid,
         lambda: _pytree_measurement_update(
-            x_pred, P_pred, position, heading, confidence, head_valid,
-            position_noise_std, heading_noise_std
+            x_pred,
+            P_pred,
+            position,
+            heading,
+            confidence,
+            head_valid,
+            position_noise_std,
+            heading_noise_std,
         ),
-        lambda: (x_pred, P_pred)  # No update if no position measurement
+        lambda: (x_pred, P_pred),  # No update if no position measurement
     )
 
     # Create outputs
@@ -741,38 +780,44 @@ def ekf_step_pytree(
 
 @jax.jit
 def _pytree_measurement_update(
-    x_pred: jnp.ndarray,
-    P_pred: jnp.ndarray,
-    position: jnp.ndarray,
+    x_pred: ArrayLike,
+    P_pred: ArrayLike,
+    position: ArrayLike,
     heading: float,
     confidence: float,
     head_valid: bool,
     position_noise_std: float,
     heading_noise_std: float,
-) -> Tuple[jnp.ndarray, jnp.ndarray]:
+) -> Tuple[Array, Array]:
     """Perform measurement update step for PyTree version."""
     # Create measurement vector - always use 3D format [x, y, heading]
-    measurement = jnp.array([
-        position[0],  # x position
-        position[1],  # y position
-        jnp.where(head_valid, heading, x_pred[4])  # heading (or prediction if invalid)
-    ])
+    measurement = jnp.array(
+        [
+            position[0],  # x position
+            position[1],  # y position
+            jnp.where(head_valid, heading, x_pred[4]),  # heading (or prediction if invalid)
+        ]
+    )
 
     # Create measurement noise - large noise for invalid measurements
     pos_noise_var = (position_noise_std / confidence) ** 2
-    noise_diag = jnp.array([
-        pos_noise_var,  # x position noise
-        pos_noise_var,  # y position noise
-        jnp.where(head_valid, heading_noise_std**2, 1e6)  # heading noise
-    ])
+    noise_diag = jnp.array(
+        [
+            pos_noise_var,  # x position noise
+            pos_noise_var,  # y position noise
+            jnp.where(head_valid, heading_noise_std**2, 1e6),  # heading noise
+        ]
+    )
     R = jnp.diag(noise_diag)
 
     # Measurement Jacobian for [x, y, heading]
-    H = jnp.array([
-        [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # x position
-        [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # y position
-        [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],  # heading
-    ])
+    H = jnp.array(
+        [
+            [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # x position
+            [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # y position
+            [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],  # heading
+        ]
+    )
 
     # Predicted measurement
     h_pred = H @ x_pred
@@ -796,13 +841,13 @@ def _pytree_measurement_update(
 def ekf_step_arrays(
     carry: EkfCarry,
     inp: Tuple[
-        jnp.ndarray,
+        ArrayLike,
         float,
-        jnp.ndarray,
-        jnp.ndarray,
-        jnp.ndarray,
-        jnp.ndarray,
-        jnp.ndarray,
+        ArrayLike,
+        ArrayLike,
+        ArrayLike,
+        ArrayLike,
+        ArrayLike,
         float,
         float,
         float,
@@ -851,7 +896,9 @@ def create_ekf_step_arrays_optimized(
     @jax.jit
     def ekf_step_arrays_optimized(
         carry: EkfCarry,
-        inp: Tuple[jnp.ndarray, float, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray],
+        inp: Tuple[
+            jnp.ndarray, float, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray
+        ],
     ) -> Tuple[EkfCarry, EkfOutputs]:
         """Optimized EKF step with static filter parameters.
 
@@ -884,11 +931,13 @@ def create_ekf_step_arrays_optimized(
         has_heading = head_mask
 
         # Create a full measurement vector (always 3 elements: [x, y, heading])
-        measurement = jnp.array([
-            jnp.where(has_position, position[0], x_pred[0]),  # x position
-            jnp.where(has_position, position[1], x_pred[1]),  # y position
-            jnp.where(has_heading, heading, x_pred[4]),  # heading
-        ])
+        measurement = jnp.array(
+            [
+                jnp.where(has_position, position[0], x_pred[0]),  # x position
+                jnp.where(has_position, position[1], x_pred[1]),  # y position
+                jnp.where(has_heading, heading, x_pred[4]),  # heading
+            ]
+        )
 
         # Apply measurement update only if we have position measurements
         def apply_measurement_update():
@@ -896,19 +945,25 @@ def create_ekf_step_arrays_optimized(
             pos_noise_var = (position_noise_std / confidence) ** 2
 
             # Always use 3D measurement format: [x, y, heading]
-            noise_diag = jnp.array([
-                jnp.where(has_position, pos_noise_var, 1e6),  # Large noise for missing position
-                jnp.where(has_position, pos_noise_var, 1e6),
-                jnp.where(has_heading, heading_noise_std**2, 1e6),  # Large noise for missing heading
-            ])
+            noise_diag = jnp.array(
+                [
+                    jnp.where(has_position, pos_noise_var, 1e6),  # Large noise for missing position
+                    jnp.where(has_position, pos_noise_var, 1e6),
+                    jnp.where(
+                        has_heading, heading_noise_std**2, 1e6
+                    ),  # Large noise for missing heading
+                ]
+            )
             measurement_noise_matrix = jnp.diag(noise_diag)
 
             # Measurement function: h(x) = [x[0], x[1], x[4]] (position + heading)
-            H = jnp.array([
-                [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # x position
-                [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # y position
-                [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],  # heading
-            ])
+            H = jnp.array(
+                [
+                    [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # x position
+                    [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # y position
+                    [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],  # heading
+                ]
+            )
 
             # Predicted measurement
             h_pred = H @ x_pred  # [x, y, theta]
@@ -962,13 +1017,13 @@ def create_ekf_step_arrays_optimized(
 def ekf_step_arrays_pure(
     carry: EkfCarry,
     inp: Tuple[
-        jnp.ndarray,
+        ArrayLike,
         float,
-        jnp.ndarray,
-        jnp.ndarray,
-        jnp.ndarray,
-        jnp.ndarray,
-        jnp.ndarray,
+        ArrayLike,
+        ArrayLike,
+        ArrayLike,
+        ArrayLike,
+        ArrayLike,
         float,
         float,
         float,
@@ -1130,14 +1185,14 @@ class EKFFilter:
     def __init__(
         self,
         initial_state: State2D,
-        initial_covariance: jnp.ndarray,
-        velocity_damping: float = 0.1,
-        accel_noise_std: float = 0.5,
-        gyro_noise_std: float = 0.1,
-        bias_drift_std: float = 0.01,
-        position_noise_std: float = 1.0,
-        heading_noise_std: float = 0.1,
-        gate_threshold: float = 9.21,
+        initial_covariance: ArrayLike,
+        velocity_damping: ArrayLike = 0.1,
+        accel_noise_std: ArrayLike = 0.5,
+        gyro_noise_std: ArrayLike = 0.1,
+        bias_drift_std: ArrayLike = 0.01,
+        position_noise_std: ArrayLike = 1.0,
+        heading_noise_std: ArrayLike = 0.1,
+        gate_threshold: ArrayLike = 9.21,
     ):
         """Initialize EKF filter.
 
@@ -1170,8 +1225,8 @@ class EKFFilter:
     def predict(
         self,
         dt: float,
-        accel: jnp.ndarray,
-        gyro: jnp.ndarray,
+        accel: ArrayLike,
+        gyro: ArrayLike,
     ) -> None:
         """Perform prediction step.
 
@@ -1193,7 +1248,7 @@ class EKFFilter:
 
     def update(
         self,
-        position: Optional[jnp.ndarray] = None,
+        position: Optional[ArrayLike] = None,
         heading: Optional[float] = None,
         confidence: float = 1.0,
     ) -> EKFResult:
@@ -1264,7 +1319,7 @@ class EKFFilter:
         """
         return array_to_state(self.ekf_state.state)
 
-    def get_current_covariance(self) -> jnp.ndarray:
+    def get_current_covariance(self) -> Array:
         """Get current covariance matrix.
 
         Returns:

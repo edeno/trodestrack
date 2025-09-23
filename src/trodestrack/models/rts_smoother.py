@@ -16,7 +16,8 @@ from typing import List, NamedTuple, Tuple
 
 import jax
 import jax.numpy as jnp
-from jax import lax
+from jax import Array, lax
+from jax.typing import ArrayLike
 
 from ._solvers import safe_solve
 from .ekf import EKFResult
@@ -31,8 +32,8 @@ class RTSResult(NamedTuple):
         log_likelihood: Total log-likelihood of the sequence
     """
 
-    smoothed_states: jnp.ndarray
-    smoothed_covariances: jnp.ndarray
+    smoothed_states: Array
+    smoothed_covariances: Array
     log_likelihood: float
 
 
@@ -47,22 +48,22 @@ class ForwardPassData(NamedTuple):
         log_likelihood: Cumulative log-likelihood
     """
 
-    filtered_states: jnp.ndarray
-    filtered_covariances: jnp.ndarray
-    predicted_states: jnp.ndarray
-    predicted_covariances: jnp.ndarray
+    filtered_states: Array
+    filtered_covariances: Array
+    predicted_states: Array
+    predicted_covariances: Array
     log_likelihood: float
 
 
 @jax.jit
 def rts_backward_step(
-    x_s_next: jnp.ndarray,
-    P_s_next: jnp.ndarray,
-    x_f: jnp.ndarray,
-    P_f: jnp.ndarray,
-    x_p_next: jnp.ndarray,
-    P_p_next: jnp.ndarray,
-) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    x_s_next: ArrayLike,
+    P_s_next: ArrayLike,
+    x_f: ArrayLike,
+    P_f: ArrayLike,
+    x_p_next: ArrayLike,
+    P_p_next: ArrayLike,
+) -> Tuple[Array, Array]:
     """Single RTS backward step.
 
     Computes the smoothed estimate at time k given:
@@ -111,15 +112,15 @@ def rts_smooth(
         forward_data.filtered_covariances,
         forward_data.predicted_states,
         forward_data.predicted_covariances,
-        forward_data.log_likelihood
+        forward_data.log_likelihood,
     )
 
 
 def rts_smooth_pure(
-    filtered_states: jnp.ndarray,
-    filtered_covariances: jnp.ndarray,
-    predicted_states: jnp.ndarray,
-    predicted_covariances: jnp.ndarray,
+    filtered_states: ArrayLike,
+    filtered_covariances: ArrayLike,
+    predicted_states: ArrayLike,
+    predicted_covariances: ArrayLike,
     log_likelihood: float,
 ) -> RTSResult:
     """Pure RTS smoothing implementation with optimal JIT compilation.
@@ -145,19 +146,25 @@ def rts_smooth_pure(
         return RTSResult(
             smoothed_states=jnp.array([]).reshape(0, state_dim),
             smoothed_covariances=jnp.array([]).reshape(0, state_dim, state_dim),
-            log_likelihood=log_likelihood
+            log_likelihood=log_likelihood,
         )
 
     # Delegate to JIT-compiled implementation for non-empty case
-    return _rts_smooth_impl(filtered_states, filtered_covariances, predicted_states, predicted_covariances, log_likelihood)
+    return _rts_smooth_impl(
+        filtered_states,
+        filtered_covariances,
+        predicted_states,
+        predicted_covariances,
+        log_likelihood,
+    )
 
 
 @jax.jit
 def _rts_smooth_impl(
-    filtered_states: jnp.ndarray,
-    filtered_covariances: jnp.ndarray,
-    predicted_states: jnp.ndarray,
-    predicted_covariances: jnp.ndarray,
+    filtered_states: ArrayLike,
+    filtered_covariances: ArrayLike,
+    predicted_states: ArrayLike,
+    predicted_covariances: ArrayLike,
     log_likelihood: float,
 ) -> RTSResult:
     """Internal JAX-compiled RTS smoothing implementation.
@@ -251,7 +258,7 @@ class RTSSmoother:
     def collect_forward_data(
         self,
         ekf_results: List[EKFResult],
-        prediction_data: List[Tuple[jnp.ndarray, jnp.ndarray]],
+        prediction_data: List[Tuple[ArrayLike, ArrayLike]],
     ) -> ForwardPassData:
         """Collect data from forward pass for smoothing.
 
@@ -300,9 +307,9 @@ class RTSSmoother:
 
 
 def compute_smoothing_improvement(
-    filtered_states: List[jnp.ndarray],
-    smoothed_states: List[jnp.ndarray],
-    ground_truth: List[jnp.ndarray],
+    filtered_states: List[ArrayLike],
+    smoothed_states: List[ArrayLike],
+    ground_truth: List[ArrayLike],
 ) -> Tuple[float, float, float]:
     """Compute RMSE improvement from smoothing.
 

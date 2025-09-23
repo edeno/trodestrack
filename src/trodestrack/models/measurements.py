@@ -17,7 +17,7 @@ from jax.typing import ArrayLike
 from .state import State2D
 
 
-def position_measurement(state: State2D) -> jnp.ndarray:
+def position_measurement(state: State2D) -> Array:
     """Extract position measurement from state.
 
     Args:
@@ -49,7 +49,7 @@ def heading_measurement(led_front: ArrayLike, led_back: ArrayLike) -> Array:
 
 
 @jax.jit
-def compute_position_jacobian(state_array: jnp.ndarray) -> jnp.ndarray:
+def compute_position_jacobian(state_array: ArrayLike) -> Array:
     """Compute Jacobian of position measurement function.
 
     Args:
@@ -69,7 +69,7 @@ def compute_position_jacobian(state_array: jnp.ndarray) -> jnp.ndarray:
 
 
 @jax.jit
-def compute_heading_jacobian(state_array: jnp.ndarray) -> jnp.ndarray:
+def compute_heading_jacobian(state_array: ArrayLike) -> Array:
     """Compute Jacobian of heading measurement function.
 
     Args:
@@ -160,9 +160,9 @@ def _create_position_heading_noise(
 
 
 def create_combined_measurement(
-    position: jnp.ndarray,
+    position: ArrayLike,
     heading: Optional[float] = None,
-) -> jnp.ndarray:
+) -> Array:
     """Create combined measurement vector.
 
     Args:
@@ -179,9 +179,9 @@ def create_combined_measurement(
 
 
 def create_combined_jacobian(
-    state_array: jnp.ndarray,
+    state_array: ArrayLike,
     has_heading: bool,
-) -> jnp.ndarray:
+) -> Array:
     """Create combined measurement Jacobian matrix.
 
     Args:
@@ -198,13 +198,13 @@ def create_combined_jacobian(
 
 
 @jax.jit
-def _create_position_jacobian(state_array: jnp.ndarray) -> jnp.ndarray:
+def _create_position_jacobian(state_array: ArrayLike) -> Array:
     """Create position-only Jacobian."""
     return compute_position_jacobian(state_array)
 
 
 @jax.jit
-def _create_position_heading_jacobian(state_array: jnp.ndarray) -> jnp.ndarray:
+def _create_position_heading_jacobian(state_array: ArrayLike) -> Array:
     """Create position + heading Jacobian."""
     H_pos = compute_position_jacobian(state_array)
     H_heading = compute_heading_jacobian(state_array)

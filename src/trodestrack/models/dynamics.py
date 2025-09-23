@@ -69,8 +69,8 @@ def _check_damping_stability(dt: float, velocity_damping: float) -> None:
 def predict_state(
     state: State2D,
     dt: float,
-    accel: jnp.ndarray,
-    gyro: jnp.ndarray,
+    accel: ArrayLike,
+    gyro: ArrayLike,
     velocity_damping: float = 0.0,
 ) -> State2D:
     """Predict state forward using IMU measurements.
@@ -169,12 +169,12 @@ def predict_covariance(
 
 @jax.jit
 def compute_state_jacobian(
-    state_array: jnp.ndarray,
+    state_array: ArrayLike,
     dt: float,
-    accel: jnp.ndarray,
-    gyro: jnp.ndarray,
+    accel: ArrayLike,
+    gyro: ArrayLike,
     velocity_damping: float,
-) -> jnp.ndarray:
+) -> Array:
     """Compute Jacobian of dynamics function for EKF linearization.
 
     Uses JAX automatic differentiation to compute ∂f/∂x where f is the
@@ -191,7 +191,7 @@ def compute_state_jacobian(
         8x8 Jacobian matrix
     """
 
-    def dynamics_function(x: jnp.ndarray) -> jnp.ndarray:
+    def dynamics_function(x: ArrayLike) -> Array:
         """Dynamics function for Jacobian computation."""
         # Extract state components
         pos = x[:2]

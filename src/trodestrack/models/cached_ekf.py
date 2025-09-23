@@ -16,6 +16,7 @@ from typing import Dict, List, NamedTuple, Optional, Tuple
 
 import jax.numpy as jnp
 from jax import Array
+from jax.typing import ArrayLike
 
 from ._solvers import safe_solve
 from .dynamics import compute_process_noise, compute_state_jacobian
@@ -34,11 +35,11 @@ class CachedComputations(NamedTuple):
         innovation_covariances: Innovation covariances S_k (when available)
     """
 
-    state_jacobians: List[jnp.ndarray]
-    predicted_covariances: List[jnp.ndarray]
-    process_noise_matrices: List[jnp.ndarray]
-    measurement_jacobians: List[Optional[jnp.ndarray]]
-    innovation_covariances: List[Optional[jnp.ndarray]]
+    state_jacobians: List[Array]
+    predicted_covariances: List[Array]
+    process_noise_matrices: List[Array]
+    measurement_jacobians: List[Optional[Array]]
+    innovation_covariances: List[Optional[Array]]
 
 
 class CachedEKFFilter:
@@ -103,8 +104,8 @@ class CachedEKFFilter:
     def predict_with_caching(
         self,
         dt: float,
-        accel: jnp.ndarray,
-        gyro: jnp.ndarray,
+        accel: ArrayLike,
+        gyro: ArrayLike,
     ) -> Tuple[EKFState, Dict[str, jnp.ndarray]]:
         """Perform prediction step with caching of intermediate computations.
 
@@ -166,7 +167,7 @@ class CachedEKFFilter:
     def update_with_caching(
         self,
         predicted_state: EKFState,
-        position: Optional[jnp.ndarray] = None,
+        position: Optional[ArrayLike] = None,
         heading: Optional[float] = None,
         confidence: float = 1.0,
     ) -> Tuple[EKFResult, Dict[str, Optional[Array]]]:
@@ -248,9 +249,9 @@ class CachedEKFFilter:
     def step_with_caching(
         self,
         dt: float,
-        accel: jnp.ndarray,
-        gyro: jnp.ndarray,
-        position: Optional[jnp.ndarray] = None,
+        accel: ArrayLike,
+        gyro: ArrayLike,
+        position: Optional[ArrayLike] = None,
         heading: Optional[float] = None,
         confidence: float = 1.0,
     ) -> Tuple[EKFResult, Dict[str, Optional[Array]]]:
@@ -287,7 +288,7 @@ class CachedEKFFilter:
 
         return result, all_cached_data
 
-    def get_cached_jacobian(self, step_index: int) -> Optional[jnp.ndarray]:
+    def get_cached_jacobian(self, step_index: int) -> Optional[Array]:
         """Get cached state Jacobian for a specific step.
 
         Args:
@@ -300,7 +301,7 @@ class CachedEKFFilter:
             return None
         return self.cached_computations.state_jacobians[step_index]
 
-    def get_cached_predicted_covariance(self, step_index: int) -> Optional[jnp.ndarray]:
+    def get_cached_predicted_covariance(self, step_index: int) -> Optional[Array]:
         """Get cached predicted covariance for a specific step.
 
         Args:

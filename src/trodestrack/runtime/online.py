@@ -12,6 +12,8 @@ from typing import List, NamedTuple, Optional, Tuple
 
 import jax.numpy as jnp
 import numpy as np
+from jax import Array
+from jax.typing import ArrayLike
 
 from ..config.schemas import SessionConfig
 from ..models.ekf import EKFFilter
@@ -32,10 +34,10 @@ class TrackingFrame(NamedTuple):
     """
 
     timestamp: float
-    position: Optional[jnp.ndarray]
+    position: Optional[ArrayLike]
     heading: Optional[float]
     confidence: float
-    imu_measurements: List[Tuple[jnp.ndarray, jnp.ndarray, float]]
+    imu_measurements: List[Tuple[ArrayLike, ArrayLike, float]]
 
 
 class TrackingResult(NamedTuple):
@@ -52,10 +54,10 @@ class TrackingResult(NamedTuple):
     """
 
     state: State2D
-    covariance: jnp.ndarray
+    covariance: Array
     timestamp: float
     processing_time_ms: float
-    innovation: jnp.ndarray
+    innovation: Array
     gated: bool
     log_likelihood: float
 
@@ -98,7 +100,7 @@ class OnlineTracker:
         log_level = getattr(logging, self.config.output.log_level.upper(), logging.INFO)
         logger.setLevel(log_level)
 
-    def initialize(self, initial_position: jnp.ndarray, initial_heading: float = 0.0) -> None:
+    def initialize(self, initial_position: ArrayLike, initial_heading: float = 0.0) -> None:
         """Initialize tracker with known starting conditions.
 
         Args:
@@ -311,7 +313,7 @@ class OnlineTracker:
         self._processing_times.clear()
         logger.info("Tracker reset")
 
-    def _create_initial_covariance(self) -> jnp.ndarray:
+    def _create_initial_covariance(self) -> Array:
         """Create initial covariance matrix from configuration."""
         variances = self.config.filter.initial_state_variance
         return jnp.diag(
@@ -330,8 +332,8 @@ class OnlineTracker:
         )
 
     def _prepare_imu_data(
-        self, imu_measurements: List[Tuple[jnp.ndarray, jnp.ndarray, float]]
-    ) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        self, imu_measurements: List[Tuple[ArrayLike, ArrayLike, float]]
+    ) -> Tuple[Array, Array]:
         """Prepare IMU measurements for processing.
 
         Efficiently builds JAX arrays by collecting data in Python lists first,
@@ -469,7 +471,7 @@ class StreamingTracker:
             result = self.tracker.process_frame(frame)
             self.results.append(result)
 
-    def get_state_estimates(self) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    def get_state_estimates(self) -> Tuple[Array, Array]:
         """Get state estimates and timestamps from processed results.
 
         Returns:
