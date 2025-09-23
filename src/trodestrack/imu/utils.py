@@ -1,7 +1,7 @@
 """IMU utility functions for preprocessing and alignment."""
 
 import logging
-from typing import Tuple
+from typing import Any, Tuple
 
 import numpy as np
 
@@ -248,7 +248,7 @@ def compute_imu_alignment_matrix(gravity_vector: np.ndarray, target_axis: int = 
 
 def validate_imu_data_quality(
     accel_data: np.ndarray, gyro_data: np.ndarray, timestamps: np.ndarray, sampling_rate: float
-) -> dict:
+) -> dict[str, Any]:
     """Validate IMU data quality and return diagnostic information.
 
     Parameters

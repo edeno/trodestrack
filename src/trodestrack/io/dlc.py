@@ -188,10 +188,12 @@ def load_dlc_csv(file_path: Path) -> DLCKeypointData:
         raise ValueError(f"Failed to read DLC CSV file: {e}")
 
     # Get scorer name (first level of columns)
-    scorer = df.columns.levels[0][0]
-
-    # Extract bodyparts (second level)
-    bodyparts = df.columns.levels[1]
+    if hasattr(df.columns, 'levels'):
+        scorer = df.columns.levels[0][0]
+        # Extract bodyparts (second level)
+        bodyparts = df.columns.levels[1]
+    else:
+        raise ValueError("Expected MultiIndex columns in DLC CSV file")
 
     # Generate timestamps if not provided
     if df.index.name == "frame":
@@ -274,7 +276,12 @@ def load_dlc_h5(file_path: Path) -> DLCKeypointData:
 
     try:
         # Load data using pandas HDFStore format
-        df = pd.read_hdf(file_path)
+        data = pd.read_hdf(file_path)
+
+        # Ensure we have a DataFrame
+        if isinstance(data, pd.Series):
+            raise ValueError("Expected DataFrame, got Series from HDF5 file")
+        df = data
 
         # Process similar to CSV but from HDF5
         if isinstance(df.columns, pd.MultiIndex):
@@ -320,10 +327,12 @@ def _process_dlc_dataframe(df: pd.DataFrame, file_path: Path) -> DLCKeypointData
         DLCKeypointData container
     """
     # Get scorer name (first level of columns)
-    scorer = df.columns.levels[0][0]
-
-    # Extract bodyparts (second level)
-    bodyparts = df.columns.levels[1]
+    if hasattr(df.columns, 'levels'):
+        scorer = df.columns.levels[0][0]
+        # Extract bodyparts (second level)
+        bodyparts = df.columns.levels[1]
+    else:
+        raise ValueError("Expected MultiIndex columns in DLC DataFrame")
 
     # Generate timestamps
     if df.index.name == "frame":

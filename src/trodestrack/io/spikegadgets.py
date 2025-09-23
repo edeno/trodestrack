@@ -504,7 +504,7 @@ def load_spikegadgets_csv(file_path: Path) -> SpikeGadgetsIMUData:
     # Estimate sampling rate
     if len(timestamps) > 1:
         dt = np.median(np.diff(timestamps))
-        sampling_rate = 1.0 / dt
+        sampling_rate = float(1.0 / dt)
     else:
         sampling_rate = 30000.0  # Default assumption
 

@@ -7,7 +7,7 @@ This module implements robust measurement processing:
 - Confidence-based filtering
 """
 
-from typing import Tuple
+from typing import Optional, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -181,8 +181,8 @@ def validate_and_gate_measurement(
     innovation_covariance: jnp.ndarray,
     confidence: float,
     min_confidence: float = 0.5,
-    gating_threshold: float = None,
-    measurement_dim: int = None,
+    gating_threshold: Optional[float] = None,
+    measurement_dim: Optional[int] = None,
 ) -> Tuple[bool, float]:
     """Validate and gate a single measurement.
 

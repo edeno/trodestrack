@@ -176,6 +176,9 @@ class OnlineTracker:
                     "Tracker not initialized - call initialize() or provide position in first frame"
                 )
 
+        # Ensure filter is available after initialization check
+        assert self._ekf_filter is not None, "EKF filter should be available after initialization"
+
         # Handle timing
         dt = 0.0
         if self._last_timestamp is not None:

@@ -4,7 +4,7 @@ This module provides a minimal synthetic data generator for testing
 filtering scenarios without needing the full sim module implementation.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
 import jax.numpy as jnp
@@ -21,9 +21,9 @@ class SimConfig:
     camera_fps: float = 30.0
     imu_rate_hz: float = 1000.0
     trajectory_type: str = "steady_motion"
-    vision_dropout_periods: List[Tuple[float, float]] = None
-    heading_dropout_periods: List[Tuple[float, float]] = None
-    led_swap_periods: List[Tuple[float, float]] = None
+    vision_dropout_periods: List[Tuple[float, float]] = field(default_factory=list)
+    heading_dropout_periods: List[Tuple[float, float]] = field(default_factory=list)
+    led_swap_periods: List[Tuple[float, float]] = field(default_factory=list)
     position_noise_std_cm: float = 1.0
     heading_noise_std_rad: float = 0.05
     confidence_noise_std: float = 0.1
@@ -254,7 +254,7 @@ class SyntheticSessionResult:
 
         # Add heading noise
         heading_noise = self.rng.normal(0, self.config.heading_noise_std_rad)
-        heading = truth[4] + heading_noise
+        heading: Optional[float] = float(truth[4] + heading_noise)
 
         # Check for heading dropouts
         for start, end in self.config.heading_dropout_periods:
