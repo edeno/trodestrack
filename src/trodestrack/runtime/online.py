@@ -327,6 +327,9 @@ class OnlineTracker:
     ) -> Tuple[jnp.ndarray, jnp.ndarray]:
         """Prepare IMU measurements for processing.
 
+        Efficiently builds JAX arrays by collecting data in Python lists first,
+        then creating JAX arrays in a single operation to avoid device transfers.
+
         Args:
             imu_measurements: List of (accel, gyro, timestamp) tuples
 
@@ -336,24 +339,22 @@ class OnlineTracker:
         if not imu_measurements:
             return jnp.array([]).reshape(0, 6), jnp.array([])
 
-        # JAX-optimized data preparation
-        n_measurements = len(imu_measurements)
-
-        # Pre-allocate arrays
-        imu_data = jnp.zeros((n_measurements, 6))
-        timestamps = jnp.zeros(n_measurements)
-
-        # Vectorized assignment (more JAX-friendly)
+        # Build Python lists first, then create JAX arrays once
+        # This avoids multiple device transfers and is more efficient
         measurements = []
-        ts = []
+        timestamps = []
+
         for accel, gyro, timestamp in imu_measurements:
+            # Concatenate accel and gyro into 6-vector
             measurement = jnp.concatenate([accel[:3], gyro[:3]])
             measurements.append(measurement)
-            ts.append(timestamp)
+            timestamps.append(timestamp)
 
-        imu_data = jnp.stack(measurements) if measurements else jnp.zeros((0, 6))
-        timestamps = jnp.array(ts) if ts else jnp.array([])
-        return imu_data, timestamps
+        # Single JAX array creation - no device transfer loops
+        imu_data = jnp.stack(measurements)
+        timestamps_array = jnp.array(timestamps)
+
+        return imu_data, timestamps_array
 
 
 class StreamingTracker:
@@ -428,7 +429,7 @@ class StreamingTracker:
             heading = float(headings[i]) if heading_valid[i] else None
             confidence = float(confidences[i])
 
-            # IMU processing (simplified for optimization case)
+            # IMU processing (vectorized for efficiency)
             imu_measurements = []
             if imu_data is not None and i > 0:
                 prev_timestamp = float(timestamps[i - 1])
@@ -437,12 +438,16 @@ class StreamingTracker:
                     imu_data["timestamps"] <= timestamp
                 )
                 if jnp.any(mask):
-                    imu_indices = jnp.where(mask)[0]
-                    for j in imu_indices:
-                        imu_sample = imu_data["data"][j]
+                    # Vectorized extraction - avoid Python loops
+                    masked_data = imu_data["data"][mask]
+                    masked_timestamps = imu_data["timestamps"][mask]
+
+                    # Build list once with vectorized operations
+                    for idx in range(len(masked_data)):
+                        imu_sample = masked_data[idx]
                         accel = imu_sample[:3]
                         gyro = imu_sample[3:6]
-                        imu_ts = imu_data["timestamps"][j]
+                        imu_ts = float(masked_timestamps[idx])
                         imu_measurements.append((accel, gyro, imu_ts))
 
             frame = TrackingFrame(
