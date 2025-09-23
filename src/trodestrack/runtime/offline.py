@@ -19,7 +19,7 @@ from jax import lax
 from ..config.schemas import SessionConfig
 from ..geom.homography import transform_points_pixel_to_cm
 from ..io.loaders import load_imu_data, load_video_detections
-from ..models.ekf import EkfCarry, EKFFilter, ekf_step_arrays
+from ..models.ekf import EkfCarry, EKFFilter, ekf_step_pytree
 from ..models.rts_smoother import ForwardPassData, rts_smooth
 from ..models.state import State2D, create_initial_state
 
@@ -299,38 +299,39 @@ def _run_filtering_pass_consistent(
         # Create dummy IMU blocks (zeros)
         imu_blocks = jnp.zeros((n_frames, 3))  # [ax, ay, gz]
 
-    # Create filter configuration arrays (constant values repeated for each frame)
-    velocity_damping = jnp.full(n_frames, config.filter.velocity_damping)
-    accel_noise_std = jnp.full(n_frames, jnp.sqrt(config.filter.process_noise["velocity"]))
-    gyro_noise_std = jnp.full(n_frames, jnp.sqrt(config.filter.process_noise["heading"]))
-    bias_drift_std = jnp.full(n_frames, jnp.sqrt(config.filter.process_noise["bias_gyro"]))
-    position_noise_std = jnp.full(n_frames, jnp.sqrt(config.filter.measurement_noise["position"]))
-    heading_noise_std = jnp.full(n_frames, jnp.sqrt(config.filter.measurement_noise["heading"]))
-    gate_threshold = jnp.full(n_frames, config.filter.gating_threshold)
+    # Extract filter configuration (scalars, not repeated arrays)
+    velocity_damping = config.filter.velocity_damping
+    accel_noise_std = jnp.sqrt(config.filter.process_noise["velocity"])
+    gyro_noise_std = jnp.sqrt(config.filter.process_noise["heading"])
+    bias_drift_std = jnp.sqrt(config.filter.process_noise["bias_gyro"])
+    position_noise_std = jnp.sqrt(config.filter.measurement_noise["position"])
+    heading_noise_std = jnp.sqrt(config.filter.measurement_noise["heading"])
+    gate_threshold = config.filter.gating_threshold
 
-    # Create scan inputs: transpose all arrays to create sequence of inputs
+    # Create functional scan inputs using PyTree approach
+    # This transposes the data to create a sequence of frame-wise tuples
     scan_inputs = (
         positions,  # (n_frames, 2)
-        dts,  # (n_frames,)
-        imu_blocks,  # (n_frames, 3)
-        headings,  # (n_frames,)
+        headings,   # (n_frames,)
         confidences,  # (n_frames,)
         position_mask,  # (n_frames,)
         heading_mask,  # (n_frames,)
-        velocity_damping,  # (n_frames,)
-        accel_noise_std,  # (n_frames,)
-        gyro_noise_std,  # (n_frames,)
-        bias_drift_std,  # (n_frames,)
-        position_noise_std,  # (n_frames,)
-        heading_noise_std,  # (n_frames,)
-        gate_threshold,  # (n_frames,)
+        imu_blocks,  # (n_frames, 3)
+        dts,  # (n_frames,)
+        jnp.full(n_frames, velocity_damping),  # (n_frames,)
+        jnp.full(n_frames, accel_noise_std),   # (n_frames,)
+        jnp.full(n_frames, gyro_noise_std),    # (n_frames,)
+        jnp.full(n_frames, bias_drift_std),    # (n_frames,)
+        jnp.full(n_frames, position_noise_std), # (n_frames,)
+        jnp.full(n_frames, heading_noise_std),  # (n_frames,)
+        jnp.full(n_frames, gate_threshold),     # (n_frames,)
     )
 
     # Initial carry state
     carry0 = EkfCarry(x=initial_state, P=initial_covariance)
 
-    # Run lax.scan with the JAX-compatible EKF step
-    final_carry, outputs = lax.scan(ekf_step_arrays, carry0, scan_inputs)
+    # Run lax.scan with the functional PyTree EKF step
+    final_carry, outputs = lax.scan(ekf_step_pytree, carry0, scan_inputs)
 
     # Extract results (both filtered and predicted for RTS)
     filtered_states = outputs.x_filt

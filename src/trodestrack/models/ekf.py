@@ -12,6 +12,7 @@ from typing import Any, Dict, NamedTuple, Optional, Tuple
 
 import jax
 import jax.numpy as jnp
+from chex import dataclass
 
 from ._solvers import kalman_gain, mahalanobis_distance
 from .dynamics import (
@@ -90,6 +91,41 @@ class EkfOutputs(NamedTuple):
 
 # Type alias for EKF step input
 EkfInput = Tuple[Dict[str, Any], float, Optional[jnp.ndarray], Dict[str, Any]]
+
+
+@dataclass
+class EkfScanInputs:
+    """PyTree dataclass for EKF scan inputs.
+
+    This provides a clean, functional structure for scan inputs that is
+    JIT-cache friendly and avoids large tuples with NaN padding.
+
+    Attributes:
+        measurements: Measurement data (positions, headings, confidences, validity masks)
+        imu_data: IMU measurements [ax, ay, gz] for each frame
+        time_deltas: Time differences between frames
+        filter_params: Filter configuration parameters
+    """
+
+    # Measurement data
+    positions: jnp.ndarray  # (n_frames, 2) - [x, y] positions
+    headings: jnp.ndarray   # (n_frames,) - heading angles
+    confidences: jnp.ndarray  # (n_frames,) - measurement confidences
+    position_valid: jnp.ndarray  # (n_frames,) - True if position is valid
+    heading_valid: jnp.ndarray   # (n_frames,) - True if heading is valid
+
+    # IMU and timing
+    imu_blocks: jnp.ndarray  # (n_frames, 3) - [ax, ay, gz] for each frame
+    dt: jnp.ndarray  # (n_frames,) - time deltas
+
+    # Filter configuration (constant values)
+    velocity_damping: float
+    accel_noise_std: float
+    gyro_noise_std: float
+    bias_drift_std: float
+    position_noise_std: float
+    heading_noise_std: float
+    gate_threshold: float
 
 
 @jax.jit
@@ -489,6 +525,272 @@ class MeasurementArrays(NamedTuple):
     confidences: jnp.ndarray  # Shape (n_frames,) - confidence values
     position_mask: jnp.ndarray  # Shape (n_frames,) - True if position valid
     heading_mask: jnp.ndarray  # Shape (n_frames,) - True if heading valid
+
+
+@jax.jit
+def ekf_step_functional(
+    carry: EkfCarry,
+    scan_inputs: EkfScanInputs,
+    frame_idx: int,
+) -> Tuple[EkfCarry, EkfOutputs]:
+    """Functional EKF step using PyTree inputs.
+
+    Args:
+        carry: Current EKF state (x, P)
+        scan_inputs: PyTree dataclass containing all scan inputs
+        frame_idx: Current frame index
+
+    Returns:
+        Tuple of (new_carry, outputs)
+    """
+    x, P = carry
+
+    # Extract frame-specific data
+    position = scan_inputs.positions[frame_idx]
+    heading = scan_inputs.headings[frame_idx]
+    confidence = scan_inputs.confidences[frame_idx]
+    pos_valid = scan_inputs.position_valid[frame_idx]
+    head_valid = scan_inputs.heading_valid[frame_idx]
+    imu_block = scan_inputs.imu_blocks[frame_idx]
+    dt = scan_inputs.dt[frame_idx]
+
+    # Prediction step
+    accel = imu_block[:2]  # [ax, ay]
+    gyro = imu_block[2:]   # [gz]
+
+    x_pred = _predict_state_jax(x, dt, accel, gyro, scan_inputs.velocity_damping)
+
+    # Predict covariance using linearized dynamics
+    process_noise = compute_process_noise(
+        dt, scan_inputs.accel_noise_std, scan_inputs.gyro_noise_std, scan_inputs.bias_drift_std
+    )
+    P_pred = predict_covariance(P, x, dt, accel, gyro, scan_inputs.velocity_damping, process_noise)
+
+    # Measurement update
+    x_filt, P_filt = jax.lax.cond(
+        pos_valid,
+        lambda: _functional_measurement_update(
+            x_pred, P_pred, position, heading, confidence, pos_valid, head_valid, scan_inputs
+        ),
+        lambda: (x_pred, P_pred)  # No update if no position measurement
+    )
+
+    # Create outputs
+    outputs = EkfOutputs(x_filt=x_filt, P_filt=P_filt, x_pred=x_pred, P_pred=P_pred)
+    new_carry = EkfCarry(x=x_filt, P=P_filt)
+
+    return new_carry, outputs
+
+
+@jax.jit
+def _functional_measurement_update(
+    x_pred: jnp.ndarray,
+    P_pred: jnp.ndarray,
+    position: jnp.ndarray,
+    heading: float,
+    confidence: float,
+    pos_valid: bool,
+    head_valid: bool,
+    scan_inputs: EkfScanInputs,
+) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    """Perform measurement update step."""
+    # Create measurement vector - always use 3D format [x, y, heading]
+    measurement = jnp.array([
+        position[0],  # x position
+        position[1],  # y position
+        jnp.where(head_valid, heading, x_pred[4])  # heading (or prediction if invalid)
+    ])
+
+    # Create measurement noise - large noise for invalid measurements
+    pos_noise_var = (scan_inputs.position_noise_std / confidence) ** 2
+    noise_diag = jnp.array([
+        pos_noise_var,  # x position noise
+        pos_noise_var,  # y position noise
+        jnp.where(head_valid, scan_inputs.heading_noise_std**2, 1e6)  # heading noise
+    ])
+    R = jnp.diag(noise_diag)
+
+    # Measurement Jacobian for [x, y, heading]
+    H = jnp.array([
+        [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # x position
+        [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # y position
+        [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],  # heading
+    ])
+
+    # Predicted measurement
+    h_pred = H @ x_pred
+
+    # Innovation with angle wrapping
+    innovation = measurement - h_pred
+    innovation = innovation.at[2].set(wrap_angle(innovation[2]))
+
+    # Innovation covariance and Kalman gain
+    S = H @ P_pred @ H.T + R
+    K = P_pred @ H.T @ jnp.linalg.pinv(S)
+
+    # State and covariance updates
+    x_update = x_pred + K @ innovation
+    I_KH = jnp.eye(8) - K @ H
+    P_update = I_KH @ P_pred @ I_KH.T + K @ R @ K.T
+
+    return x_update, P_update
+
+
+def create_functional_scan_inputs(
+    positions: jnp.ndarray,
+    headings: jnp.ndarray,
+    confidences: jnp.ndarray,
+    position_valid: jnp.ndarray,
+    heading_valid: jnp.ndarray,
+    imu_blocks: jnp.ndarray,
+    dt: jnp.ndarray,
+    velocity_damping: float,
+    accel_noise_std: float,
+    gyro_noise_std: float,
+    bias_drift_std: float,
+    position_noise_std: float,
+    heading_noise_std: float,
+    gate_threshold: float,
+) -> EkfScanInputs:
+    """Create PyTree scan inputs from arrays.
+
+    Args:
+        positions: Position measurements (n_frames, 2)
+        headings: Heading measurements (n_frames,)
+        confidences: Measurement confidences (n_frames,)
+        position_valid: Position validity mask (n_frames,)
+        heading_valid: Heading validity mask (n_frames,)
+        imu_blocks: IMU measurements (n_frames, 3)
+        dt: Time deltas (n_frames,)
+        velocity_damping: Velocity damping coefficient
+        accel_noise_std: Accelerometer noise std
+        gyro_noise_std: Gyroscope noise std
+        bias_drift_std: Bias drift std
+        position_noise_std: Position noise std
+        heading_noise_std: Heading noise std
+        gate_threshold: Gating threshold
+
+    Returns:
+        EkfScanInputs PyTree dataclass
+    """
+    return EkfScanInputs(
+        positions=positions,
+        headings=headings,
+        confidences=confidences,
+        position_valid=position_valid,
+        heading_valid=heading_valid,
+        imu_blocks=imu_blocks,
+        dt=dt,
+        velocity_damping=velocity_damping,
+        accel_noise_std=accel_noise_std,
+        gyro_noise_std=gyro_noise_std,
+        bias_drift_std=bias_drift_std,
+        position_noise_std=position_noise_std,
+        heading_noise_std=heading_noise_std,
+        gate_threshold=gate_threshold,
+    )
+
+
+@jax.jit
+def ekf_step_pytree(
+    carry: EkfCarry,
+    scan_input: Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray,
+                      jnp.ndarray, float, float, float, float, float, float, float, float],
+) -> Tuple[EkfCarry, EkfOutputs]:
+    """Functional EKF step that accepts frame-wise PyTree inputs for lax.scan.
+
+    Args:
+        carry: Current EKF state (x, P)
+        scan_input: Tuple of frame-wise inputs (position, heading, confidence, pos_valid,
+                   head_valid, imu_block, dt, + filter params)
+
+    Returns:
+        Tuple of (new_carry, outputs)
+    """
+    x, P = carry
+    (position, heading, confidence, pos_valid, head_valid, imu_block, dt,
+     velocity_damping, accel_noise_std, gyro_noise_std, bias_drift_std,
+     position_noise_std, heading_noise_std, gate_threshold) = scan_input
+
+    # Prediction step
+    accel = imu_block[:2]  # [ax, ay]
+    gyro = imu_block[2:]   # [gz]
+
+    x_pred = _predict_state_jax(x, dt, accel, gyro, velocity_damping)
+
+    # Predict covariance using linearized dynamics
+    process_noise = compute_process_noise(dt, accel_noise_std, gyro_noise_std, bias_drift_std)
+    P_pred = predict_covariance(P, x, dt, accel, gyro, velocity_damping, process_noise)
+
+    # Measurement update
+    x_filt, P_filt = jax.lax.cond(
+        pos_valid,
+        lambda: _pytree_measurement_update(
+            x_pred, P_pred, position, heading, confidence, head_valid,
+            position_noise_std, heading_noise_std
+        ),
+        lambda: (x_pred, P_pred)  # No update if no position measurement
+    )
+
+    # Create outputs
+    outputs = EkfOutputs(x_filt=x_filt, P_filt=P_filt, x_pred=x_pred, P_pred=P_pred)
+    new_carry = EkfCarry(x=x_filt, P=P_filt)
+
+    return new_carry, outputs
+
+
+@jax.jit
+def _pytree_measurement_update(
+    x_pred: jnp.ndarray,
+    P_pred: jnp.ndarray,
+    position: jnp.ndarray,
+    heading: float,
+    confidence: float,
+    head_valid: bool,
+    position_noise_std: float,
+    heading_noise_std: float,
+) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    """Perform measurement update step for PyTree version."""
+    # Create measurement vector - always use 3D format [x, y, heading]
+    measurement = jnp.array([
+        position[0],  # x position
+        position[1],  # y position
+        jnp.where(head_valid, heading, x_pred[4])  # heading (or prediction if invalid)
+    ])
+
+    # Create measurement noise - large noise for invalid measurements
+    pos_noise_var = (position_noise_std / confidence) ** 2
+    noise_diag = jnp.array([
+        pos_noise_var,  # x position noise
+        pos_noise_var,  # y position noise
+        jnp.where(head_valid, heading_noise_std**2, 1e6)  # heading noise
+    ])
+    R = jnp.diag(noise_diag)
+
+    # Measurement Jacobian for [x, y, heading]
+    H = jnp.array([
+        [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # x position
+        [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # y position
+        [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],  # heading
+    ])
+
+    # Predicted measurement
+    h_pred = H @ x_pred
+
+    # Innovation with angle wrapping
+    innovation = measurement - h_pred
+    innovation = innovation.at[2].set(wrap_angle(innovation[2]))
+
+    # Innovation covariance and Kalman gain
+    S = H @ P_pred @ H.T + R
+    K = P_pred @ H.T @ jnp.linalg.pinv(S)
+
+    # State and covariance updates
+    x_update = x_pred + K @ innovation
+    I_KH = jnp.eye(8) - K @ H
+    P_update = I_KH @ P_pred @ I_KH.T + K @ R @ K.T
+
+    return x_update, P_update
 
 
 @jax.jit
