@@ -8,20 +8,20 @@ This module implements the main offline smoothing pipeline that combines:
 """
 
 import logging
-from typing import NamedTuple, Optional, Tuple
 import warnings
+from typing import NamedTuple, Optional, Tuple
 
 import jax.numpy as jnp
 import numpy as np
 from jax import lax
 
 from ..config.schemas import SessionConfig
-from ..io.loaders import load_video_detections, load_imu_data
 from ..geom.homography import transform_points_pixel_to_cm
 from ..imu.preintegration import preintegrate_between_frames
+from ..io.loaders import load_imu_data, load_video_detections
+from ..models.ekf import EkfCarry, EKFFilter, ekf_step, ekf_step_arrays
+from ..models.rts_smoother import ForwardPassData, rts_smooth
 from ..models.state import State2D, create_initial_state, state_to_array
-from ..models.ekf import EKFFilter, ekf_step, EkfCarry, ekf_step_arrays
-from ..models.rts_smoother import rts_smooth, ForwardPassData
 
 logger = logging.getLogger(__name__)
 
@@ -243,8 +243,9 @@ def _run_filtering_pass(
     logger.info(f"Processing {n_frames} frames")
 
     # Use consistent filtering implementation for all dataset sizes
-    return _run_filtering_pass_consistent(ekf_filter, config, video_data, imu_data, frame_timestamps)
-
+    return _run_filtering_pass_consistent(
+        ekf_filter, config, video_data, imu_data, frame_timestamps
+    )
 
 
 def _run_filtering_pass_consistent(
@@ -309,20 +310,20 @@ def _run_filtering_pass_consistent(
 
     # Create scan inputs: transpose all arrays to create sequence of inputs
     scan_inputs = (
-        positions,      # (n_frames, 2)
-        dts,           # (n_frames,)
-        imu_blocks,    # (n_frames, 3)
-        headings,      # (n_frames,)
-        confidences,   # (n_frames,)
-        position_mask, # (n_frames,)
+        positions,  # (n_frames, 2)
+        dts,  # (n_frames,)
+        imu_blocks,  # (n_frames, 3)
+        headings,  # (n_frames,)
+        confidences,  # (n_frames,)
+        position_mask,  # (n_frames,)
         heading_mask,  # (n_frames,)
-        velocity_damping,    # (n_frames,)
-        accel_noise_std,     # (n_frames,)
-        gyro_noise_std,      # (n_frames,)
-        bias_drift_std,      # (n_frames,)
+        velocity_damping,  # (n_frames,)
+        accel_noise_std,  # (n_frames,)
+        gyro_noise_std,  # (n_frames,)
+        bias_drift_std,  # (n_frames,)
         position_noise_std,  # (n_frames,)
-        heading_noise_std,   # (n_frames,)
-        gate_threshold       # (n_frames,)
+        heading_noise_std,  # (n_frames,)
+        gate_threshold,  # (n_frames,)
     )
 
     # Initial carry state

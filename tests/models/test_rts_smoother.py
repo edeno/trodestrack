@@ -1,17 +1,17 @@
 """Tests for RTS smoother implementation."""
 
-import pytest
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
+from trodestrack.models.ekf import EKFResult, EKFState
 from trodestrack.models.rts_smoother import (
+    ForwardPassData,
+    RTSSmoother,
+    compute_smoothing_improvement,
     rts_backward_step,
     rts_smooth,
-    RTSSmoother,
-    ForwardPassData,
-    compute_smoothing_improvement,
 )
-from trodestrack.models.ekf import EKFState, EKFResult
 
 
 class TestRTSBackwardStep:

@@ -17,12 +17,8 @@ from typing import Dict, List, NamedTuple, Optional, Tuple
 import jax.numpy as jnp
 
 from ._solvers import safe_solve
-from .dynamics import (
-    compute_state_jacobian,
-    compute_process_noise,
-)
-from .ekf import _predict_state_jax
-from .ekf import EKFState, EKFResult, ekf_update
+from .dynamics import compute_process_noise, compute_state_jacobian
+from .ekf import EKFResult, EKFState, _predict_state_jax, ekf_update
 from .measurements import create_measurement_noise
 
 

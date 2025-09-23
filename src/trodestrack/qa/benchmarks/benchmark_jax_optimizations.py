@@ -5,8 +5,8 @@ This script compares the performance of the JAX-optimized runtime implementation
 with their non-optimized counterparts.
 """
 
-import time
 import tempfile
+import time
 from pathlib import Path
 
 import jax
@@ -14,9 +14,9 @@ import jax.numpy as jnp
 import numpy as np
 
 from trodestrack.config.schemas import SessionConfig
+from trodestrack.models._solvers import safe_solve
 from trodestrack.runtime.offline import smooth_session
 from trodestrack.runtime.online import StreamingTracker
-from trodestrack.models._solvers import safe_solve
 
 
 def create_synthetic_data(n_frames: int = 1000, imu_rate: float = 1000.0) -> tuple:

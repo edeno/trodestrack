@@ -1,15 +1,16 @@
 """Tests for state representation and utilities."""
 
-import numpy as np
 import jax.numpy as jnp
-from hypothesis import given, strategies as st
+import numpy as np
+from hypothesis import given
+from hypothesis import strategies as st
 
 from trodestrack.models.state import (
+    STATE_DIM,
     State2D,
+    array_to_state,
     create_initial_state,
     state_to_array,
-    array_to_state,
-    STATE_DIM,
 )
 
 

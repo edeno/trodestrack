@@ -85,9 +85,7 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     # Benchmark command
-    benchmark_parser = subparsers.add_parser(
-        "benchmark", help="Run performance benchmarks"
-    )
+    benchmark_parser = subparsers.add_parser("benchmark", help="Run performance benchmarks")
     benchmark_parser.add_argument(
         "--type",
         choices=["simple", "optimizations", "all"],
@@ -152,8 +150,8 @@ def cmd_online(args: argparse.Namespace) -> int:
         logger.info(f"Starting online tracker with {config.filter.filter_type}")
 
         # Import streaming tracker
+        from ..io.loaders import load_imu_data, load_video_detections
         from ..runtime.online import StreamingTracker
-        from ..io.loaders import load_video_detections, load_imu_data
 
         # Create streaming tracker
         tracker = StreamingTracker(config)
@@ -287,7 +285,10 @@ def cmd_benchmark(args: argparse.Namespace) -> int:
         logger.info(f"Running benchmarks: {args.type}")
 
         # Import benchmark functions
-        from ..qa.benchmarks import run_simple_jax_benchmark, run_jax_optimizations_benchmark
+        from ..qa.benchmarks import (
+            run_jax_optimizations_benchmark,
+            run_simple_jax_benchmark,
+        )
 
         if args.type in ["simple", "all"]:
             logger.info("Running simple JAX benchmark")

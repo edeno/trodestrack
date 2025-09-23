@@ -8,19 +8,24 @@ This module implements the EKF algorithm for online state estimation, featuring:
 - Functional interface for lax.scan forward pass
 """
 
-from typing import NamedTuple, Optional, Tuple, Dict, Any
+from typing import Any, Dict, NamedTuple, Optional, Tuple
 
 import jax
 import jax.numpy as jnp
 
-from .dynamics import predict_covariance, compute_process_noise, rotation_matrix_2d, wrap_angle
-from ._solvers import mahalanobis_distance, kalman_gain
-from .measurements import (
-    create_measurement_noise,
-    _create_position_jacobian,
-    _create_position_heading_jacobian,
+from ._solvers import kalman_gain, mahalanobis_distance
+from .dynamics import (
+    compute_process_noise,
+    predict_covariance,
+    rotation_matrix_2d,
+    wrap_angle,
 )
-from .state import State2D, state_to_array, array_to_state
+from .measurements import (
+    _create_position_heading_jacobian,
+    _create_position_jacobian,
+    create_measurement_noise,
+)
+from .state import State2D, array_to_state, state_to_array
 
 
 class EKFState(NamedTuple):
@@ -478,17 +483,33 @@ class MeasurementArrays(NamedTuple):
 
     All measurements use NaN to indicate missing values, and masks indicate validity.
     """
+
     positions: jnp.ndarray  # Shape (n_frames, 2) - [x, y] positions
-    headings: jnp.ndarray   # Shape (n_frames,) - heading angles
+    headings: jnp.ndarray  # Shape (n_frames,) - heading angles
     confidences: jnp.ndarray  # Shape (n_frames,) - confidence values
     position_mask: jnp.ndarray  # Shape (n_frames,) - True if position valid
-    heading_mask: jnp.ndarray   # Shape (n_frames,) - True if heading valid
+    heading_mask: jnp.ndarray  # Shape (n_frames,) - True if heading valid
 
 
 @jax.jit
 def ekf_step_arrays(
     carry: EkfCarry,
-    inp: Tuple[jnp.ndarray, float, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, float, float, float, float, float, float, float]
+    inp: Tuple[
+        jnp.ndarray,
+        float,
+        jnp.ndarray,
+        jnp.ndarray,
+        jnp.ndarray,
+        jnp.ndarray,
+        jnp.ndarray,
+        float,
+        float,
+        float,
+        float,
+        float,
+        float,
+        float,
+    ],
 ) -> Tuple[EkfCarry, EkfOutputs]:
     """JAX-compatible EKF step for lax.scan using structured arrays.
 
@@ -502,14 +523,27 @@ def ekf_step_arrays(
         Tuple of (new_carry, outputs)
     """
     x, P = carry
-    (position, dt, imu_block, heading, confidence, pos_mask, head_mask,
-     velocity_damping, accel_noise_std, gyro_noise_std, bias_drift_std,
-     position_noise_std, heading_noise_std, gate_threshold) = inp
+    (
+        position,
+        dt,
+        imu_block,
+        heading,
+        confidence,
+        pos_mask,
+        head_mask,
+        velocity_damping,
+        accel_noise_std,
+        gyro_noise_std,
+        bias_drift_std,
+        position_noise_std,
+        heading_noise_std,
+        gate_threshold,
+    ) = inp
 
     # Prediction step
     # Extract IMU measurements
     accel = imu_block[:2]  # [ax, ay]
-    gyro = imu_block[2:]   # [gz]
+    gyro = imu_block[2:]  # [gz]
 
     # Predict state using existing JAX function
     x_pred = _predict_state_jax(x, dt, accel, gyro, velocity_damping)
@@ -533,11 +567,13 @@ def ekf_step_arrays(
 
     # Create a full measurement vector (always 3 elements: [x, y, heading])
     # Use the actual values if available, otherwise use state prediction as placeholder
-    measurement = jnp.array([
-        jnp.where(has_position, position[0], x_pred[0]),  # x position
-        jnp.where(has_position, position[1], x_pred[1]),  # y position
-        jnp.where(has_heading, heading, x_pred[4])        # heading
-    ])
+    measurement = jnp.array(
+        [
+            jnp.where(has_position, position[0], x_pred[0]),  # x position
+            jnp.where(has_position, position[1], x_pred[1]),  # y position
+            jnp.where(has_heading, heading, x_pred[4]),  # heading
+        ]
+    )
 
     # Create a measurement selection mask for position+heading
     measurement_dim = jnp.where(has_heading, 3, 2)  # 2 for position only, 3 for position+heading
@@ -549,19 +585,25 @@ def ekf_step_arrays(
 
         # Always use 3D measurement format: [x, y, heading]
         # For missing measurements, noise is made very large to minimize impact
-        noise_diag = jnp.array([
-            jnp.where(has_position, pos_noise_var, 1e6),  # Large noise for missing position
-            jnp.where(has_position, pos_noise_var, 1e6),
-            jnp.where(has_heading, heading_noise_std**2, 1e6)  # Large noise for missing heading
-        ])
+        noise_diag = jnp.array(
+            [
+                jnp.where(has_position, pos_noise_var, 1e6),  # Large noise for missing position
+                jnp.where(has_position, pos_noise_var, 1e6),
+                jnp.where(
+                    has_heading, heading_noise_std**2, 1e6
+                ),  # Large noise for missing heading
+            ]
+        )
         measurement_noise_matrix = jnp.diag(noise_diag)
 
         # Measurement function: h(x) = [x[0], x[1], x[4]] (position + heading)
-        H = jnp.array([
-            [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # x position
-            [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # y position
-            [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],  # heading
-        ])
+        H = jnp.array(
+            [
+                [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # x position
+                [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # y position
+                [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],  # heading
+            ]
+        )
 
         # Predicted measurement
         h_pred = H @ x_pred  # [x, y, theta]
@@ -593,11 +635,7 @@ def ekf_step_arrays(
         return x_pred, P_pred
 
     # Use conditional execution for JAX compatibility
-    x_filt, P_filt = jax.lax.cond(
-        has_position,
-        apply_measurement_update,
-        no_measurement_update
-    )
+    x_filt, P_filt = jax.lax.cond(has_position, apply_measurement_update, no_measurement_update)
 
     # Create outputs
     outputs = EkfOutputs(

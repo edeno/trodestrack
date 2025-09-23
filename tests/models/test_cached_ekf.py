@@ -5,8 +5,8 @@ import numpy as np
 
 from trodestrack.models.cached_ekf import (
     CachedEKFFilter,
-    efficient_rts_smooth_with_cache,
     compute_cache_efficiency_stats,
+    efficient_rts_smooth_with_cache,
 )
 from trodestrack.models.ekf import EKFState, create_initial_ekf_state
 from trodestrack.models.state import State2D

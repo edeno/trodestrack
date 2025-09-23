@@ -13,12 +13,10 @@ import jax
 import jax.numpy as jnp
 from jax.scipy.linalg import cholesky
 
-from ._solvers import mahalanobis_distance, safe_solve, _symmetrize_and_stabilize
+from ._solvers import _symmetrize_and_stabilize, mahalanobis_distance, safe_solve
 from .dynamics import compute_process_noise, rotation_matrix_2d, wrap_angle
-from .measurements import (
-    create_measurement_noise,
-)
-from .state import State2D, state_to_array, array_to_state
+from .measurements import create_measurement_noise
+from .state import State2D, array_to_state, state_to_array
 
 
 class UKFState(NamedTuple):

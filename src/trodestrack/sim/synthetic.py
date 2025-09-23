@@ -4,10 +4,11 @@ This module provides a minimal synthetic data generator for testing
 filtering scenarios without needing the full sim module implementation.
 """
 
-from typing import List, Tuple, Optional
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
+
 import jax.numpy as jnp
 import numpy as np
-from dataclasses import dataclass
 
 from ..models.state import State2D
 

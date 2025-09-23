@@ -1,18 +1,19 @@
 """Tests for velocity pseudo-measurements."""
 
-import numpy as np
 import jax.numpy as jnp
-from hypothesis import given, strategies as st, settings
+import numpy as np
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
+from trodestrack.models.state import State2D
 from trodestrack.models.velocity import (
-    velocity_measurement,
     compute_velocity_jacobian,
     create_velocity_noise,
     estimate_velocity_from_positions,
-    velocity_pseudo_measurement_update,
     should_use_velocity_constraint,
+    velocity_measurement,
+    velocity_pseudo_measurement_update,
 )
-from trodestrack.models.state import State2D
 
 
 class TestVelocityMeasurement:

@@ -2,16 +2,17 @@
 
 import tempfile
 from pathlib import Path
-import pytest
-import numpy as np
+
 import jax.numpy as jnp
+import numpy as np
+import pytest
 
 from trodestrack.config.schemas import (
-    SessionConfig,
     FilterConfig,
-    OutputConfig,
-    MappingConfig,
     IMUConfig,
+    MappingConfig,
+    OutputConfig,
+    SessionConfig,
     SynchronizationConfig,
 )
 from trodestrack.runtime.offline import smooth_session
@@ -105,12 +106,12 @@ class TestRuntimeSmoke:
         """Test that all runtime components can be imported."""
         # Test imports
         from trodestrack.runtime import (
-            smooth_session,
-            SmoothingResult,
             OnlineTracker,
+            SmoothingResult,
             StreamingTracker,
             TrackingFrame,
             TrackingResult,
+            smooth_session,
         )
 
         # Verify they are callable/instantiable

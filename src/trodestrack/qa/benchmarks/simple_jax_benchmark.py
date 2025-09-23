@@ -2,12 +2,13 @@
 """Simple benchmark to demonstrate JAX optimization improvements."""
 
 import time
+
 import jax
 import jax.numpy as jnp
 import numpy as np
 
-from trodestrack.models.rts_smoother import rts_smooth, ForwardPassData
 from trodestrack.models._solvers import safe_solve
+from trodestrack.models.rts_smoother import ForwardPassData, rts_smooth
 
 
 def benchmark_rts_smoother():

@@ -1,6 +1,6 @@
 """Runtime APIs for trodestrack."""
 
-from .offline import smooth_session, SmoothingResult
+from .offline import SmoothingResult, smooth_session
 from .online import OnlineTracker, StreamingTracker, TrackingFrame, TrackingResult
 
 __all__ = [

@@ -2,25 +2,26 @@
 
 import tempfile
 from pathlib import Path
-import pytest
-import numpy as np
+
 import jax.numpy as jnp
+import numpy as np
+import pytest
 
 from trodestrack.config.schemas import (
-    SessionConfig,
     FilterConfig,
-    OutputConfig,
-    MappingConfig,
     IMUConfig,
+    MappingConfig,
+    OutputConfig,
+    SessionConfig,
     SynchronizationConfig,
 )
+from trodestrack.models.state import State2D
 from trodestrack.runtime.online import (
     OnlineTracker,
     StreamingTracker,
     TrackingFrame,
     TrackingResult,
 )
-from trodestrack.models.state import State2D
 
 
 class TestOnlineTracker:

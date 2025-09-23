@@ -7,15 +7,15 @@ with low latency for real-time applications.
 
 import logging
 import time
-from typing import NamedTuple, Optional, Tuple, List
 from collections import deque
+from typing import List, NamedTuple, Optional, Tuple
 
 import jax.numpy as jnp
 import numpy as np
 
 from ..config.schemas import SessionConfig
-from ..models.state import State2D, state_to_array
 from ..models.ekf import EKFFilter
+from ..models.state import State2D, state_to_array
 
 logger = logging.getLogger(__name__)
 
@@ -402,7 +402,6 @@ class StreamingTracker:
 
         logger.info(f"Processed {len(self.results)} frames")
         return self.results
-
 
     def _process_frames(self, video_data: dict, imu_data: Optional[dict]) -> None:
         """Process frames with JAX-optimized data preparation."""

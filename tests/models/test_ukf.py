@@ -4,6 +4,8 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from trodestrack.models.measurements import create_measurement_noise
+from trodestrack.models.state import State2D
 from trodestrack.models.ukf import (
     UKFFilter,
     UKFParams,
@@ -13,8 +15,6 @@ from trodestrack.models.ukf import (
     ukf_predict,
     ukf_update,
 )
-from trodestrack.models.measurements import create_measurement_noise
-from trodestrack.models.state import State2D
 
 
 class TestUKFParams:

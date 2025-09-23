@@ -13,7 +13,7 @@ import jax
 import jax.numpy as jnp
 
 from ._solvers import kalman_gain
-from .state import State2D, state_to_array, array_to_state
+from .state import State2D, array_to_state, state_to_array
 
 
 def velocity_measurement(state: State2D) -> jnp.ndarray:

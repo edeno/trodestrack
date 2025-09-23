@@ -8,10 +8,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from trodestrack.models.ekf import EKFFilter
-from trodestrack.models.rts_smoother import (
-    RTSSmoother,
-    compute_smoothing_improvement,
-)
+from trodestrack.models.rts_smoother import RTSSmoother, compute_smoothing_improvement
 from trodestrack.sim.synthetic import SimConfig, generate_synthetic_session
 
 

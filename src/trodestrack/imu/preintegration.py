@@ -15,12 +15,10 @@ Key features:
 - Robust integration with configurable step size
 """
 
-import jax
-
-
 from typing import NamedTuple, Optional
 
 import chex
+import jax
 import jax.numpy as jnp
 from jax import lax
 

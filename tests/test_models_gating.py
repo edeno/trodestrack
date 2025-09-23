@@ -1,15 +1,16 @@
 """Tests for Mahalanobis gating and measurement masking."""
 
-import numpy as np
 import jax.numpy as jnp
-from hypothesis import given, strategies as st
+import numpy as np
+from hypothesis import given
+from hypothesis import strategies as st
 
 from trodestrack.models.gating import (
-    mahalanobis_distance,
-    mahalanobis_gate,
-    create_measurement_mask,
     apply_measurement_mask,
     chi_squared_threshold,
+    create_measurement_mask,
+    mahalanobis_distance,
+    mahalanobis_gate,
 )
 
 

@@ -97,6 +97,7 @@
 **STATUS:** ✅ COMPLETED - All filtering and smoothing algorithms implemented with comprehensive testing. The system now supports:
 
 **✅ Extended Kalman Filter (EKF):**
+
 - JAX-compiled prediction and update steps for online tracking
 - Robust measurement handling with Mahalanobis gating
 - Support for position-only and position+heading measurements
@@ -105,6 +106,7 @@
 - Complete test coverage with 18 test cases
 
 **✅ Unscented Kalman Filter (UKF):**
+
 - Sigma point generation and propagation for nonlinear handling
 - JAX-compiled implementation for offline smoothing performance
 - Enhanced accuracy compared to EKF for nonlinear dynamics
@@ -114,12 +116,14 @@
 **✅ CRITICAL BUG FIXES - Mathematical & Numerical Robustness:**
 
 *Acceleration Rotation Consistency:*
+
 - Fixed acceleration rotation inconsistency between `predict_state` and IMU preintegration
 - Added proper rotation from IMU/body frame to world frame using heading angle θ
 - Updated dynamics.py, ekf.py, and ukf.py to include `R @ accel_corrected` transformation
 - Ensures physical consistency across all filtering algorithms
 
 *Process Noise Time Scaling:*
+
 - Fixed incorrect white noise time scaling in `compute_process_noise()`
 - Position noise: `dt⁴ → dt³` (correct Van Loan discrete-time scaling)
 - Velocity noise: `dt² → dt` (correct continuous white noise integration)
@@ -127,23 +131,27 @@
 - Cross-correlation: `dt³ → dt²` (consistent with corrected scaling)
 
 *Damping Stability Protection:*
+
 - Added `_check_damping_stability()` to prevent numerical instabilities
 - Validates that velocity damping satisfies `λ·dt ≤ 1` for stability
 - Clear error messages for unstable parameter combinations
 - Comprehensive test coverage for stability edge cases
 
 *Consistent Angle Wrapping:*
+
 - Implemented uniform `wrap_angle()` function using JAX `jnp.remainder`
 - Applied throughout dynamics, EKF, and UKF prediction steps
 - Ensures heading stays in `[-π, π]` range consistently across all algorithms
 
 *JAX-Pure Chi-Squared Implementation:*
+
 - Replaced SciPy dependency with JAX-compatible lookup table
 - Accurate for common DOF (1-5) and p-values (0.05, 0.01, 0.001)
 - Conservative fallback for edge cases using `2*DOF` or `3*DOF` heuristics
 - JAX-compiled for performance with no external dependencies
 
 *IMU Unit Boundary Clarification:*
+
 - Added clear unit conversion constants with documentation
 - Internal calculations use SI units (m, m/s, m/s²) for consistency
 - External interface maintains cm/cm/s for backward compatibility
@@ -152,29 +160,34 @@
 - **All 247 tests pass** with mathematically correct and numerically stable implementation
 
 **✅ Rauch-Tung-Striebel (RTS) Smoother:**
+
 - Backward-pass smoothing algorithm for improved offline state estimation
 - JAX-compiled implementation with numerical stability checks
 - Compatible with EKF forward pass results
 - 14 comprehensive test cases including edge cases and numerical robustness
 
 **✅ Cached EKF Implementation:**
+
 - Efficient Jacobian and covariance reuse for computational optimization
 - Memory-efficient caching with configurable enable/disable
 - Integration with RTS smoother for high-performance batch processing
 - 14 test cases covering caching functionality and efficiency metrics
 
 **✅ Comprehensive Scenario Testing:**
+
 - Real-world robustness testing for occlusions, LED swaps, and drift recovery
 - Synthetic data generator with configurable noise, dropouts, and trajectory types
 - PRD compliance validation (occlusion drift bounds, recovery times)
 - Scenario tests demonstrate filter robustness under challenging conditions
 
 **✅ Benchmark Performance Validation:**
+
 - **RTS achieves 47.5% RMSE improvement** vs EKF on synthetic "twitchy" session (exceeds ≥20% PRD requirement)
 - Comprehensive benchmarking across multiple scenarios (noisy data, occlusions, velocity estimation)
 - Performance validation demonstrates production-ready accuracy improvements
 
 **📊 MILESTONE 6 FINAL IMPACT:**
+
 - **46 new test cases** added (14 RTS + 14 cached EKF + 4 benchmarks + 14 scenarios)
 - **Total filtering tests: 279+** (all passing)
 - **Complete filtering pipeline** from online EKF to offline RTS smoothing
@@ -193,6 +206,7 @@
 **STATUS:** ✅ COMPLETED - All JAX best-practice violations identified and fixed
 
 **Definition of Done Checklist:**
+
 - ✅ No `np.*` calls inside any `@jit`/`@vmap`-reachable function
 - ✅ All core math functions (predict, update, preintegrate) are `@jit`-ed
 - ✅ RNG flows via `jax.random.PRNGKey`, not global NumPy RNG
@@ -242,22 +256,26 @@
 **✅ MILESTONE 7 ACHIEVEMENTS:**
 
 **Runtime APIs Implemented:**
+
 - **Offline Smoothing API**: `smooth_session(cfg)` with complete EKF filtering and RTS smoothing pipeline
 - **Online Tracking API**: `OnlineTracker(cfg)` and `StreamingTracker` for real-time state estimation
 - **Data Loaders**: Unified loaders supporting NPZ, CSV, and native formats (Trodes, DLC, SpikeGadgets)
 - **Configuration Integration**: Full SessionConfig validation and processing
 
 **CLI Commands Functional:**
+
 - **`trodestrack smooth`**: Runs complete offline smoothing with progress reporting and results saving
 - **`trodestrack online`**: Demonstrates real-time tracking capabilities with performance metrics
 - **`trodestrack calib-homography`**: Interactive homography calibration (pre-existing)
 
 **Integration Testing:**
+
 - **Smoke Tests**: 4 comprehensive tests validating basic functionality
 - **Error Handling**: Robust handling of missing files, invalid configs, and edge cases
 - **Performance Metrics**: Processing time tracking and throughput measurement
 
 **Technical Implementation:**
+
 - **JAX-Compatible**: All runtime APIs use JAX for high-performance computation
 - **Modular Design**: Clean separation between data loading, filtering, and output handling
 - **Professional Logging**: Structured logging with progress updates and diagnostic information
@@ -299,6 +317,7 @@ Following Milestone 7 completion, implemented full JAX lax.scan for offline filt
   - Real-time tracking capability maintained
 
 **JAX lax.scan Implementation Impact:**
+
 - **Complete JAX adoption**: All offline filtering now uses pure JAX with lax.scan
 - **Eliminated fallback paths**: No more arbitrary size-based conditional logic
 - **Consistent performance**: Same optimized code path for all dataset sizes
@@ -322,6 +341,7 @@ Following Milestone 7 completion, implemented full JAX lax.scan for offline filt
   - [ ] Acceptance thresholds enforced in CI (≤2 cm pos RMSE, ≤10 cm/s vel RMSE, ≤7° heading, ≤15 cm drift after 5–7 s dropout).
 
 **DEPENDENCIES COMPLETED:**
+
 - ✅ Runtime APIs functional (Milestone 7)
 - ✅ JAX optimizations implemented for performance
 - ✅ All filtering algorithms production-ready
@@ -338,6 +358,7 @@ Following Milestone 7 completion, implemented full JAX lax.scan for offline filt
 **🏗️ BENCHMARK PACKAGE ORGANIZATION COMPLETED:**
 
 **✅ Package Structure Improvements:**
+
 - **Benchmark Relocation**: Moved benchmark files from root to `src/trodestrack/qa/benchmarks/`
   - `simple_jax_benchmark.py` → proper package location with CLI integration
   - `benchmark_jax_optimizations.py` → proper package location with CLI integration
@@ -346,12 +367,14 @@ Following Milestone 7 completion, implemented full JAX lax.scan for offline filt
 - **Code Quality**: Fixed deprecated `jnp.random` usage, replaced with proper `jax.random`
 
 **✅ Verification Results:**
+
 - Simple benchmark (`--type simple`): ✅ Working perfectly (RTS smoother, JAX arrays, JIT compilation)
 - Optimizations benchmark (`--type optimizations`): ✅ Most components functional, lax.scan path has known issue
 - CLI integration: ✅ All benchmark commands accessible via `trodestrack benchmark`
 - Package organization: ✅ Clean package structure with proper `__init__.py` exports
 
 **Technical Impact:**
+
 - **Performance**: JAX-compiled lax.scan for significant speedups on large datasets (>10 frames)
 - **Architecture**: Clean functional/stateful EKF interfaces for optimal performance paths
 - **Accuracy**: RTS smoother uses actual EKF predictions instead of dummy approximations

@@ -16,7 +16,6 @@ from typing import Optional, Tuple
 import jax.numpy as jnp
 from pydantic import BaseModel, ConfigDict
 
-
 # State dimension as per PRD
 STATE_DIM: int = 8
 

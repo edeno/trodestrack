@@ -1,14 +1,15 @@
 """Tests for dynamics models and prediction step."""
 
+import jax.numpy as jnp
 import numpy as np
 import pytest
-import jax.numpy as jnp
-from hypothesis import given, strategies as st
+from hypothesis import given
+from hypothesis import strategies as st
 
 from trodestrack.models.dynamics import (
-    predict_state,
-    compute_state_jacobian,
     compute_process_noise,
+    compute_state_jacobian,
+    predict_state,
 )
 from trodestrack.models.state import State2D
 

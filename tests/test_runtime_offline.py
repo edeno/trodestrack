@@ -2,19 +2,20 @@
 
 import tempfile
 from pathlib import Path
-import pytest
-import numpy as np
+
 import jax.numpy as jnp
+import numpy as np
+import pytest
 
 from trodestrack.config.schemas import (
-    SessionConfig,
     FilterConfig,
-    OutputConfig,
-    MappingConfig,
     IMUConfig,
+    MappingConfig,
+    OutputConfig,
+    SessionConfig,
     SynchronizationConfig,
 )
-from trodestrack.runtime.offline import smooth_session, SmoothingResult
+from trodestrack.runtime.offline import SmoothingResult, smooth_session
 from trodestrack.sim.session import generate_synthetic_session
 
 
