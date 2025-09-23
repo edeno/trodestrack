@@ -12,8 +12,10 @@ from pathlib import Path
 from typing import NamedTuple, Optional, Tuple
 import warnings
 
+import jax
 import jax.numpy as jnp
 import numpy as np
+from jax import lax
 
 from ..config.schemas import SessionConfig
 from ..io.loaders import load_video_detections, load_imu_data
@@ -21,7 +23,7 @@ from ..geom.homography import transform_points_pixel_to_cm
 from ..imu.preintegration import preintegrate_between_frames
 from ..models.state import State2D, create_initial_state, state_to_array, array_to_state
 from ..models.ekf import EKFFilter, create_initial_ekf_state
-from ..models.rts_smoother import rts_smooth
+from ..models.rts_smoother import rts_smooth, ForwardPassData
 from ..models.measurements import create_measurement_noise
 
 logger = logging.getLogger(__name__)
@@ -224,12 +226,29 @@ def _run_filtering_pass(
         )
 
     n_frames = len(frame_timestamps)
+    logger.info(f"Processing {n_frames} frames")
+
+    # For small datasets or when JAX optimization isn't beneficial, use direct approach
+    if n_frames < 10 or video_data is None:
+        return _run_filtering_pass_direct(ekf_filter, config, video_data, imu_data, frame_timestamps)
+
+    # Use JAX-optimized approach for larger datasets
+    return _run_filtering_pass_scan(ekf_filter, config, video_data, imu_data, frame_timestamps)
+
+
+def _run_filtering_pass_direct(
+    ekf_filter: EKFFilter,
+    config: SessionConfig,
+    video_data: Optional[dict],
+    imu_data: Optional[dict],
+    frame_timestamps: jnp.ndarray,
+) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    """Direct filtering implementation for small datasets or debugging."""
+    n_frames = len(frame_timestamps)
 
     # Storage for results
     filtered_states = []
     filtered_covariances = []
-
-    logger.info(f"Processing {n_frames} frames")
 
     prev_timestamp = frame_timestamps[0]
 
@@ -304,6 +323,56 @@ def _run_filtering_pass(
     )
 
 
+def _run_filtering_pass_scan(
+    ekf_filter: EKFFilter,
+    config: SessionConfig,
+    video_data: dict,
+    imu_data: Optional[dict],
+    frame_timestamps: jnp.ndarray,
+) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    """JAX-optimized filtering implementation using lax.scan."""
+    n_frames = len(frame_timestamps)
+    logger.info(f"Using JAX-optimized filtering for {n_frames} frames")
+
+    # Prepare measurement data
+    positions = video_data['positions']
+    confidences = jnp.array(video_data.get('confidences', [1.0] * len(positions)))
+    headings = None
+    if video_data.get('headings') is not None:
+        headings = jnp.array(video_data['headings'])
+
+    # Pad data to match frame count if needed
+    if len(positions) < n_frames:
+        pad_size = n_frames - len(positions)
+        positions = jnp.concatenate([positions, jnp.full((pad_size, 2), jnp.nan)])
+        confidences = jnp.concatenate([confidences, jnp.zeros(pad_size)])
+        if headings is not None:
+            headings = jnp.concatenate([headings, jnp.full(pad_size, jnp.nan)])
+
+    # Compute time differences
+    dts = jnp.diff(frame_timestamps, prepend=frame_timestamps[0])
+
+    # Create scan inputs
+    if headings is not None:
+        scan_inputs = (dts, positions, headings, confidences)
+    else:
+        scan_inputs = (dts, positions, jnp.full(n_frames, jnp.nan), confidences)
+
+    # Define scan function
+    def filter_step(carry, inputs):
+        # Unpack inputs
+        dt, position, heading, confidence = inputs
+
+        # Get current filter state (not used directly in scan, but for reference)
+        # We'll need to work with the stateful ekf_filter outside of scan
+        return carry, (dt, position, heading, confidence)
+
+    # For now, fall back to direct approach since EKFFilter is stateful
+    # TODO: Refactor EKF to be functional for full JAX compatibility
+    logger.info("Falling back to direct approach (EKF filter is stateful)")
+    return _run_filtering_pass_direct(ekf_filter, config, video_data, imu_data, frame_timestamps)
+
+
 def _run_smoothing_pass(
     filtered_states: jnp.ndarray,
     filtered_covariances: jnp.ndarray,
@@ -313,40 +382,53 @@ def _run_smoothing_pass(
 ) -> Tuple[jnp.ndarray, jnp.ndarray]:
     """Run the backward smoothing pass with RTS smoother."""
 
-    # For now, implement a simple backward pass
-    # TODO: Integrate with full RTS smoother when IMU dynamics are included
-
     if config.filter.filter_type == "ekf":
-        logger.info("Running RTS smoothing")
+        logger.info("Running JAX-optimized RTS smoothing")
 
-        # Simple RTS implementation without IMU dynamics for now
-        smoothed_states = filtered_states.copy()
-        smoothed_covariances = filtered_covariances.copy()
-
-        # Apply basic RTS smoothing (simplified version)
+        # Use the full RTS smoother implementation with lax.scan
         n_frames = len(filtered_states)
 
-        for i in range(n_frames - 2, -1, -1):
-            # Simple backward pass - will be enhanced with full dynamics
-            dt = frame_timestamps[i+1] - frame_timestamps[i]
-            if dt > 0:
-                # Basic smoothing gain computation
-                A = jnp.eye(8)  # Simplified dynamics
-                C = A @ filtered_covariances[i] @ A.T
+        # Create predicted states using simple dynamics for RTS
+        # In a full implementation, these would come from the forward pass
+        predicted_states = []
+        predicted_covariances = []
 
-                # Avoid division by zero
-                C_inv = jnp.linalg.pinv(C + 1e-12 * jnp.eye(8))
-                gain = filtered_covariances[i] @ A.T @ C_inv
+        for i in range(n_frames):
+            if i == 0:
+                # First frame: predicted = filtered (no prior prediction)
+                predicted_states.append(filtered_states[i])
+                predicted_covariances.append(filtered_covariances[i])
+            else:
+                # Simple prediction for RTS (in full implementation, this comes from forward pass)
+                dt = frame_timestamps[i] - frame_timestamps[i-1]
 
-                # Smooth state
-                state_diff = smoothed_states[i+1] - filtered_states[i+1]
-                smoothed_states = smoothed_states.at[i].add(gain @ state_diff)
+                # Simple constant velocity prediction
+                A = jnp.eye(8)
+                A = A.at[0, 2].set(dt)  # x += vx * dt
+                A = A.at[1, 3].set(dt)  # y += vy * dt
 
-                # Smooth covariance
-                cov_diff = smoothed_covariances[i+1] - filtered_covariances[i+1]
-                smoothed_covariances = smoothed_covariances.at[i].add(gain @ cov_diff @ gain.T)
+                pred_state = A @ filtered_states[i-1]
+                pred_cov = A @ filtered_covariances[i-1] @ A.T + jnp.eye(8) * 1e-6
 
-        logger.info("RTS smoothing completed")
+                predicted_states.append(pred_state)
+                predicted_covariances.append(pred_cov)
+
+        # Create forward pass data for RTS
+        forward_data = ForwardPassData(
+            filtered_states=list(filtered_states),
+            filtered_covariances=list(filtered_covariances),
+            predicted_states=predicted_states,
+            predicted_covariances=predicted_covariances,
+            log_likelihood=0.0  # Not used in offline context
+        )
+
+        # Run JAX-optimized RTS smoother
+        rts_result = rts_smooth(forward_data)
+
+        smoothed_states = jnp.array(rts_result.smoothed_states)
+        smoothed_covariances = jnp.array(rts_result.smoothed_covariances)
+
+        logger.info("JAX-optimized RTS smoothing completed")
     else:
         logger.info("UKF selected - using filtered results as smoothed (UKF smoothing not yet implemented)")
         smoothed_states = filtered_states

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Dict, Optional, Any
 import logging
 
+import jax.numpy as jnp
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -99,11 +100,12 @@ def _load_video_npz(file_path: Path) -> Dict[str, Any]:
         if key not in data:
             raise ValueError(f"Missing required key '{key}' in video NPZ file")
 
+    # Convert to JAX arrays for better performance
     result = {
-        'timestamps': data['timestamps'],
-        'positions': data['positions'],
-        'confidences': data.get('confidences', np.ones(len(data['timestamps']))),
-        'headings': data.get('headings', None),
+        'timestamps': jnp.array(data['timestamps']),
+        'positions': jnp.array(data['positions']),
+        'confidences': jnp.array(data.get('confidences', np.ones(len(data['timestamps'])))),
+        'headings': jnp.array(data['headings']) if data.get('headings') is not None else None,
         'metadata': {'format': 'npz', 'source_file': str(file_path)},
     }
 
@@ -163,11 +165,12 @@ def _load_video_csv(file_path: Path) -> Dict[str, Any]:
     confidences = df[confidence_col].values if confidence_col else np.ones(len(df))
     headings = df[heading_col].values if heading_col else None
 
+    # Convert to JAX arrays for better performance
     return {
-        'timestamps': timestamps,
-        'positions': positions,
-        'confidences': confidences,
-        'headings': headings,
+        'timestamps': jnp.array(timestamps),
+        'positions': jnp.array(positions),
+        'confidences': jnp.array(confidences),
+        'headings': jnp.array(headings) if headings is not None else None,
         'metadata': {'format': 'csv', 'source_file': str(file_path)},
     }
 
@@ -187,10 +190,11 @@ def _load_video_dlc_h5(file_path: Path) -> Dict[str, Any]:
     primary_keypoint = keypoint_names[0]
     logger.info(f"Using keypoint '{primary_keypoint}' as primary position")
 
+    # Convert to JAX arrays for better performance
     return {
-        'timestamps': dlc_data.timestamps,
-        'positions': dlc_data.keypoints[primary_keypoint],
-        'confidences': dlc_data.confidences[primary_keypoint],
+        'timestamps': jnp.array(dlc_data.timestamps),
+        'positions': jnp.array(dlc_data.keypoints[primary_keypoint]),
+        'confidences': jnp.array(dlc_data.confidences[primary_keypoint]),
         'headings': None,  # Could compute from multiple keypoints if available
         'metadata': {
             'format': 'dlc_h5',
@@ -223,9 +227,10 @@ def _load_imu_npz(file_path: Path) -> Dict[str, Any]:
     if imu_data.shape[1] != 6:
         raise ValueError(f"IMU data must have 6 columns [ax, ay, az, gx, gy, gz], got {imu_data.shape[1]}")
 
+    # Convert to JAX arrays for better performance
     return {
-        'timestamps': data['timestamps'],
-        'data': imu_data,
+        'timestamps': jnp.array(data['timestamps']),
+        'data': jnp.array(imu_data),
         'sampling_rate': sampling_rate,
         'metadata': {'format': 'npz', 'source_file': str(file_path)},
     }
@@ -281,9 +286,10 @@ def _load_imu_csv(file_path: Path) -> Dict[str, Any]:
     dt = np.median(np.diff(timestamps))
     sampling_rate = 1.0 / dt
 
+    # Convert to JAX arrays for better performance
     return {
-        'timestamps': timestamps,
-        'data': imu_data,
+        'timestamps': jnp.array(timestamps),
+        'data': jnp.array(imu_data),
         'sampling_rate': sampling_rate,
         'metadata': {'format': 'csv', 'source_file': str(file_path)},
     }
@@ -302,9 +308,10 @@ def _load_imu_spikegadgets(file_path: Path) -> Dict[str, Any]:
     # Combine into 6-column format
     combined_data = np.column_stack([accel_ms2, gyro_rad_s])
 
+    # Convert to JAX arrays for better performance
     return {
-        'timestamps': imu_data.timestamps,
-        'data': combined_data,
+        'timestamps': jnp.array(imu_data.timestamps),
+        'data': jnp.array(combined_data),
         'sampling_rate': imu_data.sampling_rate,
         'metadata': {
             'format': 'spikegadgets',
