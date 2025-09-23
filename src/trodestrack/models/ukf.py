@@ -489,6 +489,9 @@ def ukf_update(
     Returns:
         UKF update result
     """
+    # Use specialized functions for each case to avoid conditional logic in JAX
+    # Note: This is acceptable since the branching happens at the Python level (not in JIT)
+    # and avoids recompilation issues
     if has_heading:
         return _ukf_update_position_heading(
             ukf_state, measurement, measurement_noise, gate_threshold, params

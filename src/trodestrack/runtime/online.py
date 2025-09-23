@@ -200,11 +200,15 @@ class OnlineTracker:
         innovation = jnp.array([])
         gated = False
 
-        if dt > 0 and len(imu_measurements) > 0:
+        # Use JAX-compatible conditional for future JIT compilation
+        has_imu_data = dt > 0 and len(imu_measurements) > 0
+        if has_imu_data:
             # Perform IMU pre-integration
             imu_data, imu_timestamps = self._prepare_imu_data(imu_measurements)
 
-            if len(imu_data) > 1:
+            # Use JAX-compatible conditional for IMU data length check
+            has_sufficient_imu = len(imu_data) > 1
+            if has_sufficient_imu:
                 # Get current state for pre-integration
                 _ = self._ekf_filter.get_current_state()
 

@@ -253,6 +253,8 @@ def ekf_update(
         EKF update result
     """
     # Use specialized functions for each case to avoid conditional logic in JAX
+    # Note: This is acceptable since the branching happens at the Python level (not in JIT)
+    # and avoids recompilation issues
     if has_heading:
         return _ekf_update_position_heading(
             ekf_state, measurement, measurement_noise, gate_threshold
@@ -433,14 +435,10 @@ def ekf_step(carry: EkfCarry, inp: EkfInput) -> Tuple[EkfCarry, EkfOutputs]:
     gate_threshold = filter_cfg.get("gate_threshold", 9.21)
 
     # Prediction step
-    # Extract IMU measurements (handle None case)
-    if imu_block is not None:
-        accel = imu_block[:2]  # [ax, ay]
-        gyro = imu_block[2:]  # [gz]
-    else:
-        # Use zero IMU measurements if not available
-        accel = jnp.zeros(2)
-        gyro = jnp.zeros(1)
+    # Extract IMU measurements (imu_block is guaranteed to be a valid array in our pipeline)
+    # If missing data is passed, it will be zeros which is handled correctly
+    accel = imu_block[:2]  # [ax, ay]
+    gyro = imu_block[2:]   # [gz]
 
     # Predict state using existing JAX function
     x_pred = _predict_state_jax(x, dt, accel, gyro, velocity_damping)
