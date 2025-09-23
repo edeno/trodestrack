@@ -8,13 +8,14 @@ This module implements the prediction step of the EKF/UKF, including:
 
 import jax
 import jax.numpy as jnp
+from jax import Array
 from jax.typing import ArrayLike
 
 from .state import State2D
 
 
 @jax.jit
-def wrap_angle(angle: ArrayLike) -> ArrayLike:
+def wrap_angle(angle: ArrayLike) -> Array:
     """Wrap angle to [-π, π] range using JAX operations.
 
     Args:
@@ -135,14 +136,14 @@ def predict_state(
 
 
 def predict_covariance(
-    covariance: jnp.ndarray,
-    state_array: jnp.ndarray,
-    dt: float,
-    accel: jnp.ndarray,
-    gyro: jnp.ndarray,
+    covariance: ArrayLike,
+    state_array: ArrayLike,
+    dt: ArrayLike,
+    accel: ArrayLike,
+    gyro: ArrayLike,
     velocity_damping: float,
-    process_noise: jnp.ndarray,
-) -> jnp.ndarray:
+    process_noise: ArrayLike,
+) -> Array:
     """Predict covariance matrix using linearized dynamics.
 
     Args:
@@ -231,11 +232,11 @@ def compute_state_jacobian(
 
 
 def compute_process_noise(
-    dt: float,
+    dt: ArrayLike,
     accel_noise_std: float,
     gyro_noise_std: float,
     bias_drift_std: float,
-) -> jnp.ndarray:
+) -> Array:
     """Compute process noise matrix Q for the dynamics model.
 
     Process noise accounts for:

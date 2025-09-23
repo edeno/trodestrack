@@ -11,6 +11,8 @@ from typing import Tuple
 
 import jax
 import jax.numpy as jnp
+from jax import Array
+from jax.typing import ArrayLike
 
 from ._solvers import kalman_gain
 from .state import State2D, array_to_state, state_to_array
@@ -202,7 +204,7 @@ def compute_velocity_from_recent_positions(
     confidences: jnp.ndarray,
     window_size: int = 5,
     min_confidence: float = 0.7,
-) -> Tuple[jnp.ndarray, float, bool]:
+) -> Tuple[Array, Array, bool]:
     """Compute velocity from recent position measurements.
 
     Args:
@@ -225,7 +227,7 @@ def compute_velocity_from_recent_positions(
     valid_mask = confidences >= min_confidence
     if jnp.sum(valid_mask) < 2:
         # Need at least 2 valid points for velocity estimation
-        return jnp.zeros(2), 0.0, False
+        return jnp.zeros(2), jnp.array(0.0), False
 
     valid_positions = positions[valid_mask]
     valid_timestamps = timestamps[valid_mask]

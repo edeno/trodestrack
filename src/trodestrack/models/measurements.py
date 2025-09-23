@@ -11,6 +11,7 @@ from typing import Optional
 
 import jax
 import jax.numpy as jnp
+from jax import Array
 from jax.typing import ArrayLike
 
 from .state import State2D
@@ -28,7 +29,7 @@ def position_measurement(state: State2D) -> jnp.ndarray:
     return jnp.array([state.x, state.y])
 
 
-def heading_measurement(led_front: jnp.ndarray, led_back: jnp.ndarray) -> ArrayLike:
+def heading_measurement(led_front: ArrayLike, led_back: ArrayLike) -> Array:
     """Compute heading from LED pair.
 
     Args:
@@ -86,11 +87,11 @@ def compute_heading_jacobian(state_array: jnp.ndarray) -> jnp.ndarray:
 
 
 def validate_led_measurement(
-    led_front: jnp.ndarray,
-    led_back: jnp.ndarray,
+    led_front: ArrayLike,
+    led_back: ArrayLike,
     expected_spacing: float,
     tolerance: float,
-) -> ArrayLike:
+) -> Array:
     """Validate LED measurement based on expected spacing.
 
     Args:

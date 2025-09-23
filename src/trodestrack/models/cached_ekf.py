@@ -15,6 +15,7 @@ Key optimizations:
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
 import jax.numpy as jnp
+from jax import Array
 
 from ._solvers import safe_solve
 from .dynamics import compute_process_noise, compute_state_jacobian
@@ -168,7 +169,7 @@ class CachedEKFFilter:
         position: Optional[jnp.ndarray] = None,
         heading: Optional[float] = None,
         confidence: float = 1.0,
-    ) -> Tuple[EKFResult, Dict[str, jnp.ndarray]]:
+    ) -> Tuple[EKFResult, Dict[str, Optional[Array]]]:
         """Perform measurement update with caching of intermediate computations.
 
         Args:
@@ -252,7 +253,7 @@ class CachedEKFFilter:
         position: Optional[jnp.ndarray] = None,
         heading: Optional[float] = None,
         confidence: float = 1.0,
-    ) -> Tuple[EKFResult, Dict[str, jnp.ndarray]]:
+    ) -> Tuple[EKFResult, Dict[str, Optional[Array]]]:
         """Perform complete EKF step (predict + update) with caching.
 
         Args:
@@ -337,7 +338,7 @@ class CachedEKFFilter:
 def efficient_rts_smooth_with_cache(
     cached_ekf: CachedEKFFilter,
     ekf_results: List[EKFResult],
-) -> Tuple[List[jnp.ndarray], List[jnp.ndarray]]:
+) -> Tuple[List[Array], List[Array]]:
     """Efficient RTS smoothing using cached computations.
 
     This function performs RTS smoothing while reusing cached Jacobians
@@ -355,8 +356,8 @@ def efficient_rts_smooth_with_cache(
         return [], []
 
     # Initialize with final filtered estimates
-    smoothed_states = [None] * N
-    smoothed_covariances = [None] * N
+    smoothed_states: List[Optional[Array]] = [None] * N
+    smoothed_covariances: List[Optional[Array]] = [None] * N
 
     smoothed_states[N - 1] = ekf_results[N - 1].state.state
     smoothed_covariances[N - 1] = ekf_results[N - 1].state.covariance

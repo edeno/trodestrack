@@ -13,6 +13,8 @@ from typing import Any, Dict, NamedTuple, Optional, Tuple
 import jax
 import jax.numpy as jnp
 from chex import dataclass
+from jax import Array
+from jax.typing import ArrayLike
 
 from ._solvers import kalman_gain, mahalanobis_distance
 from .dynamics import (
@@ -58,7 +60,7 @@ class EKFResult(NamedTuple):
     innovation: jnp.ndarray
     innovation_covariance: jnp.ndarray
     kalman_gain: jnp.ndarray
-    gated: bool
+    gated: ArrayLike
 
 
 class EkfCarry(NamedTuple):

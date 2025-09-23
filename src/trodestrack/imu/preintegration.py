@@ -20,7 +20,8 @@ from typing import NamedTuple, Optional
 import chex
 import jax
 import jax.numpy as jnp
-from jax import lax
+from jax import Array, lax
+from jax.typing import ArrayLike
 
 
 class IMUPreintegrationResult(NamedTuple):
@@ -40,10 +41,10 @@ class IMUPreintegrationResult(NamedTuple):
         Number of IMU samples integrated
     """
 
-    delta_position: jnp.ndarray
-    delta_velocity: jnp.ndarray
-    delta_heading: float
-    dt: float
+    delta_position: Array
+    delta_velocity: Array
+    delta_heading: ArrayLike
+    dt: ArrayLike
     n_samples: int
 
 

@@ -11,6 +11,8 @@ from typing import NamedTuple, Optional, Tuple
 
 import jax
 import jax.numpy as jnp
+from jax import Array
+from jax.typing import ArrayLike
 from jax.scipy.linalg import cholesky
 
 from ._solvers import _symmetrize_and_stabilize, mahalanobis_distance, safe_solve
@@ -48,7 +50,7 @@ class UKFResult(NamedTuple):
     innovation: jnp.ndarray
     innovation_covariance: jnp.ndarray
     kalman_gain: jnp.ndarray
-    gated: bool
+    gated: ArrayLike
 
 
 class UKFParams(NamedTuple):
