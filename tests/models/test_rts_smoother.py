@@ -73,17 +73,17 @@ class TestRTSSmooth:
     def test_empty_sequence(self):
         """Test RTS smoothing with empty input."""
         forward_data = ForwardPassData(
-            filtered_states=[],
-            filtered_covariances=[],
-            predicted_states=[],
-            predicted_covariances=[],
+            filtered_states=jnp.array([]).reshape(0, 8),
+            filtered_covariances=jnp.array([]).reshape(0, 8, 8),
+            predicted_states=jnp.array([]).reshape(0, 8),
+            predicted_covariances=jnp.array([]).reshape(0, 8, 8),
             log_likelihood=0.0,
         )
 
         result = rts_smooth(forward_data)
 
-        assert len(result.smoothed_states) == 0
-        assert len(result.smoothed_covariances) == 0
+        assert result.smoothed_states.shape[0] == 0
+        assert result.smoothed_covariances.shape[0] == 0
         assert result.log_likelihood == 0.0
 
     def test_single_timestep(self):
@@ -93,17 +93,17 @@ class TestRTSSmooth:
         covariance = jnp.eye(n_dim) * 0.1
 
         forward_data = ForwardPassData(
-            filtered_states=[state],
-            filtered_covariances=[covariance],
-            predicted_states=[state],  # No next prediction needed
-            predicted_covariances=[covariance],
+            filtered_states=jnp.array([state]),
+            filtered_covariances=jnp.array([covariance]),
+            predicted_states=jnp.array([state]),  # No next prediction needed
+            predicted_covariances=jnp.array([covariance]),
             log_likelihood=10.0,
         )
 
         result = rts_smooth(forward_data)
 
         # Single timestep should remain unchanged
-        assert len(result.smoothed_states) == 1
+        assert result.smoothed_states.shape[0] == 1
         np.testing.assert_allclose(result.smoothed_states[0], state, rtol=1e-10)
         np.testing.assert_allclose(result.smoothed_covariances[0], covariance, rtol=1e-10)
         assert result.log_likelihood == 10.0
@@ -123,17 +123,17 @@ class TestRTSSmooth:
         P2_f = jnp.eye(n_dim) * 0.15
 
         forward_data = ForwardPassData(
-            filtered_states=[x1_f, x2_f],
-            filtered_covariances=[P1_f, P2_f],
-            predicted_states=[x1_f, x2_p],  # First is initial, second is prediction
-            predicted_covariances=[P1_f, P2_p],
+            filtered_states=jnp.array([x1_f, x2_f]),
+            filtered_covariances=jnp.array([P1_f, P2_f]),
+            predicted_states=jnp.array([x1_f, x2_p]),  # First is initial, second is prediction
+            predicted_covariances=jnp.array([P1_f, P2_p]),
             log_likelihood=25.0,
         )
 
         result = rts_smooth(forward_data)
 
-        assert len(result.smoothed_states) == 2
-        assert len(result.smoothed_covariances) == 2
+        assert result.smoothed_states.shape[0] == 2
+        assert result.smoothed_covariances.shape[0] == 2
 
         # Final timestep should remain unchanged
         np.testing.assert_allclose(result.smoothed_states[1], x2_f, rtol=1e-10)
@@ -181,10 +181,10 @@ class TestRTSSmooth:
                 predicted_covariances.append(P_filtered)
 
         forward_data = ForwardPassData(
-            filtered_states=filtered_states,
-            filtered_covariances=filtered_covariances,
-            predicted_states=predicted_states,
-            predicted_covariances=predicted_covariances,
+            filtered_states=jnp.array(filtered_states),
+            filtered_covariances=jnp.array(filtered_covariances),
+            predicted_states=jnp.array(predicted_states),
+            predicted_covariances=jnp.array(predicted_covariances),
             log_likelihood=50.0,
         )
 
@@ -235,10 +235,10 @@ class TestRTSSmoother:
 
         forward_data = smoother.collect_forward_data(ekf_results, prediction_data)
 
-        assert len(forward_data.filtered_states) == 3
-        assert len(forward_data.filtered_covariances) == 3
-        assert len(forward_data.predicted_states) == 3
-        assert len(forward_data.predicted_covariances) == 3
+        assert forward_data.filtered_states.shape[0] == 3
+        assert forward_data.filtered_covariances.shape[0] == 3
+        assert forward_data.predicted_states.shape[0] == 3
+        assert forward_data.predicted_covariances.shape[0] == 3
 
     def test_smooth_sequence_integration(self):
         """Test full smoother workflow."""
@@ -252,17 +252,17 @@ class TestRTSSmoother:
         predicted_covariances = filtered_covariances.copy()
 
         forward_data = ForwardPassData(
-            filtered_states=filtered_states,
-            filtered_covariances=filtered_covariances,
-            predicted_states=predicted_states,
-            predicted_covariances=predicted_covariances,
+            filtered_states=jnp.array(filtered_states),
+            filtered_covariances=jnp.array(filtered_covariances),
+            predicted_states=jnp.array(predicted_states),
+            predicted_covariances=jnp.array(predicted_covariances),
             log_likelihood=30.0,
         )
 
         result = smoother.smooth_sequence(forward_data)
 
-        assert len(result.smoothed_states) == n_steps
-        assert len(result.smoothed_covariances) == n_steps
+        assert result.smoothed_states.shape[0] == n_steps
+        assert result.smoothed_covariances.shape[0] == n_steps
         assert result.log_likelihood == 30.0
 
 

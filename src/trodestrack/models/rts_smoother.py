@@ -26,13 +26,13 @@ class RTSResult(NamedTuple):
     """Result from RTS smoothing operation.
 
     Attributes:
-        smoothed_states: List of smoothed state estimates
-        smoothed_covariances: List of smoothed covariance matrices
+        smoothed_states: JAX array of smoothed state estimates [N, state_dim]
+        smoothed_covariances: JAX array of smoothed covariance matrices [N, state_dim, state_dim]
         log_likelihood: Total log-likelihood of the sequence
     """
 
-    smoothed_states: List[jnp.ndarray]
-    smoothed_covariances: List[jnp.ndarray]
+    smoothed_states: jnp.ndarray
+    smoothed_covariances: jnp.ndarray
     log_likelihood: float
 
 
@@ -40,17 +40,17 @@ class ForwardPassData(NamedTuple):
     """Data from forward pass needed for RTS smoothing.
 
     Attributes:
-        filtered_states: States after measurement updates
-        filtered_covariances: Covariances after measurement updates
-        predicted_states: States after prediction steps
-        predicted_covariances: Covariances after prediction steps
+        filtered_states: JAX array of states after measurement updates [N, state_dim]
+        filtered_covariances: JAX array of covariances after measurement updates [N, state_dim, state_dim]
+        predicted_states: JAX array of states after prediction steps [N, state_dim]
+        predicted_covariances: JAX array of covariances after prediction steps [N, state_dim, state_dim]
         log_likelihood: Cumulative log-likelihood
     """
 
-    filtered_states: List[jnp.ndarray]
-    filtered_covariances: List[jnp.ndarray]
-    predicted_states: List[jnp.ndarray]
-    predicted_covariances: List[jnp.ndarray]
+    filtered_states: jnp.ndarray
+    filtered_covariances: jnp.ndarray
+    predicted_states: jnp.ndarray
+    predicted_covariances: jnp.ndarray
     log_likelihood: float
 
 
@@ -112,34 +112,22 @@ def rts_smooth(
     Returns:
         RTSResult with smoothed states and covariances
     """
-    N = len(forward_data.filtered_states)
+    N = forward_data.filtered_states.shape[0]
 
     if N == 0:
+        # Return empty arrays with correct shapes
+        state_dim = 8  # trodestrack uses 8-dimensional state
         return RTSResult(
-            smoothed_states=[], smoothed_covariances=[], log_likelihood=forward_data.log_likelihood
+            smoothed_states=jnp.array([]).reshape(0, state_dim),
+            smoothed_covariances=jnp.array([]).reshape(0, state_dim, state_dim),
+            log_likelihood=forward_data.log_likelihood
         )
 
-    # Convert lists to JAX arrays if needed
-    filtered_states = (
-        jnp.array(forward_data.filtered_states)
-        if isinstance(forward_data.filtered_states[0], jnp.ndarray)
-        else jnp.array(forward_data.filtered_states)
-    )
-    filtered_covariances = (
-        jnp.array(forward_data.filtered_covariances)
-        if isinstance(forward_data.filtered_covariances[0], jnp.ndarray)
-        else jnp.array(forward_data.filtered_covariances)
-    )
-    predicted_states = (
-        jnp.array(forward_data.predicted_states)
-        if isinstance(forward_data.predicted_states[0], jnp.ndarray)
-        else jnp.array(forward_data.predicted_states)
-    )
-    predicted_covariances = (
-        jnp.array(forward_data.predicted_covariances)
-        if isinstance(forward_data.predicted_covariances[0], jnp.ndarray)
-        else jnp.array(forward_data.predicted_covariances)
-    )
+    # Data is already JAX arrays from ForwardPassData
+    filtered_states = forward_data.filtered_states
+    filtered_covariances = forward_data.filtered_covariances
+    predicted_states = forward_data.predicted_states
+    predicted_covariances = forward_data.predicted_covariances
 
     # Initialize output arrays (JAX-compatible)
     smoothed_states = jnp.zeros_like(filtered_states)
@@ -182,8 +170,8 @@ def rts_smooth(
     smoothed_covariances = smoothed_covariances.at[:-1].set(backward_covariances)
 
     return RTSResult(
-        smoothed_states=list(smoothed_states),
-        smoothed_covariances=list(smoothed_covariances),
+        smoothed_states=smoothed_states,
+        smoothed_covariances=smoothed_covariances,
         log_likelihood=forward_data.log_likelihood,
     )
 
@@ -244,10 +232,10 @@ class RTSSmoother:
         log_likelihood = ekf_results[-1].state.log_likelihood if ekf_results else 0.0
 
         return ForwardPassData(
-            filtered_states=filtered_states,
-            filtered_covariances=filtered_covariances,
-            predicted_states=predicted_states,
-            predicted_covariances=predicted_covariances,
+            filtered_states=jnp.array(filtered_states),
+            filtered_covariances=jnp.array(filtered_covariances),
+            predicted_states=jnp.array(predicted_states),
+            predicted_covariances=jnp.array(predicted_covariances),
             log_likelihood=log_likelihood,
         )
 

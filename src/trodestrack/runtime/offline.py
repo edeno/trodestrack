@@ -412,18 +412,18 @@ def _run_smoothing_pass(
 
         # Create forward pass data for RTS using true predictions from EKF forward pass
         forward_data = ForwardPassData(
-            filtered_states=list(filtered_states),
-            filtered_covariances=list(filtered_covariances),
-            predicted_states=list(predicted_states),
-            predicted_covariances=list(predicted_covariances),
+            filtered_states=filtered_states,
+            filtered_covariances=filtered_covariances,
+            predicted_states=predicted_states,
+            predicted_covariances=predicted_covariances,
             log_likelihood=0.0,  # Not used in offline context
         )
 
         # Run JAX-optimized RTS smoother
         rts_result = rts_smooth(forward_data)
 
-        smoothed_states = jnp.array(rts_result.smoothed_states)
-        smoothed_covariances = jnp.array(rts_result.smoothed_covariances)
+        smoothed_states = rts_result.smoothed_states
+        smoothed_covariances = rts_result.smoothed_covariances
 
         logger.info("JAX-optimized RTS smoothing completed")
     else:

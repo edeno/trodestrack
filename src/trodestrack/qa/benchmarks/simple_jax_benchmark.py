@@ -62,10 +62,10 @@ def benchmark_rts_smoother():
 
     # Create forward pass data
     forward_data = ForwardPassData(
-        filtered_states=filtered_states,
-        filtered_covariances=filtered_covariances,
-        predicted_states=predicted_states,
-        predicted_covariances=predicted_covariances,
+        filtered_states=jnp.array(filtered_states),
+        filtered_covariances=jnp.array(filtered_covariances),
+        predicted_states=jnp.array(predicted_states),
+        predicted_covariances=jnp.array(predicted_covariances),
         log_likelihood=0.0,
     )
 
@@ -86,13 +86,12 @@ def benchmark_rts_smoother():
     print("   All operations JAX-compiled: ✅")
 
     # Verify results make sense
-    if len(rts_result.smoothed_states) == n_frames:
+    if rts_result.smoothed_states.shape[0] == n_frames:
         print("   Result validation: ✅ Correct number of smoothed states")
 
         # Check that smoothing actually changed something
-        total_change = sum(
-            float(jnp.linalg.norm(jnp.array(smooth) - jnp.array(filt)))
-            for smooth, filt in zip(rts_result.smoothed_states, filtered_states)
+        total_change = jnp.sum(
+            jnp.linalg.norm(rts_result.smoothed_states - jnp.array(filtered_states), axis=1)
         )
         avg_change = total_change / n_frames
         print(f"   Average state change: {avg_change:.4f} (smoothing active)")
