@@ -12,7 +12,7 @@ Key features:
 - Provides uncertainty estimates for smoothed states
 """
 
-from typing import List, NamedTuple, Optional, Tuple
+from typing import List, NamedTuple, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -270,14 +270,14 @@ class RTSSmoother:
         self,
         ekf_results: List[EKFResult],
         prediction_data: List[Tuple[ArrayLike, ArrayLike]],
-        transition_matrices: Optional[List[ArrayLike]] = None,
+        transition_matrices: List[ArrayLike],
     ) -> ForwardPassData:
         """Collect data from forward pass for smoothing.
 
         Args:
             ekf_results: Results from EKF forward pass
             prediction_data: List of (predicted_state, predicted_covariance) tuples
-            transition_matrices: Optional list of transition matrices. If None, will compute on-demand.
+            transition_matrices: List of state transition matrices F_k
 
         Returns:
             ForwardPassData suitable for RTS smoothing
@@ -288,31 +288,16 @@ class RTSSmoother:
                 f"and prediction data ({len(prediction_data)})"
             )
 
+        if len(transition_matrices) != len(ekf_results):
+            raise ValueError(
+                f"Mismatch between transition matrices ({len(transition_matrices)}) "
+                f"and EKF results ({len(ekf_results)})"
+            )
+
         filtered_states = [result.state.state for result in ekf_results]
         filtered_covariances = [result.state.covariance for result in ekf_results]
         predicted_states = [pred[0] for pred in prediction_data]
         predicted_covariances = [pred[1] for pred in prediction_data]
-
-        # Handle transition matrices
-        if transition_matrices is not None:
-            if len(transition_matrices) != len(ekf_results):
-                raise ValueError(
-                    f"Mismatch between transition matrices ({len(transition_matrices)}) "
-                    f"and EKF results ({len(ekf_results)})"
-                )
-            F_matrices = transition_matrices
-        else:
-            # Backward compatibility: use identity matrices as placeholder
-            # This maintains the old behavior but with reduced accuracy
-            # TODO: Update callers to provide actual transition matrices
-            import warnings
-            warnings.warn(
-                "RTS smoother running without transition matrices. "
-                "This reduces accuracy. Please provide transition_matrices argument.",
-                UserWarning,
-                stacklevel=2
-            )
-            F_matrices = [jnp.eye(8) for _ in range(len(ekf_results))]
 
         # Total log-likelihood is from the final EKF result
         log_likelihood = ekf_results[-1].state.log_likelihood if ekf_results else 0.0
@@ -322,7 +307,7 @@ class RTSSmoother:
             filtered_covariances=jnp.array(filtered_covariances),
             predicted_states=jnp.array(predicted_states),
             predicted_covariances=jnp.array(predicted_covariances),
-            transition_matrices=jnp.array(F_matrices),
+            transition_matrices=jnp.array(transition_matrices),
             log_likelihood=log_likelihood,
         )
 

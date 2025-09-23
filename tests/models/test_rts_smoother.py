@@ -228,9 +228,17 @@ class TestRTSSmoother:
         # Create mismatched inputs
         ekf_results = [create_dummy_ekf_result() for _ in range(3)]
         prediction_data = [(jnp.zeros(8), jnp.eye(8)) for _ in range(2)]  # Different length
+        transition_matrices = [jnp.eye(8) for _ in range(3)]
 
         with pytest.raises(ValueError, match="Mismatch between EKF results"):
-            smoother.collect_forward_data(ekf_results, prediction_data)
+            smoother.collect_forward_data(ekf_results, prediction_data, transition_matrices)
+
+        # Test transition matrix mismatch
+        prediction_data_fixed = [(jnp.zeros(8), jnp.eye(8)) for _ in range(3)]
+        transition_matrices_wrong = [jnp.eye(8) for _ in range(2)]  # Different length
+
+        with pytest.raises(ValueError, match="Mismatch between transition matrices"):
+            smoother.collect_forward_data(ekf_results, prediction_data_fixed, transition_matrices_wrong)
 
     def test_collect_forward_data_success(self):
         """Test successful collection of forward pass data."""
@@ -239,13 +247,15 @@ class TestRTSSmoother:
         # Create matching inputs
         ekf_results = [create_dummy_ekf_result() for _ in range(3)]
         prediction_data = [(jnp.zeros(8), jnp.eye(8)) for _ in range(3)]
+        transition_matrices = [jnp.eye(8) for _ in range(3)]
 
-        forward_data = smoother.collect_forward_data(ekf_results, prediction_data)
+        forward_data = smoother.collect_forward_data(ekf_results, prediction_data, transition_matrices)
 
         assert forward_data.filtered_states.shape[0] == 3
         assert forward_data.filtered_covariances.shape[0] == 3
         assert forward_data.predicted_states.shape[0] == 3
         assert forward_data.predicted_covariances.shape[0] == 3
+        assert forward_data.transition_matrices.shape[0] == 3
 
     def test_smooth_sequence_integration(self):
         """Test full smoother workflow."""
