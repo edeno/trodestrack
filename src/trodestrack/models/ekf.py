@@ -295,9 +295,11 @@ def _ekf_update_position_only(
     # State update: x = x + K * innovation (only if not gated)
     updated_state = jnp.where(gated, ekf_state.state, ekf_state.state + K @ innovation)
 
-    # Covariance update: P = (I - K * H) * P (only if not gated)
-    I = jnp.eye(8)
-    updated_covariance = jnp.where(gated, ekf_state.covariance, (I - K @ H) @ ekf_state.covariance)
+    # Covariance update using Joseph form for numerical stability: P = (I - K*H) @ P @ (I - K*H)^T + K @ R @ K^T
+    identity = jnp.eye(8)
+    I_KH = identity - K @ H
+    joseph_covariance = I_KH @ ekf_state.covariance @ I_KH.T + K @ measurement_noise @ K.T
+    updated_covariance = jnp.where(gated, ekf_state.covariance, joseph_covariance)
 
     # Log-likelihood update (only if not gated)
     log_det_S = jnp.linalg.slogdet(innovation_covariance)[1]
@@ -361,15 +363,17 @@ def _ekf_update_position_heading(
     # State update: x = x + K * innovation (only if not gated)
     updated_state = jnp.where(gated, ekf_state.state, ekf_state.state + K @ innovation)
 
-    # Covariance update: P = (I - K * H) * P (only if not gated)
-    I = jnp.eye(8)
-    updated_covariance = jnp.where(gated, ekf_state.covariance, (I - K @ H) @ ekf_state.covariance)
+    # Covariance update using Joseph form for numerical stability: P = (I - K*H) @ P @ (I - K*H)^T + K @ R @ K^T
+    identity = jnp.eye(8)
+    I_KH = identity - K @ H
+    joseph_covariance = I_KH @ ekf_state.covariance @ I_KH.T + K @ measurement_noise @ K.T
+    updated_covariance = jnp.where(gated, ekf_state.covariance, joseph_covariance)
 
     # Log-likelihood update (only if not gated)
     log_det_S = jnp.linalg.slogdet(innovation_covariance)[1]
     measurement_dim = 3
     log_likelihood_update = -0.5 * (
-        measurement_dim * jnp.log(2 * jnp.pi) + log_det_S + mahalanobis_dist
+        measurement_dim * jnp.log(2.0 * jnp.pi) + log_det_S + mahalanobis_dist
     )
 
     updated_log_likelihood = jnp.where(
@@ -1098,9 +1102,6 @@ def ekf_step_arrays_pure(
             jnp.where(has_heading, heading, x_pred[4]),  # heading
         ]
     )
-
-    # Create a measurement selection mask for position+heading
-    measurement_dim = jnp.where(has_heading, 3, 2)  # 2 for position only, 3 for position+heading
 
     # Apply measurement update only if we have position measurements
     def apply_measurement_update():
