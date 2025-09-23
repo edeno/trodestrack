@@ -17,7 +17,8 @@
 4. **Milestone 4**: IMU Preprocessing & Pre-integration ✓
 5. **Milestone 5**: State-Space Models ✓
 6. **Milestone 6**: Filtering & Smoothing ✓
-7. **JAX Best-Practices**: Complete optimization for production-ready performance ✓ **[JUST COMPLETED]**
+7. **JAX Best-Practices**: Complete optimization for production-ready performance ✓
+8. **JAX Control Flow**: Optimal lax.scan and vectorized operations ✓ **[JUST COMPLETED]**
 
 **🚀 MILESTONE 6 FINAL ACHIEVEMENTS:**
 
@@ -55,6 +56,16 @@
 - **JAX-Pure Hot Paths**: Eliminated NumPy from all JIT-compiled functions
 - **JIT-Compatible Random**: Created `_jax_random.py` for deterministic simulation
 - **Fixed Compilation Bugs**: Corrected variable naming that broke JIT compilation
+- **JAX Control Flow Optimized**: Implemented `lax.scan(reverse=True)` for RTS smoother and vectorized UKF sigma points
+
+**🚀 JAX CONTROL FLOW ACHIEVEMENTS:**
+
+**✅ Optimal JAX Primitives Implementation:**
+- **RTS Smoother**: Replaced Python `for` loop with `lax.scan(reverse=True)` for backward pass
+- **UKF Sigma Points**: Vectorized array construction eliminating Python loops
+- **Reverse Scan Pattern**: Clean implementation without manual array reversals
+- **State Carrying**: Proper JAX array handling throughout scan operations
+- **Zero Python Control Flow**: All loops and conditionals use JAX primitives
 
 **🎯 NEXT PRIORITIES:**
 

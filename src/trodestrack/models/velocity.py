@@ -11,6 +11,7 @@ from typing import Tuple
 
 import jax
 import jax.numpy as jnp
+from jax import lax
 
 from ._solvers import kalman_gain, safe_solve
 from .state import State2D, state_to_array, array_to_state

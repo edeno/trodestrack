@@ -16,6 +16,7 @@ from typing import List, NamedTuple, Tuple
 
 import jax
 import jax.numpy as jnp
+from jax import lax
 
 from ._solvers import safe_solve
 from .dynamics import predict_covariance, compute_process_noise
@@ -120,34 +121,57 @@ def rts_smooth(
             log_likelihood=forward_data.log_likelihood
         )
 
-    # Initialize output lists
-    smoothed_states = [None] * N
-    smoothed_covariances = [None] * N
+    # Convert lists to JAX arrays if needed
+    filtered_states = jnp.array(forward_data.filtered_states) if isinstance(forward_data.filtered_states[0], jnp.ndarray) else jnp.array(forward_data.filtered_states)
+    filtered_covariances = jnp.array(forward_data.filtered_covariances) if isinstance(forward_data.filtered_covariances[0], jnp.ndarray) else jnp.array(forward_data.filtered_covariances)
+    predicted_states = jnp.array(forward_data.predicted_states) if isinstance(forward_data.predicted_states[0], jnp.ndarray) else jnp.array(forward_data.predicted_states)
+    predicted_covariances = jnp.array(forward_data.predicted_covariances) if isinstance(forward_data.predicted_covariances[0], jnp.ndarray) else jnp.array(forward_data.predicted_covariances)
+
+    # Initialize output arrays (JAX-compatible)
+    smoothed_states = jnp.zeros_like(filtered_states)
+    smoothed_covariances = jnp.zeros_like(filtered_covariances)
 
     # Initialize backward pass with final filtered estimate
-    smoothed_states[N-1] = forward_data.filtered_states[N-1]
-    smoothed_covariances[N-1] = forward_data.filtered_covariances[N-1]
+    smoothed_states = smoothed_states.at[N-1].set(filtered_states[N-1])
+    smoothed_covariances = smoothed_covariances.at[N-1].set(filtered_covariances[N-1])
 
-    # Backward pass: smooth from k = N-2 down to 0
-    for k in range(N-2, -1, -1):
-        x_s_next = smoothed_states[k+1]
-        P_s_next = smoothed_covariances[k+1]
-        x_f = forward_data.filtered_states[k]
-        P_f = forward_data.filtered_covariances[k]
-        x_p_next = forward_data.predicted_states[k+1]
-        P_p_next = forward_data.predicted_covariances[k+1]
+    # Backward pass: smooth from k = N-2 down to 0 using lax.scan
+    def backward_step_fn(carry, inputs):
+        """Single backward step for lax.scan."""
+        x_s_next, P_s_next = carry
+        x_f, P_f, x_p_next, P_p_next = inputs
 
         # Perform backward step
         x_s, P_s = rts_backward_step(
             x_s_next, P_s_next, x_f, P_f, x_p_next, P_p_next
         )
 
-        smoothed_states[k] = x_s
-        smoothed_covariances[k] = P_s
+        return (x_s, P_s), (x_s, P_s)
+
+    # Prepare inputs for scan (forward order, reverse=True will handle backward iteration)
+    scan_inputs = (
+        filtered_states[:-1],      # x_f from 0 to N-2
+        filtered_covariances[:-1], # P_f from 0 to N-2
+        predicted_states[1:],      # x_p_next from 1 to N-1
+        predicted_covariances[1:]  # P_p_next from 1 to N-1
+    )
+
+    # Initial carry state (final filtered estimate)
+    init_carry = (smoothed_states[N-1], smoothed_covariances[N-1])
+
+    # Run backward scan using reverse=True (much cleaner!)
+    final_carry, backward_outputs = lax.scan(
+        backward_step_fn, init_carry, scan_inputs, reverse=True
+    )
+
+    # Extract results (already in correct forward order due to reverse=True)
+    backward_states, backward_covariances = backward_outputs
+    smoothed_states = smoothed_states.at[:-1].set(backward_states)
+    smoothed_covariances = smoothed_covariances.at[:-1].set(backward_covariances)
 
     return RTSResult(
-        smoothed_states=smoothed_states,
-        smoothed_covariances=smoothed_covariances,
+        smoothed_states=list(smoothed_states),
+        smoothed_covariances=list(smoothed_covariances),
         log_likelihood=forward_data.log_likelihood
     )
 

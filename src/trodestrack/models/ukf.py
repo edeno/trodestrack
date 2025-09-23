@@ -94,19 +94,20 @@ def generate_sigma_points(
     scaled_cov_stable = _symmetrize_and_stabilize(scaled_cov, jitter=1e-12)
     sqrt_matrix = cholesky(scaled_cov_stable, lower=True)
 
-    # Generate sigma points
+    # Generate sigma points vectorized (no Python loops)
     sigma_points = jnp.zeros((2 * n + 1, n))
 
     # Central sigma point
     sigma_points = sigma_points.at[0].set(state)
 
-    # Positive sigma points (rows of sqrt_matrix)
-    for i in range(n):
-        sigma_points = sigma_points.at[i + 1].set(state + sqrt_matrix[:, i])
+    # Positive and negative sigma points (vectorized)
+    # Positive sigma points: state + sqrt_matrix[:, i] for each column i
+    positive_points = state[None, :] + sqrt_matrix.T  # (n, n) matrix
+    sigma_points = sigma_points.at[1:n+1].set(positive_points)
 
-    # Negative sigma points (rows of sqrt_matrix)
-    for i in range(n):
-        sigma_points = sigma_points.at[i + n + 1].set(state - sqrt_matrix[:, i])
+    # Negative sigma points: state - sqrt_matrix[:, i] for each column i
+    negative_points = state[None, :] - sqrt_matrix.T  # (n, n) matrix
+    sigma_points = sigma_points.at[n+1:2*n+1].set(negative_points)
 
     # Compute weights according to standard UKF formulation
     # For mean weights

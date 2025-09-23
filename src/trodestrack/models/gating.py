@@ -11,6 +11,7 @@ from typing import Tuple
 
 import jax
 import jax.numpy as jnp
+from jax import lax
 
 from ._solvers import mahalanobis_distance as safe_mahalanobis_distance
 
