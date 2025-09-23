@@ -7,6 +7,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from trodestrack.models.rts_smoother import rts_smooth, ForwardPassData
+from trodestrack.models._solvers import safe_solve
 
 
 def benchmark_rts_smoother():
@@ -142,10 +143,10 @@ def benchmark_jax_arrays():
         np_inv = np.linalg.inv(np_matrix + np.eye(8) * 1e-6)
     np_time = time.perf_counter() - start_time
 
-    # JAX version (compiled)
+    # JAX version (compiled) using safe_solve
     @jax.jit
     def jax_inv_operation(matrix):
-        return jnp.linalg.inv(matrix + jnp.eye(8) * 1e-6)
+        return safe_solve(matrix + jnp.eye(matrix.shape[0]) * 1e-6, jnp.eye(matrix.shape[0]))
 
     # Warmup
     _ = jax_inv_operation(jax_matrix)
@@ -156,7 +157,7 @@ def benchmark_jax_arrays():
     jax_time = time.perf_counter() - start_time
 
     print(f"   NumPy (1000 matrix inversions): {np_time:.4f} seconds")
-    print(f"   JAX JIT (1000 matrix inversions): {jax_time:.4f} seconds")
+    print(f"   JAX JIT (1000 safe matrix solves): {jax_time:.4f} seconds")
     print(f"   Speedup: {np_time/jax_time:.2f}x")
 
 
