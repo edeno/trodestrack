@@ -11,13 +11,13 @@ import logging
 import warnings
 from typing import NamedTuple, Optional, Tuple
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import lax
 
 from ..config.schemas import SessionConfig
 from ..geom.homography import transform_points_pixel_to_cm
-from ..imu.preintegration import preintegrate_between_frames
 from ..io.loaders import load_imu_data, load_video_detections
 from ..models.ekf import EkfCarry, EKFFilter, ekf_step_arrays
 from ..models.rts_smoother import ForwardPassData, rts_smooth
@@ -347,53 +347,118 @@ def _run_filtering_pass_consistent(
     )
 
 
+@jax.jit
+def _preintegrate_interval_jax(
+    imu_data: jnp.ndarray,
+    timestamps: jnp.ndarray,
+    start_time: float,
+    end_time: float,
+    damping_lambda: float,
+) -> jnp.ndarray:
+    """JAX-compiled function to preintegrate IMU for a single interval.
+
+    Args:
+        imu_data: IMU measurements array (n_samples, 6)
+        timestamps: IMU timestamps array (n_samples,)
+        start_time: Start of integration interval
+        end_time: End of integration interval
+        damping_lambda: Velocity damping coefficient
+
+    Returns:
+        IMU block [ax, ay, gz] for the interval (zeros if no data)
+    """
+    # Find samples in the time interval
+    time_mask = (timestamps >= start_time) & (timestamps <= end_time)
+    n_samples = jnp.sum(time_mask)
+    dt = end_time - start_time
+
+    # Use lax.cond to avoid exceptions - return zeros for empty intervals
+    def compute_interval(args):
+        """Compute IMU block when samples are available."""
+        imu_data, _, time_mask, _ = args
+
+        # Use where to handle masking in JIT-compatible way
+        # Replace masked-out values with zeros, then compute mean only over valid samples
+        gyro_column = imu_data[:, 5]  # gz component
+        valid_gyro = jnp.where(time_mask, gyro_column, 0.0)
+        n_valid = jnp.sum(time_mask)
+
+        # Compute average over valid samples (avoid division by zero)
+        avg_gyro = jnp.sum(valid_gyro) / jnp.maximum(n_valid, 1.0)
+
+        # For consistency with current approach: accel handled by pre-integration
+        # so we use zeros for accel components
+        avg_accel = jnp.array([0.0, 0.0])
+
+        return jnp.array([avg_accel[0], avg_accel[1], avg_gyro])
+
+    def return_zeros(_):
+        """Return zero block for empty intervals."""
+        return jnp.array([0.0, 0.0, 0.0])
+
+    # Conditional execution based on whether we have samples and valid dt
+    has_data = (n_samples > 0) & (dt > 0.0)
+    return jax.lax.cond(
+        has_data,
+        compute_interval,
+        return_zeros,
+        (imu_data, timestamps, time_mask, dt)
+    )
+
+
+def _scan_imu_intervals(
+    carry: float,
+    frame_timestamp: float,
+    imu_data: jnp.ndarray,
+    timestamps: jnp.ndarray,
+    damping_lambda: float,
+) -> Tuple[float, jnp.ndarray]:
+    """Scan function for processing IMU intervals between frames.
+
+    Args:
+        carry: Previous frame timestamp
+        frame_timestamp: Current frame timestamp
+        imu_data: Full IMU data array
+        timestamps: Full timestamp array
+        damping_lambda: Damping coefficient
+
+    Returns:
+        Tuple of (current_timestamp, imu_block)
+    """
+    prev_timestamp = carry
+
+    # Preintegrate IMU for this interval
+    imu_block = _preintegrate_interval_jax(
+        imu_data, timestamps, prev_timestamp, frame_timestamp, damping_lambda
+    )
+
+    return frame_timestamp, imu_block
+
+
 def _prepare_imu_blocks_for_frames(
     imu_data: dict,
     frame_timestamps: jnp.ndarray,
     config: SessionConfig,
 ) -> jnp.ndarray:
-    """Prepare IMU measurement blocks for each frame using pre-integration."""
-    imu_blocks = []
+    """Prepare IMU measurement blocks for each frame using JAX lax.scan.
 
-    prev_timestamp = frame_timestamps[0]
+    Eliminates Python loops and exceptions for optimal JIT performance.
+    """
+    damping_lambda = config.filter.velocity_damping
 
-    for i, timestamp in enumerate(frame_timestamps):
-        dt = timestamp - prev_timestamp
+    # Extract JAX arrays from IMU data
+    imu_array = imu_data["data"]  # (n_samples, 6)
+    timestamp_array = imu_data["timestamps"]  # (n_samples,)
 
-        if dt > 0 and i > 0:
-            # Pre-integrate IMU between frames for average measurements
-            try:
-                imu_result = preintegrate_between_frames(
-                    imu_data["data"],
-                    imu_data["timestamps"],
-                    prev_timestamp,
-                    timestamp,
-                    initial_heading=0.0,  # Will be corrected in EKF
-                    initial_velocity=jnp.array([0.0, 0.0]),
-                    gyro_bias=0.0,
-                    accel_bias=jnp.array([0.0, 0.0]),
-                    damping_lambda=config.filter.velocity_damping,
-                )
+    # Use lax.scan to process intervals between consecutive frames
+    def scan_fn(carry, x):
+        return _scan_imu_intervals(carry, x, imu_array, timestamp_array, damping_lambda)
 
-                if imu_result.n_samples > 0:
-                    # Use average angular velocity for this interval
-                    avg_accel = jnp.array([0.0, 0.0])  # Pre-integration handles accel
-                    avg_gyro = imu_result.delta_heading / dt
-                    imu_block = jnp.array([avg_accel[0], avg_accel[1], avg_gyro])
-                else:
-                    imu_block = jnp.array([0.0, 0.0, 0.0])
+    # Initialize with first timestamp and scan over all frame timestamps
+    initial_timestamp = frame_timestamps[0]
+    _, imu_blocks = jax.lax.scan(scan_fn, initial_timestamp, frame_timestamps)
 
-            except Exception:
-                # Fallback to zero measurements
-                imu_block = jnp.array([0.0, 0.0, 0.0])
-        else:
-            # First frame or zero dt
-            imu_block = jnp.array([0.0, 0.0, 0.0])
-
-        imu_blocks.append(imu_block)
-        prev_timestamp = timestamp
-
-    return jnp.stack(imu_blocks)
+    return imu_blocks
 
 
 def _run_smoothing_pass(
