@@ -13,18 +13,15 @@ from typing import NamedTuple, Optional, Tuple, Dict, Any
 import jax
 import jax.numpy as jnp
 
-from .dynamics import predict_state, predict_covariance, compute_process_noise, rotation_matrix_2d, wrap_angle
-from ._solvers import mahalanobis_distance, kalman_gain, safe_solve
-from .gating import mahalanobis_gate
+from .dynamics import predict_covariance, compute_process_noise, rotation_matrix_2d, wrap_angle
+from ._solvers import mahalanobis_distance, kalman_gain
 from .measurements import (
-    create_combined_measurement,
-    create_combined_jacobian,
     create_measurement_noise,
-    position_measurement,
     _create_position_jacobian,
     _create_position_heading_jacobian,
 )
 from .state import State2D, state_to_array, array_to_state
+
 
 class EKFState(NamedTuple):
     """EKF state representation.
@@ -34,6 +31,7 @@ class EKFState(NamedTuple):
         covariance: State covariance matrix (8x8)
         log_likelihood: Cumulative log-likelihood
     """
+
     state: jnp.ndarray  # 8-dimensional state vector
     covariance: jnp.ndarray  # 8x8 covariance matrix
     log_likelihood: float
@@ -49,6 +47,7 @@ class EKFResult(NamedTuple):
         kalman_gain: Kalman gain matrix
         gated: Whether measurement was gated (rejected)
     """
+
     state: EKFState
     innovation: jnp.ndarray
     innovation_covariance: jnp.ndarray
@@ -63,6 +62,7 @@ class EkfCarry(NamedTuple):
         x: Current state estimate (8-dimensional)
         P: Current covariance matrix (8x8)
     """
+
     x: jnp.ndarray
     P: jnp.ndarray
 
@@ -76,6 +76,7 @@ class EkfOutputs(NamedTuple):
         x_pred: Predicted state estimate (before update)
         P_pred: Predicted covariance matrix (before update)
     """
+
     x_filt: jnp.ndarray
     P_filt: jnp.ndarray
     x_pred: jnp.ndarray
@@ -113,14 +114,10 @@ def ekf_predict(
         Predicted EKF state
     """
     # Use pure JAX array operations instead of State2D conversion
-    predicted_state = _predict_state_jax(
-        ekf_state.state, dt, accel, gyro, velocity_damping
-    )
+    predicted_state = _predict_state_jax(ekf_state.state, dt, accel, gyro, velocity_damping)
 
     # Predict covariance using linearized dynamics
-    process_noise = compute_process_noise(
-        dt, accel_noise_std, gyro_noise_std, bias_drift_std
-    )
+    process_noise = compute_process_noise(dt, accel_noise_std, gyro_noise_std, bias_drift_std)
 
     predicted_covariance = predict_covariance(
         ekf_state.covariance,
@@ -192,10 +189,7 @@ def _predict_state_jax(
     theta_new = wrap_angle(theta + gyro_corrected * dt)
 
     # Biases remain unchanged (random walk model)
-    return jnp.array([
-        pos_new[0], pos_new[1], vel_new[0], vel_new[1],
-        theta_new, b_gz, b_ax, b_ay
-    ])
+    return jnp.array([pos_new[0], pos_new[1], vel_new[0], vel_new[1], theta_new, b_gz, b_ax, b_ay])
 
 
 def ekf_update(
@@ -223,9 +217,7 @@ def ekf_update(
             ekf_state, measurement, measurement_noise, gate_threshold
         )
     else:
-        return _ekf_update_position_only(
-            ekf_state, measurement, measurement_noise, gate_threshold
-        )
+        return _ekf_update_position_only(ekf_state, measurement, measurement_noise, gate_threshold)
 
 
 @jax.jit
@@ -256,19 +248,11 @@ def _ekf_update_position_only(
     K = kalman_gain(ekf_state.covariance, H, measurement_noise)
 
     # State update: x = x + K * innovation (only if not gated)
-    updated_state = jnp.where(
-        gated,
-        ekf_state.state,
-        ekf_state.state + K @ innovation
-    )
+    updated_state = jnp.where(gated, ekf_state.state, ekf_state.state + K @ innovation)
 
     # Covariance update: P = (I - K * H) * P (only if not gated)
     I = jnp.eye(8)
-    updated_covariance = jnp.where(
-        gated,
-        ekf_state.covariance,
-        (I - K @ H) @ ekf_state.covariance
-    )
+    updated_covariance = jnp.where(gated, ekf_state.covariance, (I - K @ H) @ ekf_state.covariance)
 
     # Log-likelihood update (only if not gated)
     log_det_S = jnp.linalg.slogdet(innovation_covariance)[1]
@@ -278,9 +262,7 @@ def _ekf_update_position_only(
     )
 
     updated_log_likelihood = jnp.where(
-        gated,
-        ekf_state.log_likelihood,
-        ekf_state.log_likelihood + log_likelihood_update
+        gated, ekf_state.log_likelihood, ekf_state.log_likelihood + log_likelihood_update
     )
 
     updated_ekf_state = EKFState(
@@ -310,18 +292,15 @@ def _ekf_update_position_heading(
     H = _create_position_heading_jacobian(ekf_state.state)
 
     # Predicted measurement (position + heading)
-    predicted_measurement = jnp.concatenate([
-        ekf_state.state[:2],  # position [x, y]
-        jnp.array([ekf_state.state[4]])  # heading [θ]
-    ])
+    predicted_measurement = jnp.concatenate(
+        [ekf_state.state[:2], jnp.array([ekf_state.state[4]])]  # position [x, y]  # heading [θ]
+    )
 
     # Innovation (measurement residual)
     innovation = measurement - predicted_measurement
 
     # Wrap heading innovation to [-π, π]
-    wrapped_heading_innov = jnp.arctan2(
-        jnp.sin(innovation[2]), jnp.cos(innovation[2])
-    )
+    wrapped_heading_innov = jnp.arctan2(jnp.sin(innovation[2]), jnp.cos(innovation[2]))
     innovation = innovation.at[2].set(wrapped_heading_innov)
 
     # Innovation covariance: S = H * P * H^T + R
@@ -335,19 +314,11 @@ def _ekf_update_position_heading(
     K = kalman_gain(ekf_state.covariance, H, measurement_noise)
 
     # State update: x = x + K * innovation (only if not gated)
-    updated_state = jnp.where(
-        gated,
-        ekf_state.state,
-        ekf_state.state + K @ innovation
-    )
+    updated_state = jnp.where(gated, ekf_state.state, ekf_state.state + K @ innovation)
 
     # Covariance update: P = (I - K * H) * P (only if not gated)
     I = jnp.eye(8)
-    updated_covariance = jnp.where(
-        gated,
-        ekf_state.covariance,
-        (I - K @ H) @ ekf_state.covariance
-    )
+    updated_covariance = jnp.where(gated, ekf_state.covariance, (I - K @ H) @ ekf_state.covariance)
 
     # Log-likelihood update (only if not gated)
     log_det_S = jnp.linalg.slogdet(innovation_covariance)[1]
@@ -357,9 +328,7 @@ def _ekf_update_position_heading(
     )
 
     updated_log_likelihood = jnp.where(
-        gated,
-        ekf_state.log_likelihood,
-        ekf_state.log_likelihood + log_likelihood_update
+        gated, ekf_state.log_likelihood, ekf_state.log_likelihood + log_likelihood_update
     )
 
     updated_ekf_state = EKFState(
@@ -414,19 +383,19 @@ def ekf_step(carry: EkfCarry, inp: EkfInput) -> Tuple[EkfCarry, EkfOutputs]:
     meas_struct, dt, imu_block, filter_cfg = inp
 
     # Extract filter configuration
-    velocity_damping = filter_cfg.get('velocity_damping', 0.1)
-    accel_noise_std = filter_cfg.get('accel_noise_std', 0.5)
-    gyro_noise_std = filter_cfg.get('gyro_noise_std', 0.1)
-    bias_drift_std = filter_cfg.get('bias_drift_std', 0.01)
-    position_noise_std = filter_cfg.get('position_noise_std', 1.0)
-    heading_noise_std = filter_cfg.get('heading_noise_std', 0.1)
-    gate_threshold = filter_cfg.get('gate_threshold', 9.21)
+    velocity_damping = filter_cfg.get("velocity_damping", 0.1)
+    accel_noise_std = filter_cfg.get("accel_noise_std", 0.5)
+    gyro_noise_std = filter_cfg.get("gyro_noise_std", 0.1)
+    bias_drift_std = filter_cfg.get("bias_drift_std", 0.01)
+    position_noise_std = filter_cfg.get("position_noise_std", 1.0)
+    heading_noise_std = filter_cfg.get("heading_noise_std", 0.1)
+    gate_threshold = filter_cfg.get("gate_threshold", 9.21)
 
     # Prediction step
     # Extract IMU measurements (handle None case)
     if imu_block is not None:
         accel = imu_block[:2]  # [ax, ay]
-        gyro = imu_block[2:]   # [gz]
+        gyro = imu_block[2:]  # [gz]
     else:
         # Use zero IMU measurements if not available
         accel = jnp.zeros(2)
@@ -441,9 +410,9 @@ def ekf_step(carry: EkfCarry, inp: EkfInput) -> Tuple[EkfCarry, EkfOutputs]:
 
     # Measurement update step
     # Extract measurements from meas_struct
-    position = meas_struct.get('position')
-    heading = meas_struct.get('heading')
-    confidence = meas_struct.get('confidence', 1.0)
+    position = meas_struct.get("position")
+    heading = meas_struct.get("heading")
+    confidence = meas_struct.get("confidence", 1.0)
 
     # Create EKF state for measurement update
     pred_ekf_state = EKFState(state=x_pred, covariance=P_pred, log_likelihood=0.0)

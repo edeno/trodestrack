@@ -1,8 +1,5 @@
 """Tests for IMU pre-integration functionality."""
 
-import jax
-
-
 import warnings
 
 import jax.numpy as jnp

@@ -12,7 +12,6 @@ from trodestrack.models.rts_smoother import (
     compute_smoothing_improvement,
 )
 from trodestrack.models.ekf import EKFState, EKFResult
-from trodestrack.models.state import State2D
 
 
 class TestRTSBackwardStep:
@@ -160,7 +159,9 @@ class TestRTSSmooth:
 
         for i in range(n_steps):
             # Add some noise to simulate measurement updates
-            x_filtered = x + jnp.array([0.1, 0.05, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]) * np.random.normal(0, 0.1)
+            x_filtered = x + jnp.array(
+                [0.1, 0.05, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+            ) * np.random.normal(0, 0.1)
             P_filtered = P * (1 + 0.1 * np.random.uniform(0.8, 1.2))
 
             filtered_states.append(x_filtered)
@@ -277,7 +278,9 @@ class TestSmoothingImprovement:
         ground_truth = [jnp.array([i, i, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0]) for i in range(n_steps)]
 
         # Filtered has some error
-        filtered_states = [gt + jnp.array([0.1, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]) for gt in ground_truth]
+        filtered_states = [
+            gt + jnp.array([0.1, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]) for gt in ground_truth
+        ]
 
         # Smoothed is perfect
         smoothed_states = ground_truth.copy()
@@ -293,13 +296,19 @@ class TestSmoothingImprovement:
     def test_partial_improvement(self):
         """Test improvement computation with partial error reduction."""
         n_steps = 10
-        ground_truth = [jnp.array([i, i*0.5, 1.0, 0.5, 0.0, 0.0, 0.0, 0.0]) for i in range(n_steps)]
+        ground_truth = [
+            jnp.array([i, i * 0.5, 1.0, 0.5, 0.0, 0.0, 0.0, 0.0]) for i in range(n_steps)
+        ]
 
         # Filtered has 10cm error
-        filtered_states = [gt + jnp.array([10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]) for gt in ground_truth]
+        filtered_states = [
+            gt + jnp.array([10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]) for gt in ground_truth
+        ]
 
         # Smoothed has 5cm error
-        smoothed_states = [gt + jnp.array([5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]) for gt in ground_truth]
+        smoothed_states = [
+            gt + jnp.array([5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]) for gt in ground_truth
+        ]
 
         filt_rmse, smooth_rmse, improvement = compute_smoothing_improvement(
             filtered_states, smoothed_states, ground_truth

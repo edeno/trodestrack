@@ -15,7 +15,6 @@ import jax.numpy as jnp
 from .state import State2D
 
 
-
 def position_measurement(state: State2D) -> jnp.ndarray:
     """Extract position measurement from state.
 
@@ -129,9 +128,7 @@ def create_measurement_noise(
     if has_heading:
         if heading_noise_std is None:
             raise ValueError("heading_noise_std required when has_heading=True")
-        return _create_position_heading_noise(
-            position_noise_std, confidence, heading_noise_std
-        )
+        return _create_position_heading_noise(position_noise_std, confidence, heading_noise_std)
     else:
         return _create_position_noise(position_noise_std, confidence)
 
@@ -143,7 +140,7 @@ def _create_position_noise(
 ) -> jnp.ndarray:
     """Create position-only measurement noise matrix."""
     scaled_position_std = position_noise_std / confidence
-    position_var = scaled_position_std ** 2
+    position_var = scaled_position_std**2
     return jnp.diag(jnp.array([position_var, position_var]))
 
 
@@ -155,8 +152,8 @@ def _create_position_heading_noise(
 ) -> jnp.ndarray:
     """Create position + heading measurement noise matrix."""
     scaled_position_std = position_noise_std / confidence
-    position_var = scaled_position_std ** 2
-    heading_var = heading_noise_std ** 2
+    position_var = scaled_position_std**2
+    heading_var = heading_noise_std**2
     return jnp.diag(jnp.array([position_var, position_var, heading_var]))
 
 

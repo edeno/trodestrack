@@ -1,7 +1,6 @@
 """Tests for state representation and utilities."""
 
 import numpy as np
-import pytest
 import jax.numpy as jnp
 from hypothesis import given, strategies as st
 
@@ -46,16 +45,13 @@ class TestState2D:
     def test_state_array_conversion(self):
         """Test conversion between state and array representations."""
         state = State2D(
-            x=1.0, y=2.0, vx=0.5, vy=-0.3,
-            theta=0.785, b_gz=0.01, b_ax=0.02, b_ay=-0.01
+            x=1.0, y=2.0, vx=0.5, vy=-0.3, theta=0.785, b_gz=0.01, b_ax=0.02, b_ay=-0.01
         )
 
         # Convert to array
         arr = state_to_array(state)
         assert arr.shape == (8,)
-        np.testing.assert_allclose(
-            arr, [1.0, 2.0, 0.5, -0.3, 0.785, 0.01, 0.02, -0.01], rtol=1e-15
-        )
+        np.testing.assert_allclose(arr, [1.0, 2.0, 0.5, -0.3, 0.785, 0.01, 0.02, -0.01], rtol=1e-15)
 
         # Convert back to state
         recovered = array_to_state(arr)
@@ -80,24 +76,41 @@ class TestState2D:
     )
     def test_state_array_roundtrip(self, x, y, vx, vy, theta, b_gz, b_ax, b_ay):
         """Property test: state -> array -> state roundtrip preserves values."""
-        original = State2D(
-            x=x, y=y, vx=vx, vy=vy,
-            theta=theta, b_gz=b_gz, b_ax=b_ax, b_ay=b_ay
-        )
+        original = State2D(x=x, y=y, vx=vx, vy=vy, theta=theta, b_gz=b_gz, b_ax=b_ax, b_ay=b_ay)
 
         arr = state_to_array(original)
         recovered = array_to_state(arr)
 
-        np.testing.assert_allclose([recovered.x, recovered.y, recovered.vx, recovered.vy,
-                                   recovered.theta, recovered.b_gz, recovered.b_ax, recovered.b_ay],
-                                  [original.x, original.y, original.vx, original.vy,
-                                   original.theta, original.b_gz, original.b_ax, original.b_ay],
-                                  rtol=1e-14, atol=1e-14)
+        np.testing.assert_allclose(
+            [
+                recovered.x,
+                recovered.y,
+                recovered.vx,
+                recovered.vy,
+                recovered.theta,
+                recovered.b_gz,
+                recovered.b_ax,
+                recovered.b_ay,
+            ],
+            [
+                original.x,
+                original.y,
+                original.vx,
+                original.vy,
+                original.theta,
+                original.b_gz,
+                original.b_ax,
+                original.b_ay,
+            ],
+            rtol=1e-14,
+            atol=1e-14,
+        )
 
     def test_jax_compatibility(self):
         """Test that state arrays work with JAX."""
-        state = State2D(x=1.0, y=2.0, vx=0.5, vy=-0.3,
-                       theta=0.785, b_gz=0.01, b_ax=0.02, b_ay=-0.01)
+        state = State2D(
+            x=1.0, y=2.0, vx=0.5, vy=-0.3, theta=0.785, b_gz=0.01, b_ax=0.02, b_ay=-0.01
+        )
 
         arr = state_to_array(state)
         jax_arr = jnp.array(arr)

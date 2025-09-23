@@ -2,13 +2,11 @@
 
 from typing import List, Union
 
-import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import jit
 
 from ..models._solvers import safe_solve
-
 
 
 class HomographyTransform:

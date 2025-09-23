@@ -14,19 +14,16 @@ Key optimizations:
 
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
-import jax
 import jax.numpy as jnp
 
 from ._solvers import safe_solve
 from .dynamics import (
     compute_state_jacobian,
     compute_process_noise,
-    predict_covariance,
 )
 from .ekf import _predict_state_jax
-from .ekf import EKFState, EKFResult, ekf_predict, ekf_update
+from .ekf import EKFState, EKFResult, ekf_update
 from .measurements import create_measurement_noise
-
 
 
 class CachedComputations(NamedTuple):
@@ -39,6 +36,7 @@ class CachedComputations(NamedTuple):
         measurement_jacobians: Measurement Jacobians H_k (when available)
         innovation_covariances: Innovation covariances S_k (when available)
     """
+
     state_jacobians: List[jnp.ndarray]
     predicted_covariances: List[jnp.ndarray]
     process_noise_matrices: List[jnp.ndarray]
@@ -314,7 +312,9 @@ class CachedEKFFilter:
         Returns:
             Cached predicted covariance, or None if not available
         """
-        if not self.enable_caching or step_index >= len(self.cached_computations.predicted_covariances):
+        if not self.enable_caching or step_index >= len(
+            self.cached_computations.predicted_covariances
+        ):
             return None
         return self.cached_computations.predicted_covariances[step_index]
 
@@ -362,21 +362,21 @@ def efficient_rts_smooth_with_cache(
     smoothed_states = [None] * N
     smoothed_covariances = [None] * N
 
-    smoothed_states[N-1] = ekf_results[N-1].state.state
-    smoothed_covariances[N-1] = ekf_results[N-1].state.covariance
+    smoothed_states[N - 1] = ekf_results[N - 1].state.state
+    smoothed_covariances[N - 1] = ekf_results[N - 1].state.covariance
 
     # Backward pass using cached data
-    for k in range(N-2, -1, -1):
+    for k in range(N - 2, -1, -1):
         # Get cached predicted covariance (if available)
-        P_p_next = cached_ekf.get_cached_predicted_covariance(k+1)
+        P_p_next = cached_ekf.get_cached_predicted_covariance(k + 1)
 
         if P_p_next is not None:
             # Use cached data for efficiency
             x_f = ekf_results[k].state.state
             P_f = ekf_results[k].state.covariance
-            x_s_next = smoothed_states[k+1]
-            P_s_next = smoothed_covariances[k+1]
-            x_p_next = ekf_results[k+1].state.state  # Approximation
+            x_s_next = smoothed_states[k + 1]
+            P_s_next = smoothed_covariances[k + 1]
+            x_p_next = ekf_results[k + 1].state.state  # Approximation
 
             # Compute smoother gain using safe solve
             G = safe_solve(P_p_next, P_f.T).T

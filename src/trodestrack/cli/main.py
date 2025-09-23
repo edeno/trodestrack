@@ -111,12 +111,14 @@ def cmd_smooth(args: argparse.Namespace) -> int:
         # Print summary
         n_frames = len(result.filtered_states)
         duration = result.timestamps[-1] - result.timestamps[0]
-        logger.info(f"Smoothing completed successfully:")
+        logger.info("Smoothing completed successfully:")
         logger.info(f"  - Processed {n_frames} frames over {duration:.1f} seconds")
         logger.info(f"  - Final log-likelihood: {result.log_likelihood:.2f}")
 
-        if 'smoothing_improvement' in result.diagnostics:
-            improvement = result.diagnostics['smoothing_improvement']['position_rmse_improvement_cm']
+        if "smoothing_improvement" in result.diagnostics:
+            improvement = result.diagnostics["smoothing_improvement"][
+                "position_rmse_improvement_cm"
+            ]
             logger.info(f"  - Position smoothing improvement: {improvement:.3f} cm RMS")
 
         return 0
@@ -164,10 +166,12 @@ def cmd_online(args: argparse.Namespace) -> int:
         performance = tracker.get_performance_summary()
         logger.info("Online tracking completed:")
         logger.info(f"  - Processed {performance.get('total_frames', 0)} frames")
-        logger.info(f"  - Average processing time: {performance.get('avg_processing_time_ms', 0):.2f} ms")
+        logger.info(
+            f"  - Average processing time: {performance.get('avg_processing_time_ms', 0):.2f} ms"
+        )
         logger.info(f"  - Gating rate: {performance.get('gating_rate', 0)*100:.1f}%")
 
-        if performance.get('frames_per_second'):
+        if performance.get("frames_per_second"):
             logger.info(f"  - Processing rate: {performance['frames_per_second']:.1f} FPS")
 
         # Save results if output directory specified
@@ -177,6 +181,7 @@ def cmd_online(args: argparse.Namespace) -> int:
             output_dir.mkdir(parents=True, exist_ok=True)
 
             import numpy as np
+
             np.savez(
                 output_dir / "online_states.npz",
                 states=np.array(states),

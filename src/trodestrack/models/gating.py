@@ -11,10 +11,8 @@ from typing import Tuple
 
 import jax
 import jax.numpy as jnp
-from jax import lax
 
 from ._solvers import mahalanobis_distance as safe_mahalanobis_distance
-
 
 
 def mahalanobis_distance(
@@ -69,11 +67,13 @@ def chi_squared_threshold(dof: int, p_value: float = 0.05) -> float:
     """
     # Lookup table for common DOF and p-values (precomputed with SciPy)
     # Rows: p-values [0.05, 0.01, 0.001], Columns: DOF [1, 2, 3, 4, 5]
-    thresholds = jnp.array([
-        [3.841459, 5.991465, 7.814728, 9.487729, 11.070498],  # p=0.05
-        [6.634897, 9.210340, 11.344867, 13.276704, 15.086272], # p=0.01
-        [10.827566, 13.815511, 16.266189, 18.466776, 20.514982] # p=0.001
-    ])
+    thresholds = jnp.array(
+        [
+            [3.841459, 5.991465, 7.814728, 9.487729, 11.070498],  # p=0.05
+            [6.634897, 9.210340, 11.344867, 13.276704, 15.086272],  # p=0.01
+            [10.827566, 13.815511, 16.266189, 18.466776, 20.514982],  # p=0.001
+        ]
+    )
 
     p_values = jnp.array([0.05, 0.01, 0.001])
 
@@ -86,7 +86,7 @@ def chi_squared_threshold(dof: int, p_value: float = 0.05) -> float:
             (dof >= 1) & (dof <= 5),
             thresholds[p_idx, dof - 1],
             # Conservative fallback: 2*DOF for p=0.05, 3*DOF for smaller p
-            jnp.where(p_value <= 0.01, 3.0 * dof, 2.0 * dof)
+            jnp.where(p_value <= 0.01, 3.0 * dof, 2.0 * dof),
         )
 
     return get_threshold()
@@ -142,11 +142,7 @@ def apply_measurement_mask(
     if len(valid_indices) == 0:
         # No valid measurements - return empty arrays
         n_states = jacobian.shape[1]
-        return (
-            jnp.array([]),
-            jnp.zeros((0, 0)),
-            jnp.zeros((0, n_states))
-        )
+        return (jnp.array([]), jnp.zeros((0, 0)), jnp.zeros((0, n_states)))
 
     # Filter measurements
     masked_measurements = measurements[valid_indices]

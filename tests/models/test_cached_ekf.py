@@ -1,12 +1,10 @@
 """Tests for cached EKF implementation."""
 
-import pytest
 import jax.numpy as jnp
 import numpy as np
 
 from trodestrack.models.cached_ekf import (
     CachedEKFFilter,
-    CachedComputations,
     efficient_rts_smooth_with_cache,
     compute_cache_efficiency_stats,
 )
@@ -20,8 +18,7 @@ class TestCachedEKFFilter:
     def test_initialization(self):
         """Test cached EKF filter initialization."""
         initial_state = State2D(
-            x=0.0, y=0.0, vx=1.0, vy=1.0, theta=0.0,
-            b_gz=0.0, b_ax=0.0, b_ay=0.0
+            x=0.0, y=0.0, vx=1.0, vy=1.0, theta=0.0, b_gz=0.0, b_ax=0.0, b_ay=0.0
         )
         initial_covariance = jnp.eye(8) * 0.1
         ekf_state = create_initial_ekf_state(initial_state, initial_covariance)
@@ -40,8 +37,7 @@ class TestCachedEKFFilter:
     def test_predict_with_caching(self):
         """Test prediction step with caching enabled."""
         initial_state = State2D(
-            x=0.0, y=0.0, vx=1.0, vy=1.0, theta=0.0,
-            b_gz=0.0, b_ax=0.0, b_ay=0.0
+            x=0.0, y=0.0, vx=1.0, vy=1.0, theta=0.0, b_gz=0.0, b_ax=0.0, b_ay=0.0
         )
         initial_covariance = jnp.eye(8) * 0.1
         ekf_state = create_initial_ekf_state(initial_state, initial_covariance)
@@ -77,8 +73,7 @@ class TestCachedEKFFilter:
     def test_update_with_caching_position_only(self):
         """Test update step with position measurement and caching."""
         initial_state = State2D(
-            x=0.0, y=0.0, vx=1.0, vy=1.0, theta=0.0,
-            b_gz=0.0, b_ax=0.0, b_ay=0.0
+            x=0.0, y=0.0, vx=1.0, vy=1.0, theta=0.0, b_gz=0.0, b_ax=0.0, b_ay=0.0
         )
         initial_covariance = jnp.eye(8) * 0.1
         ekf_state = create_initial_ekf_state(initial_state, initial_covariance)
@@ -114,8 +109,7 @@ class TestCachedEKFFilter:
     def test_update_with_caching_no_measurement(self):
         """Test update step with no measurements."""
         initial_state = State2D(
-            x=0.0, y=0.0, vx=1.0, vy=1.0, theta=0.0,
-            b_gz=0.0, b_ax=0.0, b_ay=0.0
+            x=0.0, y=0.0, vx=1.0, vy=1.0, theta=0.0, b_gz=0.0, b_ax=0.0, b_ay=0.0
         )
         initial_covariance = jnp.eye(8) * 0.1
         ekf_state = create_initial_ekf_state(initial_state, initial_covariance)
@@ -145,8 +139,7 @@ class TestCachedEKFFilter:
     def test_step_with_caching(self):
         """Test complete EKF step with caching."""
         initial_state = State2D(
-            x=0.0, y=0.0, vx=1.0, vy=1.0, theta=0.0,
-            b_gz=0.0, b_ax=0.0, b_ay=0.0
+            x=0.0, y=0.0, vx=1.0, vy=1.0, theta=0.0, b_gz=0.0, b_ax=0.0, b_ay=0.0
         )
         initial_covariance = jnp.eye(8) * 0.1
         ekf_state = create_initial_ekf_state(initial_state, initial_covariance)
@@ -172,8 +165,13 @@ class TestCachedEKFFilter:
         assert cached_filter.step_count == 1
 
         # Check all cached data is present
-        expected_keys = ["state_jacobian", "process_noise", "predicted_covariance",
-                        "measurement_jacobian", "innovation_covariance"]
+        expected_keys = [
+            "state_jacobian",
+            "process_noise",
+            "predicted_covariance",
+            "measurement_jacobian",
+            "innovation_covariance",
+        ]
         for key in expected_keys:
             assert key in cached_data
 
@@ -184,8 +182,7 @@ class TestCachedEKFFilter:
     def test_multiple_steps_caching(self):
         """Test caching over multiple steps."""
         initial_state = State2D(
-            x=0.0, y=0.0, vx=1.0, vy=1.0, theta=0.0,
-            b_gz=0.0, b_ax=0.0, b_ay=0.0
+            x=0.0, y=0.0, vx=1.0, vy=1.0, theta=0.0, b_gz=0.0, b_ax=0.0, b_ay=0.0
         )
         initial_covariance = jnp.eye(8) * 0.1
         ekf_state = create_initial_ekf_state(initial_state, initial_covariance)
@@ -218,8 +215,7 @@ class TestCachedEKFFilter:
     def test_cache_retrieval(self):
         """Test retrieval of cached computations."""
         initial_state = State2D(
-            x=0.0, y=0.0, vx=1.0, vy=1.0, theta=0.0,
-            b_gz=0.0, b_ax=0.0, b_ay=0.0
+            x=0.0, y=0.0, vx=1.0, vy=1.0, theta=0.0, b_gz=0.0, b_ax=0.0, b_ay=0.0
         )
         initial_covariance = jnp.eye(8) * 0.1
         ekf_state = create_initial_ekf_state(initial_state, initial_covariance)
@@ -253,8 +249,7 @@ class TestCachedEKFFilter:
     def test_caching_disabled(self):
         """Test filter behavior with caching disabled."""
         initial_state = State2D(
-            x=0.0, y=0.0, vx=1.0, vy=1.0, theta=0.0,
-            b_gz=0.0, b_ax=0.0, b_ay=0.0
+            x=0.0, y=0.0, vx=1.0, vy=1.0, theta=0.0, b_gz=0.0, b_ax=0.0, b_ay=0.0
         )
         initial_covariance = jnp.eye(8) * 0.1
         ekf_state = create_initial_ekf_state(initial_state, initial_covariance)
@@ -278,8 +273,7 @@ class TestCachedEKFFilter:
     def test_clear_cache(self):
         """Test cache clearing functionality."""
         initial_state = State2D(
-            x=0.0, y=0.0, vx=1.0, vy=1.0, theta=0.0,
-            b_gz=0.0, b_ax=0.0, b_ay=0.0
+            x=0.0, y=0.0, vx=1.0, vy=1.0, theta=0.0, b_gz=0.0, b_ax=0.0, b_ay=0.0
         )
         initial_covariance = jnp.eye(8) * 0.1
         ekf_state = create_initial_ekf_state(initial_state, initial_covariance)
@@ -315,8 +309,7 @@ class TestEfficientRTSSmooth:
     def test_empty_sequence(self):
         """Test RTS smoothing with empty input."""
         initial_state = State2D(
-            x=0.0, y=0.0, vx=1.0, vy=1.0, theta=0.0,
-            b_gz=0.0, b_ax=0.0, b_ay=0.0
+            x=0.0, y=0.0, vx=1.0, vy=1.0, theta=0.0, b_gz=0.0, b_ax=0.0, b_ay=0.0
         )
         initial_covariance = jnp.eye(8) * 0.1
         ekf_state = create_initial_ekf_state(initial_state, initial_covariance)
@@ -326,9 +319,7 @@ class TestEfficientRTSSmooth:
             enable_caching=True,
         )
 
-        smoothed_states, smoothed_covariances = efficient_rts_smooth_with_cache(
-            cached_filter, []
-        )
+        smoothed_states, smoothed_covariances = efficient_rts_smooth_with_cache(cached_filter, [])
 
         assert len(smoothed_states) == 0
         assert len(smoothed_covariances) == 0
@@ -336,8 +327,7 @@ class TestEfficientRTSSmooth:
     def test_single_step_sequence(self):
         """Test RTS smoothing with single step."""
         initial_state = State2D(
-            x=0.0, y=0.0, vx=1.0, vy=1.0, theta=0.0,
-            b_gz=0.0, b_ax=0.0, b_ay=0.0
+            x=0.0, y=0.0, vx=1.0, vy=1.0, theta=0.0, b_gz=0.0, b_ax=0.0, b_ay=0.0
         )
         initial_covariance = jnp.eye(8) * 0.1
         ekf_state = create_initial_ekf_state(initial_state, initial_covariance)
@@ -365,8 +355,7 @@ class TestEfficientRTSSmooth:
     def test_multi_step_sequence(self):
         """Test RTS smoothing with multiple steps and cached data."""
         initial_state = State2D(
-            x=0.0, y=0.0, vx=2.0, vy=1.0, theta=0.0,
-            b_gz=0.0, b_ax=0.0, b_ay=0.0
+            x=0.0, y=0.0, vx=2.0, vy=1.0, theta=0.0, b_gz=0.0, b_ax=0.0, b_ay=0.0
         )
         initial_covariance = jnp.eye(8) * 0.1
         ekf_state = create_initial_ekf_state(initial_state, initial_covariance)
@@ -408,9 +397,7 @@ class TestEfficientRTSSmooth:
             assert P_s.shape == (8, 8)
 
         # Final step should be unchanged (no future information)
-        np.testing.assert_allclose(
-            smoothed_states[-1], results[-1].state.state, rtol=1e-10
-        )
+        np.testing.assert_allclose(smoothed_states[-1], results[-1].state.state, rtol=1e-10)
 
 
 class TestCacheEfficiencyStats:
@@ -419,8 +406,7 @@ class TestCacheEfficiencyStats:
     def test_empty_cache_stats(self):
         """Test efficiency stats with empty cache."""
         initial_state = State2D(
-            x=0.0, y=0.0, vx=1.0, vy=1.0, theta=0.0,
-            b_gz=0.0, b_ax=0.0, b_ay=0.0
+            x=0.0, y=0.0, vx=1.0, vy=1.0, theta=0.0, b_gz=0.0, b_ax=0.0, b_ay=0.0
         )
         initial_covariance = jnp.eye(8) * 0.1
         ekf_state = create_initial_ekf_state(initial_state, initial_covariance)
@@ -441,8 +427,7 @@ class TestCacheEfficiencyStats:
     def test_full_cache_stats(self):
         """Test efficiency stats with full cache utilization."""
         initial_state = State2D(
-            x=0.0, y=0.0, vx=1.0, vy=1.0, theta=0.0,
-            b_gz=0.0, b_ax=0.0, b_ay=0.0
+            x=0.0, y=0.0, vx=1.0, vy=1.0, theta=0.0, b_gz=0.0, b_ax=0.0, b_ay=0.0
         )
         initial_covariance = jnp.eye(8) * 0.1
         ekf_state = create_initial_ekf_state(initial_state, initial_covariance)

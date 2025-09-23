@@ -115,11 +115,11 @@ class TestRuntimeSmoke:
 
         # Verify they are callable/instantiable
         assert callable(smooth_session)
-        assert hasattr(SmoothingResult, '_fields')  # NamedTuple
+        assert hasattr(SmoothingResult, "_fields")  # NamedTuple
         assert callable(OnlineTracker)
         assert callable(StreamingTracker)
-        assert hasattr(TrackingFrame, '_fields')    # NamedTuple
-        assert hasattr(TrackingResult, '_fields')   # NamedTuple
+        assert hasattr(TrackingFrame, "_fields")  # NamedTuple
+        assert hasattr(TrackingResult, "_fields")  # NamedTuple
 
     def test_config_validation_passes(self, temp_output_dir):
         """Test that valid configurations pass validation."""

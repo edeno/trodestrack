@@ -4,7 +4,7 @@ This module provides a minimal synthetic data generator for testing
 filtering scenarios without needing the full sim module implementation.
 """
 
-from typing import List, Tuple, Optional, NamedTuple, Iterator
+from typing import List, Tuple, Optional
 import jax.numpy as jnp
 import numpy as np
 from dataclasses import dataclass
@@ -15,6 +15,7 @@ from ..models.state import State2D
 @dataclass
 class SimConfig:
     """Simplified configuration for synthetic session generation."""
+
     duration_s: float = 10.0
     camera_fps: float = 30.0
     imu_rate_hz: float = 1000.0
@@ -42,16 +43,18 @@ class SimConfig:
 @dataclass
 class IMUSample:
     """IMU measurement sample."""
+
     accel: jnp.ndarray  # [ax, ay] in m/s²
-    gyro: jnp.ndarray   # [gz] in rad/s
+    gyro: jnp.ndarray  # [gz] in rad/s
 
 
 @dataclass
 class VideoDetection:
     """Video detection result."""
+
     position_cm: jnp.ndarray  # [x, y] in cm
-    heading_rad: float        # heading in radians
-    confidence: float         # detection confidence [0, 1]
+    heading_rad: float  # heading in radians
+    confidence: float  # detection confidence [0, 1]
 
 
 class SyntheticSessionResult:
@@ -101,8 +104,10 @@ class SyntheticSessionResult:
             for i in range(n_steps):
                 angle = angular_vel * self.timestamps[i]
                 self.ground_truth_positions[i] = radius * np.array([np.cos(angle), np.sin(angle)])
-                self.ground_truth_velocities[i] = radius * angular_vel * np.array([-np.sin(angle), np.cos(angle)])
-                self.ground_truth_headings[i] = angle + np.pi/2
+                self.ground_truth_velocities[i] = (
+                    radius * angular_vel * np.array([-np.sin(angle), np.cos(angle)])
+                )
+                self.ground_truth_headings[i] = angle + np.pi / 2
 
         elif self.config.trajectory_type == "figure_eight":
             # Figure-8 motion
@@ -115,7 +120,7 @@ class SyntheticSessionResult:
 
                 # Compute velocity via finite differences
                 if i > 0:
-                    vel = (self.ground_truth_positions[i] - self.ground_truth_positions[i-1]) / dt
+                    vel = (self.ground_truth_positions[i] - self.ground_truth_positions[i - 1]) / dt
                     self.ground_truth_velocities[i] = vel
                     self.ground_truth_headings[i] = np.arctan2(vel[1], vel[0])
 
@@ -132,7 +137,7 @@ class SyntheticSessionResult:
 
                 # Add random turns
                 if i % 90 == 0 and i > 0:  # Turn every 3 seconds
-                    turn_angle = self.rng.uniform(-np.pi/3, np.pi/3)
+                    turn_angle = self.rng.uniform(-np.pi / 3, np.pi / 3)
                     heading += turn_angle
                     speed = np.linalg.norm(vel)
                     vel = speed * np.array([np.cos(heading), np.sin(heading)])
@@ -173,14 +178,18 @@ class SyntheticSessionResult:
         idx = int(t * self.config.camera_fps)
         idx = min(idx, len(self.ground_truth_positions) - 1)
 
-        return jnp.array([
-            self.ground_truth_positions[idx, 0],  # x
-            self.ground_truth_positions[idx, 1],  # y
-            self.ground_truth_velocities[idx, 0], # vx
-            self.ground_truth_velocities[idx, 1], # vy
-            self.ground_truth_headings[idx],      # theta
-            0.0, 0.0, 0.0                         # biases
-        ])
+        return jnp.array(
+            [
+                self.ground_truth_positions[idx, 0],  # x
+                self.ground_truth_positions[idx, 1],  # y
+                self.ground_truth_velocities[idx, 0],  # vx
+                self.ground_truth_velocities[idx, 1],  # vy
+                self.ground_truth_headings[idx],  # theta
+                0.0,
+                0.0,
+                0.0,  # biases
+            ]
+        )
 
     def generate_timeline(self) -> List[Tuple[float, IMUSample, Optional[VideoDetection]]]:
         """Generate timeline of IMU and video measurements."""
@@ -223,11 +232,10 @@ class SyntheticSessionResult:
 
         # Add noise
         accel_noise = self.rng.normal(0, 0.1, 2)  # m/s²
-        gyro_noise = self.rng.normal(0, 0.05)     # rad/s
+        gyro_noise = self.rng.normal(0, 0.05)  # rad/s
 
         return IMUSample(
-            accel=jnp.array(accel_true + accel_noise),
-            gyro=jnp.array([gyro_true + gyro_noise])
+            accel=jnp.array(accel_true + accel_noise), gyro=jnp.array([gyro_true + gyro_noise])
         )
 
     def _generate_video_detection(self, t: float, frame_idx: int) -> Optional[VideoDetection]:
@@ -277,7 +285,7 @@ class SyntheticSessionResult:
         return VideoDetection(
             position_cm=jnp.array(position),
             heading_rad=heading if heading is not None else 0.0,
-            confidence=confidence
+            confidence=confidence,
         )
 
 

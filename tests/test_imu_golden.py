@@ -9,9 +9,6 @@ Each test compares the JAX implementation against a high-resolution numerical
 integration baseline to ensure accuracy within specified tolerances.
 """
 
-import jax
-
-
 import jax.numpy as jnp
 import numpy as np
 import pytest

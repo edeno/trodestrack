@@ -35,10 +35,10 @@ def create_synthetic_data(n_frames: int = 1000, imu_rate: float = 1000.0) -> tup
     confidences = np.ones(n_frames) * 0.9
 
     video_data = {
-        'timestamps': jnp.array(video_timestamps),
-        'positions': jnp.array(positions),
-        'confidences': jnp.array(confidences),
-        'headings': None,
+        "timestamps": jnp.array(video_timestamps),
+        "positions": jnp.array(positions),
+        "confidences": jnp.array(confidences),
+        "headings": None,
     }
 
     # IMU data at higher rate
@@ -52,9 +52,9 @@ def create_synthetic_data(n_frames: int = 1000, imu_rate: float = 1000.0) -> tup
     imu_data_combined = np.column_stack([accel, gyro])
 
     imu_data = {
-        'timestamps': jnp.array(imu_timestamps),
-        'data': jnp.array(imu_data_combined),
-        'sampling_rate': imu_rate,
+        "timestamps": jnp.array(imu_timestamps),
+        "data": jnp.array(imu_data_combined),
+        "sampling_rate": imu_rate,
     }
 
     return video_data, imu_data
@@ -92,16 +92,18 @@ def benchmark_offline_smoothing():
         )
 
         # Benchmark
-        print(f"Processing {len(video_data['timestamps'])} frames with {len(imu_data['timestamps'])} IMU samples")
+        print(
+            f"Processing {len(video_data['timestamps'])} frames with {len(imu_data['timestamps'])} IMU samples"
+        )
 
         start_time = time.perf_counter()
         result = smooth_session(config)
         end_time = time.perf_counter()
 
         processing_time = end_time - start_time
-        frames_per_second = len(video_data['timestamps']) / processing_time
+        frames_per_second = len(video_data["timestamps"]) / processing_time
 
-        print(f"✅ Offline smoothing completed:")
+        print("✅ Offline smoothing completed:")
         print(f"   Total time: {processing_time:.3f} seconds")
         print(f"   Processing rate: {frames_per_second:.1f} frames/second")
         print(f"   JAX-optimized RTS smoothing used: {len(result.smoothed_states) > 0}")
@@ -121,7 +123,9 @@ def benchmark_offline_smoothing():
             A = jnp.eye(2) + jnp.random.normal(0, 0.01, (2, 2))
             b = jnp.array([1.0, 1.0])
             x = safe_solve(A + jnp.eye(A.shape[0]) * 1e-6, b)
-            print(f"   Safe solve demonstration completed (result norm: {float(jnp.linalg.norm(x)):.4f})")
+            print(
+                f"   Safe solve demonstration completed (result norm: {float(jnp.linalg.norm(x)):.4f})"
+            )
 
 
 def benchmark_online_tracking():
@@ -155,14 +159,16 @@ def benchmark_online_tracking():
         # Get performance stats
         stats = tracker.get_performance_summary()
 
-        print(f"✅ Online tracking completed:")
+        print("✅ Online tracking completed:")
         print(f"   Total time: {processing_time:.3f} seconds")
         print(f"   Processing rate: {frames_per_second:.1f} frames/second")
         print(f"   Average frame processing: {stats.get('avg_processing_time_ms', 0):.2f} ms")
         print(f"   JAX-optimized data preparation used for {len(results)} frames")
 
         # Check real-time capability (30 FPS target)
-        realtime_capable = stats.get('avg_processing_time_ms', 100) < 33.3  # 30 FPS = 33.3ms per frame
+        realtime_capable = (
+            stats.get("avg_processing_time_ms", 100) < 33.3
+        )  # 30 FPS = 33.3ms per frame
         print(f"   Real-time capable (30 FPS): {'✅ Yes' if realtime_capable else '❌ No'}")
 
 
@@ -193,11 +199,13 @@ def benchmark_data_loading():
         loading_time = end_time - start_time
         samples_per_second = len(timestamps) / loading_time
 
-        print(f"✅ Data loading completed:")
+        print("✅ Data loading completed:")
         print(f"   Samples loaded: {len(timestamps):,}")
         print(f"   Loading time: {loading_time:.4f} seconds")
         print(f"   Loading rate: {samples_per_second:,.0f} samples/second")
-        print(f"   Data type: {type(data['timestamps'])} (JAX array: {hasattr(data['timestamps'], 'device')})")
+        print(
+            f"   Data type: {type(data['timestamps'])} (JAX array: {hasattr(data['timestamps'], 'device')})"
+        )
 
 
 def main():

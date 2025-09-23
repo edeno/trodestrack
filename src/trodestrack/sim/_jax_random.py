@@ -22,9 +22,7 @@ def create_prng_key(seed: int) -> jax.Array:
 
 
 def add_gaussian_noise(
-    key: jax.Array,
-    signal: jnp.ndarray,
-    noise_std: float
+    key: jax.Array, signal: jnp.ndarray, noise_std: float
 ) -> tuple[jax.Array, jnp.ndarray]:
     """Add Gaussian noise to signal using JAX random.
 
@@ -48,10 +46,7 @@ def add_gaussian_noise(
 
 
 def generate_random_walk_bias(
-    key: jax.Array,
-    n_samples: int,
-    bias_drift_std: float,
-    dt: float
+    key: jax.Array, n_samples: int, bias_drift_std: float, dt: float
 ) -> tuple[jax.Array, jnp.ndarray]:
     """Generate random walk bias using JAX random.
 
@@ -84,9 +79,7 @@ def generate_random_walk_bias(
 
 
 def interpolate_trajectory_jax(
-    timestamps_in: jnp.ndarray,
-    values_in: jnp.ndarray,
-    timestamps_out: jnp.ndarray
+    timestamps_in: jnp.ndarray, values_in: jnp.ndarray, timestamps_out: jnp.ndarray
 ) -> jnp.ndarray:
     """JAX-compatible linear interpolation.
 
@@ -108,10 +101,7 @@ def interpolate_trajectory_jax(
 
 
 @jax.jit
-def rotate_acceleration_jax(
-    accel_body: jnp.ndarray,
-    heading: jnp.ndarray
-) -> jnp.ndarray:
+def rotate_acceleration_jax(accel_body: jnp.ndarray, heading: jnp.ndarray) -> jnp.ndarray:
     """Rotate acceleration from body frame to world frame using JAX.
 
     Parameters

@@ -2,7 +2,6 @@
 
 import jax.numpy as jnp
 import jax.scipy.linalg as jlinalg
-from jax import lax
 
 
 def _symmetrize_and_stabilize(A: jnp.ndarray, jitter: float = 1e-12) -> jnp.ndarray:
@@ -67,8 +66,9 @@ def safe_cho_solve(A: jnp.ndarray, b: jnp.ndarray, jitter: float = 1e-12) -> jnp
     return jlinalg.cho_solve((L, True), b)
 
 
-def mahalanobis_distance(residual: jnp.ndarray, covariance: jnp.ndarray,
-                        jitter: float = 1e-12) -> jnp.ndarray:
+def mahalanobis_distance(
+    residual: jnp.ndarray, covariance: jnp.ndarray, jitter: float = 1e-12
+) -> jnp.ndarray:
     """Compute Mahalanobis distance using safe solve.
 
     Parameters
@@ -91,8 +91,9 @@ def mahalanobis_distance(residual: jnp.ndarray, covariance: jnp.ndarray,
     return residual.T @ solved
 
 
-def kalman_gain(state_cov: jnp.ndarray, H: jnp.ndarray, measurement_cov: jnp.ndarray,
-                jitter: float = 1e-12) -> jnp.ndarray:
+def kalman_gain(
+    state_cov: jnp.ndarray, H: jnp.ndarray, measurement_cov: jnp.ndarray, jitter: float = 1e-12
+) -> jnp.ndarray:
     """Compute Kalman gain K = P @ H.T @ S^{-1} using safe solve.
 
     Parameters

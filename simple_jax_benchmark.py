@@ -29,16 +29,18 @@ def benchmark_rts_smoother():
 
     for i in range(n_frames):
         # Random but reasonable state
-        state = jnp.array([
-            10 + i * 0.1 + np.random.normal(0, 1),  # x
-            10 + i * 0.05 + np.random.normal(0, 1), # y
-            np.random.normal(0, 0.1),               # vx
-            np.random.normal(0, 0.1),               # vy
-            np.random.normal(0, 0.1),               # theta
-            np.random.normal(0, 0.01),              # b_gz
-            np.random.normal(0, 0.01),              # b_ax
-            np.random.normal(0, 0.01),              # b_ay
-        ])
+        state = jnp.array(
+            [
+                10 + i * 0.1 + np.random.normal(0, 1),  # x
+                10 + i * 0.05 + np.random.normal(0, 1),  # y
+                np.random.normal(0, 0.1),  # vx
+                np.random.normal(0, 0.1),  # vy
+                np.random.normal(0, 0.1),  # theta
+                np.random.normal(0, 0.01),  # b_gz
+                np.random.normal(0, 0.01),  # b_ax
+                np.random.normal(0, 0.01),  # b_ay
+            ]
+        )
 
         # Covariance matrix
         cov = jnp.eye(state_dim) * 0.1 + np.random.normal(0, 0.01, (state_dim, state_dim))
@@ -61,7 +63,7 @@ def benchmark_rts_smoother():
         filtered_covariances=filtered_covariances,
         predicted_states=predicted_states,
         predicted_covariances=predicted_covariances,
-        log_likelihood=0.0
+        log_likelihood=0.0,
     )
 
     print(f"Processing {n_frames} timesteps with {state_dim}D state vector")
@@ -74,15 +76,15 @@ def benchmark_rts_smoother():
     processing_time = end_time - start_time
     timesteps_per_second = n_frames / processing_time
 
-    print(f"✅ JAX-optimized RTS smoothing completed:")
+    print("✅ JAX-optimized RTS smoothing completed:")
     print(f"   Processing time: {processing_time:.4f} seconds")
     print(f"   Throughput: {timesteps_per_second:,.0f} timesteps/second")
-    print(f"   Using lax.scan reverse=True for backward pass: ✅")
-    print(f"   All operations JAX-compiled: ✅")
+    print("   Using lax.scan reverse=True for backward pass: ✅")
+    print("   All operations JAX-compiled: ✅")
 
     # Verify results make sense
     if len(rts_result.smoothed_states) == n_frames:
-        print(f"   Result validation: ✅ Correct number of smoothed states")
+        print("   Result validation: ✅ Correct number of smoothed states")
 
         # Check that smoothing actually changed something
         total_change = sum(
@@ -108,7 +110,7 @@ def benchmark_jax_arrays():
 
     # JAX arrays
     jax_data = jnp.array(np_data)
-    jax_timestamps = jnp.array(np_timestamps)
+    _ = jnp.array(np_timestamps)  # For completeness, though not used
 
     print(f"Comparing operations on {n_samples:,} samples")
 
@@ -117,12 +119,12 @@ def benchmark_jax_arrays():
 
     # NumPy version
     start_time = time.perf_counter()
-    np_result = np.mean(np_data ** 2, axis=0)
+    _ = np.mean(np_data**2, axis=0)
     np_time = time.perf_counter() - start_time
 
     # JAX version
     start_time = time.perf_counter()
-    jax_result = jnp.mean(jax_data ** 2, axis=0)
+    _ = jnp.mean(jax_data**2, axis=0)
     jax_time = time.perf_counter() - start_time
 
     print(f"   NumPy: {np_time:.4f} seconds")
@@ -140,7 +142,7 @@ def benchmark_jax_arrays():
     # NumPy version
     start_time = time.perf_counter()
     for _ in range(1000):
-        np_inv = np.linalg.inv(np_matrix + np.eye(8) * 1e-6)
+        _ = np.linalg.inv(np_matrix + np.eye(8) * 1e-6)
     np_time = time.perf_counter() - start_time
 
     # JAX version (compiled) using safe_solve
@@ -153,7 +155,7 @@ def benchmark_jax_arrays():
 
     start_time = time.perf_counter()
     for _ in range(1000):
-        jax_result = jax_inv_operation(jax_matrix)
+        _ = jax_inv_operation(jax_matrix)
     jax_time = time.perf_counter() - start_time
 
     print(f"   NumPy (1000 matrix inversions): {np_time:.4f} seconds")

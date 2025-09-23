@@ -8,11 +8,9 @@ This module implements the main offline smoothing pipeline that combines:
 """
 
 import logging
-from pathlib import Path
 from typing import NamedTuple, Optional, Tuple
 import warnings
 
-import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import lax
@@ -21,10 +19,9 @@ from ..config.schemas import SessionConfig
 from ..io.loaders import load_video_detections, load_imu_data
 from ..geom.homography import transform_points_pixel_to_cm
 from ..imu.preintegration import preintegrate_between_frames
-from ..models.state import State2D, create_initial_state, state_to_array, array_to_state
-from ..models.ekf import EKFFilter, create_initial_ekf_state, ekf_step, EkfCarry
+from ..models.state import State2D, create_initial_state, state_to_array
+from ..models.ekf import EKFFilter, ekf_step, EkfCarry
 from ..models.rts_smoother import rts_smooth, ForwardPassData
-from ..models.measurements import create_measurement_noise
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +38,7 @@ class SmoothingResult(NamedTuple):
         log_likelihood: Total log-likelihood from filtering
         diagnostics: Dictionary of diagnostic information
     """
+
     filtered_states: jnp.ndarray
     smoothed_states: jnp.ndarray
     timestamps: jnp.ndarray
@@ -85,15 +83,24 @@ def smooth_session(config: SessionConfig) -> SmoothingResult:
 
     # Run filtering pass
     logger.info("Running EKF filtering pass")
-    filtered_states, filtered_covariances, frame_timestamps, predicted_states, predicted_covariances = _run_filtering_pass(
-        ekf_filter, config, video_data, imu_data, sync_info
-    )
+    (
+        filtered_states,
+        filtered_covariances,
+        frame_timestamps,
+        predicted_states,
+        predicted_covariances,
+    ) = _run_filtering_pass(ekf_filter, config, video_data, imu_data, sync_info)
 
     # Run smoothing pass
     logger.info("Running RTS smoothing pass")
     smoothed_states, smoothed_covariances = _run_smoothing_pass(
-        filtered_states, filtered_covariances, predicted_states, predicted_covariances,
-        config, imu_data, frame_timestamps
+        filtered_states,
+        filtered_covariances,
+        predicted_states,
+        predicted_covariances,
+        config,
+        imu_data,
+        frame_timestamps,
     )
 
     # Collect diagnostics
@@ -133,14 +140,14 @@ def _load_and_sync_data(config: SessionConfig) -> Tuple[Optional[dict], Optional
             logger.info("Applying homography coordinate transformation")
             # Apply homography transformation
             homography_matrix = jnp.array(config.mapping.homography_matrix)
-            video_data['positions'] = transform_points_pixel_to_cm(
-                video_data['positions'], homography_matrix
+            video_data["positions"] = transform_points_pixel_to_cm(
+                video_data["positions"], homography_matrix
             )
         elif config.mapping.type == "ruler_scale":
             logger.info("Applying ruler-scale coordinate transformation")
             # Convert pixels to cm using scale
             scale = config.mapping.pixel_per_cm
-            video_data['positions'] = video_data['positions'] / scale
+            video_data["positions"] = video_data["positions"] / scale
 
     # Load IMU data
     if config.imu_file is not None:
@@ -148,8 +155,10 @@ def _load_and_sync_data(config: SessionConfig) -> Tuple[Optional[dict], Optional
         imu_data = load_imu_data(config.imu_file)
 
         # Downsample if requested
-        if config.imu.downsampling_rate < imu_data['sampling_rate']:
-            logger.info(f"Downsampling IMU from {imu_data['sampling_rate']:.1f} Hz to {config.imu.downsampling_rate:.1f} Hz")
+        if config.imu.downsampling_rate < imu_data["sampling_rate"]:
+            logger.info(
+                f"Downsampling IMU from {imu_data['sampling_rate']:.1f} Hz to {config.imu.downsampling_rate:.1f} Hz"
+            )
             imu_data = _downsample_imu_data(imu_data, config.imu.downsampling_rate)
 
     # Perform synchronization
@@ -158,31 +167,37 @@ def _load_and_sync_data(config: SessionConfig) -> Tuple[Optional[dict], Optional
     return video_data, imu_data, sync_info
 
 
-def _initialize_filter(config: SessionConfig, video_data: Optional[dict], imu_data: Optional[dict]) -> Tuple[EKFFilter, State2D]:
+def _initialize_filter(
+    config: SessionConfig, video_data: Optional[dict], imu_data: Optional[dict]
+) -> Tuple[EKFFilter, State2D]:
     """Initialize the EKF filter with appropriate initial conditions."""
 
     # Create initial state estimate
     if video_data is not None:
         # Use first few frames for initialization
-        n_init = min(3, len(video_data['positions']))
+        n_init = min(3, len(video_data["positions"]))
         homography = jnp.eye(3)  # Identity for now, actual homography applied earlier
         if config.mapping.type == "homography":
             homography = jnp.array(config.mapping.homography_matrix)
 
         initial_state, _ = create_initial_state(
-            positions=video_data['positions'][:n_init],
-            timestamps=video_data['timestamps'][:n_init],
-            confidences=video_data['confidences'][:n_init],
+            positions=video_data["positions"][:n_init],
+            timestamps=video_data["timestamps"][:n_init],
+            confidences=video_data["confidences"][:n_init],
             homography=homography,
         )
     else:
         # IMU-only initialization (less accurate)
         logger.warning("Initializing with IMU-only data - position accuracy will be limited")
         initial_state = State2D(
-            x=0.0, y=0.0,  # Unknown initial position
-            vx=0.0, vy=0.0,  # Start at rest
+            x=0.0,
+            y=0.0,  # Unknown initial position
+            vx=0.0,
+            vy=0.0,  # Start at rest
             theta=0.0,  # Unknown initial heading
-            b_gz=0.0, b_ax=0.0, b_ay=0.0,  # Assume no initial bias
+            b_gz=0.0,
+            b_ax=0.0,
+            b_ay=0.0,  # Assume no initial bias
         )
 
     # Create initial covariance matrix
@@ -215,15 +230,13 @@ def _run_filtering_pass(
 
     # Determine frame timestamps
     if video_data is not None:
-        frame_timestamps = video_data['timestamps']
+        frame_timestamps = video_data["timestamps"]
     else:
         # Create artificial frames at video rate for IMU-only processing
-        duration = imu_data['timestamps'][-1] - imu_data['timestamps'][0]
+        duration = imu_data["timestamps"][-1] - imu_data["timestamps"][0]
         n_frames = int(duration * config.video_fps)
         frame_timestamps = jnp.linspace(
-            imu_data['timestamps'][0],
-            imu_data['timestamps'][-1],
-            n_frames
+            imu_data["timestamps"][0], imu_data["timestamps"][-1], n_frames
         )
 
     n_frames = len(frame_timestamps)
@@ -231,7 +244,9 @@ def _run_filtering_pass(
 
     # For small datasets or when JAX optimization isn't beneficial, use direct approach
     if n_frames < 10 or video_data is None:
-        return _run_filtering_pass_direct(ekf_filter, config, video_data, imu_data, frame_timestamps)
+        return _run_filtering_pass_direct(
+            ekf_filter, config, video_data, imu_data, frame_timestamps
+        )
 
     # Use JAX-optimized approach for larger datasets
     return _run_filtering_pass_scan(ekf_filter, config, video_data, imu_data, frame_timestamps)
@@ -271,20 +286,18 @@ def _run_filtering_pass_direct(
         if imu_data is not None and dt > 0:
             # Pre-integrate IMU between frames
             imu_result = preintegrate_between_frames(
-                imu_data['data'],
-                imu_data['timestamps'],
+                imu_data["data"],
+                imu_data["timestamps"],
                 prev_timestamp,
                 timestamp,
                 initial_heading=ekf_filter.get_current_state().theta,
-                initial_velocity=jnp.array([
-                    ekf_filter.get_current_state().vx,
-                    ekf_filter.get_current_state().vy
-                ]),
+                initial_velocity=jnp.array(
+                    [ekf_filter.get_current_state().vx, ekf_filter.get_current_state().vy]
+                ),
                 gyro_bias=ekf_filter.get_current_state().b_gz,
-                accel_bias=jnp.array([
-                    ekf_filter.get_current_state().b_ax,
-                    ekf_filter.get_current_state().b_ay
-                ]),
+                accel_bias=jnp.array(
+                    [ekf_filter.get_current_state().b_ax, ekf_filter.get_current_state().b_ay]
+                ),
                 damping_lambda=config.filter.velocity_damping,
             )
 
@@ -304,14 +317,14 @@ def _run_filtering_pass_direct(
             predicted_covariances.append(ekf_filter.get_current_covariance())
 
         # Update step with video measurements if available
-        if video_data is not None and i < len(video_data['positions']):
-            position = video_data['positions'][i]
-            confidence = video_data.get('confidences', [1.0] * len(video_data['positions']))[i]
+        if video_data is not None and i < len(video_data["positions"]):
+            position = video_data["positions"][i]
+            confidence = video_data.get("confidences", [1.0] * len(video_data["positions"]))[i]
 
             # Handle heading data (may be None)
             heading = None
-            if video_data.get('headings') is not None:
-                heading = video_data['headings'][i]
+            if video_data.get("headings") is not None:
+                heading = video_data["headings"][i]
 
             # Skip update if position is invalid
             if not jnp.all(jnp.isfinite(position)):
@@ -355,11 +368,11 @@ def _run_filtering_pass_scan(
     initial_covariance = ekf_filter.ekf_state.covariance
 
     # Prepare measurement data
-    positions = video_data['positions']
-    confidences = jnp.array(video_data.get('confidences', [1.0] * len(positions)))
+    positions = video_data["positions"]
+    confidences = jnp.array(video_data.get("confidences", [1.0] * len(positions)))
     headings = None
-    if video_data.get('headings') is not None:
-        headings = jnp.array(video_data['headings'])
+    if video_data.get("headings") is not None:
+        headings = jnp.array(video_data["headings"])
 
     # Pad data to match frame count if needed
     if len(positions) < n_frames:
@@ -375,22 +388,20 @@ def _run_filtering_pass_scan(
     # Prepare IMU data for each frame if available
     imu_blocks = None
     if imu_data is not None:
-        imu_blocks = _prepare_imu_blocks_for_frames(
-            imu_data, frame_timestamps, config
-        )
+        imu_blocks = _prepare_imu_blocks_for_frames(imu_data, frame_timestamps, config)
     else:
         # Create dummy IMU blocks (zeros)
         imu_blocks = jnp.zeros((n_frames, 3))  # [ax, ay, gz]
 
     # Create filter configuration dict
     filter_cfg = {
-        'velocity_damping': config.filter.velocity_damping,
-        'accel_noise_std': np.sqrt(config.filter.process_noise["velocity"]),
-        'gyro_noise_std': np.sqrt(config.filter.process_noise["heading"]),
-        'bias_drift_std': np.sqrt(config.filter.process_noise["bias_gyro"]),
-        'position_noise_std': np.sqrt(config.filter.measurement_noise["position"]),
-        'heading_noise_std': np.sqrt(config.filter.measurement_noise["heading"]),
-        'gate_threshold': config.filter.gating_threshold,
+        "velocity_damping": config.filter.velocity_damping,
+        "accel_noise_std": np.sqrt(config.filter.process_noise["velocity"]),
+        "gyro_noise_std": np.sqrt(config.filter.process_noise["heading"]),
+        "bias_drift_std": np.sqrt(config.filter.process_noise["bias_gyro"]),
+        "position_noise_std": np.sqrt(config.filter.measurement_noise["position"]),
+        "heading_noise_std": np.sqrt(config.filter.measurement_noise["heading"]),
+        "gate_threshold": config.filter.gating_threshold,
     }
 
     # Prepare measurement structures for each frame
@@ -401,14 +412,14 @@ def _run_filtering_pass_scan(
         # Add position if valid
         pos = positions[i]
         if jnp.all(jnp.isfinite(pos)):
-            meas_struct['position'] = pos
+            meas_struct["position"] = pos
 
         # Add heading if available and valid
         if headings is not None and jnp.isfinite(headings[i]):
-            meas_struct['heading'] = headings[i]
+            meas_struct["heading"] = headings[i]
 
         # Add confidence
-        meas_struct['confidence'] = confidences[i]
+        meas_struct["confidence"] = confidences[i]
 
         meas_structs.append(meas_struct)
 
@@ -427,7 +438,13 @@ def _run_filtering_pass_scan(
     predicted_states = outputs.x_pred
     predicted_covariances = outputs.P_pred
 
-    return filtered_states, filtered_covariances, frame_timestamps, predicted_states, predicted_covariances
+    return (
+        filtered_states,
+        filtered_covariances,
+        frame_timestamps,
+        predicted_states,
+        predicted_covariances,
+    )
 
 
 def _prepare_imu_blocks_for_frames(
@@ -448,8 +465,8 @@ def _prepare_imu_blocks_for_frames(
             # Pre-integrate IMU between frames for average measurements
             try:
                 imu_result = preintegrate_between_frames(
-                    imu_data['data'],
-                    imu_data['timestamps'],
+                    imu_data["data"],
+                    imu_data["timestamps"],
                     prev_timestamp,
                     timestamp,
                     initial_heading=0.0,  # Will be corrected in EKF
@@ -500,7 +517,7 @@ def _run_smoothing_pass(
             filtered_covariances=list(filtered_covariances),
             predicted_states=list(predicted_states),
             predicted_covariances=list(predicted_covariances),
-            log_likelihood=0.0  # Not used in offline context
+            log_likelihood=0.0,  # Not used in offline context
         )
 
         # Run JAX-optimized RTS smoother
@@ -511,7 +528,9 @@ def _run_smoothing_pass(
 
         logger.info("JAX-optimized RTS smoothing completed")
     else:
-        logger.info("UKF selected - using filtered results as smoothed (UKF smoothing not yet implemented)")
+        logger.info(
+            "UKF selected - using filtered results as smoothed (UKF smoothing not yet implemented)"
+        )
         smoothed_states = filtered_states
         smoothed_covariances = filtered_covariances
 
@@ -520,21 +539,25 @@ def _run_smoothing_pass(
 
 def _create_initial_covariance(initial_variances: dict) -> jnp.ndarray:
     """Create initial covariance matrix from configuration."""
-    return jnp.diag(jnp.array([
-        initial_variances["position"],  # x
-        initial_variances["position"],  # y
-        initial_variances["velocity"],  # vx
-        initial_variances["velocity"],  # vy
-        initial_variances["heading"],   # theta
-        initial_variances["bias_gyro"], # b_gz
-        initial_variances["bias_accel"], # b_ax
-        initial_variances["bias_accel"], # b_ay
-    ]))
+    return jnp.diag(
+        jnp.array(
+            [
+                initial_variances["position"],  # x
+                initial_variances["position"],  # y
+                initial_variances["velocity"],  # vx
+                initial_variances["velocity"],  # vy
+                initial_variances["heading"],  # theta
+                initial_variances["bias_gyro"],  # b_gz
+                initial_variances["bias_accel"],  # b_ax
+                initial_variances["bias_accel"],  # b_ay
+            ]
+        )
+    )
 
 
 def _downsample_imu_data(imu_data: dict, target_rate: float) -> dict:
     """Downsample IMU data to target rate."""
-    original_rate = imu_data['sampling_rate']
+    original_rate = imu_data["sampling_rate"]
     decimation_factor = int(original_rate / target_rate)
 
     if decimation_factor <= 1:
@@ -542,66 +565,73 @@ def _downsample_imu_data(imu_data: dict, target_rate: float) -> dict:
 
     # Simple decimation
     downsampled_data = {
-        'data': imu_data['data'][::decimation_factor],
-        'timestamps': imu_data['timestamps'][::decimation_factor],
-        'sampling_rate': original_rate / decimation_factor,
+        "data": imu_data["data"][::decimation_factor],
+        "timestamps": imu_data["timestamps"][::decimation_factor],
+        "sampling_rate": original_rate / decimation_factor,
     }
 
     return downsampled_data
 
 
-def _synchronize_timestamps(video_data: Optional[dict], imu_data: Optional[dict], sync_config) -> dict:
+def _synchronize_timestamps(
+    video_data: Optional[dict], imu_data: Optional[dict], sync_config
+) -> dict:
     """Synchronize video and IMU timestamps."""
     sync_info = {
-        'method': sync_config.method,
-        'video_start': None,
-        'video_end': None,
-        'imu_start': None,
-        'imu_end': None,
-        'overlap_start': None,
-        'overlap_end': None,
+        "method": sync_config.method,
+        "video_start": None,
+        "video_end": None,
+        "imu_start": None,
+        "imu_end": None,
+        "overlap_start": None,
+        "overlap_end": None,
     }
 
     if video_data is not None:
-        sync_info['video_start'] = video_data['timestamps'][0]
-        sync_info['video_end'] = video_data['timestamps'][-1]
+        sync_info["video_start"] = video_data["timestamps"][0]
+        sync_info["video_end"] = video_data["timestamps"][-1]
 
     if imu_data is not None:
-        sync_info['imu_start'] = imu_data['timestamps'][0]
-        sync_info['imu_end'] = imu_data['timestamps'][-1]
+        sync_info["imu_start"] = imu_data["timestamps"][0]
+        sync_info["imu_end"] = imu_data["timestamps"][-1]
 
     # Compute overlap period
     if video_data is not None and imu_data is not None:
-        sync_info['overlap_start'] = max(sync_info['video_start'], sync_info['imu_start'])
-        sync_info['overlap_end'] = min(sync_info['video_end'], sync_info['imu_end'])
+        sync_info["overlap_start"] = max(sync_info["video_start"], sync_info["imu_start"])
+        sync_info["overlap_end"] = min(sync_info["video_end"], sync_info["imu_end"])
 
-        overlap_duration = sync_info['overlap_end'] - sync_info['overlap_start']
+        overlap_duration = sync_info["overlap_end"] - sync_info["overlap_start"]
         if overlap_duration <= 0:
             warnings.warn("No temporal overlap between video and IMU data")
 
     return sync_info
 
 
-def _collect_diagnostics(config: SessionConfig, filtered_states: jnp.ndarray,
-                        smoothed_states: jnp.ndarray, sync_info: dict,
-                        ekf_filter: EKFFilter) -> dict:
+def _collect_diagnostics(
+    config: SessionConfig,
+    filtered_states: jnp.ndarray,
+    smoothed_states: jnp.ndarray,
+    sync_info: dict,
+    ekf_filter: EKFFilter,
+) -> dict:
     """Collect diagnostic information about the smoothing run."""
 
     diagnostics = {
-        'config_summary': {
-            'filter_type': config.filter.filter_type,
-            'video_fps': config.video_fps,
-            'mapping_type': config.mapping.type,
-            'sync_method': config.synchronization.method,
+        "config_summary": {
+            "filter_type": config.filter.filter_type,
+            "video_fps": config.video_fps,
+            "mapping_type": config.mapping.type,
+            "sync_method": config.synchronization.method,
         },
-        'data_summary': {
-            'n_frames': len(filtered_states),
-            'duration_s': (sync_info.get('overlap_end') or 0) - (sync_info.get('overlap_start') or 0),
+        "data_summary": {
+            "n_frames": len(filtered_states),
+            "duration_s": (sync_info.get("overlap_end") or 0)
+            - (sync_info.get("overlap_start") or 0),
         },
-        'filter_performance': {
-            'log_likelihood': ekf_filter.get_log_likelihood(),
+        "filter_performance": {
+            "log_likelihood": ekf_filter.get_log_likelihood(),
         },
-        'sync_info': sync_info,
+        "sync_info": sync_info,
     }
 
     # Compute RMSE improvement from smoothing
@@ -609,15 +639,16 @@ def _collect_diagnostics(config: SessionConfig, filtered_states: jnp.ndarray,
         position_rmse_improvement = _compute_smoothing_improvement(
             filtered_states[:, :2], smoothed_states[:, :2]
         )
-        diagnostics['smoothing_improvement'] = {
-            'position_rmse_improvement_cm': position_rmse_improvement,
+        diagnostics["smoothing_improvement"] = {
+            "position_rmse_improvement_cm": position_rmse_improvement,
         }
 
     return diagnostics
 
 
-def _compute_smoothing_improvement(filtered_positions: jnp.ndarray,
-                                 smoothed_positions: jnp.ndarray) -> float:
+def _compute_smoothing_improvement(
+    filtered_positions: jnp.ndarray, smoothed_positions: jnp.ndarray
+) -> float:
     """Compute RMS improvement from smoothing."""
     if len(filtered_positions) < 2:
         return 0.0
@@ -627,9 +658,13 @@ def _compute_smoothing_improvement(filtered_positions: jnp.ndarray,
     return float(jnp.mean(diff))
 
 
-def _save_results(config: SessionConfig, filtered_states: jnp.ndarray,
-                 smoothed_states: jnp.ndarray, timestamps: jnp.ndarray,
-                 diagnostics: dict) -> None:
+def _save_results(
+    config: SessionConfig,
+    filtered_states: jnp.ndarray,
+    smoothed_states: jnp.ndarray,
+    timestamps: jnp.ndarray,
+    diagnostics: dict,
+) -> None:
     """Save results to output directory."""
 
     output_dir = config.output.output_dir
@@ -645,6 +680,7 @@ def _save_results(config: SessionConfig, filtered_states: jnp.ndarray,
 
     # Save diagnostics as JSON
     import json
+
     diagnostics_serializable = _make_json_serializable(diagnostics)
     with open(output_dir / "diagnostics.json", "w") as f:
         json.dump(diagnostics_serializable, f, indent=2)

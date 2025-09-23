@@ -1,7 +1,6 @@
 """Tests for velocity pseudo-measurements."""
 
 import numpy as np
-import pytest
 import jax.numpy as jnp
 from hypothesis import given, strategies as st, settings
 
@@ -13,7 +12,7 @@ from trodestrack.models.velocity import (
     velocity_pseudo_measurement_update,
     should_use_velocity_constraint,
 )
-from trodestrack.models.state import State2D, state_to_array
+from trodestrack.models.state import State2D
 
 
 class TestVelocityMeasurement:
@@ -21,10 +20,7 @@ class TestVelocityMeasurement:
 
     def test_velocity_measurement_basic(self):
         """Test basic velocity measurement extraction."""
-        state = State2D(
-            x=10.0, y=20.0, vx=5.0, vy=-3.0, theta=0.5,
-            b_gz=0.01, b_ax=0.02, b_ay=0.01
-        )
+        state = State2D(x=10.0, y=20.0, vx=5.0, vy=-3.0, theta=0.5, b_gz=0.01, b_ax=0.02, b_ay=0.01)
 
         # Expected measurement is just the velocity
         expected = jnp.array([5.0, -3.0])
@@ -54,10 +50,7 @@ class TestVelocityMeasurement:
     )
     def test_velocity_measurement_property(self, vx, vy):
         """Property test: velocity measurement extracts velocity."""
-        state = State2D(
-            x=0.0, y=0.0, vx=vx, vy=vy, theta=0.0,
-            b_gz=0.0, b_ax=0.0, b_ay=0.0
-        )
+        state = State2D(x=0.0, y=0.0, vx=vx, vy=vy, theta=0.0, b_gz=0.0, b_ax=0.0, b_ay=0.0)
 
         measured = velocity_measurement(state)
 
@@ -71,11 +64,13 @@ class TestVelocityEstimation:
         """Test velocity estimation for constant motion."""
         # Constant velocity: 10 cm/s in x, -5 cm/s in y
         dt = 0.033  # 30 Hz
-        positions = jnp.array([
-            [0.0, 0.0],
-            [10.0 * dt, -5.0 * dt],
-            [20.0 * dt, -10.0 * dt],
-        ])
+        positions = jnp.array(
+            [
+                [0.0, 0.0],
+                [10.0 * dt, -5.0 * dt],
+                [20.0 * dt, -10.0 * dt],
+            ]
+        )
         timestamps = jnp.array([0.0, dt, 2 * dt])
 
         estimated_vel = estimate_velocity_from_positions(positions, timestamps)
@@ -87,22 +82,26 @@ class TestVelocityEstimation:
         """Test velocity estimation with noisy positions."""
         dt = 0.1
         # True velocity: [2, 3] cm/s
-        true_positions = jnp.array([
-            [0.0, 0.0],
-            [0.2, 0.3],
-            [0.4, 0.6],
-            [0.6, 0.9],
-            [0.8, 1.2],
-        ])
+        true_positions = jnp.array(
+            [
+                [0.0, 0.0],
+                [0.2, 0.3],
+                [0.4, 0.6],
+                [0.6, 0.9],
+                [0.8, 1.2],
+            ]
+        )
 
         # Add small amount of noise
-        noise = jnp.array([
-            [0.01, -0.01],
-            [0.02, 0.01],
-            [-0.01, 0.02],
-            [0.01, -0.01],
-            [-0.02, 0.01],
-        ])
+        noise = jnp.array(
+            [
+                [0.01, -0.01],
+                [0.02, 0.01],
+                [-0.01, 0.02],
+                [0.01, -0.01],
+                [-0.02, 0.01],
+            ]
+        )
         noisy_positions = true_positions + noise
         timestamps = jnp.arange(5) * dt
 
@@ -243,10 +242,7 @@ class TestVelocityPseudoMeasurementUpdate:
     def test_velocity_pseudo_measurement_update_simple(self):
         """Test velocity pseudo-measurement with simple case."""
         # Current state with some velocity
-        state = State2D(
-            x=10.0, y=20.0, vx=5.0, vy=3.0, theta=0.0,
-            b_gz=0.0, b_ax=0.0, b_ay=0.0
-        )
+        state = State2D(x=10.0, y=20.0, vx=5.0, vy=3.0, theta=0.0, b_gz=0.0, b_ax=0.0, b_ay=0.0)
         state_cov = jnp.eye(8) * 0.1  # Small covariance
 
         # Observed velocity from recent positions
@@ -267,10 +263,7 @@ class TestVelocityPseudoMeasurementUpdate:
 
     def test_velocity_pseudo_measurement_update_no_change_positions(self):
         """Test that position and other states are unchanged."""
-        state = State2D(
-            x=10.0, y=20.0, vx=5.0, vy=3.0, theta=1.5,
-            b_gz=0.01, b_ax=0.02, b_ay=0.01
-        )
+        state = State2D(x=10.0, y=20.0, vx=5.0, vy=3.0, theta=1.5, b_gz=0.01, b_ax=0.02, b_ay=0.01)
         state_cov = jnp.eye(8) * 0.1
 
         observed_velocity = jnp.array([4.0, 2.0])
@@ -290,10 +283,7 @@ class TestVelocityPseudoMeasurementUpdate:
 
     def test_velocity_pseudo_measurement_high_noise(self):
         """Test velocity update with high measurement noise."""
-        state = State2D(
-            x=0.0, y=0.0, vx=10.0, vy=5.0, theta=0.0,
-            b_gz=0.0, b_ax=0.0, b_ay=0.0
-        )
+        state = State2D(x=0.0, y=0.0, vx=10.0, vy=5.0, theta=0.0, b_gz=0.0, b_ax=0.0, b_ay=0.0)
         state_cov = jnp.eye(8) * 0.01  # Low state uncertainty
 
         observed_velocity = jnp.array([0.0, 0.0])  # Very different from state

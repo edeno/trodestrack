@@ -10,16 +10,12 @@ import time
 from typing import NamedTuple, Optional, Tuple, List
 from collections import deque
 
-import jax
 import jax.numpy as jnp
 import numpy as np
-from jax import lax
 
 from ..config.schemas import SessionConfig
-from ..models.state import State2D, create_initial_state, state_to_array, array_to_state
+from ..models.state import State2D, state_to_array
 from ..models.ekf import EKFFilter
-from ..models.measurements import create_measurement_noise
-from ..imu.preintegration import preintegrate_imu_scan
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +30,7 @@ class TrackingFrame(NamedTuple):
         confidence: Detection confidence [0, 1]
         imu_measurements: IMU data since last frame [(accel, gyro, timestamp), ...]
     """
+
     timestamp: float
     position: Optional[jnp.ndarray]
     heading: Optional[float]
@@ -53,6 +50,7 @@ class TrackingResult(NamedTuple):
         gated: Whether measurement was rejected by gating
         log_likelihood: Cumulative log-likelihood
     """
+
     state: State2D
     covariance: jnp.ndarray
     timestamp: float
@@ -138,8 +136,10 @@ class OnlineTracker:
         self._initialized = True
         self._start_time = time.time()
 
-        logger.info(f"Tracker initialized at position ({initial_position[0]:.1f}, {initial_position[1]:.1f}) cm, "
-                   f"heading {np.degrees(initial_heading):.1f}°")
+        logger.info(
+            f"Tracker initialized at position ({initial_position[0]:.1f}, {initial_position[1]:.1f}) cm, "
+            f"heading {np.degrees(initial_heading):.1f}°"
+        )
 
     def add_imu_measurement(self, accel: jnp.ndarray, gyro: jnp.ndarray, timestamp: float) -> None:
         """Add IMU measurement to buffer.
@@ -172,7 +172,9 @@ class OnlineTracker:
                 logger.info("Auto-initializing tracker from first frame")
                 self.initialize(frame.position, frame.heading or 0.0)
             else:
-                raise RuntimeError("Tracker not initialized - call initialize() or provide position in first frame")
+                raise RuntimeError(
+                    "Tracker not initialized - call initialize() or provide position in first frame"
+                )
 
         # Handle timing
         dt = 0.0
@@ -185,7 +187,8 @@ class OnlineTracker:
         # Add any buffered IMU measurements in time range
         if self._last_timestamp is not None:
             buffered_imu = [
-                (accel, gyro, ts) for accel, gyro, ts in self._imu_buffer
+                (accel, gyro, ts)
+                for accel, gyro, ts in self._imu_buffer
                 if self._last_timestamp <= ts <= frame.timestamp
             ]
             imu_measurements.extend(buffered_imu)
@@ -239,7 +242,9 @@ class OnlineTracker:
         # Log progress periodically
         if self._frame_count % 100 == 0:
             avg_time = np.mean(list(self._processing_times))
-            logger.info(f"Processed {self._frame_count} frames, avg processing time: {avg_time:.2f} ms")
+            logger.info(
+                f"Processed {self._frame_count} frames, avg processing time: {avg_time:.2f} ms"
+            )
 
         return TrackingResult(
             state=final_state,
@@ -273,18 +278,18 @@ class OnlineTracker:
         processing_times = list(self._processing_times)
 
         stats = {
-            'frame_count': self._frame_count,
-            'avg_processing_time_ms': np.mean(processing_times),
-            'max_processing_time_ms': np.max(processing_times),
-            'min_processing_time_ms': np.min(processing_times),
-            'std_processing_time_ms': np.std(processing_times),
+            "frame_count": self._frame_count,
+            "avg_processing_time_ms": np.mean(processing_times),
+            "max_processing_time_ms": np.max(processing_times),
+            "min_processing_time_ms": np.min(processing_times),
+            "std_processing_time_ms": np.std(processing_times),
         }
 
         if self._start_time is not None:
             elapsed_time = time.time() - self._start_time
-            stats['elapsed_time_s'] = elapsed_time
+            stats["elapsed_time_s"] = elapsed_time
             if elapsed_time > 0:
-                stats['frames_per_second'] = self._frame_count / elapsed_time
+                stats["frames_per_second"] = self._frame_count / elapsed_time
 
         return stats
 
@@ -302,18 +307,24 @@ class OnlineTracker:
     def _create_initial_covariance(self) -> jnp.ndarray:
         """Create initial covariance matrix from configuration."""
         variances = self.config.filter.initial_state_variance
-        return jnp.diag(jnp.array([
-            variances["position"],  # x
-            variances["position"],  # y
-            variances["velocity"],  # vx
-            variances["velocity"],  # vy
-            variances["heading"],   # theta
-            variances["bias_gyro"], # b_gz
-            variances["bias_accel"], # b_ax
-            variances["bias_accel"], # b_ay
-        ]))
+        return jnp.diag(
+            jnp.array(
+                [
+                    variances["position"],  # x
+                    variances["position"],  # y
+                    variances["velocity"],  # vx
+                    variances["velocity"],  # vy
+                    variances["heading"],  # theta
+                    variances["bias_gyro"],  # b_gz
+                    variances["bias_accel"],  # b_ax
+                    variances["bias_accel"],  # b_ay
+                ]
+            )
+        )
 
-    def _prepare_imu_data(self, imu_measurements: List[Tuple[jnp.ndarray, jnp.ndarray, float]]) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    def _prepare_imu_data(
+        self, imu_measurements: List[Tuple[jnp.ndarray, jnp.ndarray, float]]
+    ) -> Tuple[jnp.ndarray, jnp.ndarray]:
         """Prepare IMU measurements for processing.
 
         Args:
@@ -358,8 +369,9 @@ class StreamingTracker:
         self.tracker = OnlineTracker(config)
         self.results: List[TrackingResult] = []
 
-    def process_data_streams(self, video_data: Optional[dict] = None,
-                           imu_data: Optional[dict] = None) -> List[TrackingResult]:
+    def process_data_streams(
+        self, video_data: Optional[dict] = None, imu_data: Optional[dict] = None
+    ) -> List[TrackingResult]:
         """Process complete data streams.
 
         Args:
@@ -375,15 +387,15 @@ class StreamingTracker:
             raise ValueError("At least one data stream must be provided")
 
         # Initialize from first video frame if available
-        if video_data is not None and len(video_data['positions']) > 0:
-            first_position = video_data['positions'][0]
-            first_heading = video_data.get('headings', [0.0])[0] or 0.0
+        if video_data is not None and len(video_data["positions"]) > 0:
+            first_position = video_data["positions"][0]
+            first_heading = video_data.get("headings", [0.0])[0] or 0.0
             if jnp.all(jnp.isfinite(first_position)):
                 self.tracker.initialize(first_position, first_heading)
 
         # Process frame by frame
         if video_data is not None:
-            n_frames = len(video_data['timestamps'])
+            n_frames = len(video_data["timestamps"])
 
             # For large datasets, consider JAX optimization (though tracker is stateful)
             if n_frames > 1000 and imu_data is None:
@@ -399,27 +411,33 @@ class StreamingTracker:
 
     def _process_frames_direct(self, video_data: dict, imu_data: Optional[dict]) -> None:
         """Direct frame-by-frame processing."""
-        n_frames = len(video_data['timestamps'])
+        n_frames = len(video_data["timestamps"])
 
         for i in range(n_frames):
             # Create tracking frame
-            timestamp = video_data['timestamps'][i]
-            position = video_data['positions'][i] if jnp.all(jnp.isfinite(video_data['positions'][i])) else None
-            heading = video_data.get('headings', [None] * n_frames)[i]
-            confidence = video_data.get('confidences', [1.0] * n_frames)[i]
+            timestamp = video_data["timestamps"][i]
+            position = (
+                video_data["positions"][i]
+                if jnp.all(jnp.isfinite(video_data["positions"][i]))
+                else None
+            )
+            heading = video_data.get("headings", [None] * n_frames)[i]
+            confidence = video_data.get("confidences", [1.0] * n_frames)[i]
 
             # Get IMU measurements for this time interval
             imu_measurements = []
             if imu_data is not None and i > 0:
-                prev_timestamp = video_data['timestamps'][i-1]
+                prev_timestamp = video_data["timestamps"][i - 1]
                 # Find IMU samples in time range
-                mask = (imu_data['timestamps'] >= prev_timestamp) & (imu_data['timestamps'] <= timestamp)
+                mask = (imu_data["timestamps"] >= prev_timestamp) & (
+                    imu_data["timestamps"] <= timestamp
+                )
                 if jnp.any(mask):
                     for j in jnp.where(mask)[0]:
-                        imu_sample = imu_data['data'][j]
+                        imu_sample = imu_data["data"][j]
                         accel = imu_sample[:3]
                         gyro = imu_sample[3:6]
-                        imu_ts = imu_data['timestamps'][j]
+                        imu_ts = imu_data["timestamps"][j]
                         imu_measurements.append((accel, gyro, imu_ts))
 
             frame = TrackingFrame(
@@ -436,14 +454,14 @@ class StreamingTracker:
 
     def _process_frames_optimized(self, video_data: dict, imu_data: Optional[dict]) -> None:
         """JAX-optimized frame processing for large datasets."""
-        n_frames = len(video_data['timestamps'])
+        n_frames = len(video_data["timestamps"])
         logger.info(f"Using optimized processing for {n_frames} frames")
 
         # Pre-process data into JAX arrays
-        timestamps = jnp.array(video_data['timestamps'])
-        positions = jnp.array(video_data['positions'])
-        headings = jnp.array(video_data.get('headings', [jnp.nan] * n_frames))
-        confidences = jnp.array(video_data.get('confidences', [1.0] * n_frames))
+        timestamps = jnp.array(video_data["timestamps"])
+        positions = jnp.array(video_data["positions"])
+        headings = jnp.array(video_data.get("headings", [jnp.nan] * n_frames))
+        confidences = jnp.array(video_data.get("confidences", [1.0] * n_frames))
 
         # Create validity masks
         position_valid = jnp.all(jnp.isfinite(positions), axis=1)
@@ -459,16 +477,18 @@ class StreamingTracker:
             # IMU processing (simplified for optimization case)
             imu_measurements = []
             if imu_data is not None and i > 0:
-                prev_timestamp = float(timestamps[i-1])
+                prev_timestamp = float(timestamps[i - 1])
                 # Use JAX operations for mask computation
-                mask = (imu_data['timestamps'] >= prev_timestamp) & (imu_data['timestamps'] <= timestamp)
+                mask = (imu_data["timestamps"] >= prev_timestamp) & (
+                    imu_data["timestamps"] <= timestamp
+                )
                 if jnp.any(mask):
                     imu_indices = jnp.where(mask)[0]
                     for j in imu_indices:
-                        imu_sample = imu_data['data'][j]
+                        imu_sample = imu_data["data"][j]
                         accel = imu_sample[:3]
                         gyro = imu_sample[3:6]
-                        imu_ts = imu_data['timestamps'][j]
+                        imu_ts = imu_data["timestamps"][j]
                         imu_measurements.append((accel, gyro, imu_ts))
 
             frame = TrackingFrame(
@@ -507,17 +527,19 @@ class StreamingTracker:
 
         if self.results:
             processing_times = [result.processing_time_ms for result in self.results]
-            innovations = [jnp.linalg.norm(result.innovation) if len(result.innovation) > 0 else 0.0
-                          for result in self.results]
+            innovations = [
+                jnp.linalg.norm(result.innovation) if len(result.innovation) > 0 else 0.0
+                for result in self.results
+            ]
             gated_count = sum(1 for result in self.results if result.gated)
 
             summary = {
                 **tracker_stats,
-                'total_frames': len(self.results),
-                'gated_measurements': gated_count,
-                'gating_rate': gated_count / len(self.results),
-                'avg_innovation_norm': np.mean(innovations),
-                'final_log_likelihood': self.results[-1].log_likelihood,
+                "total_frames": len(self.results),
+                "gated_measurements": gated_count,
+                "gating_rate": gated_count / len(self.results),
+                "avg_innovation_norm": np.mean(innovations),
+                "final_log_likelihood": self.results[-1].log_likelihood,
             }
         else:
             summary = tracker_stats

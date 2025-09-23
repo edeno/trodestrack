@@ -11,11 +11,9 @@ from typing import Tuple
 
 import jax
 import jax.numpy as jnp
-from jax import lax
 
-from ._solvers import kalman_gain, safe_solve
+from ._solvers import kalman_gain
 from .state import State2D, state_to_array, array_to_state
-
 
 
 def velocity_measurement(state: State2D) -> jnp.ndarray:
@@ -115,7 +113,7 @@ def create_velocity_noise(
     """
     # Scale noise by confidence (lower confidence = higher velocity noise)
     scaled_velocity_std = velocity_noise_std / confidence
-    velocity_var = scaled_velocity_std ** 2
+    velocity_var = scaled_velocity_std**2
 
     # Diagonal covariance matrix
     R = jnp.diag(jnp.array([velocity_var, velocity_var]))

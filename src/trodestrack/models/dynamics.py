@@ -6,13 +6,10 @@ This module implements the prediction step of the EKF/UKF, including:
 - Process noise modeling
 """
 
-from typing import Tuple
-
 import jax
 import jax.numpy as jnp
 
-from .state import State2D, state_to_array, array_to_state
-
+from .state import State2D
 
 
 @jax.jit
@@ -223,11 +220,9 @@ def compute_state_jacobian(
         theta_new = wrap_angle(theta + gyro_corrected * dt)
 
         # Biases unchanged
-        return jnp.array([
-            pos_new[0], pos_new[1],
-            vel_new[0], vel_new[1],
-            theta_new, b_gz, b_ax, b_ay
-        ])
+        return jnp.array(
+            [pos_new[0], pos_new[1], vel_new[0], vel_new[1], theta_new, b_gz, b_ax, b_ay]
+        )
 
     # Compute Jacobian using automatic differentiation
     jacobian = jax.jacfwd(dynamics_function)(state_array)
@@ -262,7 +257,7 @@ def compute_process_noise(
     # Position noise from accelerometer (double integration of white noise)
     # For continuous white noise: Var(Δx) = (1/3) * σ_a² * dt³ (not dt⁴)
     # This is the correct Van Loan discrete-time process noise for double integrator
-    pos_noise_var = (1.0/3.0) * accel_noise_cm**2 * dt**3
+    pos_noise_var = (1.0 / 3.0) * accel_noise_cm**2 * dt**3
 
     # Velocity noise from accelerometer (single integration of white noise)
     # For continuous white noise: Var(Δv) = σ_a² * dt (not dt²)
@@ -277,16 +272,20 @@ def compute_process_noise(
     bias_noise_var = bias_drift_std**2 * dt
 
     # Construct diagonal process noise matrix
-    Q = jnp.diag(jnp.array([
-        pos_noise_var,      # x position
-        pos_noise_var,      # y position
-        vel_noise_var,      # vx velocity
-        vel_noise_var,      # vy velocity
-        heading_noise_var,  # θ heading
-        bias_noise_var,     # b_gz gyro bias
-        bias_noise_var,     # b_ax accel bias
-        bias_noise_var,     # b_ay accel bias
-    ]))
+    Q = jnp.diag(
+        jnp.array(
+            [
+                pos_noise_var,  # x position
+                pos_noise_var,  # y position
+                vel_noise_var,  # vx velocity
+                vel_noise_var,  # vy velocity
+                heading_noise_var,  # θ heading
+                bias_noise_var,  # b_gz gyro bias
+                bias_noise_var,  # b_ax accel bias
+                bias_noise_var,  # b_ay accel bias
+            ]
+        )
+    )
 
     # Add cross-correlation between position and velocity (from acceleration)
     # For continuous white noise: Cov(Δx, Δv) = (1/2) * σ_a² * dt² (not dt³)

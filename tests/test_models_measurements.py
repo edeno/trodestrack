@@ -1,7 +1,6 @@
 """Tests for measurement models."""
 
 import numpy as np
-import pytest
 import jax.numpy as jnp
 from hypothesis import given, strategies as st
 
@@ -13,7 +12,7 @@ from trodestrack.models.measurements import (
     create_measurement_noise,
     validate_led_measurement,
 )
-from trodestrack.models.state import State2D, state_to_array
+from trodestrack.models.state import State2D
 
 
 class TestPositionMeasurement:
@@ -22,8 +21,7 @@ class TestPositionMeasurement:
     def test_position_measurement_basic(self):
         """Test basic position measurement."""
         state = State2D(
-            x=100.0, y=200.0, vx=10.0, vy=5.0, theta=0.5,
-            b_gz=0.01, b_ax=0.02, b_ay=0.01
+            x=100.0, y=200.0, vx=10.0, vy=5.0, theta=0.5, b_gz=0.01, b_ax=0.02, b_ay=0.01
         )
 
         # Expected measurement is just the position
@@ -54,10 +52,7 @@ class TestPositionMeasurement:
     )
     def test_position_measurement_property(self, x, y):
         """Property test: position measurement extracts position."""
-        state = State2D(
-            x=x, y=y, vx=0.0, vy=0.0, theta=0.0,
-            b_gz=0.0, b_ax=0.0, b_ay=0.0
-        )
+        state = State2D(x=x, y=y, vx=0.0, vy=0.0, theta=0.0, b_gz=0.0, b_ax=0.0, b_ay=0.0)
 
         measured = position_measurement(state)
 
@@ -83,7 +78,7 @@ class TestHeadingMeasurement:
     def test_heading_measurement_vertical(self):
         """Test heading measurement for vertical orientation."""
         led_front = jnp.array([100.0, 210.0])  # Front LED above
-        led_back = jnp.array([100.0, 190.0])   # Back LED below
+        led_back = jnp.array([100.0, 190.0])  # Back LED below
 
         expected_heading = jnp.arctan2(20.0, 0.0)  # π/2 radians (pointing up)
 
@@ -94,7 +89,7 @@ class TestHeadingMeasurement:
     def test_heading_measurement_diagonal(self):
         """Test heading measurement for diagonal orientation."""
         led_front = jnp.array([110.0, 210.0])  # Front LED up-right
-        led_back = jnp.array([90.0, 190.0])    # Back LED down-left
+        led_back = jnp.array([90.0, 190.0])  # Back LED down-left
 
         # Vector from back to front: [20, 20]
         expected_heading = jnp.arctan2(20.0, 20.0)  # π/4 radians (45°)
@@ -208,9 +203,7 @@ class TestMeasurementNoise:
         confidence = 0.95
 
         R = create_measurement_noise(
-            position_noise_std=position_noise_std,
-            confidence=confidence,
-            has_heading=False
+            position_noise_std=position_noise_std, confidence=confidence, has_heading=False
         )
 
         # Should be 2x2 for position only
@@ -233,7 +226,7 @@ class TestMeasurementNoise:
             position_noise_std=position_noise_std,
             confidence=confidence,
             has_heading=True,
-            heading_noise_std=heading_noise_std
+            heading_noise_std=heading_noise_std,
         )
 
         # Should be 3x3 for position + heading
@@ -244,7 +237,7 @@ class TestMeasurementNoise:
 
         # Position noise scaled by confidence, heading noise constant
         expected_pos_var = (position_noise_std / confidence) ** 2
-        expected_heading_var = heading_noise_std ** 2
+        expected_heading_var = heading_noise_std**2
 
         expected_diag = jnp.array([expected_pos_var, expected_pos_var, expected_heading_var])
         np.testing.assert_allclose(jnp.diag(R), expected_diag, rtol=1e-12)

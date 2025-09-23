@@ -13,10 +13,8 @@ Where:
 
 from typing import Optional, Tuple
 
-import jax
 import jax.numpy as jnp
 from pydantic import BaseModel, ConfigDict
-
 
 
 # State dimension as per PRD
@@ -58,10 +56,10 @@ def state_to_array(state: State2D) -> jnp.ndarray:
     Returns:
         8-dimensional JAX array [x, y, vx, vy, θ, b_gz, b_ax, b_ay]
     """
-    return jnp.array([
-        state.x, state.y, state.vx, state.vy,
-        state.theta, state.b_gz, state.b_ax, state.b_ay
-    ], dtype=jnp.float64)
+    return jnp.array(
+        [state.x, state.y, state.vx, state.vy, state.theta, state.b_gz, state.b_ax, state.b_ay],
+        dtype=jnp.float64,
+    )
 
 
 def array_to_state(arr: jnp.ndarray) -> State2D:
@@ -124,9 +122,7 @@ def create_initial_state(
 
     # Apply homography transformation
     # Convert to homogeneous coordinates
-    pos_homogeneous = jnp.concatenate([
-        positions, jnp.ones((n_frames, 1))
-    ], axis=1)  # Shape: (n, 3)
+    pos_homogeneous = jnp.concatenate([positions, jnp.ones((n_frames, 1))], axis=1)  # Shape: (n, 3)
 
     # Transform to cm coordinates
     pos_cm_homogeneous = (homography @ pos_homogeneous.T).T  # Shape: (n, 3)
@@ -168,15 +164,19 @@ def create_initial_state(
 
     # Create initial covariance matrix with conservative uncertainties
     # Values based on PRD guidance: low for position, high for velocity, medium for heading
-    initial_cov = jnp.diag(jnp.array([
-        1.0,     # x position uncertainty (cm²)
-        1.0,     # y position uncertainty (cm²)
-        100.0,   # vx velocity uncertainty (cm²/s²)
-        100.0,   # vy velocity uncertainty (cm²/s²)
-        0.25,    # θ heading uncertainty (rad²) ≈ 28 degrees std
-        0.01,    # b_gz gyro bias uncertainty (rad²/s²)
-        0.01,    # b_ax accel bias uncertainty (m²/s⁴)
-        0.01,    # b_ay accel bias uncertainty (m²/s⁴)
-    ]))
+    initial_cov = jnp.diag(
+        jnp.array(
+            [
+                1.0,  # x position uncertainty (cm²)
+                1.0,  # y position uncertainty (cm²)
+                100.0,  # vx velocity uncertainty (cm²/s²)
+                100.0,  # vy velocity uncertainty (cm²/s²)
+                0.25,  # θ heading uncertainty (rad²) ≈ 28 degrees std
+                0.01,  # b_gz gyro bias uncertainty (rad²/s²)
+                0.01,  # b_ax accel bias uncertainty (m²/s⁴)
+                0.01,  # b_ay accel bias uncertainty (m²/s⁴)
+            ]
+        )
+    )
 
     return initial_state, initial_cov

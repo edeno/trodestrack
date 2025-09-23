@@ -19,9 +19,7 @@ import jax.numpy as jnp
 from jax import lax
 
 from ._solvers import safe_solve
-from .dynamics import predict_covariance, compute_process_noise
-from .ekf import EKFState, EKFResult
-
+from .ekf import EKFResult
 
 
 class RTSResult(NamedTuple):
@@ -32,6 +30,7 @@ class RTSResult(NamedTuple):
         smoothed_covariances: List of smoothed covariance matrices
         log_likelihood: Total log-likelihood of the sequence
     """
+
     smoothed_states: List[jnp.ndarray]
     smoothed_covariances: List[jnp.ndarray]
     log_likelihood: float
@@ -47,6 +46,7 @@ class ForwardPassData(NamedTuple):
         predicted_covariances: Covariances after prediction steps
         log_likelihood: Cumulative log-likelihood
     """
+
     filtered_states: List[jnp.ndarray]
     filtered_covariances: List[jnp.ndarray]
     predicted_states: List[jnp.ndarray]
@@ -116,24 +116,38 @@ def rts_smooth(
 
     if N == 0:
         return RTSResult(
-            smoothed_states=[],
-            smoothed_covariances=[],
-            log_likelihood=forward_data.log_likelihood
+            smoothed_states=[], smoothed_covariances=[], log_likelihood=forward_data.log_likelihood
         )
 
     # Convert lists to JAX arrays if needed
-    filtered_states = jnp.array(forward_data.filtered_states) if isinstance(forward_data.filtered_states[0], jnp.ndarray) else jnp.array(forward_data.filtered_states)
-    filtered_covariances = jnp.array(forward_data.filtered_covariances) if isinstance(forward_data.filtered_covariances[0], jnp.ndarray) else jnp.array(forward_data.filtered_covariances)
-    predicted_states = jnp.array(forward_data.predicted_states) if isinstance(forward_data.predicted_states[0], jnp.ndarray) else jnp.array(forward_data.predicted_states)
-    predicted_covariances = jnp.array(forward_data.predicted_covariances) if isinstance(forward_data.predicted_covariances[0], jnp.ndarray) else jnp.array(forward_data.predicted_covariances)
+    filtered_states = (
+        jnp.array(forward_data.filtered_states)
+        if isinstance(forward_data.filtered_states[0], jnp.ndarray)
+        else jnp.array(forward_data.filtered_states)
+    )
+    filtered_covariances = (
+        jnp.array(forward_data.filtered_covariances)
+        if isinstance(forward_data.filtered_covariances[0], jnp.ndarray)
+        else jnp.array(forward_data.filtered_covariances)
+    )
+    predicted_states = (
+        jnp.array(forward_data.predicted_states)
+        if isinstance(forward_data.predicted_states[0], jnp.ndarray)
+        else jnp.array(forward_data.predicted_states)
+    )
+    predicted_covariances = (
+        jnp.array(forward_data.predicted_covariances)
+        if isinstance(forward_data.predicted_covariances[0], jnp.ndarray)
+        else jnp.array(forward_data.predicted_covariances)
+    )
 
     # Initialize output arrays (JAX-compatible)
     smoothed_states = jnp.zeros_like(filtered_states)
     smoothed_covariances = jnp.zeros_like(filtered_covariances)
 
     # Initialize backward pass with final filtered estimate
-    smoothed_states = smoothed_states.at[N-1].set(filtered_states[N-1])
-    smoothed_covariances = smoothed_covariances.at[N-1].set(filtered_covariances[N-1])
+    smoothed_states = smoothed_states.at[N - 1].set(filtered_states[N - 1])
+    smoothed_covariances = smoothed_covariances.at[N - 1].set(filtered_covariances[N - 1])
 
     # Backward pass: smooth from k = N-2 down to 0 using lax.scan
     def backward_step_fn(carry, inputs):
@@ -142,22 +156,20 @@ def rts_smooth(
         x_f, P_f, x_p_next, P_p_next = inputs
 
         # Perform backward step
-        x_s, P_s = rts_backward_step(
-            x_s_next, P_s_next, x_f, P_f, x_p_next, P_p_next
-        )
+        x_s, P_s = rts_backward_step(x_s_next, P_s_next, x_f, P_f, x_p_next, P_p_next)
 
         return (x_s, P_s), (x_s, P_s)
 
     # Prepare inputs for scan (forward order, reverse=True will handle backward iteration)
     scan_inputs = (
-        filtered_states[:-1],      # x_f from 0 to N-2
-        filtered_covariances[:-1], # P_f from 0 to N-2
-        predicted_states[1:],      # x_p_next from 1 to N-1
-        predicted_covariances[1:]  # P_p_next from 1 to N-1
+        filtered_states[:-1],  # x_f from 0 to N-2
+        filtered_covariances[:-1],  # P_f from 0 to N-2
+        predicted_states[1:],  # x_p_next from 1 to N-1
+        predicted_covariances[1:],  # P_p_next from 1 to N-1
     )
 
     # Initial carry state (final filtered estimate)
-    init_carry = (smoothed_states[N-1], smoothed_covariances[N-1])
+    init_carry = (smoothed_states[N - 1], smoothed_covariances[N - 1])
 
     # Run backward scan using reverse=True (much cleaner!)
     final_carry, backward_outputs = lax.scan(
@@ -172,7 +184,7 @@ def rts_smooth(
     return RTSResult(
         smoothed_states=list(smoothed_states),
         smoothed_covariances=list(smoothed_covariances),
-        log_likelihood=forward_data.log_likelihood
+        log_likelihood=forward_data.log_likelihood,
     )
 
 
@@ -284,8 +296,8 @@ def compute_smoothing_improvement(
         pos_error = jnp.linalg.norm(smooth[:2] - truth[:2])  # Position only
         smoothed_errors.append(pos_error)
 
-    filtered_rmse = jnp.sqrt(jnp.mean(jnp.array(filtered_errors)**2))
-    smoothed_rmse = jnp.sqrt(jnp.mean(jnp.array(smoothed_errors)**2))
+    filtered_rmse = jnp.sqrt(jnp.mean(jnp.array(filtered_errors) ** 2))
+    smoothed_rmse = jnp.sqrt(jnp.mean(jnp.array(smoothed_errors) ** 2))
 
     improvement_pct = (filtered_rmse - smoothed_rmse) / filtered_rmse * 100.0
 

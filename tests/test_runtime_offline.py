@@ -32,7 +32,7 @@ class TestOfflineSmoothing:
         """Create basic session configuration."""
         return SessionConfig(
             video_file=None,  # Will be set by tests
-            imu_file=None,    # Will be set by tests
+            imu_file=None,  # Will be set by tests
             video_fps=30.0,
             mapping=MappingConfig(
                 type="ruler_scale",
@@ -120,10 +120,12 @@ class TestOfflineSmoothing:
 
             # Create simple video data
             timestamps = np.linspace(0, 5.0, 150)  # 30 FPS for 5 seconds
-            positions = np.column_stack([
-                50 + 30 * np.cos(timestamps),  # Circular motion
-                50 + 30 * np.sin(timestamps),
-            ])
+            positions = np.column_stack(
+                [
+                    50 + 30 * np.cos(timestamps),  # Circular motion
+                    50 + 30 * np.sin(timestamps),
+                ]
+            )
             confidences = np.ones(len(timestamps))
 
             video_file = tmpdir / "video_only.npz"
@@ -193,10 +195,12 @@ class TestOfflineSmoothing:
 
             # Create minimal video data
             timestamps = np.linspace(0, 2.0, 60)
-            positions = np.column_stack([
-                np.linspace(0, 10, 60),
-                np.zeros(60),
-            ])
+            positions = np.column_stack(
+                [
+                    np.linspace(0, 10, 60),
+                    np.zeros(60),
+                ]
+            )
 
             video_file = tmpdir / "video.npz"
             np.savez(

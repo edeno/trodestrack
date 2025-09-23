@@ -8,14 +8,13 @@ from trodestrack.models.ukf import (
     UKFFilter,
     UKFParams,
     UKFState,
-    create_initial_ukf_state,
     generate_sigma_points,
     propagate_sigma_points,
     ukf_predict,
     ukf_update,
 )
 from trodestrack.models.measurements import create_measurement_noise
-from trodestrack.models.state import State2D, state_to_array
+from trodestrack.models.state import State2D
 
 
 class TestUKFParams:
@@ -70,20 +69,20 @@ class TestSigmaPoints:
     def test_sigma_point_propagation(self):
         """Test sigma point propagation through dynamics."""
         # Create simple sigma points
-        sigma_points = jnp.array([
-            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # Center
-            [0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # Perturbed x
-            [0.0, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # Perturbed y
-        ])
+        sigma_points = jnp.array(
+            [
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # Center
+                [0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # Perturbed x
+                [0.0, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # Perturbed y
+            ]
+        )
 
         dt = 0.1
         accel = jnp.array([1.0, 0.0])
         gyro = jnp.array([0.0])
         velocity_damping = 0.0
 
-        propagated = propagate_sigma_points(
-            sigma_points, dt, accel, gyro, velocity_damping
-        )
+        propagated = propagate_sigma_points(sigma_points, dt, accel, gyro, velocity_damping)
 
         assert propagated.shape == sigma_points.shape
 
@@ -133,15 +132,25 @@ class TestUKFPredict:
         params = UKFParams()
 
         predicted = ukf_predict(
-            ukf_state, dt, accel, gyro, velocity_damping,
-            accel_noise_std=0.1, gyro_noise_std=0.05, bias_drift_std=0.01,
-            params=params
+            ukf_state,
+            dt,
+            accel,
+            gyro,
+            velocity_damping,
+            accel_noise_std=0.1,
+            gyro_noise_std=0.05,
+            bias_drift_std=0.01,
+            params=params,
         )
 
         # Check state prediction (UKF has numerical differences due to sigma points and rotation)
         # The rotation now couples heading uncertainty with position/velocity through sigma points
-        assert predicted.state[0] == pytest.approx(0.5, rel=0.1)  # x position (allow 10% relative error)
-        assert predicted.state[1] == pytest.approx(0.0, abs=1e-2)  # y position (allow small absolute error)
+        assert predicted.state[0] == pytest.approx(
+            0.5, rel=0.1
+        )  # x position (allow 10% relative error)
+        assert predicted.state[1] == pytest.approx(
+            0.0, abs=1e-2
+        )  # y position (allow small absolute error)
         assert predicted.state[2] == pytest.approx(10.0, rel=0.1)  # vx velocity
         assert predicted.state[3] == pytest.approx(0.0, abs=1e-2)  # vy velocity
 
@@ -161,9 +170,15 @@ class TestUKFPredict:
         params = UKFParams()
 
         predicted = ukf_predict(
-            ukf_state, dt, accel, gyro, velocity_damping,
-            accel_noise_std=0.1, gyro_noise_std=0.05, bias_drift_std=0.01,
-            params=params
+            ukf_state,
+            dt,
+            accel,
+            gyro,
+            velocity_damping,
+            accel_noise_std=0.1,
+            gyro_noise_std=0.05,
+            bias_drift_std=0.01,
+            params=params,
         )
 
         # Expected heading change: θ = 0 + (0.2 - 0.1)*0.1 = 0.01 rad
@@ -250,8 +265,9 @@ class TestUKFUpdate:
         measurement_noise = create_measurement_noise(1.0, 1.0, False)
         params = UKFParams()
 
-        result = ukf_update(ukf_state, measurement, measurement_noise, False,
-                           gate_threshold=9.21, params=params)
+        result = ukf_update(
+            ukf_state, measurement, measurement_noise, False, gate_threshold=9.21, params=params
+        )
 
         # Should be gated
         assert result.gated
@@ -267,8 +283,7 @@ class TestUKFFilter:
     def create_test_filter(self) -> UKFFilter:
         """Create a test UKF filter."""
         initial_state = State2D(
-            x=0.0, y=0.0, vx=0.0, vy=0.0, theta=0.0,
-            b_gz=0.0, b_ax=0.0, b_ay=0.0
+            x=0.0, y=0.0, vx=0.0, vy=0.0, theta=0.0, b_gz=0.0, b_ax=0.0, b_ay=0.0
         )
         initial_cov = jnp.eye(8) * 0.5
 
@@ -303,11 +318,7 @@ class TestUKFFilter:
         """Test filter prediction without measurements."""
         filter = self.create_test_filter()
 
-        filter.predict(
-            dt=0.1,
-            accel=jnp.array([2.0, 0.0]),
-            gyro=jnp.array([0.0])
-        )
+        filter.predict(dt=0.1, accel=jnp.array([2.0, 0.0]), gyro=jnp.array([0.0]))
 
         state = filter.get_current_state()
         # Should have moved forward due to acceleration
@@ -318,10 +329,7 @@ class TestUKFFilter:
         """Test filter update without prediction."""
         filter = self.create_test_filter()
 
-        result = filter.update(
-            position=jnp.array([1.0, 2.0]),
-            confidence=0.8
-        )
+        result = filter.update(position=jnp.array([1.0, 2.0]), confidence=0.8)
 
         assert not result.gated
         state = filter.get_current_state()
@@ -334,20 +342,12 @@ class TestUKFFilter:
         filter = self.create_test_filter()
 
         # Predict step
-        filter.predict(
-            dt=0.1,
-            accel=jnp.array([1.0, 0.0]),
-            gyro=jnp.array([0.1])
-        )
+        filter.predict(dt=0.1, accel=jnp.array([1.0, 0.0]), gyro=jnp.array([0.1]))
 
         state_after_predict = filter.get_current_state()
 
         # Update step
-        result = filter.update(
-            position=jnp.array([0.5, 0.1]),
-            heading=0.05,
-            confidence=0.9
-        )
+        result = filter.update(position=jnp.array([0.5, 0.1]), heading=0.05, confidence=0.9)
 
         assert not result.gated
         state_after_update = filter.get_current_state()
@@ -383,8 +383,7 @@ class TestUKFvsEKF:
         """Test UKF vs EKF on linear case (should be similar)."""
         # For linear case, UKF and EKF should give similar results
         initial_state = State2D(
-            x=0.0, y=0.0, vx=0.0, vy=0.0, theta=0.0,
-            b_gz=0.0, b_ax=0.0, b_ay=0.0
+            x=0.0, y=0.0, vx=0.0, vy=0.0, theta=0.0, b_gz=0.0, b_ax=0.0, b_ay=0.0
         )
         initial_cov = jnp.eye(8) * 1.0
 

@@ -7,7 +7,7 @@ the runtime APIs.
 
 import warnings
 from pathlib import Path
-from typing import Dict, Optional, Any
+from typing import Dict, Any
 import logging
 
 import jax.numpy as jnp
@@ -42,15 +42,17 @@ def load_video_detections(file_path: Path) -> Dict[str, Any]:
     logger.info(f"Loading video detections from: {file_path}")
 
     # Determine format from file extension
-    if file_path.suffix.lower() == '.npz':
+    if file_path.suffix.lower() == ".npz":
         return _load_video_npz(file_path)
-    elif file_path.suffix.lower() in ['.csv', '.txt']:
+    elif file_path.suffix.lower() in [".csv", ".txt"]:
         return _load_video_csv(file_path)
-    elif file_path.suffix.lower() == '.h5':
+    elif file_path.suffix.lower() == ".h5":
         return _load_video_dlc_h5(file_path)
     else:
         # Try to auto-detect format
-        logger.warning(f"Unknown video file extension {file_path.suffix}, attempting auto-detection")
+        logger.warning(
+            f"Unknown video file extension {file_path.suffix}, attempting auto-detection"
+        )
         return _auto_detect_video_format(file_path)
 
 
@@ -79,11 +81,11 @@ def load_imu_data(file_path: Path) -> Dict[str, Any]:
     logger.info(f"Loading IMU data from: {file_path}")
 
     # Determine format from file extension
-    if file_path.suffix.lower() == '.npz':
+    if file_path.suffix.lower() == ".npz":
         return _load_imu_npz(file_path)
-    elif file_path.suffix.lower() in ['.csv', '.txt']:
+    elif file_path.suffix.lower() in [".csv", ".txt"]:
         return _load_imu_csv(file_path)
-    elif file_path.suffix.lower() == '.rec':
+    elif file_path.suffix.lower() == ".rec":
         return _load_imu_spikegadgets(file_path)
     else:
         # Try to auto-detect format
@@ -95,24 +97,26 @@ def _load_video_npz(file_path: Path) -> Dict[str, Any]:
     """Load video data from NPZ format."""
     data = np.load(file_path)
 
-    required_keys = ['timestamps', 'positions']
+    required_keys = ["timestamps", "positions"]
     for key in required_keys:
         if key not in data:
             raise ValueError(f"Missing required key '{key}' in video NPZ file")
 
     # Convert to JAX arrays for better performance
     result = {
-        'timestamps': jnp.array(data['timestamps']),
-        'positions': jnp.array(data['positions']),
-        'confidences': jnp.array(data.get('confidences', np.ones(len(data['timestamps'])))),
-        'headings': jnp.array(data['headings']) if data.get('headings') is not None else None,
-        'metadata': {'format': 'npz', 'source_file': str(file_path)},
+        "timestamps": jnp.array(data["timestamps"]),
+        "positions": jnp.array(data["positions"]),
+        "confidences": jnp.array(data.get("confidences", np.ones(len(data["timestamps"])))),
+        "headings": jnp.array(data["headings"]) if data.get("headings") is not None else None,
+        "metadata": {"format": "npz", "source_file": str(file_path)},
     }
 
     # Validate data shapes
-    n_frames = len(result['timestamps'])
-    if result['positions'].shape != (n_frames, 2):
-        raise ValueError(f"Invalid positions shape: expected ({n_frames}, 2), got {result['positions'].shape}")
+    n_frames = len(result["timestamps"])
+    if result["positions"].shape != (n_frames, 2):
+        raise ValueError(
+            f"Invalid positions shape: expected ({n_frames}, 2), got {result['positions'].shape}"
+        )
 
     return result
 
@@ -140,15 +144,15 @@ def _load_video_csv(file_path: Path) -> Dict[str, Any]:
     # Common column name patterns
     for col in df.columns:
         col_lower = col.lower()
-        if 'time' in col_lower or 'frame' in col_lower:
+        if "time" in col_lower or "frame" in col_lower:
             timestamp_col = col
-        elif col_lower in ['x', 'pos_x', 'position_x']:
+        elif col_lower in ["x", "pos_x", "position_x"]:
             x_col = col
-        elif col_lower in ['y', 'pos_y', 'position_y']:
+        elif col_lower in ["y", "pos_y", "position_y"]:
             y_col = col
-        elif 'confidence' in col_lower or 'likelihood' in col_lower:
+        elif "confidence" in col_lower or "likelihood" in col_lower:
             confidence_col = col
-        elif 'heading' in col_lower or 'angle' in col_lower or 'theta' in col_lower:
+        elif "heading" in col_lower or "angle" in col_lower or "theta" in col_lower:
             heading_col = col
 
     if timestamp_col is None:
@@ -167,11 +171,11 @@ def _load_video_csv(file_path: Path) -> Dict[str, Any]:
 
     # Convert to JAX arrays for better performance
     return {
-        'timestamps': jnp.array(timestamps),
-        'positions': jnp.array(positions),
-        'confidences': jnp.array(confidences),
-        'headings': jnp.array(headings) if headings is not None else None,
-        'metadata': {'format': 'csv', 'source_file': str(file_path)},
+        "timestamps": jnp.array(timestamps),
+        "positions": jnp.array(positions),
+        "confidences": jnp.array(confidences),
+        "headings": jnp.array(headings) if headings is not None else None,
+        "metadata": {"format": "csv", "source_file": str(file_path)},
     }
 
 
@@ -192,15 +196,15 @@ def _load_video_dlc_h5(file_path: Path) -> Dict[str, Any]:
 
     # Convert to JAX arrays for better performance
     return {
-        'timestamps': jnp.array(dlc_data.timestamps),
-        'positions': jnp.array(dlc_data.keypoints[primary_keypoint]),
-        'confidences': jnp.array(dlc_data.confidences[primary_keypoint]),
-        'headings': None,  # Could compute from multiple keypoints if available
-        'metadata': {
-            'format': 'dlc_h5',
-            'source_file': str(file_path),
-            'keypoint_names': keypoint_names,
-            'primary_keypoint': primary_keypoint,
+        "timestamps": jnp.array(dlc_data.timestamps),
+        "positions": jnp.array(dlc_data.keypoints[primary_keypoint]),
+        "confidences": jnp.array(dlc_data.confidences[primary_keypoint]),
+        "headings": None,  # Could compute from multiple keypoints if available
+        "metadata": {
+            "format": "dlc_h5",
+            "source_file": str(file_path),
+            "keypoint_names": keypoint_names,
+            "primary_keypoint": primary_keypoint,
         },
     }
 
@@ -209,30 +213,34 @@ def _load_imu_npz(file_path: Path) -> Dict[str, Any]:
     """Load IMU data from NPZ format."""
     data = np.load(file_path)
 
-    required_keys = ['timestamps', 'data']
+    required_keys = ["timestamps", "data"]
     for key in required_keys:
         if key not in data:
             raise ValueError(f"Missing required key '{key}' in IMU NPZ file")
 
     # Get sampling rate
-    if 'sampling_rate' in data:
-        sampling_rate = float(data['sampling_rate'])
+    if "sampling_rate" in data:
+        sampling_rate = float(data["sampling_rate"])
     else:
         # Estimate from timestamps
-        dt = np.median(np.diff(data['timestamps']))
+        dt = np.median(np.diff(data["timestamps"]))
         sampling_rate = 1.0 / dt
-        warnings.warn(f"No sampling_rate in NPZ file, estimated {sampling_rate:.1f} Hz from timestamps")
+        warnings.warn(
+            f"No sampling_rate in NPZ file, estimated {sampling_rate:.1f} Hz from timestamps"
+        )
 
-    imu_data = data['data']
+    imu_data = data["data"]
     if imu_data.shape[1] != 6:
-        raise ValueError(f"IMU data must have 6 columns [ax, ay, az, gx, gy, gz], got {imu_data.shape[1]}")
+        raise ValueError(
+            f"IMU data must have 6 columns [ax, ay, az, gx, gy, gz], got {imu_data.shape[1]}"
+        )
 
     # Convert to JAX arrays for better performance
     return {
-        'timestamps': jnp.array(data['timestamps']),
-        'data': jnp.array(imu_data),
-        'sampling_rate': sampling_rate,
-        'metadata': {'format': 'npz', 'source_file': str(file_path)},
+        "timestamps": jnp.array(data["timestamps"]),
+        "data": jnp.array(imu_data),
+        "sampling_rate": sampling_rate,
+        "metadata": {"format": "npz", "source_file": str(file_path)},
     }
 
 
@@ -252,19 +260,19 @@ def _load_imu_csv(file_path: Path) -> Dict[str, Any]:
 
     for col in df.columns:
         col_lower = col.lower()
-        if 'time' in col_lower:
+        if "time" in col_lower:
             timestamp_col = col
-        elif any(x in col_lower for x in ['accel_x', 'ax', 'acc_x']):
+        elif any(x in col_lower for x in ["accel_x", "ax", "acc_x"]):
             accel_cols.append(col)
-        elif any(x in col_lower for x in ['accel_y', 'ay', 'acc_y']):
+        elif any(x in col_lower for x in ["accel_y", "ay", "acc_y"]):
             accel_cols.append(col)
-        elif any(x in col_lower for x in ['accel_z', 'az', 'acc_z']):
+        elif any(x in col_lower for x in ["accel_z", "az", "acc_z"]):
             accel_cols.append(col)
-        elif any(x in col_lower for x in ['gyro_x', 'gx', 'gyr_x']):
+        elif any(x in col_lower for x in ["gyro_x", "gx", "gyr_x"]):
             gyro_cols.append(col)
-        elif any(x in col_lower for x in ['gyro_y', 'gy', 'gyr_y']):
+        elif any(x in col_lower for x in ["gyro_y", "gy", "gyr_y"]):
             gyro_cols.append(col)
-        elif any(x in col_lower for x in ['gyro_z', 'gz', 'gyr_z']):
+        elif any(x in col_lower for x in ["gyro_z", "gz", "gyr_z"]):
             gyro_cols.append(col)
 
     if len(accel_cols) != 3 or len(gyro_cols) != 3:
@@ -273,14 +281,16 @@ def _load_imu_csv(file_path: Path) -> Dict[str, Any]:
     timestamps = df[timestamp_col].values if timestamp_col else np.arange(len(df)) / 1000.0
 
     # Combine IMU data
-    imu_data = np.column_stack([
-        df[accel_cols[0]].values,  # ax
-        df[accel_cols[1]].values,  # ay
-        df[accel_cols[2]].values,  # az
-        df[gyro_cols[0]].values,   # gx
-        df[gyro_cols[1]].values,   # gy
-        df[gyro_cols[2]].values,   # gz
-    ])
+    imu_data = np.column_stack(
+        [
+            df[accel_cols[0]].values,  # ax
+            df[accel_cols[1]].values,  # ay
+            df[accel_cols[2]].values,  # az
+            df[gyro_cols[0]].values,  # gx
+            df[gyro_cols[1]].values,  # gy
+            df[gyro_cols[2]].values,  # gz
+        ]
+    )
 
     # Estimate sampling rate
     dt = np.median(np.diff(timestamps))
@@ -288,10 +298,10 @@ def _load_imu_csv(file_path: Path) -> Dict[str, Any]:
 
     # Convert to JAX arrays for better performance
     return {
-        'timestamps': jnp.array(timestamps),
-        'data': jnp.array(imu_data),
-        'sampling_rate': sampling_rate,
-        'metadata': {'format': 'csv', 'source_file': str(file_path)},
+        "timestamps": jnp.array(timestamps),
+        "data": jnp.array(imu_data),
+        "sampling_rate": sampling_rate,
+        "metadata": {"format": "csv", "source_file": str(file_path)},
     }
 
 
@@ -310,13 +320,13 @@ def _load_imu_spikegadgets(file_path: Path) -> Dict[str, Any]:
 
     # Convert to JAX arrays for better performance
     return {
-        'timestamps': jnp.array(imu_data.timestamps),
-        'data': jnp.array(combined_data),
-        'sampling_rate': imu_data.sampling_rate,
-        'metadata': {
-            'format': 'spikegadgets',
-            'source_file': str(file_path),
-            'original_sampling_rate': imu_data.sampling_rate,
+        "timestamps": jnp.array(imu_data.timestamps),
+        "data": jnp.array(combined_data),
+        "sampling_rate": imu_data.sampling_rate,
+        "metadata": {
+            "format": "spikegadgets",
+            "source_file": str(file_path),
+            "original_sampling_rate": imu_data.sampling_rate,
         },
     }
 
@@ -349,34 +359,34 @@ def _auto_detect_imu_format(file_path: Path) -> Dict[str, Any]:
 
 def validate_video_data(data: Dict[str, Any]) -> None:
     """Validate loaded video data structure."""
-    required_keys = ['timestamps', 'positions', 'confidences']
+    required_keys = ["timestamps", "positions", "confidences"]
     for key in required_keys:
         if key not in data:
             raise ValueError(f"Missing required key: {key}")
 
-    n_frames = len(data['timestamps'])
+    n_frames = len(data["timestamps"])
 
-    if data['positions'].shape != (n_frames, 2):
+    if data["positions"].shape != (n_frames, 2):
         raise ValueError(f"Invalid positions shape: expected ({n_frames}, 2)")
 
-    if len(data['confidences']) != n_frames:
+    if len(data["confidences"]) != n_frames:
         raise ValueError(f"Confidences length mismatch: expected {n_frames}")
 
-    if data['headings'] is not None and len(data['headings']) != n_frames:
+    if data["headings"] is not None and len(data["headings"]) != n_frames:
         raise ValueError(f"Headings length mismatch: expected {n_frames}")
 
 
 def validate_imu_data(data: Dict[str, Any]) -> None:
     """Validate loaded IMU data structure."""
-    required_keys = ['timestamps', 'data', 'sampling_rate']
+    required_keys = ["timestamps", "data", "sampling_rate"]
     for key in required_keys:
         if key not in data:
             raise ValueError(f"Missing required key: {key}")
 
-    n_samples = len(data['timestamps'])
+    n_samples = len(data["timestamps"])
 
-    if data['data'].shape != (n_samples, 6):
+    if data["data"].shape != (n_samples, 6):
         raise ValueError(f"Invalid IMU data shape: expected ({n_samples}, 6)")
 
-    if data['sampling_rate'] <= 0:
+    if data["sampling_rate"] <= 0:
         raise ValueError("Sampling rate must be positive")

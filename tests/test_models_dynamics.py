@@ -7,11 +7,10 @@ from hypothesis import given, strategies as st
 
 from trodestrack.models.dynamics import (
     predict_state,
-    predict_covariance,
     compute_state_jacobian,
     compute_process_noise,
 )
-from trodestrack.models.state import State2D, state_to_array, array_to_state
+from trodestrack.models.state import State2D
 
 
 class TestDynamics:
@@ -20,10 +19,7 @@ class TestDynamics:
     def test_predict_state_no_motion(self):
         """Test prediction when no motion occurs."""
         # Initial state at rest
-        state = State2D(
-            x=1.0, y=2.0, vx=0.0, vy=0.0, theta=0.0,
-            b_gz=0.0, b_ax=0.0, b_ay=0.0
-        )
+        state = State2D(x=1.0, y=2.0, vx=0.0, vy=0.0, theta=0.0, b_gz=0.0, b_ax=0.0, b_ay=0.0)
 
         # No IMU data (zero acceleration, zero angular velocity)
         dt = 0.033  # 30 Hz frame rate
@@ -39,14 +35,21 @@ class TestDynamics:
         np.testing.assert_allclose(predicted.theta, 0.0, rtol=1e-14)
 
         # Biases should remain unchanged (random walk with no noise added here)
-        np.testing.assert_allclose([predicted.b_gz, predicted.b_ax, predicted.b_ay],
-                                  [0.0, 0.0, 0.0], rtol=1e-14)
+        np.testing.assert_allclose(
+            [predicted.b_gz, predicted.b_ax, predicted.b_ay], [0.0, 0.0, 0.0], rtol=1e-14
+        )
 
     def test_predict_state_constant_velocity(self):
         """Test prediction with constant velocity."""
         state = State2D(
-            x=0.0, y=0.0, vx=10.0, vy=5.0, theta=0.0,  # 10 cm/s in x, 5 cm/s in y
-            b_gz=0.0, b_ax=0.0, b_ay=0.0
+            x=0.0,
+            y=0.0,
+            vx=10.0,
+            vy=5.0,
+            theta=0.0,  # 10 cm/s in x, 5 cm/s in y
+            b_gz=0.0,
+            b_ax=0.0,
+            b_ay=0.0,
         )
 
         dt = 0.1  # 100 ms
@@ -58,7 +61,7 @@ class TestDynamics:
 
         # Position should update based on velocity
         expected_x = 0.0 + 10.0 * 0.1  # 1.0 cm
-        expected_y = 0.0 + 5.0 * 0.1   # 0.5 cm
+        expected_y = 0.0 + 5.0 * 0.1  # 0.5 cm
         np.testing.assert_allclose([predicted.x, predicted.y], [expected_x, expected_y], rtol=1e-12)
 
         # Velocity should remain unchanged
@@ -66,10 +69,7 @@ class TestDynamics:
 
     def test_predict_state_with_acceleration(self):
         """Test prediction with acceleration input."""
-        state = State2D(
-            x=0.0, y=0.0, vx=0.0, vy=0.0, theta=0.0,
-            b_gz=0.0, b_ax=0.0, b_ay=0.0
-        )
+        state = State2D(x=0.0, y=0.0, vx=0.0, vy=0.0, theta=0.0, b_gz=0.0, b_ax=0.0, b_ay=0.0)
 
         dt = 0.1
         accel = jnp.array([1.0, 0.5])  # 1 m/s² in x, 0.5 m/s² in y
@@ -84,7 +84,9 @@ class TestDynamics:
         # Velocity should update: v = v0 + a*dt
         expected_vx = 0.0 + accel_cm[0] * dt  # 10 cm/s
         expected_vy = 0.0 + accel_cm[1] * dt  # 5 cm/s
-        np.testing.assert_allclose([predicted.vx, predicted.vy], [expected_vx, expected_vy], rtol=1e-12)
+        np.testing.assert_allclose(
+            [predicted.vx, predicted.vy], [expected_vx, expected_vy], rtol=1e-12
+        )
 
         # Position should update: x = x0 + v0*dt + 0.5*a*dt²
         expected_x = 0.0 + 0.0 * dt + 0.5 * accel_cm[0] * dt**2  # 0.5 cm
@@ -93,10 +95,7 @@ class TestDynamics:
 
     def test_predict_state_with_rotation(self):
         """Test prediction with angular velocity."""
-        state = State2D(
-            x=0.0, y=0.0, vx=0.0, vy=0.0, theta=0.0,
-            b_gz=0.0, b_ax=0.0, b_ay=0.0
-        )
+        state = State2D(x=0.0, y=0.0, vx=0.0, vy=0.0, theta=0.0, b_gz=0.0, b_ax=0.0, b_ay=0.0)
 
         dt = 0.1
         accel = jnp.zeros(2)
@@ -112,8 +111,14 @@ class TestDynamics:
     def test_predict_state_with_bias_compensation(self):
         """Test prediction with IMU bias compensation."""
         state = State2D(
-            x=0.0, y=0.0, vx=0.0, vy=0.0, theta=0.0,
-            b_gz=0.1, b_ax=0.05, b_ay=0.02  # Non-zero biases
+            x=0.0,
+            y=0.0,
+            vx=0.0,
+            vy=0.0,
+            theta=0.0,
+            b_gz=0.1,
+            b_ax=0.05,
+            b_ay=0.02,  # Non-zero biases
         )
 
         dt = 0.1
@@ -133,10 +138,7 @@ class TestDynamics:
 
     def test_predict_state_with_velocity_damping(self):
         """Test prediction with velocity damping."""
-        state = State2D(
-            x=0.0, y=0.0, vx=10.0, vy=5.0, theta=0.0,
-            b_gz=0.0, b_ax=0.0, b_ay=0.0
-        )
+        state = State2D(x=0.0, y=0.0, vx=10.0, vy=5.0, theta=0.0, b_gz=0.0, b_ax=0.0, b_ay=0.0)
 
         dt = 0.1
         accel = jnp.zeros(2)
@@ -148,8 +150,10 @@ class TestDynamics:
         # Velocity should be damped: v = v * (1 - λ*dt)
         damping_factor = 1.0 - velocity_damping * dt  # 0.99
         expected_vx = 10.0 * damping_factor  # 9.9 cm/s
-        expected_vy = 5.0 * damping_factor   # 4.95 cm/s
-        np.testing.assert_allclose([predicted.vx, predicted.vy], [expected_vx, expected_vy], rtol=1e-12)
+        expected_vy = 5.0 * damping_factor  # 4.95 cm/s
+        np.testing.assert_allclose(
+            [predicted.vx, predicted.vy], [expected_vx, expected_vy], rtol=1e-12
+        )
 
     @given(
         dt=st.floats(0.001, 0.1, allow_subnormal=False),
@@ -158,10 +162,7 @@ class TestDynamics:
     )
     def test_predict_state_position_integration(self, dt, vx, vy):
         """Property test: position integration should be consistent."""
-        state = State2D(
-            x=0.0, y=0.0, vx=vx, vy=vy, theta=0.0,
-            b_gz=0.0, b_ax=0.0, b_ay=0.0
-        )
+        state = State2D(x=0.0, y=0.0, vx=vx, vy=vy, theta=0.0, b_gz=0.0, b_ax=0.0, b_ay=0.0)
 
         accel = jnp.zeros(2)
         gyro = jnp.array([0.0])
@@ -173,7 +174,9 @@ class TestDynamics:
         expected_x = 0.0 + vx * dt
         expected_y = 0.0 + vy * dt
 
-        np.testing.assert_allclose([predicted.x, predicted.y], [expected_x, expected_y], rtol=1e-10, atol=1e-12)
+        np.testing.assert_allclose(
+            [predicted.x, predicted.y], [expected_x, expected_y], rtol=1e-10, atol=1e-12
+        )
 
     def test_damping_stability_check(self):
         """Test that damping stability check catches unstable parameters."""

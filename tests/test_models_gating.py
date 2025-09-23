@@ -1,7 +1,6 @@
 """Tests for Mahalanobis gating and measurement masking."""
 
 import numpy as np
-import pytest
 import jax.numpy as jnp
 from hypothesis import given, strategies as st
 
@@ -50,9 +49,7 @@ class TestMahalanobisDistance:
         # Should be zero
         np.testing.assert_allclose(distance, 0.0, rtol=1e-15)
 
-    @given(
-        residual=st.lists(st.floats(-10, 10, allow_subnormal=False), min_size=2, max_size=4)
-    )
+    @given(residual=st.lists(st.floats(-10, 10, allow_subnormal=False), min_size=2, max_size=4))
     def test_mahalanobis_distance_positive_definite(self, residual):
         """Property test: Mahalanobis distance should be non-negative."""
         residual = jnp.array(residual)
@@ -223,7 +220,7 @@ class TestMeasurementMask:
             measurements=measurements,
             covariance=jnp.eye(2),
             jacobian=jnp.array([[1.0, 0.0], [0.0, 1.0]]),
-            mask=mask
+            mask=mask,
         )
 
         # Should only include x-position
@@ -238,10 +235,7 @@ class TestMeasurementMask:
         mask = jnp.array([False, False])  # All invalid
 
         masked_meas, masked_cov, masked_H = apply_measurement_mask(
-            measurements=measurements,
-            covariance=jnp.eye(2),
-            jacobian=jnp.eye(2),
-            mask=mask
+            measurements=measurements, covariance=jnp.eye(2), jacobian=jnp.eye(2), mask=mask
         )
 
         # Should return empty arrays
@@ -256,10 +250,7 @@ class TestMeasurementMask:
 
         H = jnp.array([[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]])  # Simplified Jacobian
         masked_meas, masked_cov, masked_H = apply_measurement_mask(
-            measurements=measurements,
-            covariance=jnp.eye(3),
-            jacobian=H,
-            mask=mask
+            measurements=measurements, covariance=jnp.eye(3), jacobian=H, mask=mask
         )
 
         # Should include x and theta only

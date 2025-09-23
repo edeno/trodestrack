@@ -1,7 +1,6 @@
 """Tests for IMU utility functions."""
 
 import warnings
-from unittest.mock import patch
 
 import numpy as np
 import pytest

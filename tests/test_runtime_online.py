@@ -238,11 +238,7 @@ class TestOnlineTracker:
         tracker.initialize(jnp.array([0.0, 0.0]), 0.0)
 
         # Add IMU measurements to buffer
-        tracker.add_imu_measurement(
-            jnp.array([0.1, 0.0, 9.8]),
-            jnp.array([0.0, 0.0, 0.01]),
-            0.5
-        )
+        tracker.add_imu_measurement(jnp.array([0.1, 0.0, 9.8]), jnp.array([0.0, 0.0, 0.01]), 0.5)
 
         # Buffer should contain measurement
         assert len(tracker._imu_buffer) == 1
@@ -287,10 +283,12 @@ class TestStreamingTracker:
 
         # Create simple video data
         timestamps = np.linspace(0, 2.0, 60)  # 30 FPS
-        positions = np.column_stack([
-            20 + 10 * np.cos(timestamps),
-            20 + 10 * np.sin(timestamps),
-        ])
+        positions = np.column_stack(
+            [
+                20 + 10 * np.cos(timestamps),
+                20 + 10 * np.sin(timestamps),
+            ]
+        )
         confidences = np.ones(len(timestamps))
 
         video_data = {
@@ -317,10 +315,12 @@ class TestStreamingTracker:
 
         # Create synchronized video and IMU data
         video_timestamps = np.linspace(0, 1.0, 30)
-        video_positions = np.column_stack([
-            np.linspace(0, 10, 30),
-            np.zeros(30),
-        ])
+        video_positions = np.column_stack(
+            [
+                np.linspace(0, 10, 30),
+                np.zeros(30),
+            ]
+        )
 
         imu_timestamps = np.linspace(0, 1.0, 1000)
         imu_data = np.zeros((1000, 6))
@@ -441,7 +441,7 @@ class TestTrackingDataStructures:
         frame = TrackingFrame(
             timestamp=1.0,
             position=None,  # Missing position
-            heading=None,   # Missing heading
+            heading=None,  # Missing heading
             confidence=0.0,
             imu_measurements=[],
         )

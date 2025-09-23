@@ -13,16 +13,12 @@ import jax
 import jax.numpy as jnp
 from jax.scipy.linalg import cholesky
 
-from ._solvers import mahalanobis_distance, kalman_gain, safe_solve, _symmetrize_and_stabilize
+from ._solvers import mahalanobis_distance, safe_solve, _symmetrize_and_stabilize
 from .dynamics import compute_process_noise, rotation_matrix_2d, wrap_angle
-from .gating import mahalanobis_gate
 from .measurements import (
     create_measurement_noise,
-    _create_position_jacobian,
-    _create_position_heading_jacobian,
 )
 from .state import State2D, state_to_array, array_to_state
-
 
 
 class UKFState(NamedTuple):
@@ -33,6 +29,7 @@ class UKFState(NamedTuple):
         covariance: State covariance matrix (8x8)
         log_likelihood: Cumulative log-likelihood
     """
+
     state: jnp.ndarray  # 8-dimensional state vector
     covariance: jnp.ndarray  # 8x8 covariance matrix
     log_likelihood: float
@@ -48,6 +45,7 @@ class UKFResult(NamedTuple):
         kalman_gain: Kalman gain matrix
         gated: Whether measurement was gated (rejected)
     """
+
     state: UKFState
     innovation: jnp.ndarray
     innovation_covariance: jnp.ndarray
@@ -63,6 +61,7 @@ class UKFParams(NamedTuple):
         beta: Distribution parameter (incorporates prior knowledge) (2 for Gaussian)
         kappa: Secondary spread parameter (typically 0 or 3-n)
     """
+
     alpha: float = 1.0  # Use unscented transform without scaling for stability
     beta: float = 2.0
     kappa: float = 0.0
@@ -103,11 +102,11 @@ def generate_sigma_points(
     # Positive and negative sigma points (vectorized)
     # Positive sigma points: state + sqrt_matrix[:, i] for each column i
     positive_points = state[None, :] + sqrt_matrix.T  # (n, n) matrix
-    sigma_points = sigma_points.at[1:n+1].set(positive_points)
+    sigma_points = sigma_points.at[1 : n + 1].set(positive_points)
 
     # Negative sigma points: state - sqrt_matrix[:, i] for each column i
     negative_points = state[None, :] - sqrt_matrix.T  # (n, n) matrix
-    sigma_points = sigma_points.at[n+1:2*n+1].set(negative_points)
+    sigma_points = sigma_points.at[n + 1 : 2 * n + 1].set(negative_points)
 
     # Compute weights according to standard UKF formulation
     # For mean weights
@@ -118,15 +117,9 @@ def generate_sigma_points(
     weight_cov_0 = weight_mean_0 + (1.0 - params.alpha**2 + params.beta)
 
     # Create weight arrays
-    weights_mean = jnp.concatenate([
-        jnp.array([weight_mean_0]),
-        jnp.full(2 * n, weight_others)
-    ])
+    weights_mean = jnp.concatenate([jnp.array([weight_mean_0]), jnp.full(2 * n, weight_others)])
 
-    weights_cov = jnp.concatenate([
-        jnp.array([weight_cov_0]),
-        jnp.full(2 * n, weight_others)
-    ])
+    weights_cov = jnp.concatenate([jnp.array([weight_cov_0]), jnp.full(2 * n, weight_others)])
 
     return sigma_points, (weights_mean, weights_cov)
 
@@ -151,6 +144,7 @@ def propagate_sigma_points(
     Returns:
         Propagated sigma points (2n+1, n)
     """
+
     def dynamics_function(x: jnp.ndarray) -> jnp.ndarray:
         """Dynamics function for sigma point propagation."""
         # Extract state components
@@ -182,11 +176,9 @@ def propagate_sigma_points(
         theta_new = wrap_angle(theta + gyro_corrected * dt)
 
         # Biases unchanged
-        return jnp.array([
-            pos_new[0], pos_new[1],
-            vel_new[0], vel_new[1],
-            theta_new, b_gz, b_ax, b_ay
-        ])
+        return jnp.array(
+            [pos_new[0], pos_new[1], vel_new[0], vel_new[1], theta_new, b_gz, b_ax, b_ay]
+        )
 
     # Apply dynamics to each sigma point
     return jax.vmap(dynamics_function)(sigma_points)
@@ -217,7 +209,7 @@ def predict_from_sigma_points(
     centered_points = propagated_points - predicted_mean[None, :]
     predicted_cov = jnp.sum(
         weights_cov[:, None, None] * centered_points[:, :, None] * centered_points[:, None, :],
-        axis=0
+        axis=0,
     )
     predicted_cov += process_noise
 
@@ -253,19 +245,13 @@ def ukf_predict(
         Predicted UKF state
     """
     # Generate sigma points
-    sigma_points, weights = generate_sigma_points(
-        ukf_state.state, ukf_state.covariance, params
-    )
+    sigma_points, weights = generate_sigma_points(ukf_state.state, ukf_state.covariance, params)
 
     # Propagate through dynamics
-    propagated_points = propagate_sigma_points(
-        sigma_points, dt, accel, gyro, velocity_damping
-    )
+    propagated_points = propagate_sigma_points(sigma_points, dt, accel, gyro, velocity_damping)
 
     # Compute process noise
-    process_noise = compute_process_noise(
-        dt, accel_noise_std, gyro_noise_std, bias_drift_std
-    )
+    process_noise = compute_process_noise(dt, accel_noise_std, gyro_noise_std, bias_drift_std)
 
     # Predict mean and covariance
     predicted_mean, predicted_cov = predict_from_sigma_points(
@@ -321,9 +307,7 @@ def _ukf_update_position_only(
 ) -> UKFResult:
     """UKF update for position-only measurements."""
     # Generate sigma points
-    sigma_points, weights = generate_sigma_points(
-        ukf_state.state, ukf_state.covariance, params
-    )
+    sigma_points, weights = generate_sigma_points(ukf_state.state, ukf_state.covariance, params)
 
     # Transform sigma points through measurement function
     measurement_points = measurement_sigma_points_position(sigma_points)
@@ -339,20 +323,20 @@ def _ukf_update_position_only(
     # Innovation covariance
     centered_measurement_points = measurement_points - predicted_measurement[None, :]
     innovation_cov = jnp.sum(
-        weights_cov[:, None, None] *
-        centered_measurement_points[:, :, None] *
-        centered_measurement_points[:, None, :],
-        axis=0
+        weights_cov[:, None, None]
+        * centered_measurement_points[:, :, None]
+        * centered_measurement_points[:, None, :],
+        axis=0,
     )
     innovation_cov += measurement_noise
 
     # Cross-covariance
     centered_state_points = sigma_points - ukf_state.state[None, :]
     cross_cov = jnp.sum(
-        weights_cov[:, None, None] *
-        centered_state_points[:, :, None] *
-        centered_measurement_points[:, None, :],
-        axis=0
+        weights_cov[:, None, None]
+        * centered_state_points[:, :, None]
+        * centered_measurement_points[:, None, :],
+        axis=0,
     )
 
     # Mahalanobis gating
@@ -363,16 +347,10 @@ def _ukf_update_position_only(
     K = safe_solve(innovation_cov, cross_cov.T).T
 
     # State and covariance update (conditional on gating)
-    updated_state = jnp.where(
-        gated,
-        ukf_state.state,
-        ukf_state.state + K @ innovation
-    )
+    updated_state = jnp.where(gated, ukf_state.state, ukf_state.state + K @ innovation)
 
     updated_covariance = jnp.where(
-        gated,
-        ukf_state.covariance,
-        ukf_state.covariance - K @ innovation_cov @ K.T
+        gated, ukf_state.covariance, ukf_state.covariance - K @ innovation_cov @ K.T
     )
 
     # Log-likelihood update
@@ -383,9 +361,7 @@ def _ukf_update_position_only(
     )
 
     updated_log_likelihood = jnp.where(
-        gated,
-        ukf_state.log_likelihood,
-        ukf_state.log_likelihood + log_likelihood_update
+        gated, ukf_state.log_likelihood, ukf_state.log_likelihood + log_likelihood_update
     )
 
     updated_ukf_state = UKFState(
@@ -413,9 +389,7 @@ def _ukf_update_position_heading(
 ) -> UKFResult:
     """UKF update for position + heading measurements."""
     # Generate sigma points
-    sigma_points, weights = generate_sigma_points(
-        ukf_state.state, ukf_state.covariance, params
-    )
+    sigma_points, weights = generate_sigma_points(ukf_state.state, ukf_state.covariance, params)
 
     # Transform sigma points through measurement function
     measurement_points = measurement_sigma_points_position_heading(sigma_points)
@@ -427,9 +401,7 @@ def _ukf_update_position_heading(
 
     # Innovation with heading wrapping
     innovation = measurement - predicted_measurement
-    wrapped_heading_innov = jnp.arctan2(
-        jnp.sin(innovation[2]), jnp.cos(innovation[2])
-    )
+    wrapped_heading_innov = jnp.arctan2(jnp.sin(innovation[2]), jnp.cos(innovation[2]))
     innovation = innovation.at[2].set(wrapped_heading_innov)
 
     # Innovation covariance
@@ -437,26 +409,25 @@ def _ukf_update_position_heading(
     centered_measurement_points = measurement_points - predicted_measurement[None, :]
     # Wrap heading differences
     wrapped_heading_diffs = jnp.arctan2(
-        jnp.sin(centered_measurement_points[:, 2]),
-        jnp.cos(centered_measurement_points[:, 2])
+        jnp.sin(centered_measurement_points[:, 2]), jnp.cos(centered_measurement_points[:, 2])
     )
     centered_measurement_points = centered_measurement_points.at[:, 2].set(wrapped_heading_diffs)
 
     innovation_cov = jnp.sum(
-        weights_cov[:, None, None] *
-        centered_measurement_points[:, :, None] *
-        centered_measurement_points[:, None, :],
-        axis=0
+        weights_cov[:, None, None]
+        * centered_measurement_points[:, :, None]
+        * centered_measurement_points[:, None, :],
+        axis=0,
     )
     innovation_cov += measurement_noise
 
     # Cross-covariance
     centered_state_points = sigma_points - ukf_state.state[None, :]
     cross_cov = jnp.sum(
-        weights_cov[:, None, None] *
-        centered_state_points[:, :, None] *
-        centered_measurement_points[:, None, :],
-        axis=0
+        weights_cov[:, None, None]
+        * centered_state_points[:, :, None]
+        * centered_measurement_points[:, None, :],
+        axis=0,
     )
 
     # Mahalanobis gating
@@ -467,16 +438,10 @@ def _ukf_update_position_heading(
     K = safe_solve(innovation_cov, cross_cov.T).T
 
     # State and covariance update (conditional on gating)
-    updated_state = jnp.where(
-        gated,
-        ukf_state.state,
-        ukf_state.state + K @ innovation
-    )
+    updated_state = jnp.where(gated, ukf_state.state, ukf_state.state + K @ innovation)
 
     updated_covariance = jnp.where(
-        gated,
-        ukf_state.covariance,
-        ukf_state.covariance - K @ innovation_cov @ K.T
+        gated, ukf_state.covariance, ukf_state.covariance - K @ innovation_cov @ K.T
     )
 
     # Log-likelihood update
@@ -487,9 +452,7 @@ def _ukf_update_position_heading(
     )
 
     updated_log_likelihood = jnp.where(
-        gated,
-        ukf_state.log_likelihood,
-        ukf_state.log_likelihood + log_likelihood_update
+        gated, ukf_state.log_likelihood, ukf_state.log_likelihood + log_likelihood_update
     )
 
     updated_ukf_state = UKFState(

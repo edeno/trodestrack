@@ -39,8 +39,7 @@ class TestEKFState:
     def test_create_initial_ekf_state(self):
         """Test creation of initial EKF state from State2D."""
         initial_state = State2D(
-            x=10.0, y=20.0, vx=1.0, vy=-0.5,
-            theta=0.5, b_gz=0.01, b_ax=0.02, b_ay=-0.01
+            x=10.0, y=20.0, vx=1.0, vy=-0.5, theta=0.5, b_gz=0.01, b_ax=0.02, b_ay=-0.01
         )
         initial_covariance = jnp.diag(jnp.array([1.0, 1.0, 10.0, 10.0, 0.1, 0.01, 0.01, 0.01]))
 
@@ -69,8 +68,14 @@ class TestEKFPredict:
         velocity_damping = 0.0
 
         predicted = ekf_predict(
-            ekf_state, dt, accel, gyro, velocity_damping,
-            accel_noise_std=0.1, gyro_noise_std=0.05, bias_drift_std=0.01
+            ekf_state,
+            dt,
+            accel,
+            gyro,
+            velocity_damping,
+            accel_noise_std=0.1,
+            gyro_noise_std=0.05,
+            bias_drift_std=0.01,
         )
 
         # Check state prediction (no biases, so acceleration should be applied directly)
@@ -98,8 +103,14 @@ class TestEKFPredict:
         velocity_damping = 0.0
 
         predicted = ekf_predict(
-            ekf_state, dt, accel, gyro, velocity_damping,
-            accel_noise_std=0.1, gyro_noise_std=0.05, bias_drift_std=0.01
+            ekf_state,
+            dt,
+            accel,
+            gyro,
+            velocity_damping,
+            accel_noise_std=0.1,
+            gyro_noise_std=0.05,
+            bias_drift_std=0.01,
         )
 
         # Bias-corrected measurements:
@@ -127,8 +138,14 @@ class TestEKFPredict:
         velocity_damping = 2.0  # Strong damping
 
         predicted = ekf_predict(
-            ekf_state, dt, accel, gyro, velocity_damping,
-            accel_noise_std=0.1, gyro_noise_std=0.05, bias_drift_std=0.01
+            ekf_state,
+            dt,
+            accel,
+            gyro,
+            velocity_damping,
+            accel_noise_std=0.1,
+            gyro_noise_std=0.05,
+            bias_drift_std=0.01,
         )
 
         # Damping factor: 1 - λ*dt = 1 - 2.0*0.1 = 0.8
@@ -153,8 +170,14 @@ class TestEKFPredict:
         gyro = jnp.zeros(1)
 
         predicted = ekf_predict(
-            ekf_state, dt, accel, gyro, velocity_damping=0.0,
-            accel_noise_std=0.5, gyro_noise_std=0.1, bias_drift_std=0.02
+            ekf_state,
+            dt,
+            accel,
+            gyro,
+            velocity_damping=0.0,
+            accel_noise_std=0.5,
+            gyro_noise_std=0.1,
+            bias_drift_std=0.02,
         )
 
         # All diagonal elements (variances) should increase due to process noise
@@ -290,8 +313,7 @@ class TestEKFFilter:
     def create_test_filter(self) -> EKFFilter:
         """Create a test EKF filter."""
         initial_state = State2D(
-            x=0.0, y=0.0, vx=0.0, vy=0.0, theta=0.0,
-            b_gz=0.0, b_ax=0.0, b_ay=0.0
+            x=0.0, y=0.0, vx=0.0, vy=0.0, theta=0.0, b_gz=0.0, b_ax=0.0, b_ay=0.0
         )
         initial_cov = jnp.eye(8) * 0.5
 
@@ -326,11 +348,7 @@ class TestEKFFilter:
         filter = self.create_test_filter()
 
         # Apply forward acceleration
-        filter.predict(
-            dt=0.1,
-            accel=jnp.array([2.0, 0.0]),
-            gyro=jnp.array([0.0])
-        )
+        filter.predict(dt=0.1, accel=jnp.array([2.0, 0.0]), gyro=jnp.array([0.0]))
 
         state = filter.get_current_state()
         # Should have moved forward due to acceleration
@@ -342,10 +360,7 @@ class TestEKFFilter:
         filter = self.create_test_filter()
 
         # Update with position measurement
-        result = filter.update(
-            position=jnp.array([1.0, 2.0]),
-            confidence=0.8
-        )
+        result = filter.update(position=jnp.array([1.0, 2.0]), confidence=0.8)
 
         assert not result.gated
         state = filter.get_current_state()
@@ -358,20 +373,12 @@ class TestEKFFilter:
         filter = self.create_test_filter()
 
         # Predict step
-        filter.predict(
-            dt=0.1,
-            accel=jnp.array([1.0, 0.0]),
-            gyro=jnp.array([0.1])
-        )
+        filter.predict(dt=0.1, accel=jnp.array([1.0, 0.0]), gyro=jnp.array([0.1]))
 
         state_after_predict = filter.get_current_state()
 
         # Update step
-        result = filter.update(
-            position=jnp.array([0.5, 0.1]),
-            heading=0.05,
-            confidence=0.9
-        )
+        result = filter.update(position=jnp.array([0.5, 0.1]), heading=0.05, confidence=0.9)
 
         assert not result.gated
         state_after_update = filter.get_current_state()
@@ -410,7 +417,7 @@ class TestEKFFilter:
         # Very low confidence measurement
         result = filter.update(
             position=jnp.array([10.0, 10.0]),  # Far from current estimate
-            confidence=0.01  # Very low confidence
+            confidence=0.01,  # Very low confidence
         )
 
         # Should still accept but with minimal influence
@@ -431,8 +438,7 @@ class TestEKFLinearCase:
 
         # Initial state: stationary at origin
         initial_state = State2D(
-            x=0.0, y=0.0, vx=0.0, vy=0.0, theta=0.0,
-            b_gz=0.0, b_ax=0.0, b_ay=0.0
+            x=0.0, y=0.0, vx=0.0, vy=0.0, theta=0.0, b_gz=0.0, b_ax=0.0, b_ay=0.0
         )
         initial_cov = jnp.eye(8) * 1.0
 
@@ -440,7 +446,7 @@ class TestEKFLinearCase:
             initial_state=initial_state,
             initial_covariance=initial_cov,
             velocity_damping=0.0,  # No damping
-            accel_noise_std=0.0,   # No process noise
+            accel_noise_std=0.0,  # No process noise
             gyro_noise_std=0.0,
             bias_drift_std=0.0,
             position_noise_std=1.0,

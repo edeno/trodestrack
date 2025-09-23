@@ -4,18 +4,14 @@ This module tests the PRD requirement that RTS smoother should improve
 RMSE by ≥20% vs EKF on synthetic "twitchy" sessions with rapid motion changes.
 """
 
-import pytest
 import jax.numpy as jnp
 import numpy as np
-from typing import List, Tuple
 
-from trodestrack.models.ekf import EKFFilter, EKFResult
+from trodestrack.models.ekf import EKFFilter
 from trodestrack.models.rts_smoother import (
     RTSSmoother,
-    ForwardPassData,
     compute_smoothing_improvement,
 )
-from trodestrack.models.state import State2D
 from trodestrack.sim.synthetic import SimConfig, generate_synthetic_session
 
 
@@ -33,7 +29,7 @@ class TestRTSBenchmark:
             camera_fps=30.0,
             imu_rate_hz=1000.0,
             trajectory_type="twitchy_motion",  # Will create rapid direction changes
-            position_noise_std_cm=2.5,        # Moderate noise to make smoothing beneficial
+            position_noise_std_cm=2.5,  # Moderate noise to make smoothing beneficial
             heading_noise_std_rad=0.15,
             confidence_noise_std=0.2,
             # Add some brief occlusions to make smoothing more valuable
@@ -61,7 +57,7 @@ class TestRTSBenchmark:
             if i == 0:
                 continue  # Skip first sample
 
-            prev_timestamp = timeline[i-1][0]
+            prev_timestamp = timeline[i - 1][0]
             dt = timestamp - prev_timestamp
 
             # EKF prediction step
@@ -70,12 +66,23 @@ class TestRTSBenchmark:
             # Store predicted state after prediction for RTS
             pred_state_array = ekf.get_current_state()
             pred_covariance = ekf.get_current_covariance()
-            prediction_data.append((
-                jnp.array([pred_state_array.x, pred_state_array.y, pred_state_array.vx,
-                          pred_state_array.vy, pred_state_array.theta, pred_state_array.b_gz,
-                          pred_state_array.b_ax, pred_state_array.b_ay]),
-                pred_covariance
-            ))
+            prediction_data.append(
+                (
+                    jnp.array(
+                        [
+                            pred_state_array.x,
+                            pred_state_array.y,
+                            pred_state_array.vx,
+                            pred_state_array.vy,
+                            pred_state_array.theta,
+                            pred_state_array.b_gz,
+                            pred_state_array.b_ax,
+                            pred_state_array.b_ay,
+                        ]
+                    ),
+                    pred_covariance,
+                )
+            )
 
             # EKF update step
             if video_detection is not None:
@@ -109,7 +116,7 @@ class TestRTSBenchmark:
             filtered_states, smoothed_states, ground_truth_states
         )
 
-        print(f"\nRTS Benchmark Results:")
+        print("\nRTS Benchmark Results:")
         print(f"EKF RMSE: {filt_rmse:.2f} cm")
         print(f"RTS RMSE: {smooth_rmse:.2f} cm")
         print(f"Improvement: {improvement_pct:.1f}%")
@@ -157,19 +164,30 @@ class TestRTSBenchmark:
             if i == 0:
                 continue
 
-            prev_timestamp = timeline[i-1][0]
+            prev_timestamp = timeline[i - 1][0]
             dt = timestamp - prev_timestamp
 
             ekf.predict(dt, imu_sample.accel, imu_sample.gyro)
 
             pred_state_array = ekf.get_current_state()
             pred_covariance = ekf.get_current_covariance()
-            prediction_data.append((
-                jnp.array([pred_state_array.x, pred_state_array.y, pred_state_array.vx,
-                          pred_state_array.vy, pred_state_array.theta, pred_state_array.b_gz,
-                          pred_state_array.b_ax, pred_state_array.b_ay]),
-                pred_covariance
-            ))
+            prediction_data.append(
+                (
+                    jnp.array(
+                        [
+                            pred_state_array.x,
+                            pred_state_array.y,
+                            pred_state_array.vx,
+                            pred_state_array.vy,
+                            pred_state_array.theta,
+                            pred_state_array.b_gz,
+                            pred_state_array.b_ax,
+                            pred_state_array.b_ay,
+                        ]
+                    ),
+                    pred_covariance,
+                )
+            )
 
             if video_detection is not None:
                 result = ekf.update(
@@ -196,15 +214,15 @@ class TestRTSBenchmark:
             filtered_states, smoothed_states, ground_truth_states
         )
 
-        print(f"\nHigh-Noise RTS Results:")
+        print("\nHigh-Noise RTS Results:")
         print(f"EKF RMSE: {filt_rmse:.2f} cm")
         print(f"RTS RMSE: {smooth_rmse:.2f} cm")
         print(f"Improvement: {improvement_pct:.1f}%")
 
         # Should see significant improvement on noisy data
-        assert improvement_pct >= 15.0, (
-            f"RTS improvement {improvement_pct:.1f}% too small on noisy data"
-        )
+        assert (
+            improvement_pct >= 15.0
+        ), f"RTS improvement {improvement_pct:.1f}% too small on noisy data"
 
     def test_rts_improvement_with_occlusions(self):
         """Test RTS improvement specifically during and after occlusions."""
@@ -237,19 +255,30 @@ class TestRTSBenchmark:
             if i == 0:
                 continue
 
-            prev_timestamp = timeline[i-1][0]
+            prev_timestamp = timeline[i - 1][0]
             dt = timestamp - prev_timestamp
 
             ekf.predict(dt, imu_sample.accel, imu_sample.gyro)
 
             pred_state_array = ekf.get_current_state()
             pred_covariance = ekf.get_current_covariance()
-            prediction_data.append((
-                jnp.array([pred_state_array.x, pred_state_array.y, pred_state_array.vx,
-                          pred_state_array.vy, pred_state_array.theta, pred_state_array.b_gz,
-                          pred_state_array.b_ax, pred_state_array.b_ay]),
-                pred_covariance
-            ))
+            prediction_data.append(
+                (
+                    jnp.array(
+                        [
+                            pred_state_array.x,
+                            pred_state_array.y,
+                            pred_state_array.vx,
+                            pred_state_array.vy,
+                            pred_state_array.theta,
+                            pred_state_array.b_gz,
+                            pred_state_array.b_ax,
+                            pred_state_array.b_ay,
+                        ]
+                    ),
+                    pred_covariance,
+                )
+            )
 
             if video_detection is not None:
                 result = ekf.update(
@@ -283,15 +312,15 @@ class TestRTSBenchmark:
                 occlusion_filtered, occlusion_smoothed, occlusion_truth
             )
 
-            print(f"\nOcclusion Period RTS Results:")
+            print("\nOcclusion Period RTS Results:")
             print(f"EKF RMSE (occlusion): {occ_filt_rmse:.2f} cm")
             print(f"RTS RMSE (occlusion): {occ_smooth_rmse:.2f} cm")
             print(f"Improvement (occlusion): {occ_improvement:.1f}%")
 
             # Should see improvement during occlusion
-            assert occ_improvement >= 10.0, (
-                f"RTS improvement {occ_improvement:.1f}% too small during occlusion"
-            )
+            assert (
+                occ_improvement >= 10.0
+            ), f"RTS improvement {occ_improvement:.1f}% too small during occlusion"
 
         # Overall improvement
         filtered_states = [result.state.state for result in ekf_results]
@@ -301,14 +330,14 @@ class TestRTSBenchmark:
             filtered_states, smoothed_states, ground_truth_states
         )
 
-        print(f"\nOverall RTS Results:")
+        print("\nOverall RTS Results:")
         print(f"EKF RMSE: {filt_rmse:.2f} cm")
         print(f"RTS RMSE: {smooth_rmse:.2f} cm")
         print(f"Improvement: {improvement_pct:.1f}%")
 
-        assert improvement_pct >= 12.0, (
-            f"Overall RTS improvement {improvement_pct:.1f}% too small with occlusions"
-        )
+        assert (
+            improvement_pct >= 12.0
+        ), f"Overall RTS improvement {improvement_pct:.1f}% too small with occlusions"
 
     def test_rts_velocity_improvement(self):
         """Test that RTS also improves velocity estimates."""
@@ -339,19 +368,30 @@ class TestRTSBenchmark:
             if i == 0:
                 continue
 
-            prev_timestamp = timeline[i-1][0]
+            prev_timestamp = timeline[i - 1][0]
             dt = timestamp - prev_timestamp
 
             ekf.predict(dt, imu_sample.accel, imu_sample.gyro)
 
             pred_state_array = ekf.get_current_state()
             pred_covariance = ekf.get_current_covariance()
-            prediction_data.append((
-                jnp.array([pred_state_array.x, pred_state_array.y, pred_state_array.vx,
-                          pred_state_array.vy, pred_state_array.theta, pred_state_array.b_gz,
-                          pred_state_array.b_ax, pred_state_array.b_ay]),
-                pred_covariance
-            ))
+            prediction_data.append(
+                (
+                    jnp.array(
+                        [
+                            pred_state_array.x,
+                            pred_state_array.y,
+                            pred_state_array.vx,
+                            pred_state_array.vy,
+                            pred_state_array.theta,
+                            pred_state_array.b_gz,
+                            pred_state_array.b_ax,
+                            pred_state_array.b_ay,
+                        ]
+                    ),
+                    pred_covariance,
+                )
+            )
 
             if video_detection is not None:
                 result = ekf.update(
@@ -386,19 +426,17 @@ class TestRTSBenchmark:
             smooth_vel_error = jnp.linalg.norm(rts_vel - gt_vel)
             smoothed_vel_errors.append(smooth_vel_error)
 
-        filt_vel_rmse = jnp.sqrt(jnp.mean(jnp.array(filtered_vel_errors)**2))
-        smooth_vel_rmse = jnp.sqrt(jnp.mean(jnp.array(smoothed_vel_errors)**2))
+        filt_vel_rmse = jnp.sqrt(jnp.mean(jnp.array(filtered_vel_errors) ** 2))
+        smooth_vel_rmse = jnp.sqrt(jnp.mean(jnp.array(smoothed_vel_errors) ** 2))
         vel_improvement = (filt_vel_rmse - smooth_vel_rmse) / filt_vel_rmse * 100.0
 
-        print(f"\nVelocity Estimation Results:")
+        print("\nVelocity Estimation Results:")
         print(f"EKF velocity RMSE: {filt_vel_rmse:.2f} cm/s")
         print(f"RTS velocity RMSE: {smooth_vel_rmse:.2f} cm/s")
         print(f"Velocity improvement: {vel_improvement:.1f}%")
 
         # Should see some improvement in velocity estimates
-        assert vel_improvement >= 5.0, (
-            f"RTS velocity improvement {vel_improvement:.1f}% too small"
-        )
+        assert vel_improvement >= 5.0, f"RTS velocity improvement {vel_improvement:.1f}% too small"
 
 
 # Extend synthetic data generator to support "twitchy" motion
@@ -425,7 +463,7 @@ def _generate_twitchy_trajectory(self):
         # Random direction changes every 0.5-1.5 seconds
         if i > 0 and self.rng.random() < 0.02:  # ~2% chance per frame
             # Sharp turn
-            turn_angle = self.rng.uniform(-np.pi/2, np.pi/2)
+            turn_angle = self.rng.uniform(-np.pi / 2, np.pi / 2)
             heading += turn_angle
 
             # Speed variation
@@ -440,11 +478,13 @@ import trodestrack.sim.synthetic as synthetic_module
 
 original_generate_trajectory = synthetic_module.SyntheticSessionResult._generate_trajectory
 
+
 def patched_generate_trajectory(self):
     if self.config.trajectory_type == "twitchy_motion":
         _generate_twitchy_trajectory(self)
     else:
         original_generate_trajectory(self)
+
 
 synthetic_module.SyntheticSessionResult._generate_trajectory = patched_generate_trajectory
 

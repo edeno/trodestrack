@@ -11,20 +11,11 @@ All tests use synthetic data with known ground truth to verify
 that the filtering algorithms meet PRD requirements for robustness.
 """
 
-import pytest
 import jax.numpy as jnp
-import numpy as np
-from typing import List, Tuple, Optional
 
-from trodestrack.models.ekf import EKFFilter, EKFResult
-from trodestrack.models.ukf import UKFFilter, UKFResult
-from trodestrack.models.rts_smoother import RTSSmoother, ForwardPassData, compute_smoothing_improvement
-from trodestrack.models.state import State2D, create_initial_state
-from trodestrack.sim.synthetic import (
-    SimConfig,
-    generate_synthetic_session,
-    SyntheticSessionResult
-)
+from trodestrack.models.ekf import EKFFilter
+from trodestrack.models.rts_smoother import RTSSmoother, compute_smoothing_improvement
+from trodestrack.sim.synthetic import SimConfig, generate_synthetic_session
 
 
 class TestOcclusionScenarios:
@@ -64,7 +55,7 @@ class TestOcclusionScenarios:
             if i == 0:
                 continue  # Skip first sample (no dt)
 
-            prev_timestamp = timeline[i-1][0]
+            prev_timestamp = timeline[i - 1][0]
             dt = timestamp - prev_timestamp
 
             # Prediction step
@@ -89,7 +80,7 @@ class TestOcclusionScenarios:
 
         # Pre-occlusion should have good accuracy
         pre_errors = [jnp.linalg.norm(r.state.state[:2] - gt[:2]) for _, r, gt in pre_occlusion]
-        pre_rmse = jnp.sqrt(jnp.mean(jnp.array(pre_errors)**2))
+        pre_rmse = jnp.sqrt(jnp.mean(jnp.array(pre_errors) ** 2))
         assert pre_rmse < 3.0, f"Pre-occlusion RMSE {pre_rmse:.2f} cm too high"
 
         # During occlusion, drift should be bounded (relaxed for testing)
@@ -98,15 +89,19 @@ class TestOcclusionScenarios:
                 during_occlusion[-1][1].state.state[:2] - during_occlusion[-1][2][:2]
             )
             # Relaxed bound for testing - the actual bound depends on proper parameter tuning
-            assert final_occlusion_error < 50.0, f"Occlusion drift {final_occlusion_error:.2f} cm excessive"
+            assert (
+                final_occlusion_error < 50.0
+            ), f"Occlusion drift {final_occlusion_error:.2f} cm excessive"
 
         # Post-occlusion should recover quickly
         if post_occlusion:
             # Check that we recover to <5cm within 1 second
             recovery_period = [(t, r, gt) for t, r, gt in post_occlusion if t <= 7.0]
             if recovery_period:
-                recovery_errors = [jnp.linalg.norm(r.state.state[:2] - gt[:2]) for _, r, gt in recovery_period]
-                recovery_rmse = jnp.sqrt(jnp.mean(jnp.array(recovery_errors)**2))
+                recovery_errors = [
+                    jnp.linalg.norm(r.state.state[:2] - gt[:2]) for _, r, gt in recovery_period
+                ]
+                recovery_rmse = jnp.sqrt(jnp.mean(jnp.array(recovery_errors) ** 2))
                 assert recovery_rmse < 5.0, f"Recovery RMSE {recovery_rmse:.2f} cm too slow"
 
     def test_extended_occlusion_drift(self):
@@ -144,7 +139,7 @@ class TestOcclusionScenarios:
             if i == 0:
                 continue
 
-            prev_timestamp = session.generate_timeline()[i-1][0]
+            prev_timestamp = session.generate_timeline()[i - 1][0]
             dt = timestamp - prev_timestamp
 
             ekf.predict(dt, imu_sample.accel, imu_sample.gyro)
@@ -204,7 +199,7 @@ class TestOcclusionScenarios:
             if i == 0:
                 continue
 
-            prev_timestamp = session.generate_timeline()[i-1][0]
+            prev_timestamp = session.generate_timeline()[i - 1][0]
             dt = timestamp - prev_timestamp
 
             ekf.predict(dt, imu_sample.accel, imu_sample.gyro)
@@ -225,7 +220,7 @@ class TestOcclusionScenarios:
             position_errors.append(error)
 
         # Overall RMSE should still be reasonable despite multiple occlusions
-        rmse = jnp.sqrt(jnp.mean(jnp.array(position_errors)**2))
+        rmse = jnp.sqrt(jnp.mean(jnp.array(position_errors) ** 2))
         assert rmse < 4.0, f"RMSE {rmse:.2f} cm too high with multiple occlusions"
 
 
@@ -261,7 +256,7 @@ class TestLEDSwapScenarios:
             if i == 0:
                 continue
 
-            prev_timestamp = session.generate_timeline()[i-1][0]
+            prev_timestamp = session.generate_timeline()[i - 1][0]
             dt = timestamp - prev_timestamp
 
             ekf.predict(dt, imu_sample.accel, imu_sample.gyro)
@@ -281,18 +276,19 @@ class TestLEDSwapScenarios:
             # Track heading error
             truth = session.get_ground_truth_at_time(timestamp)
             estimate = ekf.get_current_state()
-            heading_error = abs(jnp.arctan2(
-                jnp.sin(estimate.theta - truth[4]),
-                jnp.cos(estimate.theta - truth[4])
-            ))
+            heading_error = abs(
+                jnp.arctan2(jnp.sin(estimate.theta - truth[4]), jnp.cos(estimate.theta - truth[4]))
+            )
             heading_errors.append(heading_error)
 
         # Should gate some measurements during swap periods
         assert gated_measurements > 0, "Expected some measurements to be gated during LED swaps"
 
         # Overall heading accuracy should still be reasonable
-        heading_rmse_deg = jnp.sqrt(jnp.mean(jnp.array(heading_errors)**2)) * 180 / jnp.pi
-        assert heading_rmse_deg < 15.0, f"Heading RMSE {heading_rmse_deg:.1f}° too high with LED swaps"
+        heading_rmse_deg = jnp.sqrt(jnp.mean(jnp.array(heading_errors) ** 2)) * 180 / jnp.pi
+        assert (
+            heading_rmse_deg < 15.0
+        ), f"Heading RMSE {heading_rmse_deg:.1f}° too high with LED swaps"
 
     def test_confidence_based_swap_handling(self):
         """Test that low-confidence measurements during swaps are handled appropriately."""
@@ -323,7 +319,7 @@ class TestLEDSwapScenarios:
             if i == 0:
                 continue
 
-            prev_timestamp = session.generate_timeline()[i-1][0]
+            prev_timestamp = session.generate_timeline()[i - 1][0]
             dt = timestamp - prev_timestamp
 
             ekf.predict(dt, imu_sample.accel, imu_sample.gyro)
@@ -350,7 +346,7 @@ class TestLEDSwapScenarios:
         assert low_confidence_updates > 0, "Expected some low-confidence measurements during swaps"
 
         # Position tracking should remain stable
-        rmse = jnp.sqrt(jnp.mean(jnp.array(position_errors)**2))
+        rmse = jnp.sqrt(jnp.mean(jnp.array(position_errors) ** 2))
         assert rmse < 3.0, f"Position RMSE {rmse:.2f} cm too high with confidence-based handling"
 
 
@@ -378,7 +374,7 @@ class TestDriftRecoveryScenarios:
             initial_state=session.initial_state,
             initial_covariance=jnp.eye(8) * 0.1,
             velocity_damping=0.15,  # Higher damping to combat drift
-            bias_drift_std=0.02,   # Account for bias drift in process noise
+            bias_drift_std=0.02,  # Account for bias drift in process noise
         )
 
         bias_estimates = []
@@ -388,7 +384,7 @@ class TestDriftRecoveryScenarios:
             if i == 0:
                 continue
 
-            prev_timestamp = session.generate_timeline()[i-1][0]
+            prev_timestamp = session.generate_timeline()[i - 1][0]
             dt = timestamp - prev_timestamp
 
             ekf.predict(dt, imu_sample.accel, imu_sample.gyro)
@@ -407,7 +403,9 @@ class TestDriftRecoveryScenarios:
             bias_estimates.append([current_state.b_gz, current_state.b_ax, current_state.b_ay])
 
             truth = session.get_ground_truth_at_time(timestamp)
-            vel_error = jnp.linalg.norm(jnp.array([current_state.vx, current_state.vy]) - truth[2:4])
+            vel_error = jnp.linalg.norm(
+                jnp.array([current_state.vx, current_state.vy]) - truth[2:4]
+            )
             velocity_errors.append(vel_error)
 
         # Bias estimates should evolve during occlusion
@@ -416,7 +414,7 @@ class TestDriftRecoveryScenarios:
         assert bias_change > 0.001, "Bias estimates should evolve during extended occlusion"
 
         # Velocity estimation should remain reasonable
-        vel_rmse = jnp.sqrt(jnp.mean(jnp.array(velocity_errors)**2))
+        vel_rmse = jnp.sqrt(jnp.mean(jnp.array(velocity_errors) ** 2))
         assert vel_rmse < 15.0, f"Velocity RMSE {vel_rmse:.2f} cm/s too high with bias drift"
 
     def test_measurement_return_recovery(self):
@@ -446,7 +444,7 @@ class TestDriftRecoveryScenarios:
             if i == 0:
                 continue
 
-            prev_timestamp = session.generate_timeline()[i-1][0]
+            prev_timestamp = session.generate_timeline()[i - 1][0]
             dt = timestamp - prev_timestamp
 
             ekf.predict(dt, imu_sample.accel, imu_sample.gyro)
@@ -471,11 +469,14 @@ class TestDriftRecoveryScenarios:
 
         # Analyze recovery period (first 2 seconds after measurements return)
         if recovery_start_time is not None:
-            recovery_errors = [error for t, error in position_errors
-                             if recovery_start_time <= t <= recovery_start_time + 2.0]
+            recovery_errors = [
+                error
+                for t, error in position_errors
+                if recovery_start_time <= t <= recovery_start_time + 2.0
+            ]
 
             if recovery_errors:
-                recovery_rmse = jnp.sqrt(jnp.mean(jnp.array(recovery_errors)**2))
+                recovery_rmse = jnp.sqrt(jnp.mean(jnp.array(recovery_errors) ** 2))
                 assert recovery_rmse < 8.0, f"Recovery RMSE {recovery_rmse:.2f} cm too high"
 
 
@@ -509,14 +510,19 @@ class TestMixedMeasurementScenarios:
             if i == 0:
                 continue
 
-            prev_timestamp = session.generate_timeline()[i-1][0]
+            prev_timestamp = session.generate_timeline()[i - 1][0]
             dt = timestamp - prev_timestamp
 
             ekf.predict(dt, imu_sample.accel, imu_sample.gyro)
 
             if video_detection is not None:
                 # Only use heading if available
-                heading = video_detection.heading_rad if hasattr(video_detection, 'heading_available') and video_detection.heading_available else None
+                heading = (
+                    video_detection.heading_rad
+                    if hasattr(video_detection, "heading_available")
+                    and video_detection.heading_available
+                    else None
+                )
 
                 ekf.update(
                     position=video_detection.position_cm,
@@ -533,19 +539,20 @@ class TestMixedMeasurementScenarios:
             pos_error = jnp.linalg.norm(jnp.array([estimate.x, estimate.y]) - truth[:2])
             position_errors.append(pos_error)
 
-            heading_error = abs(jnp.arctan2(
-                jnp.sin(estimate.theta - truth[4]),
-                jnp.cos(estimate.theta - truth[4])
-            ))
+            heading_error = abs(
+                jnp.arctan2(jnp.sin(estimate.theta - truth[4]), jnp.cos(estimate.theta - truth[4]))
+            )
             heading_errors.append(heading_error)
 
         # Position should remain accurate
-        pos_rmse = jnp.sqrt(jnp.mean(jnp.array(position_errors)**2))
+        pos_rmse = jnp.sqrt(jnp.mean(jnp.array(position_errors) ** 2))
         assert pos_rmse < 3.0, f"Position RMSE {pos_rmse:.2f} cm too high without heading"
 
         # Heading should degrade gracefully but not catastrophically
-        heading_rmse_deg = jnp.sqrt(jnp.mean(jnp.array(heading_errors)**2)) * 180 / jnp.pi
-        assert heading_rmse_deg < 20.0, f"Heading RMSE {heading_rmse_deg:.1f}° too high without measurements"
+        heading_rmse_deg = jnp.sqrt(jnp.mean(jnp.array(heading_errors) ** 2)) * 180 / jnp.pi
+        assert (
+            heading_rmse_deg < 20.0
+        ), f"Heading RMSE {heading_rmse_deg:.1f}° too high without measurements"
 
     def test_sparse_measurements(self):
         """Test tracking with very sparse measurements (low frame rate)."""
@@ -574,7 +581,7 @@ class TestMixedMeasurementScenarios:
             if i == 0:
                 continue
 
-            prev_timestamp = session.generate_timeline()[i-1][0]
+            prev_timestamp = session.generate_timeline()[i - 1][0]
             dt = timestamp - prev_timestamp
 
             ekf.predict(dt, imu_sample.accel, imu_sample.gyro)
@@ -603,7 +610,7 @@ class TestMixedMeasurementScenarios:
         assert avg_interval > 0.15, f"Measurements not sparse enough: {avg_interval:.3f}s interval"
 
         # Should still maintain reasonable accuracy
-        rmse = jnp.sqrt(jnp.mean(jnp.array(position_errors)**2))
+        rmse = jnp.sqrt(jnp.mean(jnp.array(position_errors) ** 2))
         assert rmse < 5.0, f"RMSE {rmse:.2f} cm too high with sparse measurements"
 
 
@@ -639,7 +646,7 @@ class TestSmoothingImprovement:
             if i == 0:
                 continue
 
-            prev_timestamp = session.generate_timeline()[i-1][0]
+            prev_timestamp = session.generate_timeline()[i - 1][0]
             dt = timestamp - prev_timestamp
 
             # Store prediction for smoothing
@@ -705,7 +712,7 @@ class TestSmoothingImprovement:
             if i == 0:
                 continue
 
-            prev_timestamp = session.generate_timeline()[i-1][0]
+            prev_timestamp = session.generate_timeline()[i - 1][0]
             dt = timestamp - prev_timestamp
 
             pred_state = ekf.get_current_state()
@@ -735,7 +742,7 @@ class TestSmoothingImprovement:
         occlusion_indices = []
         for i, (timestamp, _, _) in enumerate(session.generate_timeline()):
             if 4.0 <= timestamp <= 8.0:
-                occlusion_indices.append(i-1)  # Adjust for skipped first sample
+                occlusion_indices.append(i - 1)  # Adjust for skipped first sample
 
         if occlusion_indices:
             occlusion_filtered = [ekf_results[i].state.state for i in occlusion_indices]
@@ -747,7 +754,9 @@ class TestSmoothingImprovement:
             )
 
             # Should see improvement during occlusion period
-            assert improvement > 5.0, f"RTS improvement {improvement:.1f}% during occlusion too small"
+            assert (
+                improvement > 5.0
+            ), f"RTS improvement {improvement:.1f}% during occlusion too small"
 
 
 if __name__ == "__main__":
