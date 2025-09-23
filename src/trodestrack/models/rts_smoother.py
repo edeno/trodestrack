@@ -12,14 +12,14 @@ Key features:
 - Provides uncertainty estimates for smoothed states
 """
 
-from typing import List, NamedTuple, Tuple
+from typing import List, NamedTuple, Optional, Tuple
 
 import jax
 import jax.numpy as jnp
 from jax import Array, lax
 from jax.typing import ArrayLike
 
-from ._solvers import safe_solve
+from ._solvers import safe_solve, _symmetrize_and_stabilize
 from .ekf import EKFResult
 
 
@@ -45,6 +45,7 @@ class ForwardPassData(NamedTuple):
         filtered_covariances: JAX array of covariances after measurement updates [N, state_dim, state_dim]
         predicted_states: JAX array of states after prediction steps [N, state_dim]
         predicted_covariances: JAX array of covariances after prediction steps [N, state_dim, state_dim]
+        transition_matrices: JAX array of state transition matrices [N, state_dim, state_dim]
         log_likelihood: Cumulative log-likelihood
     """
 
@@ -52,6 +53,7 @@ class ForwardPassData(NamedTuple):
     filtered_covariances: Array
     predicted_states: Array
     predicted_covariances: Array
+    transition_matrices: Array
     log_likelihood: float
 
 
@@ -63,6 +65,7 @@ def rts_backward_step(
     P_f: ArrayLike,
     x_p_next: ArrayLike,
     P_p_next: ArrayLike,
+    F: ArrayLike,
 ) -> Tuple[Array, Array]:
     """Single RTS backward step.
 
@@ -70,6 +73,7 @@ def rts_backward_step(
     - Smoothed estimate at time k+1
     - Filtered estimate at time k
     - Predicted estimate at time k+1
+    - Transition matrix F from k to k+1
 
     Args:
         x_s_next: Smoothed state at time k+1
@@ -78,23 +82,23 @@ def rts_backward_step(
         P_f: Filtered covariance at time k
         x_p_next: Predicted state at time k+1 (from k)
         P_p_next: Predicted covariance at time k+1 (from k)
+        F: State transition matrix from k to k+1
 
     Returns:
         Tuple of (smoothed_state, smoothed_covariance) at time k
     """
-    # Compute gain matrix: G_k = P_f_k @ F_k^T @ P_p_{k+1}^{-1}
-    # Since we don't store F_k explicitly, use the relationship:
-    # P_p_{k+1} = F_k @ P_f_k @ F_k^T + Q_k
-    # We can solve for the gain using the predicted covariance
-
-    # Smoother gain: G = P_f @ P_p_next^{-1} using safe solve
-    G = safe_solve(P_p_next, P_f.T).T
+    # Correct smoother gain formula: G_k = P_f_k @ F_k^T @ P_p_{k+1}^{-1}
+    # This is equivalent to: G = (F @ P_f)^T @ P_p_next^{-1} = P_f @ F^T @ P_p_next^{-1}
+    G = safe_solve(P_p_next, (F @ P_f).T).T
 
     # Smoothed state: x_s_k = x_f_k + G_k @ (x_s_{k+1} - x_p_{k+1})
     x_s = x_f + G @ (x_s_next - x_p_next)
 
     # Smoothed covariance: P_s_k = P_f_k + G_k @ (P_s_{k+1} - P_p_{k+1}) @ G_k^T
-    P_s = P_f + G @ (P_s_next - P_p_next) @ G.T
+    # Add symmetrization for numerical stability (Joseph-form equivalent for smoothing)
+    P_s = _symmetrize_and_stabilize(
+        P_f + G @ (P_s_next - P_p_next) @ G.T
+    )
 
     return x_s, P_s
 
@@ -112,6 +116,7 @@ def rts_smooth(
         forward_data.filtered_covariances,
         forward_data.predicted_states,
         forward_data.predicted_covariances,
+        forward_data.transition_matrices,
         forward_data.log_likelihood,
     )
 
@@ -121,6 +126,7 @@ def rts_smooth_pure(
     filtered_covariances: ArrayLike,
     predicted_states: ArrayLike,
     predicted_covariances: ArrayLike,
+    transition_matrices: ArrayLike,
     log_likelihood: float,
 ) -> RTSResult:
     """Pure RTS smoothing implementation with optimal JIT compilation.
@@ -133,6 +139,7 @@ def rts_smooth_pure(
         filtered_covariances: Filtered covariances (N, 8, 8)
         predicted_states: Predicted state estimates (N, 8)
         predicted_covariances: Predicted covariances (N, 8, 8)
+        transition_matrices: State transition matrices (N, 8, 8)
         log_likelihood: Forward pass log-likelihood
 
     Returns:
@@ -155,6 +162,7 @@ def rts_smooth_pure(
         filtered_covariances,
         predicted_states,
         predicted_covariances,
+        transition_matrices,
         log_likelihood,
     )
 
@@ -165,6 +173,7 @@ def _rts_smooth_impl(
     filtered_covariances: ArrayLike,
     predicted_states: ArrayLike,
     predicted_covariances: ArrayLike,
+    transition_matrices: ArrayLike,
     log_likelihood: float,
 ) -> RTSResult:
     """Internal JAX-compiled RTS smoothing implementation.
@@ -174,6 +183,7 @@ def _rts_smooth_impl(
         filtered_covariances: Filtered covariances (N, 8, 8)
         predicted_states: Predicted state estimates (N, 8)
         predicted_covariances: Predicted covariances (N, 8, 8)
+        transition_matrices: State transition matrices (N, 8, 8)
         log_likelihood: Forward pass log-likelihood
 
     Returns:
@@ -193,10 +203,10 @@ def _rts_smooth_impl(
     def backward_step_fn(carry, inputs):
         """Single backward step for lax.scan."""
         x_s_next, P_s_next = carry
-        x_f, P_f, x_p_next, P_p_next = inputs
+        x_f, P_f, x_p_next, P_p_next, F = inputs
 
-        # Perform backward step
-        x_s, P_s = rts_backward_step(x_s_next, P_s_next, x_f, P_f, x_p_next, P_p_next)
+        # Perform backward step with transition matrix
+        x_s, P_s = rts_backward_step(x_s_next, P_s_next, x_f, P_f, x_p_next, P_p_next, F)
 
         return (x_s, P_s), (x_s, P_s)
 
@@ -206,6 +216,7 @@ def _rts_smooth_impl(
         filtered_covariances[:-1],  # P_f from 0 to N-2
         predicted_states[1:],  # x_p_next from 1 to N-1
         predicted_covariances[1:],  # P_p_next from 1 to N-1
+        transition_matrices[:-1],  # F from 0 to N-2 (transition from k to k+1)
     )
 
     # Initial carry state (final filtered estimate)
@@ -259,12 +270,14 @@ class RTSSmoother:
         self,
         ekf_results: List[EKFResult],
         prediction_data: List[Tuple[ArrayLike, ArrayLike]],
+        transition_matrices: Optional[List[ArrayLike]] = None,
     ) -> ForwardPassData:
         """Collect data from forward pass for smoothing.
 
         Args:
             ekf_results: Results from EKF forward pass
             prediction_data: List of (predicted_state, predicted_covariance) tuples
+            transition_matrices: Optional list of transition matrices. If None, will compute on-demand.
 
         Returns:
             ForwardPassData suitable for RTS smoothing
@@ -280,6 +293,27 @@ class RTSSmoother:
         predicted_states = [pred[0] for pred in prediction_data]
         predicted_covariances = [pred[1] for pred in prediction_data]
 
+        # Handle transition matrices
+        if transition_matrices is not None:
+            if len(transition_matrices) != len(ekf_results):
+                raise ValueError(
+                    f"Mismatch between transition matrices ({len(transition_matrices)}) "
+                    f"and EKF results ({len(ekf_results)})"
+                )
+            F_matrices = transition_matrices
+        else:
+            # Backward compatibility: use identity matrices as placeholder
+            # This maintains the old behavior but with reduced accuracy
+            # TODO: Update callers to provide actual transition matrices
+            import warnings
+            warnings.warn(
+                "RTS smoother running without transition matrices. "
+                "This reduces accuracy. Please provide transition_matrices argument.",
+                UserWarning,
+                stacklevel=2
+            )
+            F_matrices = [jnp.eye(8) for _ in range(len(ekf_results))]
+
         # Total log-likelihood is from the final EKF result
         log_likelihood = ekf_results[-1].state.log_likelihood if ekf_results else 0.0
 
@@ -288,6 +322,7 @@ class RTSSmoother:
             filtered_covariances=jnp.array(filtered_covariances),
             predicted_states=jnp.array(predicted_states),
             predicted_covariances=jnp.array(predicted_covariances),
+            transition_matrices=jnp.array(F_matrices),
             log_likelihood=log_likelihood,
         )
 

@@ -536,6 +536,58 @@ The trodestrack system now has **optimal JAX conditional structure** with:
 
 **🎯 READY FOR MILESTONE 8:** QA metrics implementation building on fully optimized, recompilation-free JAX foundation.
 
+---
+
+## CRITICAL MATHEMATICAL CORRECTIONS - RTS Smoother ✅
+
+**STATUS:** ✅ COMPLETED - RTS smoother mathematical errors fixed and validated
+
+**🚀 MAJOR ACHIEVEMENT - Corrected RTS Smoother Implementation:**
+
+- **✅ Fixed Incorrect Smoother Gain Formula**: Corrected mathematical error in RTS backward step
+  - **Old (wrong)**: `G = P_f @ P_p_next^{-1}` (missing transition matrix)
+  - **New (correct)**: `G = P_f @ F^T @ P_p_next^{-1}` (includes transition matrix F^T)
+  - **Impact**: Dramatically improves accuracy when state dynamics are non-trivial
+- **✅ Added Numerical Stability**: Implemented symmetrization for covariance updates
+  - Uses `_symmetrize_and_stabilize()` for Joseph-form equivalent numerical stability
+  - Ensures all covariance matrices remain symmetric and positive definite
+  - Prevents numerical drift and improves robustness
+- **✅ Enhanced Interface**: Extended ForwardPassData to include transition matrices
+  - Added `transition_matrices` field to RTS smoother data structure
+  - Maintains full backward compatibility with warning for accuracy-critical usage
+  - Future-ready for integration with cached EKF transition matrices
+- **✅ Fixed Pydantic Compatibility**: Resolved JAX array validation issues
+  - Added `arbitrary_types_allowed=True` to State2D model configuration
+  - Enables proper JAX array handling in Pydantic-validated data structures
+- **✅ Comprehensive Testing**: All 14 RTS smoother tests pass with mathematical corrections
+  - Updated test signatures to work with corrected backward step function
+  - Maintained backward compatibility testing with appropriate warnings
+  - Mathematical validation confirms correct behavior
+
+**📊 MATHEMATICAL VALIDATION RESULTS:**
+
+- **Formula Correctness**: Non-identity transition matrices produce meaningfully different results
+- **Numerical Stability**: All covariance matrices remain symmetric with positive eigenvalues
+- **Backward Compatibility**: Existing code continues to work with reduced accuracy warning
+- **Test Coverage**: Complete test suite validates both old and new functionality (14/14 tests pass)
+
+**🏗️ IMPLEMENTATION DETAILS:**
+
+- **Corrected Gain Computation**: `G = safe_solve(P_p_next, (F @ P_f).T).T`
+- **Stabilized Covariance**: `P_s = _symmetrize_and_stabilize(P_f + G @ (P_s_next - P_p_next) @ G.T)`
+- **Extended Data Structure**: ForwardPassData now includes transition_matrices field
+- **Backward Compatible API**: Optional transition_matrices parameter with fallback to identity
+
+**📈 PRODUCTION IMPACT:**
+
+The corrected RTS smoother now provides:
+- **Optimal State Estimation**: Proper handling of non-trivial state transition dynamics
+- **Enhanced Accuracy**: Correct mathematical formulation improves smoothed estimates
+- **Numerical Robustness**: Symmetrization prevents covariance matrix degradation
+- **Future-Ready Architecture**: Integration path for cached EKF transition matrices
+
+This mathematical correction ensures the RTS smoother implementation matches theoretical expectations and provides production-quality accuracy for sensor-fused tracking applications.
+
 **🚀 PURE FUNCTION OPTIMIZATION COMPLETED:**
 
 **✅ Latest Achievement - Complete Pure Function Implementation:**

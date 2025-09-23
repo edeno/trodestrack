@@ -45,7 +45,10 @@ class State2D(BaseModel):
     b_ax: ArrayLike
     b_ay: ArrayLike
 
-    model_config = ConfigDict(frozen=True)  # Immutable state representation
+    model_config = ConfigDict(
+        frozen=True,  # Immutable state representation
+        arbitrary_types_allowed=True  # Allow JAX arrays and ArrayLike types
+    )
 
 
 def state_to_array(state: State2D) -> Array:

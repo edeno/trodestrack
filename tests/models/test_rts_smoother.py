@@ -27,7 +27,8 @@ class TestRTSBackwardStep:
         P_p_next = jnp.eye(n_dim) * 0.2
         x_s_next = x_p_next  # Smoothed next state equals prediction
 
-        x_s, P_s = rts_backward_step(x_s_next, P_p_next, x_f, P_f, x_p_next, P_p_next)
+        F = jnp.eye(n_dim)  # Identity transition matrix for this test
+        x_s, P_s = rts_backward_step(x_s_next, P_p_next, x_f, P_f, x_p_next, P_p_next, F)
 
         # When smoothed next state equals prediction, smoothed current should equal filtered
         np.testing.assert_allclose(x_s, x_f, rtol=1e-6)
@@ -43,7 +44,8 @@ class TestRTSBackwardStep:
         x_s_next = jnp.array([1.05, 2.05])  # Smoothed next state (corrected)
         P_s_next = jnp.eye(n_dim) * 0.15
 
-        x_s, P_s = rts_backward_step(x_s_next, P_s_next, x_f, P_f, x_p_next, P_p_next)
+        F = jnp.eye(n_dim)  # Identity transition matrix for this test
+        x_s, P_s = rts_backward_step(x_s_next, P_s_next, x_f, P_f, x_p_next, P_p_next, F)
 
         # Smoothed state should be between filtered and prediction correction
         assert jnp.all(jnp.abs(x_s - x_f) > 0)  # Should be different from filtered
@@ -60,7 +62,8 @@ class TestRTSBackwardStep:
         P_s_next = jnp.eye(n_dim) * 1e-5
 
         # Should not raise exception
-        x_s, P_s = rts_backward_step(x_s_next, P_s_next, x_f, P_f, x_p_next, P_p_next)
+        F = jnp.eye(n_dim)  # Identity transition matrix for this test
+        x_s, P_s = rts_backward_step(x_s_next, P_s_next, x_f, P_f, x_p_next, P_p_next, F)
 
         # Results should be finite
         assert jnp.all(jnp.isfinite(x_s))
@@ -77,6 +80,7 @@ class TestRTSSmooth:
             filtered_covariances=jnp.array([]).reshape(0, 8, 8),
             predicted_states=jnp.array([]).reshape(0, 8),
             predicted_covariances=jnp.array([]).reshape(0, 8, 8),
+            transition_matrices=jnp.array([]).reshape(0, 8, 8),
             log_likelihood=0.0,
         )
 
@@ -97,6 +101,7 @@ class TestRTSSmooth:
             filtered_covariances=jnp.array([covariance]),
             predicted_states=jnp.array([state]),  # No next prediction needed
             predicted_covariances=jnp.array([covariance]),
+            transition_matrices=jnp.array([jnp.eye(n_dim)]),  # Identity transition
             log_likelihood=10.0,
         )
 
@@ -127,6 +132,7 @@ class TestRTSSmooth:
             filtered_covariances=jnp.array([P1_f, P2_f]),
             predicted_states=jnp.array([x1_f, x2_p]),  # First is initial, second is prediction
             predicted_covariances=jnp.array([P1_f, P2_p]),
+            transition_matrices=jnp.array([jnp.eye(n_dim), jnp.eye(n_dim)]),  # Identity transitions
             log_likelihood=25.0,
         )
 
@@ -185,6 +191,7 @@ class TestRTSSmooth:
             filtered_covariances=jnp.array(filtered_covariances),
             predicted_states=jnp.array(predicted_states),
             predicted_covariances=jnp.array(predicted_covariances),
+            transition_matrices=jnp.array([jnp.eye(8) for _ in range(len(filtered_states))]),  # Identity transitions
             log_likelihood=50.0,
         )
 
@@ -256,6 +263,7 @@ class TestRTSSmoother:
             filtered_covariances=jnp.array(filtered_covariances),
             predicted_states=jnp.array(predicted_states),
             predicted_covariances=jnp.array(predicted_covariances),
+            transition_matrices=jnp.array([jnp.eye(8) for _ in range(n_steps)]),  # Identity transitions
             log_likelihood=30.0,
         )
 
