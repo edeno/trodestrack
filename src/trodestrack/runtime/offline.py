@@ -208,11 +208,11 @@ def _initialize_filter(
         initial_state=initial_state,
         initial_covariance=initial_covariance,
         velocity_damping=config.filter.velocity_damping,
-        accel_noise_std=np.sqrt(config.filter.process_noise["velocity"]),
-        gyro_noise_std=np.sqrt(config.filter.process_noise["heading"]),
-        bias_drift_std=np.sqrt(config.filter.process_noise["bias_gyro"]),
-        position_noise_std=np.sqrt(config.filter.measurement_noise["position"]),
-        heading_noise_std=np.sqrt(config.filter.measurement_noise["heading"]),
+        accel_noise_std=jnp.sqrt(config.filter.process_noise["velocity"]),
+        gyro_noise_std=jnp.sqrt(config.filter.process_noise["heading"]),
+        bias_drift_std=jnp.sqrt(config.filter.process_noise["bias_gyro"]),
+        position_noise_std=jnp.sqrt(config.filter.measurement_noise["position"]),
+        heading_noise_std=jnp.sqrt(config.filter.measurement_noise["heading"]),
         gate_threshold=config.filter.gating_threshold,
     )
 
@@ -301,11 +301,11 @@ def _run_filtering_pass_consistent(
 
     # Create filter configuration arrays (constant values repeated for each frame)
     velocity_damping = jnp.full(n_frames, config.filter.velocity_damping)
-    accel_noise_std = jnp.full(n_frames, np.sqrt(config.filter.process_noise["velocity"]))
-    gyro_noise_std = jnp.full(n_frames, np.sqrt(config.filter.process_noise["heading"]))
-    bias_drift_std = jnp.full(n_frames, np.sqrt(config.filter.process_noise["bias_gyro"]))
-    position_noise_std = jnp.full(n_frames, np.sqrt(config.filter.measurement_noise["position"]))
-    heading_noise_std = jnp.full(n_frames, np.sqrt(config.filter.measurement_noise["heading"]))
+    accel_noise_std = jnp.full(n_frames, jnp.sqrt(config.filter.process_noise["velocity"]))
+    gyro_noise_std = jnp.full(n_frames, jnp.sqrt(config.filter.process_noise["heading"]))
+    bias_drift_std = jnp.full(n_frames, jnp.sqrt(config.filter.process_noise["bias_gyro"]))
+    position_noise_std = jnp.full(n_frames, jnp.sqrt(config.filter.measurement_noise["position"]))
+    heading_noise_std = jnp.full(n_frames, jnp.sqrt(config.filter.measurement_noise["heading"]))
     gate_threshold = jnp.full(n_frames, config.filter.gating_threshold)
 
     # Create scan inputs: transpose all arrays to create sequence of inputs

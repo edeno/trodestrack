@@ -44,8 +44,10 @@ def benchmark_rts_smoother():
         )
 
         # Covariance matrix
-        cov = jnp.eye(state_dim) * 0.1 + np.random.normal(0, 0.01, (state_dim, state_dim))
-        cov = jnp.array(cov)
+        # Create noise using JAX random instead of NumPy
+        noise_key = jax.random.split(jax.random.PRNGKey(42 + i), 1)[0]
+        cov_noise = jax.random.normal(noise_key, (state_dim, state_dim)) * 0.01
+        cov = jnp.eye(state_dim) * 0.1 + cov_noise
         cov = cov @ cov.T  # Make PSD
 
         filtered_states.append(state)

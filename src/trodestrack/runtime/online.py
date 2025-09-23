@@ -125,11 +125,11 @@ class OnlineTracker:
             initial_state=initial_state,
             initial_covariance=initial_covariance,
             velocity_damping=self.config.filter.velocity_damping,
-            accel_noise_std=np.sqrt(self.config.filter.process_noise["velocity"]),
-            gyro_noise_std=np.sqrt(self.config.filter.process_noise["heading"]),
-            bias_drift_std=np.sqrt(self.config.filter.process_noise["bias_gyro"]),
-            position_noise_std=np.sqrt(self.config.filter.measurement_noise["position"]),
-            heading_noise_std=np.sqrt(self.config.filter.measurement_noise["heading"]),
+            accel_noise_std=jnp.sqrt(self.config.filter.process_noise["velocity"]),
+            gyro_noise_std=jnp.sqrt(self.config.filter.process_noise["heading"]),
+            bias_drift_std=jnp.sqrt(self.config.filter.process_noise["bias_gyro"]),
+            position_noise_std=jnp.sqrt(self.config.filter.measurement_noise["position"]),
+            heading_noise_std=jnp.sqrt(self.config.filter.measurement_noise["heading"]),
             gate_threshold=self.config.filter.gating_threshold,
         )
 
