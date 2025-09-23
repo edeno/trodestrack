@@ -22,7 +22,7 @@ from ..io.loaders import load_video_detections, load_imu_data
 from ..geom.homography import transform_points_pixel_to_cm
 from ..imu.preintegration import preintegrate_between_frames
 from ..models.state import State2D, create_initial_state, state_to_array, array_to_state
-from ..models.ekf import EKFFilter, create_initial_ekf_state
+from ..models.ekf import EKFFilter, create_initial_ekf_state, ekf_step, EkfCarry
 from ..models.rts_smoother import rts_smooth, ForwardPassData
 from ..models.measurements import create_measurement_noise
 
@@ -334,6 +334,10 @@ def _run_filtering_pass_scan(
     n_frames = len(frame_timestamps)
     logger.info(f"Using JAX-optimized filtering for {n_frames} frames")
 
+    # Get initial state from the EKF filter
+    initial_state = ekf_filter.ekf_state.state
+    initial_covariance = ekf_filter.ekf_state.covariance
+
     # Prepare measurement data
     positions = video_data['positions']
     confidences = jnp.array(video_data.get('confidences', [1.0] * len(positions)))
@@ -352,25 +356,110 @@ def _run_filtering_pass_scan(
     # Compute time differences
     dts = jnp.diff(frame_timestamps, prepend=frame_timestamps[0])
 
-    # Create scan inputs
-    if headings is not None:
-        scan_inputs = (dts, positions, headings, confidences)
+    # Prepare IMU data for each frame if available
+    imu_blocks = None
+    if imu_data is not None:
+        imu_blocks = _prepare_imu_blocks_for_frames(
+            imu_data, frame_timestamps, config
+        )
     else:
-        scan_inputs = (dts, positions, jnp.full(n_frames, jnp.nan), confidences)
+        # Create dummy IMU blocks (zeros)
+        imu_blocks = jnp.zeros((n_frames, 3))  # [ax, ay, gz]
 
-    # Define scan function
-    def filter_step(carry, inputs):
-        # Unpack inputs
-        dt, position, heading, confidence = inputs
+    # Create filter configuration dict
+    filter_cfg = {
+        'velocity_damping': config.filter.velocity_damping,
+        'accel_noise_std': np.sqrt(config.filter.process_noise["velocity"]),
+        'gyro_noise_std': np.sqrt(config.filter.process_noise["heading"]),
+        'bias_drift_std': np.sqrt(config.filter.process_noise["bias_gyro"]),
+        'position_noise_std': np.sqrt(config.filter.measurement_noise["position"]),
+        'heading_noise_std': np.sqrt(config.filter.measurement_noise["heading"]),
+        'gate_threshold': config.filter.gating_threshold,
+    }
 
-        # Get current filter state (not used directly in scan, but for reference)
-        # We'll need to work with the stateful ekf_filter outside of scan
-        return carry, (dt, position, heading, confidence)
+    # Prepare measurement structures for each frame
+    meas_structs = []
+    for i in range(n_frames):
+        meas_struct = {}
 
-    # For now, fall back to direct approach since EKFFilter is stateful
-    # TODO: Refactor EKF to be functional for full JAX compatibility
-    logger.info("Falling back to direct approach (EKF filter is stateful)")
-    return _run_filtering_pass_direct(ekf_filter, config, video_data, imu_data, frame_timestamps)
+        # Add position if valid
+        pos = positions[i]
+        if jnp.all(jnp.isfinite(pos)):
+            meas_struct['position'] = pos
+
+        # Add heading if available and valid
+        if headings is not None and jnp.isfinite(headings[i]):
+            meas_struct['heading'] = headings[i]
+
+        # Add confidence
+        meas_struct['confidence'] = confidences[i]
+
+        meas_structs.append(meas_struct)
+
+    # Create scan inputs: (meas_struct, dt, imu_block, filter_cfg)
+    scan_inputs = (meas_structs, dts, imu_blocks, [filter_cfg] * n_frames)
+
+    # Initial carry state
+    carry0 = EkfCarry(x=initial_state, P=initial_covariance)
+
+    # Run lax.scan with the functional EKF step
+    final_carry, outputs = lax.scan(ekf_step, carry0, scan_inputs)
+
+    # Extract results
+    filtered_states = outputs.x_filt
+    filtered_covariances = outputs.P_filt
+
+    return filtered_states, filtered_covariances, frame_timestamps
+
+
+def _prepare_imu_blocks_for_frames(
+    imu_data: dict,
+    frame_timestamps: jnp.ndarray,
+    config: SessionConfig,
+) -> jnp.ndarray:
+    """Prepare IMU measurement blocks for each frame using pre-integration."""
+    n_frames = len(frame_timestamps)
+    imu_blocks = []
+
+    prev_timestamp = frame_timestamps[0]
+
+    for i, timestamp in enumerate(frame_timestamps):
+        dt = timestamp - prev_timestamp
+
+        if dt > 0 and i > 0:
+            # Pre-integrate IMU between frames for average measurements
+            try:
+                imu_result = preintegrate_between_frames(
+                    imu_data['data'],
+                    imu_data['timestamps'],
+                    prev_timestamp,
+                    timestamp,
+                    initial_heading=0.0,  # Will be corrected in EKF
+                    initial_velocity=jnp.array([0.0, 0.0]),
+                    gyro_bias=0.0,
+                    accel_bias=jnp.array([0.0, 0.0]),
+                    damping_lambda=config.filter.velocity_damping,
+                )
+
+                if imu_result.n_samples > 0:
+                    # Use average angular velocity for this interval
+                    avg_accel = jnp.array([0.0, 0.0])  # Pre-integration handles accel
+                    avg_gyro = imu_result.delta_heading / dt
+                    imu_block = jnp.array([avg_accel[0], avg_accel[1], avg_gyro])
+                else:
+                    imu_block = jnp.array([0.0, 0.0, 0.0])
+
+            except Exception:
+                # Fallback to zero measurements
+                imu_block = jnp.array([0.0, 0.0, 0.0])
+        else:
+            # First frame or zero dt
+            imu_block = jnp.array([0.0, 0.0, 0.0])
+
+        imu_blocks.append(imu_block)
+        prev_timestamp = timestamp
+
+    return jnp.stack(imu_blocks)
 
 
 def _run_smoothing_pass(
