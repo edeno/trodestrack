@@ -141,7 +141,8 @@ def _create_position_noise(
     confidence: float,
 ) -> jnp.ndarray:
     """Create position-only measurement noise matrix."""
-    scaled_position_std = position_noise_std / confidence
+    c = jnp.clip(confidence, 1e-3, 1.0)
+    scaled_position_std = position_noise_std / c
     position_var = scaled_position_std**2
     return jnp.diag(jnp.array([position_var, position_var]))
 
@@ -153,7 +154,8 @@ def _create_position_heading_noise(
     heading_noise_std: float,
 ) -> jnp.ndarray:
     """Create position + heading measurement noise matrix."""
-    scaled_position_std = position_noise_std / confidence
+    c = jnp.clip(confidence, 1e-3, 1.0)
+    scaled_position_std = position_noise_std / c
     position_var = scaled_position_std**2
     heading_var = heading_noise_std**2
     return jnp.diag(jnp.array([position_var, position_var, heading_var]))

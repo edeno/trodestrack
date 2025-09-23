@@ -92,6 +92,24 @@
 - **Linting completely clean** - No style, naming, or code quality issues
 - **Mathematical correctness verified** - Universal Joseph form provides optimal stability
 
+**🚀 LATEST UPDATE - DoF-Based Gating Thresholds Completed:**
+
+**✅ Statistical Gating Enhancement:**
+- **Fixed Hardcoded Threshold Issue**: Eliminated magic number 9.21 used for both 2 DOF and 3 DOF measurements
+- **EKF Auto-Computation**: Modified `ekf_update()` to auto-compute proper chi-squared thresholds
+  - Position-only (2 DOF): 9.210340 (p=0.01)
+  - Position+heading (3 DOF): 11.344867 (p=0.01)
+- **UKF Auto-Computation**: Applied same DoF-based threshold computation to `ukf_update()`
+- **Backward Compatibility**: Functions accept explicit `gate_threshold` parameter if needed
+- **Statistical Correctness**: Position+heading measurements no longer gated too aggressively
+
+**📊 DoF-Based Gating Verification:**
+- **All EKF tests pass (18/18)** - Extended Kalman filtering with proper statistical gating
+- **All UKF tests pass (17/17)** - Unscented filtering with DoF-appropriate thresholds
+- **All runtime smoke tests pass (4/4)** - End-to-end pipeline with corrected gating behavior
+- **Threshold Validation**: Verified 2 DOF → 9.21, 3 DOF → 11.34 computation
+- **Clean Implementation**: No linting issues, backward compatible API design
+
 **🎯 CURRENT PRIORITIES:**
 
 **Ready for Milestone 8 - QA & Diagnostics:**

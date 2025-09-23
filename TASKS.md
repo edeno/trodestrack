@@ -672,7 +672,21 @@ The trodestrack system now has **world-class numerical stability** with:
 - **Numerical Robustness**: Eliminates potential symmetry loss and numerical drift issues
 - **Production Stability**: Foundation ready for extended tracking sessions without degradation
 
-**🎯 READY FOR MILESTONE 8:** QA metrics implementation building on mathematically complete, numerically robust JAX foundation.
+**✅ LATEST ACHIEVEMENT - DoF-Based Gating Thresholds:**
+- **Fixed Hardcoded Thresholds**: Replaced magic number 9.21 with proper DoF-based chi-squared computation
+- **EKF Auto-Gating**: Modified `ekf_update()` to auto-compute thresholds (2 DOF: 9.21, 3 DOF: 11.34)
+- **UKF Auto-Gating**: Modified `ukf_update()` to auto-compute thresholds based on measurement type
+- **Statistical Correctness**: Position+heading measurements no longer gated too aggressively
+- **Backward Compatible**: Functions accept explicit thresholds if needed, default to proper DoF-based values
+- **Comprehensive Testing**: All filtering tests pass (EKF: 18, UKF: 17) with corrected gating behavior
+
+**📊 DoF-Based Gating Impact:**
+- **Statistical Accuracy**: Each measurement type uses appropriate chi-squared thresholds (p=0.01)
+- **Reduced False Rejections**: Position+heading measurements properly use 11.34 instead of 9.21
+- **Principled Design**: Eliminates hardcoded magic numbers in favor of statistical computation
+- **Automatic Adaptation**: Thresholds automatically adjust based on measurement dimensionality
+
+**🎯 READY FOR MILESTONE 8:** QA metrics implementation building on mathematically complete, statistically correct JAX foundation.
 
 ---
 

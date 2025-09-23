@@ -17,6 +17,7 @@ from jax import Array
 from jax.typing import ArrayLike
 
 from ._solvers import kalman_gain, mahalanobis_distance
+from .gating import chi_squared_threshold
 from .dynamics import (
     compute_process_noise,
     predict_covariance,
@@ -240,7 +241,7 @@ def ekf_update(
     measurement: ArrayLike,
     measurement_noise: ArrayLike,
     has_heading: bool,
-    gate_threshold: float = 9.21,  # Chi-squared with p=0.01 for 2-3 DOF
+    gate_threshold: Optional[float] = None,  # Auto-computed based on DoF if None
 ) -> EKFResult:
     """EKF measurement update step.
 
@@ -249,11 +250,16 @@ def ekf_update(
         measurement: Measurement vector (position + optional heading)
         measurement_noise: Measurement noise covariance matrix R
         has_heading: Whether measurement includes heading
-        gate_threshold: Chi-squared threshold for gating
+        gate_threshold: Chi-squared threshold for gating (auto-computed if None)
 
     Returns:
         EKF update result
     """
+    # Auto-compute threshold based on degrees of freedom if not provided
+    if gate_threshold is None:
+        dof = 3 if has_heading else 2
+        gate_threshold = chi_squared_threshold(dof, p_value=0.01)
+
     # Use specialized functions for each case to avoid conditional logic in JAX
     # Note: This is acceptable since the branching happens at the Python level (not in JIT)
     # and avoids recompilation issues

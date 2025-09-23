@@ -16,6 +16,7 @@ from jax.scipy.linalg import cholesky
 from jax.typing import ArrayLike
 
 from ._solvers import _symmetrize_and_stabilize, mahalanobis_distance, safe_solve
+from .gating import chi_squared_threshold
 from .dynamics import compute_process_noise, rotation_matrix_2d, wrap_angle
 from .measurements import create_measurement_noise
 from .state import State2D, array_to_state, state_to_array
@@ -486,7 +487,7 @@ def ukf_update(
     measurement: ArrayLike,
     measurement_noise: ArrayLike,
     has_heading: bool,
-    gate_threshold: float = 9.21,
+    gate_threshold: Optional[float] = None,  # Auto-computed based on DoF if None
     params: UKFParams = UKFParams(),
 ) -> UKFResult:
     """UKF measurement update step.
@@ -496,12 +497,17 @@ def ukf_update(
         measurement: Measurement vector (position + optional heading)
         measurement_noise: Measurement noise covariance matrix R
         has_heading: Whether measurement includes heading
-        gate_threshold: Chi-squared threshold for gating
+        gate_threshold: Chi-squared threshold for gating (auto-computed if None)
         params: UKF parameters
 
     Returns:
         UKF update result
     """
+    # Auto-compute threshold based on degrees of freedom if not provided
+    if gate_threshold is None:
+        dof = 3 if has_heading else 2
+        gate_threshold = chi_squared_threshold(dof, p_value=0.01)
+
     # Use specialized functions for each case to avoid conditional logic in JAX
     # Note: This is acceptable since the branching happens at the Python level (not in JIT)
     # and avoids recompilation issues
