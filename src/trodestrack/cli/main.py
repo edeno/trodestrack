@@ -216,17 +216,134 @@ def cmd_report(args: argparse.Namespace) -> int:
             logger.error(f"Run directory does not exist: {args.run_dir}")
             return 1
 
-        output_path = args.output or args.run_dir / "report.pdf"
+        # Look for tracking results in the run directory
+        results_files = [
+            args.run_dir / "filtered_states.npz",
+            args.run_dir / "smoothed_states.npz",
+            args.run_dir / "tracking_results.npz",
+        ]
 
-        logger.info(f"Generating report from: {args.run_dir}")
-        logger.info(f"Output report: {output_path}")
+        results_file = None
+        for candidate in results_files:
+            if candidate.exists():
+                results_file = candidate
+                break
 
-        # TODO: Implement actual report generation
-        logger.warning("Report generation not yet implemented")
+        if results_file is None:
+            logger.error(f"No tracking results found in {args.run_dir}")
+            logger.info("Looking for: filtered_states.npz, smoothed_states.npz, or tracking_results.npz")
+            return 1
+
+        logger.info(f"Loading tracking results from: {results_file}")
+
+        # Load results
+        import numpy as np
+
+        data = np.load(results_file)
+
+        # Extract required arrays
+        estimated_states = data["states"] if "states" in data else data["filtered_states"]
+
+        # Look for ground truth (may not always be available)
+        ground_truth_states = None
+        if "ground_truth_states" in data:
+            ground_truth_states = data["ground_truth_states"]
+        elif "true_states" in data:
+            ground_truth_states = data["true_states"]
+
+        # Look for covariances
+        covariances = None
+        if "covariances" in data:
+            covariances = data["covariances"]
+        elif "filtered_covariances" in data:
+            covariances = data["filtered_covariances"]
+
+        timestamps = data.get("timestamps", None)
+
+        if ground_truth_states is None:
+            logger.error("No ground truth states found - cannot generate QA report")
+            logger.info("QA reports require ground truth for comparison")
+            return 1
+
+        if covariances is None:
+            logger.error("No covariance matrices found - cannot generate QA report")
+            return 1
+
+        logger.info(f"Loaded {len(estimated_states)} timesteps for analysis")
+
+        # Set up output directory for report
+        report_dir = args.run_dir / "qa_report"
+
+        # Import QA report generator
+        from ..qa.report import QAReportGenerator
+
+        # Generate comprehensive QA report
+        logger.info("Generating comprehensive QA report...")
+        generator = QAReportGenerator(report_dir, "tracking_analysis")
+
+        # Additional data from results file
+        kwargs = {}
+        if "occlusion_mask" in data:
+            kwargs["occlusion_mask"] = data["occlusion_mask"]
+        if "residuals" in data:
+            kwargs["residuals"] = data["residuals"]
+        if "measurement_validity" in data:
+            kwargs["measurement_validity"] = data["measurement_validity"]
+
+        # Convert numpy arrays to JAX arrays for QA functions
+        import jax.numpy as jnp
+
+        estimated_states_jax = jnp.array(estimated_states)
+        ground_truth_states_jax = jnp.array(ground_truth_states)
+        covariances_jax = jnp.array(covariances)
+        timestamps_jax = jnp.array(timestamps) if timestamps is not None else None
+
+        # Convert kwargs arrays to JAX as well
+        for key, value in kwargs.items():
+            if hasattr(value, 'shape'):  # Check if it's an array-like object
+                kwargs[key] = jnp.array(value)
+
+        # Run analysis
+        results = generator.analyze_tracking_session(
+            estimated_states=estimated_states_jax,
+            ground_truth_states=ground_truth_states_jax,
+            covariances=covariances_jax,
+            timestamps=timestamps_jax,
+            **kwargs
+        )
+
+        # Print summary to console
+        logger.info("QA Report Generation Complete!")
+        logger.info(f"Report directory: {report_dir}")
+        logger.info("Generated artifacts:")
+
+        for name, path in results["plots"].items():
+            logger.info(f"  - {name}: {Path(path).name}")
+
+        # Print key metrics
+        metrics = results["metrics"]
+        logger.info("Key Performance Metrics:")
+        logger.info(f"  - Position RMSE: {metrics.get('position_rmse_cm', 'N/A'):.2f} cm")
+        logger.info(f"  - Velocity RMSE: {metrics.get('velocity_rmse_cm_s', 'N/A'):.2f} cm/s")
+        logger.info(f"  - Heading RMSE: {metrics.get('heading_rmse_deg', 'N/A'):.2f}°")
+
+        # PRD compliance
+        if "overall_prd_compliant" in metrics:
+            compliance = "✓ PASS" if metrics["overall_prd_compliant"] else "✗ FAIL"
+            logger.info(f"  - PRD Compliance: {compliance}")
+
         return 0
 
+    except FileNotFoundError as e:
+        logger.error(f"File not found: {e}")
+        return 1
+    except KeyError as e:
+        logger.error(f"Missing data in results file: {e}")
+        logger.info("Results file may be incomplete or in unexpected format")
+        return 1
     except Exception as e:
         logger.error(f"Error in report command: {e}")
+        logger.exception("Full traceback:")
         return 1
 
 
