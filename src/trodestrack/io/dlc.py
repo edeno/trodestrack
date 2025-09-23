@@ -1,11 +1,13 @@
 """DeepLabCut keypoint data loader."""
 
-import warnings
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 class DLCKeypointData:
@@ -197,7 +199,7 @@ def load_dlc_csv(file_path: Path) -> DLCKeypointData:
         # This requires fps information - use metadata or assume 30 fps
         fps = 30.0  # Default assumption
         timestamps = df.index.values / fps
-        warnings.warn(f"No timestamp column found, assuming {fps} fps")
+        logger.warning("No timestamp column found, assuming %.1f fps", fps)
     else:
         timestamps = df.index.values
 
@@ -224,7 +226,7 @@ def load_dlc_csv(file_path: Path) -> DLCKeypointData:
                 confidences[bodypart] = likelihood_vals
 
         except KeyError:
-            warnings.warn(f"Could not extract data for bodypart: {bodypart}")
+            logger.warning("Could not extract data for bodypart: %s", bodypart)
             continue
 
     if not keypoints:
@@ -327,7 +329,7 @@ def _process_dlc_dataframe(df: pd.DataFrame, file_path: Path) -> DLCKeypointData
     if df.index.name == "frame":
         fps = 30.0  # Default assumption
         timestamps = df.index.values / fps
-        warnings.warn(f"No timestamp column found, assuming {fps} fps")
+        logger.warning("No timestamp column found, assuming %.1f fps", fps)
     else:
         timestamps = df.index.values
 
@@ -362,7 +364,7 @@ def _process_dlc_dataframe(df: pd.DataFrame, file_path: Path) -> DLCKeypointData
                 confidences[bodypart] = likelihood_vals
 
         except KeyError:
-            warnings.warn(f"Could not extract data for bodypart: {bodypart}")
+            logger.warning("Could not extract data for bodypart: %s", bodypart)
             continue
 
     if not keypoints:

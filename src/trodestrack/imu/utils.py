@@ -1,11 +1,13 @@
 """IMU utility functions for preprocessing and alignment."""
 
-import warnings
+import logging
 from typing import Tuple
 
 import numpy as np
 
 from ..constants import STANDARD_GRAVITY_MS2
+
+logger = logging.getLogger(__name__)
 
 
 def remove_gravity_estimate(
@@ -109,9 +111,10 @@ def detect_imu_misalignment(
     is_misaligned = gravity_error > tolerance
 
     if is_misaligned:
-        warnings.warn(
-            f"IMU may be misaligned: gravity magnitude {median_magnitude:.3f} m/s² "
-            f"(expected {expected_gravity:.3f} m/s², error {gravity_error:.1%})"
+        logger.warning(
+            "IMU may be misaligned: gravity magnitude %.3f m/s² "
+            "(expected %.3f m/s², error %.1f%%)",
+            median_magnitude, expected_gravity, gravity_error * 100
         )
 
     return is_misaligned, gravity_error
@@ -156,9 +159,9 @@ def estimate_gyroscope_bias(
     stationary_samples = np.sum(stationary_mask)
 
     if stationary_samples < min_samples:
-        warnings.warn(
-            f"Insufficient stationary samples for bias estimation: "
-            f"{stationary_samples} < {min_samples}"
+        logger.warning(
+            "Insufficient stationary samples for bias estimation: %d < %d",
+            stationary_samples, min_samples
         )
         # Return mean of all data as fallback
         return np.mean(gyro_data, axis=0), False

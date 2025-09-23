@@ -1,7 +1,7 @@
 """SpikeGadgets IMU data loader."""
 
+import logging
 import struct
-import warnings
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -15,6 +15,8 @@ from ..constants import (
     SPIKEGADGETS_MAG_RECORD_SIZE,
     STANDARD_GRAVITY_MS2,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class SpikeGadgetsIMUData:
@@ -185,7 +187,7 @@ class SpikeGadgetsIMUData:
         with decimation information.
         """
         if target_rate >= self.sampling_rate:
-            warnings.warn("Target rate >= current rate, returning original data")
+            logger.warning("Target rate >= current rate, returning original data")
             return self
 
         # Calculate decimation factor
@@ -302,9 +304,10 @@ def _validate_imu_data_ranges(
 
         if min_val <= saturation_min or max_val >= saturation_max:
             saturated_samples = np.sum((data <= saturation_min) | (data >= saturation_max))
-            warnings.warn(
-                f"{name} data may be saturated: {saturated_samples} samples near int16 limits "
-                f"(range: [{min_val}, {max_val}], limits: [{INT16_MIN}, {INT16_MAX}])"
+            logger.warning(
+                "%s data may be saturated: %d samples near int16 limits "
+                "(range: [%d, %d], limits: [%d, %d])",
+                name, saturated_samples, min_val, max_val, INT16_MIN, INT16_MAX
             )
 
     check_saturation(accel_data, "Accelerometer")

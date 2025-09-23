@@ -6,7 +6,6 @@ the runtime APIs.
 """
 
 import logging
-import warnings
 from pathlib import Path
 from typing import Any, Dict
 
@@ -157,7 +156,7 @@ def _load_video_csv(file_path: Path) -> Dict[str, Any]:
     if timestamp_col is None:
         # Use frame index as timestamp
         timestamps = np.arange(len(df)) / 30.0  # Assume 30 FPS
-        warnings.warn("No timestamp column found, using frame index at 30 FPS")
+        logger.warning("No timestamp column found, using frame index at 30 FPS")
     else:
         timestamps = df[timestamp_col].values
 
@@ -224,8 +223,9 @@ def _load_imu_npz(file_path: Path) -> Dict[str, Any]:
         # Estimate from timestamps
         dt = np.median(np.diff(data["timestamps"]))
         sampling_rate = 1.0 / dt
-        warnings.warn(
-            f"No sampling_rate in NPZ file, estimated {sampling_rate:.1f} Hz from timestamps"
+        logger.warning(
+            "No sampling_rate in NPZ file, estimated %.1f Hz from timestamps",
+            sampling_rate
         )
 
     imu_data = data["data"]

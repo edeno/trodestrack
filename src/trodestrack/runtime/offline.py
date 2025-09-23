@@ -8,7 +8,6 @@ This module implements the main offline smoothing pipeline that combines:
 """
 
 import logging
-import warnings
 from typing import NamedTuple, Optional, Tuple
 
 import jax
@@ -19,7 +18,7 @@ from jax import lax
 from ..config.schemas import SessionConfig
 from ..geom.homography import transform_points_pixel_to_cm
 from ..io.loaders import load_imu_data, load_video_detections
-from ..models.ekf import EkfCarry, EKFFilter, ekf_step_pytree, create_ekf_step_arrays_optimized
+from ..models.ekf import EkfCarry, EKFFilter, ekf_step_pytree
 from ..models.rts_smoother import ForwardPassData, rts_smooth
 from ..models.state import State2D, create_initial_state
 
@@ -573,7 +572,7 @@ def _synchronize_timestamps(
 
         overlap_duration = sync_info["overlap_end"] - sync_info["overlap_start"]
         if overlap_duration <= 0:
-            warnings.warn("No temporal overlap between video and IMU data")
+            logger.warning("No temporal overlap between video and IMU data")
 
     return sync_info
 

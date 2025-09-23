@@ -1,11 +1,13 @@
 """Trodes LED output data loader."""
 
-import warnings
+import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 class TrodesLEDData:
@@ -157,7 +159,7 @@ def load_trodes_led_csv(file_path: Path) -> TrodesLEDData:
         # Default confidence to 1.0 if not provided
         front_confidence = np.ones(len(df))
         back_confidence = np.ones(len(df))
-        warnings.warn("No confidence columns found, defaulting to 1.0")
+        logger.warning("No confidence columns found, defaulting to 1.0")
 
     # Handle NaN values by setting confidence to 0
     front_nan_mask = np.isnan(front_led).any(axis=1)
@@ -229,7 +231,7 @@ def load_trodes_led_h5(file_path: Path) -> TrodesLEDData:
             else:
                 front_confidence = np.ones(len(timestamps))
                 back_confidence = np.ones(len(timestamps))
-                warnings.warn("No confidence data found in HDF5, defaulting to 1.0")
+                logger.warning("No confidence data found in HDF5, defaulting to 1.0")
 
             # Create metadata
             metadata = {
