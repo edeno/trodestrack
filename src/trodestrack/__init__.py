@@ -1,8 +1,6 @@
 """Sensor-fused 2D rat tracking with JAX EKF/UKF for SpikeGadgets/Trodes."""
 
-# Configure JAX globally for the entire package
-import jax
-jax.config.update("jax_enable_x64", True)
+# Keep __init__ side-effect free. Re-export public API if desired.
 
 
 def main() -> None:

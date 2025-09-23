@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+from trodestrack import jax_setup  # noqa: F401
+
 from ..config.loader import load_config
 
 # Module-level logger
