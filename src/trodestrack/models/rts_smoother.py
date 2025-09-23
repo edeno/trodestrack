@@ -19,7 +19,7 @@ import jax.numpy as jnp
 from jax import Array, lax
 from jax.typing import ArrayLike
 
-from ._solvers import safe_solve, _symmetrize_and_stabilize
+from ._solvers import _symmetrize_and_stabilize, safe_solve
 from .ekf import EKFResult
 
 
@@ -87,18 +87,15 @@ def rts_backward_step(
     Returns:
         Tuple of (smoothed_state, smoothed_covariance) at time k
     """
-    # Correct smoother gain formula: G_k = P_f_k @ F_k^T @ P_p_{k+1}^{-1}
-    # This is equivalent to: G = (F @ P_f)^T @ P_p_next^{-1} = P_f @ F^T @ P_p_next^{-1}
-    G = safe_solve(P_p_next, (F @ P_f).T).T
+    # Correct: G = P_f @ F.T @ P_p_next^{-1}
+    G = safe_solve(P_p_next.T, F @ P_f).T
 
     # Smoothed state: x_s_k = x_f_k + G_k @ (x_s_{k+1} - x_p_{k+1})
     x_s = x_f + G @ (x_s_next - x_p_next)
 
     # Smoothed covariance: P_s_k = P_f_k + G_k @ (P_s_{k+1} - P_p_{k+1}) @ G_k^T
     # Add symmetrization for numerical stability (Joseph-form equivalent for smoothing)
-    P_s = _symmetrize_and_stabilize(
-        P_f + G @ (P_s_next - P_p_next) @ G.T
-    )
+    P_s = _symmetrize_and_stabilize(P_f + G @ (P_s_next - P_p_next) @ G.T)
 
     return x_s, P_s
 
