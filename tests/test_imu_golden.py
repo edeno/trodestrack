@@ -11,8 +11,6 @@ integration baseline to ensure accuracy within specified tolerances.
 
 import jax
 
-# Enable 64-bit precision for tests
-jax.config.update("jax_enable_x64", True)
 
 import jax.numpy as jnp
 import numpy as np

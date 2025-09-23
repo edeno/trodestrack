@@ -12,10 +12,9 @@ from typing import Tuple
 import jax
 import jax.numpy as jnp
 
+from ._solvers import kalman_gain, safe_solve
 from .state import State2D, state_to_array, array_to_state
 
-# Enable 64-bit precision for numerical accuracy
-jax.config.update("jax_enable_x64", True)
 
 
 def velocity_measurement(state: State2D) -> jnp.ndarray:
@@ -183,18 +182,14 @@ def velocity_pseudo_measurement_update(
     innovation_cov = H @ state_covariance @ H.T + velocity_noise
 
     # Kalman gain: K = P H^T S^-1
-    try:
-        kalman_gain = state_covariance @ H.T @ jnp.linalg.inv(innovation_cov)
-    except jnp.linalg.LinAlgError:
-        # Handle singular innovation covariance
-        kalman_gain = state_covariance @ H.T @ jnp.linalg.pinv(innovation_cov)
+    K = kalman_gain(state_covariance, H, velocity_noise)
 
     # State update: x+ = x- + K * innovation
-    updated_state_array = state_array + kalman_gain @ innovation
+    updated_state_array = state_array + K @ innovation
 
     # Covariance update: P+ = (I - K H) P-
     I = jnp.eye(8)
-    updated_covariance = (I - kalman_gain @ H) @ state_covariance
+    updated_covariance = (I - K @ H) @ state_covariance
 
     # Convert back to State2D
     updated_state = array_to_state(updated_state_array)

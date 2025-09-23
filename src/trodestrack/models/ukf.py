@@ -13,6 +13,7 @@ import jax
 import jax.numpy as jnp
 from jax.scipy.linalg import cholesky
 
+from ._solvers import mahalanobis_distance, kalman_gain, safe_solve, _symmetrize_and_stabilize
 from .dynamics import compute_process_noise, rotation_matrix_2d, wrap_angle
 from .gating import mahalanobis_gate
 from .measurements import (
@@ -22,8 +23,6 @@ from .measurements import (
 )
 from .state import State2D, state_to_array, array_to_state
 
-# Enable 64-bit precision for numerical accuracy
-jax.config.update("jax_enable_x64", True)
 
 
 class UKFState(NamedTuple):
@@ -90,8 +89,10 @@ def generate_sigma_points(
     n = state.shape[0]  # State dimension
     lambda_ = params.alpha**2 * (n + params.kappa) - n
 
-    # Compute square root of scaled covariance matrix
-    sqrt_matrix = cholesky((n + lambda_) * covariance, lower=True)
+    # Compute square root of scaled covariance matrix with PSD hygiene
+    scaled_cov = (n + lambda_) * covariance
+    scaled_cov_stable = _symmetrize_and_stabilize(scaled_cov, jitter=1e-12)
+    sqrt_matrix = cholesky(scaled_cov_stable, lower=True)
 
     # Generate sigma points
     sigma_points = jnp.zeros((2 * n + 1, n))
@@ -354,23 +355,23 @@ def _ukf_update_position_only(
     )
 
     # Mahalanobis gating
-    mahalanobis_dist = innovation.T @ jnp.linalg.inv(innovation_cov) @ innovation
+    mahalanobis_dist = mahalanobis_distance(innovation, innovation_cov)
     gated = mahalanobis_dist > gate_threshold
 
     # Kalman gain
-    kalman_gain = cross_cov @ jnp.linalg.inv(innovation_cov)
+    K = safe_solve(innovation_cov, cross_cov.T).T
 
     # State and covariance update (conditional on gating)
     updated_state = jnp.where(
         gated,
         ukf_state.state,
-        ukf_state.state + kalman_gain @ innovation
+        ukf_state.state + K @ innovation
     )
 
     updated_covariance = jnp.where(
         gated,
         ukf_state.covariance,
-        ukf_state.covariance - kalman_gain @ innovation_cov @ kalman_gain.T
+        ukf_state.covariance - K @ innovation_cov @ K.T
     )
 
     # Log-likelihood update
@@ -396,7 +397,7 @@ def _ukf_update_position_only(
         state=updated_ukf_state,
         innovation=innovation,
         innovation_covariance=innovation_cov,
-        kalman_gain=kalman_gain,
+        kalman_gain=K,
         gated=gated,
     )
 
@@ -458,23 +459,23 @@ def _ukf_update_position_heading(
     )
 
     # Mahalanobis gating
-    mahalanobis_dist = innovation.T @ jnp.linalg.inv(innovation_cov) @ innovation
+    mahalanobis_dist = mahalanobis_distance(innovation, innovation_cov)
     gated = mahalanobis_dist > gate_threshold
 
     # Kalman gain
-    kalman_gain = cross_cov @ jnp.linalg.inv(innovation_cov)
+    K = safe_solve(innovation_cov, cross_cov.T).T
 
     # State and covariance update (conditional on gating)
     updated_state = jnp.where(
         gated,
         ukf_state.state,
-        ukf_state.state + kalman_gain @ innovation
+        ukf_state.state + K @ innovation
     )
 
     updated_covariance = jnp.where(
         gated,
         ukf_state.covariance,
-        ukf_state.covariance - kalman_gain @ innovation_cov @ kalman_gain.T
+        ukf_state.covariance - K @ innovation_cov @ K.T
     )
 
     # Log-likelihood update
@@ -500,7 +501,7 @@ def _ukf_update_position_heading(
         state=updated_ukf_state,
         innovation=innovation,
         innovation_covariance=innovation_cov,
-        kalman_gain=kalman_gain,
+        kalman_gain=K,
         gated=gated,
     )
 

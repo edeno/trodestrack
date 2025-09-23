@@ -13,6 +13,7 @@ import jax
 import jax.numpy as jnp
 
 from .dynamics import predict_state, predict_covariance, compute_process_noise, rotation_matrix_2d, wrap_angle
+from ._solvers import mahalanobis_distance, kalman_gain, safe_solve
 from .gating import mahalanobis_gate
 from .measurements import (
     create_combined_measurement,
@@ -23,10 +24,6 @@ from .measurements import (
     _create_position_heading_jacobian,
 )
 from .state import State2D, state_to_array, array_to_state
-
-# Enable 64-bit precision for numerical accuracy
-jax.config.update("jax_enable_x64", True)
-
 
 class EKFState(NamedTuple):
     """EKF state representation.
@@ -220,18 +217,18 @@ def _ekf_update_position_only(
     # Innovation covariance: S = H * P * H^T + R
     innovation_covariance = H @ ekf_state.covariance @ H.T + measurement_noise
 
-    # Mahalanobis gating
-    mahalanobis_dist = innovation.T @ jnp.linalg.inv(innovation_covariance) @ innovation
+    # Mahalanobis gating using safe solve
+    mahalanobis_dist = mahalanobis_distance(innovation, innovation_covariance)
     gated = mahalanobis_dist > gate_threshold
 
-    # Kalman gain: K = P * H^T * S^{-1}
-    kalman_gain = ekf_state.covariance @ H.T @ jnp.linalg.inv(innovation_covariance)
+    # Kalman gain: K = P * H^T * S^{-1} using safe solve
+    K = kalman_gain(ekf_state.covariance, H, measurement_noise)
 
     # State update: x = x + K * innovation (only if not gated)
     updated_state = jnp.where(
         gated,
         ekf_state.state,
-        ekf_state.state + kalman_gain @ innovation
+        ekf_state.state + K @ innovation
     )
 
     # Covariance update: P = (I - K * H) * P (only if not gated)
@@ -239,7 +236,7 @@ def _ekf_update_position_only(
     updated_covariance = jnp.where(
         gated,
         ekf_state.covariance,
-        (I - kalman_gain @ H) @ ekf_state.covariance
+        (I - K @ H) @ ekf_state.covariance
     )
 
     # Log-likelihood update (only if not gated)
@@ -265,7 +262,7 @@ def _ekf_update_position_only(
         state=updated_ekf_state,
         innovation=innovation,
         innovation_covariance=innovation_covariance,
-        kalman_gain=kalman_gain,
+        kalman_gain=K,
         gated=gated,
     )
 
@@ -300,17 +297,17 @@ def _ekf_update_position_heading(
     innovation_covariance = H @ ekf_state.covariance @ H.T + measurement_noise
 
     # Mahalanobis gating
-    mahalanobis_dist = innovation.T @ jnp.linalg.inv(innovation_covariance) @ innovation
+    mahalanobis_dist = mahalanobis_distance(innovation, innovation_covariance)
     gated = mahalanobis_dist > gate_threshold
 
     # Kalman gain: K = P * H^T * S^{-1}
-    kalman_gain = ekf_state.covariance @ H.T @ jnp.linalg.inv(innovation_covariance)
+    K = kalman_gain(ekf_state.covariance, H, measurement_noise)
 
     # State update: x = x + K * innovation (only if not gated)
     updated_state = jnp.where(
         gated,
         ekf_state.state,
-        ekf_state.state + kalman_gain @ innovation
+        ekf_state.state + K @ innovation
     )
 
     # Covariance update: P = (I - K * H) * P (only if not gated)
@@ -318,7 +315,7 @@ def _ekf_update_position_heading(
     updated_covariance = jnp.where(
         gated,
         ekf_state.covariance,
-        (I - kalman_gain @ H) @ ekf_state.covariance
+        (I - K @ H) @ ekf_state.covariance
     )
 
     # Log-likelihood update (only if not gated)
@@ -344,7 +341,7 @@ def _ekf_update_position_heading(
         state=updated_ekf_state,
         innovation=innovation,
         innovation_covariance=innovation_covariance,
-        kalman_gain=kalman_gain,
+        kalman_gain=K,
         gated=gated,
     )
 

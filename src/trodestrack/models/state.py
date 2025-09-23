@@ -17,8 +17,6 @@ import jax
 import jax.numpy as jnp
 from pydantic import BaseModel, ConfigDict
 
-# Enable 64-bit precision for numerical accuracy
-jax.config.update("jax_enable_x64", True)
 
 
 # State dimension as per PRD

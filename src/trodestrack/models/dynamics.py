@@ -13,8 +13,6 @@ import jax.numpy as jnp
 
 from .state import State2D, state_to_array, array_to_state
 
-# Enable 64-bit precision for numerical accuracy
-jax.config.update("jax_enable_x64", True)
 
 
 @jax.jit

@@ -12,8 +12,8 @@ from typing import Tuple
 import jax
 import jax.numpy as jnp
 
-# Enable 64-bit precision for numerical accuracy
-jax.config.update("jax_enable_x64", True)
+from ._solvers import mahalanobis_distance as safe_mahalanobis_distance
+
 
 
 def mahalanobis_distance(
@@ -29,27 +29,8 @@ def mahalanobis_distance(
     Returns:
         Mahalanobis distance
     """
-    # Handle potential numerical issues with covariance
-    try:
-        # Compute Cholesky decomposition for stable inversion
-        L = jnp.linalg.cholesky(covariance + 1e-12 * jnp.eye(covariance.shape[0]))
-
-        # Solve L @ y = residual for y
-        y = jnp.linalg.solve(L, residual)
-
-        # Mahalanobis distance = ||y||
-        distance = jnp.linalg.norm(y)
-
-    except jnp.linalg.LinAlgError:
-        # Fallback to pseudoinverse for singular matrices
-        try:
-            cov_inv = jnp.linalg.pinv(covariance)
-            distance = jnp.sqrt(residual.T @ cov_inv @ residual)
-        except:
-            # Ultimate fallback: treat as identity covariance
-            distance = jnp.linalg.norm(residual)
-
-    return distance
+    # Use the safe implementation from _solvers.py
+    return safe_mahalanobis_distance(residual, covariance)
 
 
 def mahalanobis_gate(

@@ -17,11 +17,10 @@ from typing import List, NamedTuple, Tuple
 import jax
 import jax.numpy as jnp
 
+from ._solvers import safe_solve
 from .dynamics import predict_covariance, compute_process_noise
 from .ekf import EKFState, EKFResult
 
-# Enable 64-bit precision for numerical accuracy
-jax.config.update("jax_enable_x64", True)
 
 
 class RTSResult(NamedTuple):
@@ -86,13 +85,8 @@ def rts_backward_step(
     # P_p_{k+1} = F_k @ P_f_k @ F_k^T + Q_k
     # We can solve for the gain using the predicted covariance
 
-    # Smoother gain: G = P_f @ P_p_next^{-1} (simplified when F is identity-like)
-    # More robust computation using pseudo-inverse for numerical stability
-    try:
-        G = P_f @ jnp.linalg.inv(P_p_next)
-    except jnp.linalg.LinAlgError:
-        # Use pseudo-inverse for numerical stability
-        G = P_f @ jnp.linalg.pinv(P_p_next)
+    # Smoother gain: G = P_f @ P_p_next^{-1} using safe solve
+    G = safe_solve(P_p_next, P_f.T).T
 
     # Smoothed state: x_s_k = x_f_k + G_k @ (x_s_{k+1} - x_p_{k+1})
     x_s = x_f + G @ (x_s_next - x_p_next)

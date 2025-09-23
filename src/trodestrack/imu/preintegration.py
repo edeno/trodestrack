@@ -17,8 +17,6 @@ Key features:
 
 import jax
 
-# Enable 64-bit precision for numerical accuracy
-jax.config.update("jax_enable_x64", True)
 
 from typing import NamedTuple, Optional
 
@@ -374,15 +372,15 @@ def preintegrate_between_frames(
 
 
 def convert_spikegadgets_to_preintegration_units(
-    accel_ms2: np.ndarray, gyro_rad_s: np.ndarray
+    accel_ms2: jnp.ndarray, gyro_rad_s: jnp.ndarray
 ) -> jnp.ndarray:
     """Convert SpikeGadgets IMU data to pre-integration units.
 
     Parameters
     ----------
-    accel_ms2 : np.ndarray, shape (n_samples, 3)
+    accel_ms2 : jnp.ndarray, shape (n_samples, 3)
         Accelerometer data in m/s² (from SpikeGadgetsIMUData.get_accel_ms2())
-    gyro_rad_s : np.ndarray, shape (n_samples, 3)
+    gyro_rad_s : jnp.ndarray, shape (n_samples, 3)
         Gyroscope data in rad/s (from SpikeGadgetsIMUData.get_gyro_rad_s())
 
     Returns

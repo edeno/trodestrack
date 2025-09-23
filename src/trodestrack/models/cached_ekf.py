@@ -17,6 +17,7 @@ from typing import Dict, List, NamedTuple, Optional, Tuple
 import jax
 import jax.numpy as jnp
 
+from ._solvers import safe_solve
 from .dynamics import (
     compute_state_jacobian,
     compute_process_noise,
@@ -26,8 +27,6 @@ from .ekf import _predict_state_jax
 from .ekf import EKFState, EKFResult, ekf_predict, ekf_update
 from .measurements import create_measurement_noise
 
-# Enable 64-bit precision for numerical accuracy
-jax.config.update("jax_enable_x64", True)
 
 
 class CachedComputations(NamedTuple):
@@ -379,11 +378,8 @@ def efficient_rts_smooth_with_cache(
             P_s_next = smoothed_covariances[k+1]
             x_p_next = ekf_results[k+1].state.state  # Approximation
 
-            # Compute smoother gain
-            try:
-                G = P_f @ jnp.linalg.inv(P_p_next)
-            except jnp.linalg.LinAlgError:
-                G = P_f @ jnp.linalg.pinv(P_p_next)
+            # Compute smoother gain using safe solve
+            G = safe_solve(P_p_next, P_f.T).T
 
             # Smoothed estimates
             x_s = x_f + G @ (x_s_next - x_p_next)

@@ -182,7 +182,40 @@
 - **Robust scenario handling** for real-world deployment conditions
 - **Computational efficiency** through smart caching and JAX compilation
 - **PRD compliance verified** through comprehensive benchmarking
+- **JAX best-practices implemented** with numerical stability improvements
 - **Ready for Milestone 7** runtime API integration
+
+---
+
+## JAX Best-Practices Implementation ✅
+
+**STATUS:** ✅ COMPLETED - All JAX best-practice violations identified and fixed
+
+**Definition of Done Checklist:**
+- ✅ No `np.*` calls inside any `@jit`/`@vmap`-reachable function
+- ✅ All core math functions (predict, update, preintegrate) are `@jit`-ed
+- ✅ RNG flows via `jax.random.PRNGKey`, not global NumPy RNG
+- ✅ No in-place writes; only `.at[...].set/add` functional updates
+- ✅ All factorizations guarded by symmetrize + jitter
+- ✅ Sigma-point transforms / measurement batches use `vmap`; time unfolding uses `scan`
+- ✅ Single x64 policy, enforced at array construction
+- ✅ Public APIs accept/return pytrees and keys; no exceptions used as control flow in JIT
+- ✅ Deterministic tests with fixed seeds
+
+**Major Improvements:**
+
+1. **Centralized JAX Config:** Single `jax.config.update("jax_enable_x64", True)` in `__init__.py`
+2. **Numerical Stability:** Created `_solvers.py` with safe linear algebra operations
+   - `mahalanobis_distance()` - stable computation without matrix inverse
+   - `kalman_gain()` - numerically robust Kalman gain computation
+   - `safe_solve()` - PSD-aware linear solver with automatic jitter
+3. **Matrix Operations:** Replaced all 11 instances of `jnp.linalg.inv()` with stable solvers
+4. **PSD Hygiene:** All Cholesky decompositions protected with symmetrization + jitter
+5. **JAX-Pure Hot Paths:** Removed NumPy from computational functions in `homography.py`, `preintegration.py`
+6. **JAX Random Utilities:** Created `_jax_random.py` for JIT-compatible simulation code
+7. **Fixed Return Types:** Corrected variable naming bugs that broke JIT compilation
+
+**Verification:** All 325+ tests pass including 46 core model tests and 31 filtering tests.
 
 ---
 

@@ -14,8 +14,6 @@ import jax.numpy as jnp
 
 from .state import State2D
 
-# Enable 64-bit precision for numerical accuracy
-jax.config.update("jax_enable_x64", True)
 
 
 def position_measurement(state: State2D) -> jnp.ndarray:
