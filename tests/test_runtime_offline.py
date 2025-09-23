@@ -15,7 +15,7 @@ from trodestrack.config.schemas import (
     SynchronizationConfig,
 )
 from trodestrack.runtime.offline import smooth_session, SmoothingResult
-from trodestrack.sim.generator import generate_synthetic_session
+from trodestrack.sim.session import generate_synthetic_session
 
 
 class TestOfflineSmoothing:

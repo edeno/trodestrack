@@ -396,66 +396,17 @@ class StreamingTracker:
         # Process frame by frame
         if video_data is not None:
             n_frames = len(video_data["timestamps"])
-
-            # For large datasets, consider JAX optimization (though tracker is stateful)
-            if n_frames > 1000 and imu_data is None:
-                logger.info(f"Processing {n_frames} frames with potential for optimization")
-                # Note: Full JAX optimization requires refactoring stateful tracker
-                # For now, we optimize the data preparation
-                self._process_frames_optimized(video_data, imu_data)
-            else:
-                self._process_frames_direct(video_data, imu_data)
+            logger.info(f"Processing {n_frames} frames")
+            # Process frames with JAX-optimized data preparation
+            self._process_frames(video_data, imu_data)
 
         logger.info(f"Processed {len(self.results)} frames")
         return self.results
 
-    def _process_frames_direct(self, video_data: dict, imu_data: Optional[dict]) -> None:
-        """Direct frame-by-frame processing."""
+
+    def _process_frames(self, video_data: dict, imu_data: Optional[dict]) -> None:
+        """Process frames with JAX-optimized data preparation."""
         n_frames = len(video_data["timestamps"])
-
-        for i in range(n_frames):
-            # Create tracking frame
-            timestamp = video_data["timestamps"][i]
-            position = (
-                video_data["positions"][i]
-                if jnp.all(jnp.isfinite(video_data["positions"][i]))
-                else None
-            )
-            heading = video_data.get("headings", [None] * n_frames)[i]
-            confidence = video_data.get("confidences", [1.0] * n_frames)[i]
-
-            # Get IMU measurements for this time interval
-            imu_measurements = []
-            if imu_data is not None and i > 0:
-                prev_timestamp = video_data["timestamps"][i - 1]
-                # Find IMU samples in time range
-                mask = (imu_data["timestamps"] >= prev_timestamp) & (
-                    imu_data["timestamps"] <= timestamp
-                )
-                if jnp.any(mask):
-                    for j in jnp.where(mask)[0]:
-                        imu_sample = imu_data["data"][j]
-                        accel = imu_sample[:3]
-                        gyro = imu_sample[3:6]
-                        imu_ts = imu_data["timestamps"][j]
-                        imu_measurements.append((accel, gyro, imu_ts))
-
-            frame = TrackingFrame(
-                timestamp=timestamp,
-                position=position,
-                heading=heading,
-                confidence=confidence,
-                imu_measurements=imu_measurements,
-            )
-
-            # Process frame
-            result = self.tracker.process_frame(frame)
-            self.results.append(result)
-
-    def _process_frames_optimized(self, video_data: dict, imu_data: Optional[dict]) -> None:
-        """JAX-optimized frame processing for large datasets."""
-        n_frames = len(video_data["timestamps"])
-        logger.info(f"Using optimized processing for {n_frames} frames")
 
         # Pre-process data into JAX arrays
         timestamps = jnp.array(video_data["timestamps"])
