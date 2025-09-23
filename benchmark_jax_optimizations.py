@@ -15,6 +15,7 @@ import numpy as np
 from trodestrack.config.schemas import SessionConfig
 from trodestrack.runtime.offline import smooth_session
 from trodestrack.runtime.online import StreamingTracker
+from trodestrack.models._solvers import safe_solve
 
 
 def create_synthetic_data(n_frames: int = 1000, imu_rate: float = 1000.0) -> tuple:
@@ -114,6 +115,13 @@ def benchmark_offline_smoothing():
             position_diff = jnp.clip(position_diff, 0, 100)
             avg_improvement = float(jnp.mean(position_diff))
             print(f"   Average position adjustment: {avg_improvement:.3f} cm")
+
+            # Demonstrate safe_solve usage for covariance computations
+            # (Example: could be used for uncertainty propagation)
+            A = jnp.eye(2) + jnp.random.normal(0, 0.01, (2, 2))
+            b = jnp.array([1.0, 1.0])
+            x = safe_solve(A + jnp.eye(A.shape[0]) * 1e-6, b)
+            print(f"   Safe solve demonstration completed (result norm: {float(jnp.linalg.norm(x)):.4f})")
 
 
 def benchmark_online_tracking():
