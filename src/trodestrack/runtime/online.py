@@ -344,11 +344,15 @@ class OnlineTracker:
         timestamps = jnp.zeros(n_measurements)
 
         # Vectorized assignment (more JAX-friendly)
-        for i, (accel, gyro, timestamp) in enumerate(imu_measurements):
+        measurements = []
+        ts = []
+        for accel, gyro, timestamp in imu_measurements:
             measurement = jnp.concatenate([accel[:3], gyro[:3]])
-            imu_data = imu_data.at[i].set(measurement)
-            timestamps = timestamps.at[i].set(timestamp)
+            measurements.append(measurement)
+            ts.append(timestamp)
 
+        imu_data = jnp.stack(measurements) if measurements else jnp.zeros((0, 6))
+        timestamps = jnp.array(ts) if ts else jnp.array([])
         return imu_data, timestamps
 
 
