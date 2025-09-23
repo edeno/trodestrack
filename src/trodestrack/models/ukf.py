@@ -349,9 +349,14 @@ def _ukf_update_position_only(
     # State and covariance update (conditional on gating)
     updated_state = jnp.where(gated, ukf_state.state, ukf_state.state + K @ innovation)
 
-    updated_covariance = jnp.where(
-        gated, ukf_state.covariance, ukf_state.covariance - K @ innovation_cov @ K.T
-    )
+    # Joseph-form covariance update for PSD preservation
+    identity = jnp.eye(ukf_state.covariance.shape[-1], dtype=ukf_state.covariance.dtype)
+    # H for position measurements is [I 0; 0 0] (identity for position, zeros elsewhere)
+    H_pos = jnp.zeros((2, 8))
+    H_pos = H_pos.at[:2, :2].set(jnp.eye(2))
+    I_KH = identity - K @ H_pos
+    joseph_covariance = I_KH @ ukf_state.covariance @ I_KH.T + K @ innovation_cov @ K.T
+    updated_covariance = jnp.where(gated, ukf_state.covariance, joseph_covariance)
 
     # Log-likelihood update
     log_det_S = jnp.linalg.slogdet(innovation_cov)[1]
@@ -440,9 +445,15 @@ def _ukf_update_position_heading(
     # State and covariance update (conditional on gating)
     updated_state = jnp.where(gated, ukf_state.state, ukf_state.state + K @ innovation)
 
-    updated_covariance = jnp.where(
-        gated, ukf_state.covariance, ukf_state.covariance - K @ innovation_cov @ K.T
-    )
+    # Joseph-form covariance update for PSD preservation
+    identity = jnp.eye(ukf_state.covariance.shape[-1], dtype=ukf_state.covariance.dtype)
+    # H for position+heading measurements is [I 0 0; 0 0 I] (identity for pos, heading, zeros elsewhere)
+    H_poshead = jnp.zeros((3, 8))
+    H_poshead = H_poshead.at[:2, :2].set(jnp.eye(2))  # position
+    H_poshead = H_poshead.at[2, 4].set(1.0)  # heading
+    I_KH = identity - K @ H_poshead
+    joseph_covariance = I_KH @ ukf_state.covariance @ I_KH.T + K @ innovation_cov @ K.T
+    updated_covariance = jnp.where(gated, ukf_state.covariance, joseph_covariance)
 
     # Log-likelihood update
     log_det_S = jnp.linalg.slogdet(innovation_cov)[1]

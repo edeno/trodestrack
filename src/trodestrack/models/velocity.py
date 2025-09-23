@@ -179,18 +179,16 @@ def velocity_pseudo_measurement_update(
     # Innovation (measurement residual)
     innovation = observed_velocity - predicted_velocity
 
-    # Innovation covariance: S = H P H^T + R
-    innovation_cov = H @ state_covariance @ H.T + velocity_noise
-
     # Kalman gain: K = P H^T S^-1
     K = kalman_gain(state_covariance, H, velocity_noise)
 
     # State update: x+ = x- + K * innovation
     updated_state_array = state_array + K @ innovation
 
-    # Covariance update: P+ = (I - K H) P-
-    I = jnp.eye(8)
-    updated_covariance = (I - K @ H) @ state_covariance
+    # Joseph-form covariance update for PSD preservation: P+ = (I - K H) P (I - K H)^T + K R K^T
+    identity = jnp.eye(8)
+    I_KH = identity - K @ H
+    updated_covariance = I_KH @ state_covariance @ I_KH.T + K @ velocity_noise @ K.T
 
     # Convert back to State2D
     updated_state = array_to_state(updated_state_array)
