@@ -9,6 +9,7 @@ import time
 import tempfile
 from pathlib import Path
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 
@@ -120,7 +121,8 @@ def benchmark_offline_smoothing():
 
             # Demonstrate safe_solve usage for covariance computations
             # (Example: could be used for uncertainty propagation)
-            A = jnp.eye(2) + jnp.random.normal(0, 0.01, (2, 2))
+            key = jax.random.PRNGKey(42)
+            A = jnp.eye(2) + jax.random.normal(key, (2, 2)) * 0.01
             b = jnp.array([1.0, 1.0])
             x = safe_solve(A + jnp.eye(A.shape[0]) * 1e-6, b)
             print(

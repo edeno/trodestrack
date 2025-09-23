@@ -84,6 +84,17 @@ def create_parser() -> argparse.ArgumentParser:
         "--arena-height", type=float, default=150.0, help="Arena height in cm (default: 150.0)"
     )
 
+    # Benchmark command
+    benchmark_parser = subparsers.add_parser(
+        "benchmark", help="Run performance benchmarks"
+    )
+    benchmark_parser.add_argument(
+        "--type",
+        choices=["simple", "optimizations", "all"],
+        default="all",
+        help="Type of benchmark to run (default: all)",
+    )
+
     return parser
 
 
@@ -270,6 +281,31 @@ def cmd_calib_homography(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_benchmark(args: argparse.Namespace) -> int:
+    """Execute benchmark command."""
+    try:
+        logger.info(f"Running benchmarks: {args.type}")
+
+        # Import benchmark functions
+        from ..qa.benchmarks import run_simple_jax_benchmark, run_jax_optimizations_benchmark
+
+        if args.type in ["simple", "all"]:
+            logger.info("Running simple JAX benchmark")
+            run_simple_jax_benchmark()
+
+        if args.type in ["optimizations", "all"]:
+            logger.info("Running JAX optimizations benchmark")
+            run_jax_optimizations_benchmark()
+
+        logger.info("Benchmarks completed successfully")
+        return 0
+
+    except Exception as e:
+        logger.error(f"Error in benchmark command: {e}")
+        logger.exception("Full traceback:")
+        return 1
+
+
 def setup_logging(verbose: bool = False, quiet: bool = False) -> None:
     """Configure logging based on verbosity flags."""
     if quiet:
@@ -301,6 +337,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "online": cmd_online,
         "report": cmd_report,
         "calib-homography": cmd_calib_homography,
+        "benchmark": cmd_benchmark,
     }
 
     handler = command_handlers.get(args.command)

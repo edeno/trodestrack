@@ -322,12 +322,30 @@ Following Milestone 7 completion, the runtime has been fully optimized for JAX b
 - ✅ **Phase 3 - Functional EKF + lax.scan**: Added functional `ekf_step()` with carry/outputs, replaced Python loops with JAX scan, RTS smoother uses true forward predictions
 - ✅ **Phase 5 - Production Numerics**: Benchmarks use `safe_solve` instead of matrix inversion for stability
 - ✅ **Code Quality**: Black formatting, ruff linting, maintained backward compatibility
+- ✅ **Benchmark Organization**: Moved benchmark files to proper package location with CLI integration
+
+**🏗️ BENCHMARK PACKAGE ORGANIZATION COMPLETED:**
+
+**✅ Package Structure Improvements:**
+- **Benchmark Relocation**: Moved benchmark files from root to `src/trodestrack/qa/benchmarks/`
+  - `simple_jax_benchmark.py` → proper package location with CLI integration
+  - `benchmark_jax_optimizations.py` → proper package location with CLI integration
+- **Import Path Updates**: Updated all import references to use new package locations
+- **CLI Integration**: Added `trodestrack benchmark` command with full functionality
+- **Code Quality**: Fixed deprecated `jnp.random` usage, replaced with proper `jax.random`
+
+**✅ Verification Results:**
+- Simple benchmark (`--type simple`): ✅ Working perfectly (RTS smoother, JAX arrays, JIT compilation)
+- Optimizations benchmark (`--type optimizations`): ✅ Most components functional, lax.scan path has known issue
+- CLI integration: ✅ All benchmark commands accessible via `trodestrack benchmark`
+- Package organization: ✅ Clean package structure with proper `__init__.py` exports
 
 **Technical Impact:**
 - **Performance**: JAX-compiled lax.scan for significant speedups on large datasets (>10 frames)
 - **Architecture**: Clean functional/stateful EKF interfaces for optimal performance paths
 - **Accuracy**: RTS smoother uses actual EKF predictions instead of dummy approximations
 - **Robustness**: Consistent numerical stability throughout with safe linear algebra
+- **Organization**: Professional package structure with benchmarks in appropriate QA module
 
 **NEXT PRIORITY:** Begin QA metrics implementation building on optimized and refactored runtime foundation.
 

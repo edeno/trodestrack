@@ -423,8 +423,15 @@ def _run_filtering_pass_scan(
 
         meas_structs.append(meas_struct)
 
-    # Create scan inputs: (meas_struct, dt, imu_block, filter_cfg)
-    scan_inputs = (meas_structs, dts, imu_blocks, [filter_cfg] * n_frames)
+    # Create scan inputs for lax.scan: each input should be properly batched
+    # Note: meas_structs and filter_cfgs stay as lists since they contain heterogeneous data
+    # dts and imu_blocks can be JAX arrays
+    filter_cfgs = [filter_cfg] * n_frames
+
+    # Convert to proper scan input structure
+    # For lax.scan, we need to pass each element as a separate component that gets
+    # indexed during the scan operation
+    scan_inputs = (meas_structs, dts, imu_blocks, filter_cfgs)
 
     # Initial carry state
     carry0 = EkfCarry(x=initial_state, P=initial_covariance)
