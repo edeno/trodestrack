@@ -100,8 +100,23 @@ def cmd_smooth(args: argparse.Namespace) -> int:
         logger.info(f"Output directory: {config.output.output_dir}")
         logger.info(f"Filter type: {config.filter.filter_type}")
 
-        # TODO: Implement actual smoothing pipeline
-        logger.warning("Offline smoothing pipeline not yet implemented")
+        # Import and run smoothing pipeline
+        from ..runtime.offline import smooth_session
+
+        logger.info("Starting offline smoothing pipeline")
+        result = smooth_session(config)
+
+        # Print summary
+        n_frames = len(result.filtered_states)
+        duration = result.timestamps[-1] - result.timestamps[0]
+        logger.info(f"Smoothing completed successfully:")
+        logger.info(f"  - Processed {n_frames} frames over {duration:.1f} seconds")
+        logger.info(f"  - Final log-likelihood: {result.log_likelihood:.2f}")
+
+        if 'smoothing_improvement' in result.diagnostics:
+            improvement = result.diagnostics['smoothing_improvement']['position_rmse_improvement_cm']
+            logger.info(f"  - Position smoothing improvement: {improvement:.3f} cm RMS")
+
         return 0
 
     except FileNotFoundError as e:
@@ -109,6 +124,7 @@ def cmd_smooth(args: argparse.Namespace) -> int:
         return 1
     except Exception as e:
         logger.error(f"Error in smooth command: {e}")
+        logger.exception("Full traceback:")
         return 1
 
 
@@ -120,8 +136,52 @@ def cmd_online(args: argparse.Namespace) -> int:
         logger.info(f"Loading session config from: {args.config}")
         logger.info(f"Starting online tracker with {config.filter.filter_type}")
 
-        # TODO: Implement actual online tracker
-        logger.warning("Online tracking not yet implemented")
+        # Import streaming tracker
+        from ..runtime.online import StreamingTracker
+        from ..io.loaders import load_video_detections, load_imu_data
+
+        # Create streaming tracker
+        tracker = StreamingTracker(config)
+
+        # Load data for demonstration (in real use, this would be live streams)
+        video_data = None
+        imu_data = None
+
+        if config.video_file is not None:
+            logger.info(f"Loading video data from: {config.video_file}")
+            video_data = load_video_detections(config.video_file)
+
+        if config.imu_file is not None:
+            logger.info(f"Loading IMU data from: {config.imu_file}")
+            imu_data = load_imu_data(config.imu_file)
+
+        # Process data streams
+        results = tracker.process_data_streams(video_data, imu_data)
+
+        # Print summary
+        performance = tracker.get_performance_summary()
+        logger.info("Online tracking completed:")
+        logger.info(f"  - Processed {performance.get('total_frames', 0)} frames")
+        logger.info(f"  - Average processing time: {performance.get('avg_processing_time_ms', 0):.2f} ms")
+        logger.info(f"  - Gating rate: {performance.get('gating_rate', 0)*100:.1f}%")
+
+        if performance.get('frames_per_second'):
+            logger.info(f"  - Processing rate: {performance['frames_per_second']:.1f} FPS")
+
+        # Save results if output directory specified
+        if config.output.save_states:
+            states, timestamps = tracker.get_state_estimates()
+            output_dir = config.output.output_dir
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            import numpy as np
+            np.savez(
+                output_dir / "online_states.npz",
+                states=np.array(states),
+                timestamps=np.array(timestamps),
+            )
+            logger.info(f"Results saved to: {output_dir}")
+
         return 0
 
     except FileNotFoundError as e:
@@ -129,6 +189,7 @@ def cmd_online(args: argparse.Namespace) -> int:
         return 1
     except Exception as e:
         logger.error(f"Error in online command: {e}")
+        logger.exception("Full traceback:")
         return 1
 
 
