@@ -85,14 +85,15 @@ def smooth_session(config: SessionConfig) -> SmoothingResult:
 
     # Run filtering pass
     logger.info("Running EKF filtering pass")
-    filtered_states, filtered_covariances, frame_timestamps = _run_filtering_pass(
+    filtered_states, filtered_covariances, frame_timestamps, predicted_states, predicted_covariances = _run_filtering_pass(
         ekf_filter, config, video_data, imu_data, sync_info
     )
 
     # Run smoothing pass
     logger.info("Running RTS smoothing pass")
     smoothed_states, smoothed_covariances = _run_smoothing_pass(
-        filtered_states, filtered_covariances, config, imu_data, frame_timestamps
+        filtered_states, filtered_covariances, predicted_states, predicted_covariances,
+        config, imu_data, frame_timestamps
     )
 
     # Collect diagnostics
@@ -209,7 +210,7 @@ def _run_filtering_pass(
     video_data: Optional[dict],
     imu_data: Optional[dict],
     sync_info: dict,
-) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     """Run the forward filtering pass with EKF."""
 
     # Determine frame timestamps
@@ -242,13 +243,15 @@ def _run_filtering_pass_direct(
     video_data: Optional[dict],
     imu_data: Optional[dict],
     frame_timestamps: jnp.ndarray,
-) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     """Direct filtering implementation for small datasets or debugging."""
     n_frames = len(frame_timestamps)
 
     # Storage for results
     filtered_states = []
     filtered_covariances = []
+    predicted_states = []
+    predicted_covariances = []
 
     prev_timestamp = frame_timestamps[0]
 
@@ -257,6 +260,12 @@ def _run_filtering_pass_direct(
             logger.info(f"Processing frame {i+1}/{n_frames}")
 
         dt = timestamp - prev_timestamp
+
+        # Store pre-prediction state for RTS
+        if i == 0:
+            # First frame: predicted = current (no prior prediction)
+            predicted_states.append(state_to_array(ekf_filter.get_current_state()))
+            predicted_covariances.append(ekf_filter.get_current_covariance())
 
         # Prediction step with IMU if available
         if imu_data is not None and dt > 0:
@@ -289,6 +298,11 @@ def _run_filtering_pass_direct(
 
             ekf_filter.predict(dt, avg_accel, avg_gyro)
 
+        # Store prediction (after predict but before update)
+        if i > 0:
+            predicted_states.append(state_to_array(ekf_filter.get_current_state()))
+            predicted_covariances.append(ekf_filter.get_current_covariance())
+
         # Update step with video measurements if available
         if video_data is not None and i < len(video_data['positions']):
             position = video_data['positions'][i]
@@ -309,7 +323,7 @@ def _run_filtering_pass_direct(
                 confidence=confidence,
             )
 
-        # Store results
+        # Store filtered results
         current_state = ekf_filter.get_current_state()
         filtered_states.append(state_to_array(current_state))
         filtered_covariances.append(ekf_filter.get_current_covariance())
@@ -320,6 +334,8 @@ def _run_filtering_pass_direct(
         jnp.stack(filtered_states),
         jnp.stack(filtered_covariances),
         frame_timestamps,
+        jnp.stack(predicted_states),
+        jnp.stack(predicted_covariances),
     )
 
 
@@ -329,7 +345,7 @@ def _run_filtering_pass_scan(
     video_data: dict,
     imu_data: Optional[dict],
     frame_timestamps: jnp.ndarray,
-) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     """JAX-optimized filtering implementation using lax.scan."""
     n_frames = len(frame_timestamps)
     logger.info(f"Using JAX-optimized filtering for {n_frames} frames")
@@ -405,11 +421,13 @@ def _run_filtering_pass_scan(
     # Run lax.scan with the functional EKF step
     final_carry, outputs = lax.scan(ekf_step, carry0, scan_inputs)
 
-    # Extract results
+    # Extract results (both filtered and predicted for RTS)
     filtered_states = outputs.x_filt
     filtered_covariances = outputs.P_filt
+    predicted_states = outputs.x_pred
+    predicted_covariances = outputs.P_pred
 
-    return filtered_states, filtered_covariances, frame_timestamps
+    return filtered_states, filtered_covariances, frame_timestamps, predicted_states, predicted_covariances
 
 
 def _prepare_imu_blocks_for_frames(
@@ -465,6 +483,8 @@ def _prepare_imu_blocks_for_frames(
 def _run_smoothing_pass(
     filtered_states: jnp.ndarray,
     filtered_covariances: jnp.ndarray,
+    predicted_states: jnp.ndarray,
+    predicted_covariances: jnp.ndarray,
     config: SessionConfig,
     imu_data: Optional[dict],
     frame_timestamps: jnp.ndarray,
@@ -472,42 +492,14 @@ def _run_smoothing_pass(
     """Run the backward smoothing pass with RTS smoother."""
 
     if config.filter.filter_type == "ekf":
-        logger.info("Running JAX-optimized RTS smoothing")
+        logger.info("Running JAX-optimized RTS smoothing with true forward predictions")
 
-        # Use the full RTS smoother implementation with lax.scan
-        n_frames = len(filtered_states)
-
-        # Create predicted states using simple dynamics for RTS
-        # In a full implementation, these would come from the forward pass
-        predicted_states = []
-        predicted_covariances = []
-
-        for i in range(n_frames):
-            if i == 0:
-                # First frame: predicted = filtered (no prior prediction)
-                predicted_states.append(filtered_states[i])
-                predicted_covariances.append(filtered_covariances[i])
-            else:
-                # Simple prediction for RTS (in full implementation, this comes from forward pass)
-                dt = frame_timestamps[i] - frame_timestamps[i-1]
-
-                # Simple constant velocity prediction
-                A = jnp.eye(8)
-                A = A.at[0, 2].set(dt)  # x += vx * dt
-                A = A.at[1, 3].set(dt)  # y += vy * dt
-
-                pred_state = A @ filtered_states[i-1]
-                pred_cov = A @ filtered_covariances[i-1] @ A.T + jnp.eye(8) * 1e-6
-
-                predicted_states.append(pred_state)
-                predicted_covariances.append(pred_cov)
-
-        # Create forward pass data for RTS
+        # Create forward pass data for RTS using true predictions from EKF forward pass
         forward_data = ForwardPassData(
             filtered_states=list(filtered_states),
             filtered_covariances=list(filtered_covariances),
-            predicted_states=predicted_states,
-            predicted_covariances=predicted_covariances,
+            predicted_states=list(predicted_states),
+            predicted_covariances=list(predicted_covariances),
             log_likelihood=0.0  # Not used in offline context
         )
 
