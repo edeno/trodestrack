@@ -358,7 +358,7 @@ class TestStreamingTracker:
         }
 
         # Process data
-        results = tracker.process_data_streams(video_data=video_data)
+        _ = tracker.process_data_streams(video_data=video_data)
 
         # Get performance summary
         summary = tracker.get_performance_summary()

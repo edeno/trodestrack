@@ -7,6 +7,7 @@ RMSE by ≥20% vs EKF on synthetic "twitchy" sessions with rapid motion changes.
 import jax.numpy as jnp
 import numpy as np
 
+import trodestrack.sim.synthetic as synthetic_module
 from trodestrack.models.ekf import EKFFilter
 from trodestrack.models.rts_smoother import RTSSmoother, compute_smoothing_improvement
 from trodestrack.sim.synthetic import SimConfig, generate_synthetic_session
@@ -471,7 +472,7 @@ def _generate_twitchy_trajectory(self):
 
 
 # Monkey patch the trajectory generation to support twitchy motion
-import trodestrack.sim.synthetic as synthetic_module
+
 
 original_generate_trajectory = synthetic_module.SyntheticSessionResult._generate_trajectory
 

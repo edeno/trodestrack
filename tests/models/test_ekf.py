@@ -466,7 +466,7 @@ class TestEKFLinearCase:
             filter.predict(dt=0.1, accel=jnp.zeros(2), gyro=jnp.zeros(1))
 
             # Update with measurement
-            result = filter.update(position=measurement, confidence=1.0)
+            _ = filter.update(position=measurement, confidence=1.0)
             log_likelihoods.append(filter.get_log_likelihood())
 
         # Final state should be close to last measurement (with some smoothing)

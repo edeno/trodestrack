@@ -483,12 +483,6 @@ class TestGoldenMotionProfiles:
         # JAX implementation
         jax_result = preintegrate_imu_scan(imu_data, timestamps)
 
-        # These are the expected values from a known-good implementation
-        # (These would be established once and then used for regression testing)
-        expected_delta_position = jnp.array([1.234567, -0.987654])  # Placeholder values
-        expected_delta_velocity = jnp.array([2.345678, 1.876543])  # Placeholder values
-        expected_delta_heading = 0.567890  # Placeholder value
-
         # Note: In practice, these expected values would be computed once using the
         # high-resolution baseline and then stored as reference values
 

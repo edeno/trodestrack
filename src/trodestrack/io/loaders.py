@@ -134,7 +134,6 @@ def _load_video_csv(file_path: Path) -> Dict[str, Any]:
         raise ValueError(f"Failed to read CSV file {file_path}: {e}")
 
     # Try to detect column structure
-    required_cols = []
     timestamp_col = None
     x_col = None
     y_col = None

@@ -171,7 +171,6 @@ class TestLEDValidation:
         # 3-4-5 triangle: 3 and 4 sides, hypotenuse is 5
         led_front = jnp.array([103.0, 204.0])
         led_back = jnp.array([100.0, 200.0])
-        distance = jnp.sqrt(9 + 16)  # sqrt(3² + 4²) = 5
         expected_spacing = 5.0
         tolerance = 0.5
 

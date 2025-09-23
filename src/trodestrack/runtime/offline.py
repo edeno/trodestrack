@@ -19,9 +19,9 @@ from ..config.schemas import SessionConfig
 from ..geom.homography import transform_points_pixel_to_cm
 from ..imu.preintegration import preintegrate_between_frames
 from ..io.loaders import load_imu_data, load_video_detections
-from ..models.ekf import EkfCarry, EKFFilter, ekf_step, ekf_step_arrays
+from ..models.ekf import EkfCarry, EKFFilter, ekf_step_arrays
 from ..models.rts_smoother import ForwardPassData, rts_smooth
-from ..models.state import State2D, create_initial_state, state_to_array
+from ..models.state import State2D, create_initial_state
 
 logger = logging.getLogger(__name__)
 
@@ -353,7 +353,6 @@ def _prepare_imu_blocks_for_frames(
     config: SessionConfig,
 ) -> jnp.ndarray:
     """Prepare IMU measurement blocks for each frame using pre-integration."""
-    n_frames = len(frame_timestamps)
     imu_blocks = []
 
     prev_timestamp = frame_timestamps[0]

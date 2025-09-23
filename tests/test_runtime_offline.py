@@ -214,7 +214,7 @@ class TestOfflineSmoothing:
             basic_config.video_file = video_file
 
             # Run smoothing
-            result = smooth_session(basic_config)
+            _ = smooth_session(basic_config)
 
             # Check output files
             output_dir = basic_config.output.output_dir

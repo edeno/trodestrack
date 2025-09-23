@@ -272,7 +272,6 @@ class TestSmoothingImprovement:
     def test_perfect_case(self):
         """Test improvement computation when smoothed equals ground truth."""
         n_steps = 5
-        n_dim = 8
 
         # Ground truth
         ground_truth = [jnp.array([i, i, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0]) for i in range(n_steps)]

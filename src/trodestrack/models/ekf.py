@@ -559,7 +559,6 @@ def ekf_step_arrays(
     # Check if we have any valid measurements
     has_position = pos_mask
     has_heading = head_mask
-    has_any_measurement = has_position | has_heading
 
     # Perform measurement update only if we have measurements
     # For simplicity, we'll handle position-only and position+heading cases

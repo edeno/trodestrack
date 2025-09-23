@@ -206,7 +206,7 @@ class OnlineTracker:
 
             if len(imu_data) > 1:
                 # Get current state for pre-integration
-                current_state = self._ekf_filter.get_current_state()
+                _ = self._ekf_filter.get_current_state()
 
                 # Compute average IMU measurements for prediction
                 avg_accel = jnp.mean(imu_data[:, :2], axis=0)  # [ax, ay]
@@ -480,7 +480,7 @@ class StreamingTracker:
         tracker_stats = self.tracker.get_performance_stats()
 
         if self.results:
-            processing_times = [result.processing_time_ms for result in self.results]
+            _ = [result.processing_time_ms for result in self.results]
             innovations = [
                 jnp.linalg.norm(result.innovation) if len(result.innovation) > 0 else 0.0
                 for result in self.results
