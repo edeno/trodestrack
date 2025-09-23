@@ -103,31 +103,76 @@ def rts_smooth(
 ) -> RTSResult:
     """Perform RTS smoothing on forward pass results.
 
-    The RTS smoother runs a backward pass through the filtered estimates,
-    incorporating information from future measurements to improve past estimates.
+    This is a wrapper around the pure JIT-compiled rts_smooth_pure function.
+    Use rts_smooth_pure for optimal performance when calling repeatedly.
+    """
+    return rts_smooth_pure(
+        forward_data.filtered_states,
+        forward_data.filtered_covariances,
+        forward_data.predicted_states,
+        forward_data.predicted_covariances,
+        forward_data.log_likelihood
+    )
+
+
+def rts_smooth_pure(
+    filtered_states: jnp.ndarray,
+    filtered_covariances: jnp.ndarray,
+    predicted_states: jnp.ndarray,
+    predicted_covariances: jnp.ndarray,
+    log_likelihood: float,
+) -> RTSResult:
+    """Pure RTS smoothing implementation with optimal JIT compilation.
+
+    Handles empty input case at Python level to avoid JIT shape issues,
+    then delegates to JIT-compiled implementation for computational work.
 
     Args:
-        forward_data: Results from forward filtering pass
+        filtered_states: Filtered state estimates (N, 8)
+        filtered_covariances: Filtered covariances (N, 8, 8)
+        predicted_states: Predicted state estimates (N, 8)
+        predicted_covariances: Predicted covariances (N, 8, 8)
+        log_likelihood: Forward pass log-likelihood
 
     Returns:
         RTSResult with smoothed states and covariances
     """
-    N = forward_data.filtered_states.shape[0]
+    N = filtered_states.shape[0]
 
+    # Handle empty input at Python level to avoid JIT shape compatibility issues
     if N == 0:
-        # Return empty arrays with correct shapes
         state_dim = 8  # trodestrack uses 8-dimensional state
         return RTSResult(
             smoothed_states=jnp.array([]).reshape(0, state_dim),
             smoothed_covariances=jnp.array([]).reshape(0, state_dim, state_dim),
-            log_likelihood=forward_data.log_likelihood
+            log_likelihood=log_likelihood
         )
 
-    # Data is already JAX arrays from ForwardPassData
-    filtered_states = forward_data.filtered_states
-    filtered_covariances = forward_data.filtered_covariances
-    predicted_states = forward_data.predicted_states
-    predicted_covariances = forward_data.predicted_covariances
+    # Delegate to JIT-compiled implementation for non-empty case
+    return _rts_smooth_impl(filtered_states, filtered_covariances, predicted_states, predicted_covariances, log_likelihood)
+
+
+@jax.jit
+def _rts_smooth_impl(
+    filtered_states: jnp.ndarray,
+    filtered_covariances: jnp.ndarray,
+    predicted_states: jnp.ndarray,
+    predicted_covariances: jnp.ndarray,
+    log_likelihood: float,
+) -> RTSResult:
+    """Internal JAX-compiled RTS smoothing implementation.
+
+    Args:
+        filtered_states: Filtered state estimates (N, 8)
+        filtered_covariances: Filtered covariances (N, 8, 8)
+        predicted_states: Predicted state estimates (N, 8)
+        predicted_covariances: Predicted covariances (N, 8, 8)
+        log_likelihood: Forward pass log-likelihood
+
+    Returns:
+        RTSResult with smoothed states and covariances
+    """
+    N = filtered_states.shape[0]
 
     # Initialize output arrays (JAX-compatible)
     smoothed_states = jnp.zeros_like(filtered_states)
@@ -172,7 +217,7 @@ def rts_smooth(
     return RTSResult(
         smoothed_states=smoothed_states,
         smoothed_covariances=smoothed_covariances,
-        log_likelihood=forward_data.log_likelihood,
+        log_likelihood=log_likelihood,
     )
 
 

@@ -13,11 +13,14 @@ from .dynamics import (
     predict_state,
 )
 from .ekf import (
+    EkfCarry,
     EKFFilter,
     EKFResult,
     EKFState,
+    create_ekf_step_arrays_optimized,
     create_initial_ekf_state,
     ekf_predict,
+    ekf_step_arrays_pure,
     ekf_update,
 )
 from .gating import (
@@ -42,6 +45,7 @@ from .measurements import (
 from .rts_smoother import (
     ForwardPassData,
     RTSResult,
+    rts_smooth_pure,
     RTSSmoother,
     compute_smoothing_improvement,
     rts_backward_step,
@@ -112,12 +116,15 @@ __all__ = [
     "should_use_velocity_constraint",
     "compute_velocity_from_recent_positions",
     # Kalman Filtering
+    "EkfCarry",
     "EKFState",
     "EKFResult",
     "EKFFilter",
     "ekf_predict",
     "ekf_update",
     "create_initial_ekf_state",
+    "ekf_step_arrays_pure",
+    "create_ekf_step_arrays_optimized",
     # Unscented Kalman Filtering
     "UKFState",
     "UKFResult",
@@ -132,6 +139,7 @@ __all__ = [
     "RTSSmoother",
     "ForwardPassData",
     "rts_smooth",
+    "rts_smooth_pure",
     "rts_backward_step",
     "compute_smoothing_improvement",
     # Cached EKF

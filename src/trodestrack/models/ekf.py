@@ -791,7 +791,6 @@ def _pytree_measurement_update(
     return x_update, P_update
 
 
-@jax.jit
 def ekf_step_arrays(
     carry: EkfCarry,
     inp: Tuple[
@@ -812,6 +811,175 @@ def ekf_step_arrays(
     ],
 ) -> Tuple[EkfCarry, EkfOutputs]:
     """JAX-compatible EKF step for lax.scan using structured arrays.
+
+    NOTE: Not JIT-compiled to allow for static argument optimization at call site.
+    Use ekf_step_arrays_pure() for pure JIT-compiled version or
+    ekf_step_arrays_optimized() for version with static filter parameters.
+    """
+    return ekf_step_arrays_pure(carry, inp)
+
+
+def create_ekf_step_arrays_optimized(
+    velocity_damping: float,
+    accel_noise_std: float,
+    gyro_noise_std: float,
+    bias_drift_std: float,
+    position_noise_std: float,
+    heading_noise_std: float,
+    gate_threshold: float,
+):
+    """Create optimized EKF step function with static filter parameters.
+
+    This creates a JIT-compiled function with filter parameters as static arguments,
+    providing optimal performance by eliminating redundant parameter passing.
+
+    Args:
+        velocity_damping: Velocity damping coefficient
+        accel_noise_std: Accelerometer noise std
+        gyro_noise_std: Gyroscope noise std
+        bias_drift_std: Bias drift std
+        position_noise_std: Position noise std
+        heading_noise_std: Heading noise std
+        gate_threshold: Gating threshold
+
+    Returns:
+        JIT-compiled EKF step function with static parameters
+    """
+
+    @jax.jit
+    def ekf_step_arrays_optimized(
+        carry: EkfCarry,
+        inp: Tuple[jnp.ndarray, float, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray],
+    ) -> Tuple[EkfCarry, EkfOutputs]:
+        """Optimized EKF step with static filter parameters.
+
+        Args:
+            carry: Current EKF state (x, P)
+            inp: Input tuple (position, dt, imu_block, heading, confidence, pos_mask, head_mask)
+
+        Returns:
+            Tuple of (new_carry, outputs)
+        """
+        x, P = carry
+        position, dt, imu_block, heading, confidence, pos_mask, head_mask = inp
+
+        # Prediction step
+        accel = imu_block[:2]  # [ax, ay]
+        gyro = imu_block[2:]  # [gz]
+
+        x_pred = _predict_state_jax(x, dt, accel, gyro, velocity_damping)
+
+        # Predict covariance using linearized dynamics
+        process_noise = compute_process_noise(dt, accel_noise_std, gyro_noise_std, bias_drift_std)
+        P_pred = predict_covariance(P, x, dt, accel, gyro, velocity_damping, process_noise)
+
+        # Default to prediction (no measurement update)
+        x_filt = x_pred
+        P_filt = P_pred
+
+        # Check if we have any valid measurements
+        has_position = pos_mask
+        has_heading = head_mask
+
+        # Create a full measurement vector (always 3 elements: [x, y, heading])
+        measurement = jnp.array([
+            jnp.where(has_position, position[0], x_pred[0]),  # x position
+            jnp.where(has_position, position[1], x_pred[1]),  # y position
+            jnp.where(has_heading, heading, x_pred[4]),  # heading
+        ])
+
+        # Apply measurement update only if we have position measurements
+        def apply_measurement_update():
+            # Create measurement noise - scale by confidence
+            pos_noise_var = (position_noise_std / confidence) ** 2
+
+            # Always use 3D measurement format: [x, y, heading]
+            noise_diag = jnp.array([
+                jnp.where(has_position, pos_noise_var, 1e6),  # Large noise for missing position
+                jnp.where(has_position, pos_noise_var, 1e6),
+                jnp.where(has_heading, heading_noise_std**2, 1e6),  # Large noise for missing heading
+            ])
+            measurement_noise_matrix = jnp.diag(noise_diag)
+
+            # Measurement function: h(x) = [x[0], x[1], x[4]] (position + heading)
+            H = jnp.array([
+                [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # x position
+                [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # y position
+                [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],  # heading
+            ])
+
+            # Predicted measurement
+            h_pred = H @ x_pred  # [x, y, theta]
+
+            # Innovation (residual)
+            innovation = measurement - h_pred
+
+            # Wrap heading innovation to [-π, π]
+            innovation = innovation.at[2].set(
+                jnp.remainder(innovation[2] + jnp.pi, 2 * jnp.pi) - jnp.pi
+            )
+
+            # Innovation covariance
+            S = H @ P_pred @ H.T + measurement_noise_matrix
+
+            # Kalman gain using pseudoinverse for robustness
+            K = P_pred @ H.T @ jnp.linalg.pinv(S)
+
+            # State update
+            x_update = x_pred + K @ innovation
+
+            # Covariance update (Joseph form for numerical stability)
+            I_KH = jnp.eye(8) - K @ H
+            P_update = I_KH @ P_pred @ I_KH.T + K @ measurement_noise_matrix @ K.T
+
+            return x_update, P_update
+
+        def no_measurement_update():
+            return x_pred, P_pred
+
+        # Use conditional execution for JAX compatibility
+        x_filt, P_filt = jax.lax.cond(has_position, apply_measurement_update, no_measurement_update)
+
+        # Create outputs
+        outputs = EkfOutputs(
+            x_filt=x_filt,
+            P_filt=P_filt,
+            x_pred=x_pred,
+            P_pred=P_pred,
+        )
+
+        # Create new carry state
+        new_carry = EkfCarry(x=x_filt, P=P_filt)
+
+        return new_carry, outputs
+
+    return ekf_step_arrays_optimized
+
+
+@jax.jit
+def ekf_step_arrays_pure(
+    carry: EkfCarry,
+    inp: Tuple[
+        jnp.ndarray,
+        float,
+        jnp.ndarray,
+        jnp.ndarray,
+        jnp.ndarray,
+        jnp.ndarray,
+        jnp.ndarray,
+        float,
+        float,
+        float,
+        float,
+        float,
+        float,
+        float,
+    ],
+) -> Tuple[EkfCarry, EkfOutputs]:
+    """Pure JAX-compiled EKF step for lax.scan using structured arrays.
+
+    This is the core computational kernel that should be JIT-compiled.
+    All parameters are explicit to enable optimal caching and avoid closures.
 
     Args:
         carry: Current EKF state (x, P)

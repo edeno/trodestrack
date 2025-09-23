@@ -19,7 +19,7 @@ from jax import lax
 from ..config.schemas import SessionConfig
 from ..geom.homography import transform_points_pixel_to_cm
 from ..io.loaders import load_imu_data, load_video_detections
-from ..models.ekf import EkfCarry, EKFFilter, ekf_step_pytree
+from ..models.ekf import EkfCarry, EKFFilter, ekf_step_pytree, create_ekf_step_arrays_optimized
 from ..models.rts_smoother import ForwardPassData, rts_smooth
 from ..models.state import State2D, create_initial_state
 
@@ -331,6 +331,12 @@ def _run_filtering_pass_consistent(
     carry0 = EkfCarry(x=initial_state, P=initial_covariance)
 
     # Run lax.scan with the functional PyTree EKF step
+    # For optimal performance, you could also use:
+    # ekf_step_optimized = create_ekf_step_arrays_optimized(
+    #     velocity_damping, accel_noise_std, gyro_noise_std, bias_drift_std,
+    #     position_noise_std, heading_noise_std, gate_threshold
+    # )
+    # and then use a simplified scan_inputs without the repeated filter parameters
     final_carry, outputs = lax.scan(ekf_step_pytree, carry0, scan_inputs)
 
     # Extract results (both filtered and predicted for RTS)
