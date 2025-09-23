@@ -66,6 +66,22 @@ from .ukf import (
     generate_sigma_points,
 )
 
+from .rts_smoother import (
+    RTSResult,
+    RTSSmoother,
+    ForwardPassData,
+    rts_smooth,
+    rts_backward_step,
+    compute_smoothing_improvement,
+)
+
+from .cached_ekf import (
+    CachedEKFFilter,
+    CachedComputations,
+    efficient_rts_smooth_with_cache,
+    compute_cache_efficiency_stats,
+)
+
 __all__ = [
     # State representation
     "State2D",
@@ -119,4 +135,16 @@ __all__ = [
     "ukf_update",
     "create_initial_ukf_state",
     "generate_sigma_points",
+    # RTS Smoothing
+    "RTSResult",
+    "RTSSmoother",
+    "ForwardPassData",
+    "rts_smooth",
+    "rts_backward_step",
+    "compute_smoothing_improvement",
+    # Cached EKF
+    "CachedEKFFilter",
+    "CachedComputations",
+    "efficient_rts_smooth_with_cache",
+    "compute_cache_efficiency_stats",
 ]
