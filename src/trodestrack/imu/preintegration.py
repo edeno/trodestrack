@@ -23,6 +23,8 @@ import jax.numpy as jnp
 from jax import Array, lax
 from jax.typing import ArrayLike
 
+from ..models.dynamics import wrap_angle
+
 
 class IMUPreintegrationResult(NamedTuple):
     """Result of IMU pre-integration between two time points.
@@ -70,20 +72,6 @@ class PreintegrationState(NamedTuple):
 
 
 @jax.jit
-def wrap_angle_jax(angle: float) -> float:
-    """Wrap angle to [-π, π] range using JAX operations.
-
-    Parameters
-    ----------
-    angle : float
-        Angle in radians
-
-    Returns
-    -------
-    float
-        Wrapped angle in [-π, π]
-    """
-    return ((angle + jnp.pi) % (2 * jnp.pi)) - jnp.pi
 
 
 @jax.jit
@@ -146,11 +134,11 @@ def preintegration_step(
     accel_corrected = accel_xy - accel_bias
 
     # Update heading using corrected gyroscope
-    new_heading = wrap_angle_jax(state.heading + omega_z_corrected * dt)
+    new_heading = wrap_angle(state.heading + omega_z_corrected * dt)
 
     # Rotate accelerometer measurements to world frame
     # Use heading at middle of interval for better accuracy
-    mid_heading = wrap_angle_jax(state.heading + 0.5 * omega_z_corrected * dt)
+    mid_heading = wrap_angle(state.heading + 0.5 * omega_z_corrected * dt)
     R = rotation_matrix_2d(mid_heading)
     accel_world = R @ accel_corrected
 
@@ -282,7 +270,7 @@ def preintegrate_imu_scan(
     return IMUPreintegrationResult(
         delta_position=delta_position_cm,
         delta_velocity=delta_velocity_cm,
-        delta_heading=wrap_angle_jax(final_state.heading - initial_heading),
+        delta_heading=wrap_angle(final_state.heading - initial_heading),
         dt=total_time,
         n_samples=n_samples,
     )

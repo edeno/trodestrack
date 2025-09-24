@@ -129,9 +129,8 @@ def _compute_nees_vectorized(errors: jnp.ndarray, covariances: jnp.ndarray) -> j
         error, cov = inputs
 
         # NEES = e^T * P^{-1} * e
-        # Use pseudoinverse for numerical stability
-        cov_inv = jnp.linalg.pinv(cov)
-        nees_i = error.T @ cov_inv @ error
+        # Use safe solve for numerical stability (equivalent to error.T @ P^{-1} @ error)
+        nees_i = error.T @ jnp.linalg.solve(cov + 1e-8 * jnp.eye(cov.shape[0]), error)
 
         return carry, nees_i
 
@@ -174,8 +173,8 @@ def compute_position_nees(
         error = pos_errors[i]
         cov = pos_covariances[i]
 
-        cov_inv = jnp.linalg.pinv(cov)
-        nees_i = float(error.T @ cov_inv @ error)
+        # Use safe solve for numerical stability (equivalent to error.T @ P^{-1} @ error)
+        nees_i = float(error.T @ jnp.linalg.solve(cov + 1e-8 * jnp.eye(cov.shape[0]), error))
         nees_values.append(nees_i)
 
     nees_array = jnp.array(nees_values)

@@ -537,7 +537,7 @@ def test_gating_pos_heading_uses_chi2_3d():
 
 def test_units_accel_mps2_to_cmps2():
     ekf = EKFFilter(
-        State2D(x=0, y=0, vx=0, vy=0, theta=0, b_gz=0, b_ax=0, b_ay=0),
+        State2D(x=0.0, y=0.0, vx=0.0, vy=0.0, theta=0.0, b_gz=0.0, b_ax=0.0, b_ay=0.0),
         jnp.eye(8),
         velocity_damping=0.0,
     )
