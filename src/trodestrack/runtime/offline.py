@@ -528,15 +528,19 @@ def _compute_transition_matrices_scan(
         """Single step for computing transition matrix."""
         state_k, frame_timestamp, dt = inputs
 
+        # Guard dt to prevent division by zero or near-zero
+        dt_eff = jnp.maximum(dt, 1e-6)
+
         # Use weighted average around frame timestamp for robustness
         # This avoids hard masking which can cause dynamic shape issues
         time_diffs = jnp.abs(imu_timestamps - frame_timestamp)
-        weights = jnp.exp(-time_diffs / (dt/4))  # Gaussian weighting around frame time
-        weights = weights / (jnp.sum(weights) + 1e-10)  # Normalize with epsilon for stability
+        weights = jnp.exp(-time_diffs / (dt_eff/4))  # Gaussian weighting around frame time
+        weights_sum = jnp.sum(weights) + 1e-10
+        weights_normalized = weights / weights_sum
 
-        # Weighted average of IMU measurements (more robust than hard masking)
-        accel_avg = jnp.average(imu_measurements[:, :2], axis=0, weights=weights)  # ax, ay
-        gyro_avg = jnp.average(imu_measurements[:, 5:6], axis=0, weights=weights)   # gz
+        # Explicit weighted sums for numerical robustness
+        accel_avg = jnp.sum(imu_measurements[:, :2] * weights_normalized[:, None], axis=0)  # ax, ay
+        gyro_avg = jnp.sum(imu_measurements[:, 5:6] * weights_normalized[:, None], axis=0)   # gz
 
         # Compute transition matrix F_k using automatic differentiation
         F_k = compute_state_jacobian(
@@ -711,26 +715,26 @@ def _collect_diagnostics(
         "sync_info": sync_info,
     }
 
-    # Compute RMSE improvement from smoothing
+    # Compute mean change from smoothing (filter vs smoother, not vs ground truth)
     if len(smoothed_states) > 0:
-        position_rmse_improvement = _compute_smoothing_improvement(
+        position_mean_change = _compute_smoothing_mean_change(
             filtered_states[:, :2], smoothed_states[:, :2]
         )
         diagnostics["smoothing_improvement"] = {
-            "position_rmse_improvement_cm": position_rmse_improvement,
+            "position_mean_change_cm": position_mean_change,
         }
 
     return diagnostics
 
 
-def _compute_smoothing_improvement(
+def _compute_smoothing_mean_change(
     filtered_positions: ArrayLike, smoothed_positions: ArrayLike
 ) -> float:
-    """Compute RMS improvement from smoothing."""
+    """Compute mean position change from smoothing (filter vs smoother comparison)."""
     if len(filtered_positions) < 2:
         return 0.0
 
-    # Compute position differences (proxy for improvement)
+    # Compute position differences (mean change, not improvement vs ground truth)
     diff = jnp.linalg.norm(smoothed_positions - filtered_positions, axis=1)
     return float(jnp.mean(diff))
 
