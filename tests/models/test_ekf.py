@@ -484,7 +484,8 @@ class TestEKFLinearCase:
 
 def test_ekf_update_heading_wrap():
     ekf = EKFFilter(
-        initial_state=State2D(x=0, y=0, vx=0, vy=0, theta=3.10, b_gz=0, b_ax=0, b_ay=0), initial_covariance=jnp.eye(8) * 0.1
+        initial_state=State2D(x=0, y=0, vx=0, vy=0, theta=3.10, b_gz=0, b_ax=0, b_ay=0),
+        initial_covariance=jnp.eye(8) * 0.1,
     )
     # measurement near -pi ~ +pi
     res = ekf.update(position=jnp.array([0.0, 0.0]), heading=-3.10, confidence=1.0)
@@ -524,14 +525,22 @@ def test_gating_pos_heading_uses_chi2_3d():
     from scipy.stats import chi2
 
     th99 = float(chi2.ppf(0.99, df=3))  # ~11.34
-    ekf = EKFFilter(State2D(x=0, y=0, vx=0, vy=0, theta=0, b_gz=0, b_ax=0, b_ay=0), jnp.eye(8), gate_threshold=th99)
+    ekf = EKFFilter(
+        State2D(x=0, y=0, vx=0, vy=0, theta=0, b_gz=0, b_ax=0, b_ay=0),
+        jnp.eye(8),
+        gate_threshold=th99,
+    )
     # huge outlier
     res = ekf.update(position=jnp.array([50.0, 50.0]), heading=3.0, confidence=1.0)
     assert res.gated
 
 
 def test_units_accel_mps2_to_cmps2():
-    ekf = EKFFilter(State2D(x=0, y=0, vx=0, vy=0, theta=0, b_gz=0, b_ax=0, b_ay=0), jnp.eye(8), velocity_damping=0.0)
+    ekf = EKFFilter(
+        State2D(x=0, y=0, vx=0, vy=0, theta=0, b_gz=0, b_ax=0, b_ay=0),
+        jnp.eye(8),
+        velocity_damping=0.0,
+    )
     dt = 0.1
     for _ in range(10):  # 1 s; a=1 m/s^2 -> vx = 100 cm/s; x = 50 cm
         ekf.predict(dt, accel=jnp.array([1.0, 0.0]), gyro=jnp.array([0.0]))

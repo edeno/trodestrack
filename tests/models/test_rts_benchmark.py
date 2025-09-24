@@ -146,8 +146,12 @@ class TestRTSBenchmark:
         )
 
         # Compute proper transition matrices using timeline data
-        transition_matrices = _compute_proper_transition_matrices(timeline, ekf_results, velocity_damping=0.1)
-        forward_data = smoother.collect_forward_data(ekf_results, prediction_data, transition_matrices)
+        transition_matrices = _compute_proper_transition_matrices(
+            timeline, ekf_results, velocity_damping=0.1
+        )
+        forward_data = smoother.collect_forward_data(
+            ekf_results, prediction_data, transition_matrices
+        )
         rts_result = smoother.smooth_sequence(forward_data)
 
         # Compare performance
@@ -246,8 +250,12 @@ class TestRTSBenchmark:
         # Run RTS smoother
         smoother = RTSSmoother()
         # Compute proper transition matrices using timeline data
-        transition_matrices = _compute_proper_transition_matrices(timeline, ekf_results, velocity_damping=0.1)
-        forward_data = smoother.collect_forward_data(ekf_results, prediction_data, transition_matrices)
+        transition_matrices = _compute_proper_transition_matrices(
+            timeline, ekf_results, velocity_damping=0.1
+        )
+        forward_data = smoother.collect_forward_data(
+            ekf_results, prediction_data, transition_matrices
+        )
         rts_result = smoother.smooth_sequence(forward_data)
 
         # Compare performance
@@ -339,8 +347,12 @@ class TestRTSBenchmark:
         # Run RTS smoother
         smoother = RTSSmoother()
         # Compute proper transition matrices using timeline data
-        transition_matrices = _compute_proper_transition_matrices(timeline, ekf_results, velocity_damping=0.1)
-        forward_data = smoother.collect_forward_data(ekf_results, prediction_data, transition_matrices)
+        transition_matrices = _compute_proper_transition_matrices(
+            timeline, ekf_results, velocity_damping=0.1
+        )
+        forward_data = smoother.collect_forward_data(
+            ekf_results, prediction_data, transition_matrices
+        )
         rts_result = smoother.smooth_sequence(forward_data)
 
         # Analyze improvement specifically during occlusion period
@@ -454,8 +466,12 @@ class TestRTSBenchmark:
         # Run RTS smoother
         smoother = RTSSmoother()
         # Compute proper transition matrices using timeline data
-        transition_matrices = _compute_proper_transition_matrices(timeline, ekf_results, velocity_damping=0.1)
-        forward_data = smoother.collect_forward_data(ekf_results, prediction_data, transition_matrices)
+        transition_matrices = _compute_proper_transition_matrices(
+            timeline, ekf_results, velocity_damping=0.1
+        )
+        forward_data = smoother.collect_forward_data(
+            ekf_results, prediction_data, transition_matrices
+        )
         rts_result = smoother.smooth_sequence(forward_data)
 
         # Compute velocity RMSE

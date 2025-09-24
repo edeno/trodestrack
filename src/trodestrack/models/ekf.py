@@ -799,7 +799,9 @@ def _pytree_measurement_update(
         )
         # Auto-compute gate threshold for 3 DoF
         gate_threshold = chi_squared_threshold(3, p_value=0.01)
-        result = _ekf_update_position_heading(ekf_state, measurement, measurement_noise, gate_threshold)
+        result = _ekf_update_position_heading(
+            ekf_state, measurement, measurement_noise, gate_threshold
+        )
         return result.state.state, result.state.covariance
 
     def update_position_only():

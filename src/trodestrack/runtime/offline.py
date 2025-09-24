@@ -534,13 +534,13 @@ def _compute_transition_matrices_scan(
         # Use weighted average around frame timestamp for robustness
         # This avoids hard masking which can cause dynamic shape issues
         time_diffs = jnp.abs(imu_timestamps - frame_timestamp)
-        weights = jnp.exp(-time_diffs / (dt_eff/4))  # Gaussian weighting around frame time
+        weights = jnp.exp(-time_diffs / (dt_eff / 4))  # Gaussian weighting around frame time
         weights_sum = jnp.sum(weights) + 1e-10
         weights_normalized = weights / weights_sum
 
         # Explicit weighted sums for numerical robustness
         accel_avg = jnp.sum(imu_measurements[:, :2] * weights_normalized[:, None], axis=0)  # ax, ay
-        gyro_avg = jnp.sum(imu_measurements[:, 5:6] * weights_normalized[:, None], axis=0)   # gz
+        gyro_avg = jnp.sum(imu_measurements[:, 5:6] * weights_normalized[:, None], axis=0)  # gz
 
         # Compute transition matrix F_k using automatic differentiation
         F_k = compute_state_jacobian(

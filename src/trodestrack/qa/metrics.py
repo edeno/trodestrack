@@ -123,6 +123,7 @@ def _compute_nees_vectorized(errors: jnp.ndarray, covariances: jnp.ndarray) -> j
     Returns:
         NEES values array (n_timesteps,)
     """
+
     def nees_step(carry, inputs):
         """Single step for computing NEES."""
         error, cov = inputs
