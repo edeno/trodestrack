@@ -181,10 +181,10 @@ class OnlineTracker:
         # Ensure filter is available after initialization check
         assert self._ekf_filter is not None, "EKF filter should be available after initialization"
 
-        # Handle timing
+        # Handle timing with dt guard to prevent negative or tiny time steps
         dt = 0.0
         if self._last_timestamp is not None:
-            dt = frame.timestamp - self._last_timestamp
+            dt = max(frame.timestamp - self._last_timestamp, 0.0)
 
         # Collect IMU measurements since last frame
         imu_measurements = list(frame.imu_measurements)
@@ -348,20 +348,26 @@ class OnlineTracker:
         if not imu_measurements:
             return jnp.array([]).reshape(0, 6), jnp.array([])
 
-        # Build Python lists first, then create JAX arrays once
-        # This avoids multiple device transfers and is more efficient
+        # Build NumPy arrays first on host, then create single JAX array
+        # This completely avoids device transfer loops for optimal performance
         measurements = []
         timestamps = []
 
         for accel, gyro, timestamp in imu_measurements:
-            # Concatenate accel and gyro into 6-vector
-            measurement = jnp.concatenate([accel[:3], gyro[:3]])
+            # Convert to NumPy on host and concatenate - no device transfers
+            accel_np = np.asarray(accel)[:3]
+            gyro_np = np.asarray(gyro)[:3]
+            measurement = np.concatenate([accel_np, gyro_np])
             measurements.append(measurement)
             timestamps.append(timestamp)
 
-        # Single JAX array creation - no device transfer loops
-        imu_data = jnp.stack(measurements)
-        timestamps_array = jnp.array(timestamps)
+        # Single JAX array creation from host arrays - optimal performance
+        if measurements:
+            imu_data = jnp.array(np.stack(measurements))
+            timestamps_array = jnp.array(timestamps)
+        else:
+            imu_data = jnp.array([]).reshape(0, 6)
+            timestamps_array = jnp.array([])
 
         return imu_data, timestamps_array
 
