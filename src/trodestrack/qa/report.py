@@ -8,18 +8,24 @@ quality assurance analysis of tracking sessions.
 
 import json
 from pathlib import Path
-from typing import Dict, Optional, Union, List, Tuple
+from typing import Dict, Optional, Union, Tuple
 import numpy as np
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 
 from .metrics import (
-    compute_rmse, compute_nees, compute_position_nees,
-    compute_occlusion_drift, evaluate_prd_compliance
+    compute_rmse,
+    compute_nees,
+    compute_position_nees,
+    compute_occlusion_drift,
+    evaluate_prd_compliance,
 )
 from .plots import (
-    plot_trajectory_comparison, plot_velocity_and_heading,
-    plot_nees_analysis, plot_bias_traces, plot_measurement_residuals
+    plot_trajectory_comparison,
+    plot_velocity_and_heading,
+    plot_nees_analysis,
+    plot_bias_traces,
+    plot_measurement_residuals,
 )
 from .logging import QALogger
 
@@ -99,7 +105,9 @@ class QAReportGenerator:
             "num_timesteps": len(estimated_states),
             "state_dimension": estimated_states.shape[1],
             "duration_s": float(timestamps[-1] - timestamps[0]) if timestamps is not None else None,
-            "occlusion_fraction": float(jnp.mean(occlusion_mask)) if occlusion_mask is not None else 0.0,
+            "occlusion_fraction": (
+                float(jnp.mean(occlusion_mask)) if occlusion_mask is not None else 0.0
+            ),
         }
 
         # 1. Compute RMSE metrics
@@ -120,7 +128,7 @@ class QAReportGenerator:
         # 3. Occlusion drift analysis
         if occlusion_mask is not None:
             self.logger.logger.info("Computing occlusion drift metrics")
-            dt = 1.0/30.0  # Default to 30 Hz
+            dt = 1.0 / 30.0  # Default to 30 Hz
             if timestamps is not None and len(timestamps) > 1:
                 dt = float((timestamps[1] - timestamps[0]))
 
@@ -140,16 +148,19 @@ class QAReportGenerator:
         # 5. Generate visualization plots
         self.logger.logger.info("Generating visualization plots")
         self._generate_plots(
-            estimated_states, ground_truth_states, covariances,
-            timestamps, occlusion_mask, residuals, measurement_validity,
-            arena_bounds
+            estimated_states,
+            ground_truth_states,
+            covariances,
+            timestamps,
+            occlusion_mask,
+            residuals,
+            measurement_validity,
+            arena_bounds,
         )
 
         # 6. Save data artifacts
         self.logger.logger.info("Saving data artifacts")
-        self._save_data_artifacts(
-            estimated_states, covariances, timestamps, residuals
-        )
+        self._save_data_artifacts(estimated_states, covariances, timestamps, residuals)
 
         # 7. Generate summary report
         self.logger.logger.info("Generating summary report")
@@ -182,64 +193,78 @@ class QAReportGenerator:
         # 1. Trajectory comparison
         trajectory_path = self.output_dir / f"{self.logger.session_name}_trajectory.png"
         fig_traj = plot_trajectory_comparison(
-            estimated_states, ground_truth_states, timestamps,
-            occlusion_mask, arena_bounds,
+            estimated_states,
+            ground_truth_states,
+            timestamps,
+            occlusion_mask,
+            arena_bounds,
             title=f"Trajectory Analysis - {self.logger.session_name}",
-            save_path=trajectory_path
+            save_path=trajectory_path,
         )
         plt.close(fig_traj)
         self.plots["trajectory"] = str(trajectory_path)
-        self.logger.save_artifact("trajectory_plot", trajectory_path,
-                                "2D trajectory comparison with error analysis")
+        self.logger.save_artifact(
+            "trajectory_plot", trajectory_path, "2D trajectory comparison with error analysis"
+        )
 
         # 2. Velocity and heading analysis
         velocity_path = self.output_dir / f"{self.logger.session_name}_velocity_heading.png"
         fig_vel = plot_velocity_and_heading(
-            estimated_states, ground_truth_states, timestamps, occlusion_mask,
+            estimated_states,
+            ground_truth_states,
+            timestamps,
+            occlusion_mask,
             title=f"Velocity & Heading Analysis - {self.logger.session_name}",
-            save_path=velocity_path
+            save_path=velocity_path,
         )
         plt.close(fig_vel)
         self.plots["velocity_heading"] = str(velocity_path)
-        self.logger.save_artifact("velocity_heading_plot", velocity_path,
-                                "Velocity and heading error analysis")
+        self.logger.save_artifact(
+            "velocity_heading_plot", velocity_path, "Velocity and heading error analysis"
+        )
 
         # 3. NEES consistency analysis
         nees_path = self.output_dir / f"{self.logger.session_name}_nees.png"
         fig_nees = plot_nees_analysis(
-            estimated_states, ground_truth_states, covariances, timestamps,
+            estimated_states,
+            ground_truth_states,
+            covariances,
+            timestamps,
             title=f"NEES Consistency Analysis - {self.logger.session_name}",
-            save_path=nees_path
+            save_path=nees_path,
         )
         plt.close(fig_nees)
         self.plots["nees"] = str(nees_path)
-        self.logger.save_artifact("nees_plot", nees_path,
-                                "NEES filter consistency analysis")
+        self.logger.save_artifact("nees_plot", nees_path, "NEES filter consistency analysis")
 
         # 4. Bias traces
         bias_path = self.output_dir / f"{self.logger.session_name}_bias_traces.png"
         fig_bias = plot_bias_traces(
-            estimated_states, ground_truth_states, timestamps,
+            estimated_states,
+            ground_truth_states,
+            timestamps,
             title=f"IMU Bias Estimates - {self.logger.session_name}",
-            save_path=bias_path
+            save_path=bias_path,
         )
         plt.close(fig_bias)
         self.plots["bias_traces"] = str(bias_path)
-        self.logger.save_artifact("bias_traces_plot", bias_path,
-                                "IMU bias estimation over time")
+        self.logger.save_artifact("bias_traces_plot", bias_path, "IMU bias estimation over time")
 
         # 5. Measurement residuals (if available)
         if residuals:
             residuals_path = self.output_dir / f"{self.logger.session_name}_residuals.png"
             fig_res = plot_measurement_residuals(
-                residuals, timestamps, measurement_validity,
+                residuals,
+                timestamps,
+                measurement_validity,
                 title=f"Measurement Residuals - {self.logger.session_name}",
-                save_path=residuals_path
+                save_path=residuals_path,
             )
             plt.close(fig_res)
             self.plots["residuals"] = str(residuals_path)
-            self.logger.save_artifact("residuals_plot", residuals_path,
-                                    "Measurement residual analysis")
+            self.logger.save_artifact(
+                "residuals_plot", residuals_path, "Measurement residual analysis"
+            )
 
     def _save_data_artifacts(
         self,
@@ -252,22 +277,18 @@ class QAReportGenerator:
 
         try:
             # Save states to parquet
-            states_path = self.logger.save_states_parquet(
-                estimated_states, covariances, timestamps
-            )
+            self.logger.save_states_parquet(estimated_states, covariances, timestamps)
 
             # Save residuals to parquet (if available)
             if residuals:
-                residuals_path = self.logger.save_residuals_parquet(
-                    residuals, timestamps
-                )
+                self.logger.save_residuals_parquet(residuals, timestamps)
 
         except ImportError:
             self.logger.logger.warning("pandas not available - skipping parquet export")
 
         # Always save metrics as JSON
         metrics_path = self.output_dir / f"{self.logger.session_name}_metrics.json"
-        with open(metrics_path, 'w') as f:
+        with open(metrics_path, "w") as f:
             # Convert JAX arrays to lists for JSON serialization
             json_metrics = {}
             for key, value in self.metrics.items():
@@ -278,8 +299,9 @@ class QAReportGenerator:
 
             json.dump(json_metrics, f, indent=2, default=str)
 
-        self.logger.save_artifact("metrics_json", metrics_path,
-                                "Computed QA metrics in JSON format")
+        self.logger.save_artifact(
+            "metrics_json", metrics_path, "Computed QA metrics in JSON format"
+        )
 
     def _generate_summary_report(self) -> str:
         """Generate comprehensive text summary report."""
@@ -296,20 +318,24 @@ class QAReportGenerator:
         ]
 
         # Data summary
-        detailed_lines.extend([
-            "Data Summary:",
-            f"  Duration: {self.data_summary.get('duration_s', 'N/A')} seconds",
-            f"  Timesteps: {self.data_summary.get('num_timesteps', 'N/A')}",
-            f"  State dimension: {self.data_summary.get('state_dimension', 'N/A')}",
-            f"  Occlusion fraction: {self.data_summary.get('occlusion_fraction', 0.0):.1%}",
-            "",
-        ])
+        detailed_lines.extend(
+            [
+                "Data Summary:",
+                f"  Duration: {self.data_summary.get('duration_s', 'N/A')} seconds",
+                f"  Timesteps: {self.data_summary.get('num_timesteps', 'N/A')}",
+                f"  State dimension: {self.data_summary.get('state_dimension', 'N/A')}",
+                f"  Occlusion fraction: {self.data_summary.get('occlusion_fraction', 0.0):.1%}",
+                "",
+            ]
+        )
 
         # Performance vs PRD requirements
-        detailed_lines.extend([
-            "PRD Compliance Assessment:",
-            "-" * 30,
-        ])
+        detailed_lines.extend(
+            [
+                "PRD Compliance Assessment:",
+                "-" * 30,
+            ]
+        )
 
         # Position RMSE
         pos_rmse = self.metrics.get("position_rmse_cm", None)
@@ -340,11 +366,13 @@ class QAReportGenerator:
         # NEES consistency
         if "nees_consistency_ratio" in self.metrics:
             ratio = self.metrics["nees_consistency_ratio"]
-            detailed_lines.extend([
-                "Filter Consistency (NEES):",
-                "-" * 25,
-                f"  Full state NEES ratio: {ratio:.3f} (ideal: 1.0)",
-            ])
+            detailed_lines.extend(
+                [
+                    "Filter Consistency (NEES):",
+                    "-" * 25,
+                    f"  Full state NEES ratio: {ratio:.3f} (ideal: 1.0)",
+                ]
+            )
 
             if ratio < 0.8:
                 detailed_lines.append("    → Filter overconfident (uncertainty too small)")
@@ -365,20 +393,24 @@ class QAReportGenerator:
             mean_drift = self.metrics.get("mean_drift_cm", 0.0)
             max_drift = self.metrics.get("max_drift_cm", 0.0)
 
-            detailed_lines.extend([
-                "Occlusion Analysis:",
-                "-" * 18,
-                f"  Number of occlusions: {num_occ}",
-                f"  Mean drift: {mean_drift:.2f} cm",
-                f"  Max drift: {max_drift:.2f} cm",
-                "",
-            ])
+            detailed_lines.extend(
+                [
+                    "Occlusion Analysis:",
+                    "-" * 18,
+                    f"  Number of occlusions: {num_occ}",
+                    f"  Mean drift: {mean_drift:.2f} cm",
+                    f"  Max drift: {max_drift:.2f} cm",
+                    "",
+                ]
+            )
 
         # Generated outputs
-        detailed_lines.extend([
-            "Generated Outputs:",
-            "-" * 18,
-        ])
+        detailed_lines.extend(
+            [
+                "Generated Outputs:",
+                "-" * 18,
+            ]
+        )
 
         for plot_name, plot_path in self.plots.items():
             filename = Path(plot_path).name
@@ -389,11 +421,12 @@ class QAReportGenerator:
 
         # Save to file
         report_path = self.output_dir / f"{self.logger.session_name}_report.txt"
-        with open(report_path, 'w') as f:
+        with open(report_path, "w") as f:
             f.write(full_report)
 
-        self.logger.save_artifact("summary_report", report_path,
-                                "Comprehensive text summary report")
+        self.logger.save_artifact(
+            "summary_report", report_path, "Comprehensive text summary report"
+        )
 
         return full_report
 
@@ -404,7 +437,7 @@ def generate_qa_report(
     covariances: jnp.ndarray,
     output_dir: Union[str, Path],
     session_name: Optional[str] = None,
-    **kwargs
+    **kwargs,
 ) -> Dict:
     """
     Generate comprehensive QA report for tracking analysis.

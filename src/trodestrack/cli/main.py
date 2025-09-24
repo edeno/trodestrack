@@ -169,7 +169,7 @@ def cmd_online(args: argparse.Namespace) -> int:
             imu_data = load_imu_data(config.imu_file)
 
         # Process data streams
-        results = tracker.process_data_streams(video_data, imu_data)
+        tracker.process_data_streams(video_data, imu_data)
 
         # Print summary
         performance = tracker.get_performance_summary()
@@ -231,7 +231,9 @@ def cmd_report(args: argparse.Namespace) -> int:
 
         if results_file is None:
             logger.error(f"No tracking results found in {args.run_dir}")
-            logger.info("Looking for: filtered_states.npz, smoothed_states.npz, or tracking_results.npz")
+            logger.info(
+                "Looking for: filtered_states.npz, smoothed_states.npz, or tracking_results.npz"
+            )
             return 1
 
         logger.info(f"Loading tracking results from: {results_file}")
@@ -300,7 +302,7 @@ def cmd_report(args: argparse.Namespace) -> int:
 
         # Convert kwargs arrays to JAX as well
         for key, value in kwargs.items():
-            if hasattr(value, 'shape'):  # Check if it's an array-like object
+            if hasattr(value, "shape"):  # Check if it's an array-like object
                 kwargs[key] = jnp.array(value)
 
         # Run analysis
@@ -309,7 +311,7 @@ def cmd_report(args: argparse.Namespace) -> int:
             ground_truth_states=ground_truth_states_jax,
             covariances=covariances_jax,
             timestamps=timestamps_jax,
-            **kwargs
+            **kwargs,
         )
 
         # Print summary to console

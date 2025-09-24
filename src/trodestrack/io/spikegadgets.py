@@ -199,7 +199,9 @@ class SpikeGadgetsIMUData:
         downsampled_timestamps = self.timestamps[indices]
         downsampled_accel = self.accel_raw[indices]
         downsampled_gyro = self.gyro_raw[indices]
-        downsampled_mag = self.mag_raw[indices] if (self.has_magnetometer and self.mag_raw is not None) else None
+        downsampled_mag = (
+            self.mag_raw[indices] if (self.has_magnetometer and self.mag_raw is not None) else None
+        )
 
         # Update metadata
         new_metadata = self.metadata.copy()
@@ -239,7 +241,9 @@ class SpikeGadgetsIMUData:
         sliced_timestamps = self.timestamps[indices]
         sliced_accel = self.accel_raw[indices]
         sliced_gyro = self.gyro_raw[indices]
-        sliced_mag = self.mag_raw[indices] if (self.has_magnetometer and self.mag_raw is not None) else None
+        sliced_mag = (
+            self.mag_raw[indices] if (self.has_magnetometer and self.mag_raw is not None) else None
+        )
 
         # Update metadata
         new_metadata = self.metadata.copy()
@@ -307,7 +311,12 @@ def _validate_imu_data_ranges(
             logger.warning(
                 "%s data may be saturated: %d samples near int16 limits "
                 "(range: [%d, %d], limits: [%d, %d])",
-                name, saturated_samples, min_val, max_val, INT16_MIN, INT16_MAX
+                name,
+                saturated_samples,
+                min_val,
+                max_val,
+                INT16_MIN,
+                INT16_MAX,
             )
 
     check_saturation(accel_data, "Accelerometer")

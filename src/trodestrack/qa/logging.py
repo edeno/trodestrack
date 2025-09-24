@@ -18,6 +18,7 @@ import jax.numpy as jnp
 # Optional dependencies for data persistence
 try:
     import pandas as pd
+
     PANDAS_AVAILABLE = True
 except ImportError:
     PANDAS_AVAILABLE = False
@@ -70,9 +71,7 @@ class QALogger:
         console_handler.setLevel(log_level)
 
         # Formatter
-        formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        )
+        formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         file_handler.setFormatter(formatter)
         console_handler.setFormatter(formatter)
 
@@ -115,7 +114,7 @@ class QALogger:
             SHA-256 hash of the data
         """
         # Convert to numpy if needed
-        if hasattr(data, 'numpy'):
+        if hasattr(data, "numpy"):
             data_np = np.array(data)
         else:
             data_np = np.array(data)
@@ -182,28 +181,28 @@ class QALogger:
 
         # Create DataFrame with state components
         data = {
-            'x_cm': states_np[:, 0],
-            'y_cm': states_np[:, 1],
-            'vx_cm_s': states_np[:, 2],
-            'vy_cm_s': states_np[:, 3],
-            'theta_rad': states_np[:, 4],
-            'bias_gz_rad_s': states_np[:, 5],
-            'bias_ax_m_s2': states_np[:, 6],
-            'bias_ay_m_s2': states_np[:, 7],
+            "x_cm": states_np[:, 0],
+            "y_cm": states_np[:, 1],
+            "vx_cm_s": states_np[:, 2],
+            "vy_cm_s": states_np[:, 3],
+            "theta_rad": states_np[:, 4],
+            "bias_gz_rad_s": states_np[:, 5],
+            "bias_ax_m_s2": states_np[:, 6],
+            "bias_ay_m_s2": states_np[:, 7],
         }
 
         if timestamps is not None:
-            data['timestamp_s'] = np.array(timestamps)
+            data["timestamp_s"] = np.array(timestamps)
 
         # Add covariance diagonal (uncertainties)
         for i in range(8):
-            data[f'var_{i}'] = covariances_np[:, i, i]
+            data[f"var_{i}"] = covariances_np[:, i, i]
 
         # Add some key off-diagonal covariances
-        data['cov_x_y'] = covariances_np[:, 0, 1]
-        data['cov_vx_vy'] = covariances_np[:, 2, 3]
-        data['cov_x_vx'] = covariances_np[:, 0, 2]
-        data['cov_y_vy'] = covariances_np[:, 1, 3]
+        data["cov_x_y"] = covariances_np[:, 0, 1]
+        data["cov_vx_vy"] = covariances_np[:, 2, 3]
+        data["cov_x_vx"] = covariances_np[:, 0, 2]
+        data["cov_y_vy"] = covariances_np[:, 1, 3]
 
         df = pd.DataFrame(data)
         df.to_parquet(output_path, index=False)
@@ -243,23 +242,23 @@ class QALogger:
         data = {}
 
         if timestamps is not None:
-            data['timestamp_s'] = np.array(timestamps)
+            data["timestamp_s"] = np.array(timestamps)
 
         # Position residuals
-        if 'position' in residuals:
-            pos_res = np.array(residuals['position'])
+        if "position" in residuals:
+            pos_res = np.array(residuals["position"])
             if pos_res.ndim == 2 and pos_res.shape[1] >= 2:
-                data['pos_residual_x_cm'] = pos_res[:, 0]
-                data['pos_residual_y_cm'] = pos_res[:, 1]
-                data['pos_residual_mag_cm'] = np.linalg.norm(pos_res, axis=1)
+                data["pos_residual_x_cm"] = pos_res[:, 0]
+                data["pos_residual_y_cm"] = pos_res[:, 1]
+                data["pos_residual_mag_cm"] = np.linalg.norm(pos_res, axis=1)
             else:
-                data['pos_residual_cm'] = pos_res
+                data["pos_residual_cm"] = pos_res
 
         # Heading residuals
-        if 'heading' in residuals:
-            heading_res = np.array(residuals['heading'])
-            data['heading_residual_rad'] = heading_res
-            data['heading_residual_deg'] = np.degrees(heading_res)
+        if "heading" in residuals:
+            heading_res = np.array(residuals["heading"])
+            data["heading_residual_rad"] = heading_res
+            data["heading_residual_deg"] = np.degrees(heading_res)
 
         df = pd.DataFrame(data)
         df.to_parquet(output_path, index=False)
@@ -305,7 +304,7 @@ class QALogger:
         # Update timestamp
         self.metadata["completed"] = datetime.now().isoformat()
 
-        with open(self.json_file, 'w') as f:
+        with open(self.json_file, "w") as f:
             json.dump(self.metadata, f, indent=2, default=str)
 
         self.logger.info(f"Saved metadata to: {self.json_file}")
@@ -319,8 +318,8 @@ class QALogger:
             Summary report as string
         """
         report_lines = [
-            f"Trodestrack QA Session Report",
-            f"=" * 40,
+            "Trodestrack QA Session Report",
+            "=" * 40,
             f"Session: {self.session_name}",
             f"Completed: {self.metadata.get('completed', 'In Progress')}",
             f"Output Directory: {self.output_dir}",
@@ -329,20 +328,24 @@ class QALogger:
 
         # Parameters
         if self.metadata["parameters"]:
-            report_lines.extend([
-                "Parameters:",
-                "-" * 20,
-            ])
+            report_lines.extend(
+                [
+                    "Parameters:",
+                    "-" * 20,
+                ]
+            )
             for key, value in self.metadata["parameters"].items():
                 report_lines.append(f"  {key}: {value}")
             report_lines.append("")
 
         # Metrics
         if self.metadata["metrics"]:
-            report_lines.extend([
-                "Key Metrics:",
-                "-" * 20,
-            ])
+            report_lines.extend(
+                [
+                    "Key Metrics:",
+                    "-" * 20,
+                ]
+            )
 
             # RMSE metrics
             for key in ["position_rmse_cm", "velocity_rmse_cm_s", "heading_rmse_deg"]:
@@ -366,10 +369,12 @@ class QALogger:
 
         # Artifacts
         if self.metadata["artifacts"]:
-            report_lines.extend([
-                "Generated Artifacts:",
-                "-" * 20,
-            ])
+            report_lines.extend(
+                [
+                    "Generated Artifacts:",
+                    "-" * 20,
+                ]
+            )
             for name, info in self.metadata["artifacts"].items():
                 if isinstance(info, dict) and "path" in info:
                     path = Path(info["path"]).name
@@ -389,9 +394,7 @@ class QALogger:
 
 
 def create_qa_session(
-    output_dir: Union[str, Path],
-    session_name: Optional[str] = None,
-    **kwargs
+    output_dir: Union[str, Path], session_name: Optional[str] = None, **kwargs
 ) -> QALogger:
     """
     Create a new QA logging session with automatic session naming.

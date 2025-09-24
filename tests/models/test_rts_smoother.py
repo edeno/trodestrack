@@ -191,7 +191,9 @@ class TestRTSSmooth:
             filtered_covariances=jnp.array(filtered_covariances),
             predicted_states=jnp.array(predicted_states),
             predicted_covariances=jnp.array(predicted_covariances),
-            transition_matrices=jnp.array([jnp.eye(8) for _ in range(len(filtered_states))]),  # Identity transitions
+            transition_matrices=jnp.array(
+                [jnp.eye(8) for _ in range(len(filtered_states))]
+            ),  # Identity transitions
             log_likelihood=50.0,
         )
 
@@ -238,7 +240,9 @@ class TestRTSSmoother:
         transition_matrices_wrong = [jnp.eye(8) for _ in range(2)]  # Different length
 
         with pytest.raises(ValueError, match="Mismatch between transition matrices"):
-            smoother.collect_forward_data(ekf_results, prediction_data_fixed, transition_matrices_wrong)
+            smoother.collect_forward_data(
+                ekf_results, prediction_data_fixed, transition_matrices_wrong
+            )
 
     def test_collect_forward_data_success(self):
         """Test successful collection of forward pass data."""
@@ -249,7 +253,9 @@ class TestRTSSmoother:
         prediction_data = [(jnp.zeros(8), jnp.eye(8)) for _ in range(3)]
         transition_matrices = [jnp.eye(8) for _ in range(3)]
 
-        forward_data = smoother.collect_forward_data(ekf_results, prediction_data, transition_matrices)
+        forward_data = smoother.collect_forward_data(
+            ekf_results, prediction_data, transition_matrices
+        )
 
         assert forward_data.filtered_states.shape[0] == 3
         assert forward_data.filtered_covariances.shape[0] == 3
@@ -273,7 +279,9 @@ class TestRTSSmoother:
             filtered_covariances=jnp.array(filtered_covariances),
             predicted_states=jnp.array(predicted_states),
             predicted_covariances=jnp.array(predicted_covariances),
-            transition_matrices=jnp.array([jnp.eye(8) for _ in range(n_steps)]),  # Identity transitions
+            transition_matrices=jnp.array(
+                [jnp.eye(8) for _ in range(n_steps)]
+            ),  # Identity transitions
             log_likelihood=30.0,
         )
 

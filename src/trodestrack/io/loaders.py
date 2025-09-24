@@ -226,8 +226,7 @@ def _load_imu_npz(file_path: Path) -> Dict[str, Any]:
         dt = np.median(np.diff(data["timestamps"]))
         sampling_rate = 1.0 / dt
         logger.warning(
-            "No sampling_rate in NPZ file, estimated %.1f Hz from timestamps",
-            sampling_rate
+            "No sampling_rate in NPZ file, estimated %.1f Hz from timestamps", sampling_rate
         )
 
     imu_data = data["data"]

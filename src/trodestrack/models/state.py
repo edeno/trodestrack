@@ -47,7 +47,7 @@ class State2D(BaseModel):
 
     model_config = ConfigDict(
         frozen=True,  # Immutable state representation
-        arbitrary_types_allowed=True  # Allow JAX arrays and ArrayLike types
+        arbitrary_types_allowed=True,  # Allow JAX arrays and ArrayLike types
     )
 
 

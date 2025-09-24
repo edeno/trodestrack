@@ -188,7 +188,7 @@ def load_dlc_csv(file_path: Path) -> DLCKeypointData:
         raise ValueError(f"Failed to read DLC CSV file: {e}")
 
     # Get scorer name (first level of columns)
-    if hasattr(df.columns, 'levels'):
+    if hasattr(df.columns, "levels"):
         scorer = df.columns.levels[0][0]
         # Extract bodyparts (second level)
         bodyparts = df.columns.levels[1]
@@ -327,7 +327,7 @@ def _process_dlc_dataframe(df: pd.DataFrame, file_path: Path) -> DLCKeypointData
         DLCKeypointData container
     """
     # Get scorer name (first level of columns)
-    if hasattr(df.columns, 'levels'):
+    if hasattr(df.columns, "levels"):
         scorer = df.columns.levels[0][0]
         # Extract bodyparts (second level)
         bodyparts = df.columns.levels[1]

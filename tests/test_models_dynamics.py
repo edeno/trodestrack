@@ -130,7 +130,6 @@ class TestDynamics:
         predicted = predict_state(state, dt, accel, gyro, velocity_damping)
 
         # Bias-corrected measurements
-        corrected_accel = accel - jnp.array([state.b_ax, state.b_ay])
         corrected_gyro = gyro[0] - state.b_gz
 
         # Check angular velocity correction

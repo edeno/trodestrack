@@ -19,7 +19,6 @@ from jax.typing import ArrayLike
 from ..config.schemas import SessionConfig
 from ..geom.homography import transform_points_pixel_to_cm
 from ..io.loaders import load_imu_data, load_video_detections
-from ..models.dynamics import compute_state_jacobian
 from ..models.ekf import EkfCarry, EKFFilter, ekf_step_pytree
 from ..models.rts_smoother import ForwardPassData, rts_smooth
 from ..models.state import State2D, create_initial_state
@@ -494,7 +493,9 @@ def _run_smoothing_pass(
         state_dim = filtered_states.shape[1]
         transition_matrices = jnp.tile(jnp.eye(state_dim), (n_frames, 1, 1))
 
-        logger.warning("Using identity transition matrices for RTS smoother - reduced accuracy expected")
+        logger.warning(
+            "Using identity transition matrices for RTS smoother - reduced accuracy expected"
+        )
 
         # Create forward pass data for RTS using true predictions from EKF forward pass
         forward_data = ForwardPassData(

@@ -114,7 +114,9 @@ def detect_imu_misalignment(
         logger.warning(
             "IMU may be misaligned: gravity magnitude %.3f m/s² "
             "(expected %.3f m/s², error %.1f%%)",
-            median_magnitude, expected_gravity, gravity_error * 100
+            median_magnitude,
+            expected_gravity,
+            gravity_error * 100,
         )
 
     return is_misaligned, gravity_error
@@ -161,7 +163,8 @@ def estimate_gyroscope_bias(
     if stationary_samples < min_samples:
         logger.warning(
             "Insufficient stationary samples for bias estimation: %d < %d",
-            stationary_samples, min_samples
+            stationary_samples,
+            min_samples,
         )
         # Return mean of all data as fallback
         return np.mean(gyro_data, axis=0), False

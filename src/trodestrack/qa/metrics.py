@@ -9,8 +9,6 @@ import jax.numpy as jnp
 import numpy as np
 from typing import Dict, Optional, Tuple, Union
 
-from ..models.state import State2D
-
 
 def compute_rmse(
     estimated_states: jnp.ndarray,
@@ -173,7 +171,7 @@ def compute_occlusion_drift(
     estimated_states: jnp.ndarray,
     ground_truth_states: jnp.ndarray,
     occlusion_mask: jnp.ndarray,
-    dt: float = 1.0/30.0,
+    dt: float = 1.0 / 30.0,
     max_drift_duration: float = 7.0,
 ) -> Dict[str, float]:
     """
@@ -208,10 +206,10 @@ def compute_occlusion_drift(
 
         # Position at start and end of occlusion
         pos_start_est = estimated_states[start_idx, :2]
-        pos_end_est = estimated_states[end_idx-1, :2]
+        pos_end_est = estimated_states[end_idx - 1, :2]
 
         pos_start_gt = ground_truth_states[start_idx, :2]
-        pos_end_gt = ground_truth_states[end_idx-1, :2]
+        pos_end_gt = ground_truth_states[end_idx - 1, :2]
 
         # Drift = change in position error during occlusion
         error_start = jnp.linalg.norm(pos_start_est - pos_start_gt)
@@ -220,12 +218,14 @@ def compute_occlusion_drift(
         drift = float(error_end - error_start)
         drift_rate = drift / duration_seconds  # cm/s
 
-        drift_results.append({
-            "duration_s": duration_seconds,
-            "drift_cm": drift,
-            "drift_rate_cm_s": drift_rate,
-            "final_error_cm": float(error_end),
-        })
+        drift_results.append(
+            {
+                "duration_s": duration_seconds,
+                "drift_cm": drift,
+                "drift_rate_cm_s": drift_rate,
+                "final_error_cm": float(error_end),
+            }
+        )
 
     if not drift_results:
         return {

@@ -11,7 +11,10 @@ import jax.numpy as jnp
 from pathlib import Path
 
 from trodestrack.qa.metrics import (
-    compute_rmse, compute_nees, compute_occlusion_drift, evaluate_prd_compliance
+    compute_rmse,
+    compute_nees,
+    compute_occlusion_drift,
+    evaluate_prd_compliance,
 )
 from trodestrack.qa.report import generate_qa_report
 
@@ -34,24 +37,32 @@ class TestQAIntegration:
         ground_truth_states = jnp.zeros((n_steps, 8))
         ground_truth_states = ground_truth_states.at[:, 0].set(radius * jnp.cos(angles))  # x
         ground_truth_states = ground_truth_states.at[:, 1].set(radius * jnp.sin(angles))  # y
-        ground_truth_states = ground_truth_states.at[:, 2].set(-radius * angular_vel * jnp.sin(angles))  # vx
-        ground_truth_states = ground_truth_states.at[:, 3].set(radius * angular_vel * jnp.cos(angles))   # vy
-        ground_truth_states = ground_truth_states.at[:, 4].set(angles + jnp.pi/2)  # heading
+        ground_truth_states = ground_truth_states.at[:, 2].set(
+            -radius * angular_vel * jnp.sin(angles)
+        )  # vx
+        ground_truth_states = ground_truth_states.at[:, 3].set(
+            radius * angular_vel * jnp.cos(angles)
+        )  # vy
+        ground_truth_states = ground_truth_states.at[:, 4].set(angles + jnp.pi / 2)  # heading
 
         # Estimated states: ground truth + small noise
         rng = np.random.RandomState(42)
-        noise_std = jnp.array([0.5, 0.5, 1.0, 1.0, 0.05, 0.001, 0.001, 0.001])  # Different noise for each component
+        noise_std = jnp.array(
+            [0.5, 0.5, 1.0, 1.0, 0.05, 0.001, 0.001, 0.001]
+        )  # Different noise for each component
         noise = rng.randn(n_steps, 8) * noise_std
         estimated_states = ground_truth_states + jnp.array(noise)
 
         # Covariances: identity matrices scaled appropriately
-        base_cov = jnp.diag(jnp.array([1.0, 1.0, 2.0, 2.0, 0.1, 0.01, 0.001, 0.001]))  # Position, velocity, heading, biases
+        base_cov = jnp.diag(
+            jnp.array([1.0, 1.0, 2.0, 2.0, 0.1, 0.01, 0.001, 0.001])
+        )  # Position, velocity, heading, biases
         covariances = jnp.tile(base_cov, (n_steps, 1, 1))
 
         # Create occlusion mask (some dropout periods)
         occlusion_mask = jnp.zeros(n_steps, dtype=bool)
-        occlusion_mask = occlusion_mask.at[50:70].set(True)   # 20 frame occlusion
-        occlusion_mask = occlusion_mask.at[150:170].set(True) # Another occlusion
+        occlusion_mask = occlusion_mask.at[50:70].set(True)  # 20 frame occlusion
+        occlusion_mask = occlusion_mask.at[150:170].set(True)  # Another occlusion
 
         # Generate QA report
         result = generate_qa_report(
@@ -117,10 +128,10 @@ class TestQAIntegration:
 
         # Test case 2: Some metrics fail
         failing_metrics = {
-            "position_rmse_cm": 3.0,    # Fails (> 2.0)
-            "velocity_rmse_cm_s": 15.0, # Fails (> 10.0)
-            "heading_rmse_deg": 4.0,    # Passes
-            "max_drift_cm": 8.0,        # Passes
+            "position_rmse_cm": 3.0,  # Fails (> 2.0)
+            "velocity_rmse_cm_s": 15.0,  # Fails (> 10.0)
+            "heading_rmse_deg": 4.0,  # Passes
+            "max_drift_cm": 8.0,  # Passes
         }
 
         compliance = evaluate_prd_compliance(failing_metrics)
@@ -172,7 +183,7 @@ class TestQAIntegration:
         est_states = est_states.at[80:, 0].set(15.0)
 
         drift_metrics = compute_occlusion_drift(
-            est_states, gt_states, occlusion_mask, dt=1.0/30.0
+            est_states, gt_states, occlusion_mask, dt=1.0 / 30.0
         )
 
         assert drift_metrics["num_occlusions"] == 1

@@ -42,7 +42,7 @@ class TestRMSEMetrics:
         est_states = est_states.at[:, 1].set(4.0)  # 4 cm offset in y
         est_states = est_states.at[:, 2].set(5.0)  # 5 cm/s offset in vx
         est_states = est_states.at[:, 3].set(12.0)  # 12 cm/s offset in vy
-        est_states = est_states.at[:, 4].set(np.pi/6)  # 30 degree offset in heading
+        est_states = est_states.at[:, 4].set(np.pi / 6)  # 30 degree offset in heading
 
         rmse = compute_rmse(est_states, gt_states)
 
@@ -184,7 +184,7 @@ class TestOcclusionDrift:
         occlusion_mask = jnp.zeros(n_steps, dtype=bool)
         occlusion_mask = occlusion_mask.at[40:60].set(True)  # 20 frame occlusion
 
-        drift = compute_occlusion_drift(states, states, occlusion_mask, dt=1.0/30.0)
+        drift = compute_occlusion_drift(states, states, occlusion_mask, dt=1.0 / 30.0)
 
         assert drift["num_occlusions"] == 1
         assert drift["mean_drift_cm"] == pytest.approx(0.0, abs=1e-6)
@@ -210,7 +210,7 @@ class TestOcclusionDrift:
         occlusion_mask = jnp.zeros(n_steps, dtype=bool)
         occlusion_mask = occlusion_mask.at[40:60].set(True)
 
-        drift = compute_occlusion_drift(est_states, gt_states, occlusion_mask, dt=1.0/30.0)
+        drift = compute_occlusion_drift(est_states, gt_states, occlusion_mask, dt=1.0 / 30.0)
 
         assert drift["num_occlusions"] == 1
         assert drift["mean_drift_cm"] == pytest.approx(10.0, abs=0.5)
@@ -224,7 +224,7 @@ class TestOcclusionDrift:
 
         # Two occlusion periods with different drifts
         occlusion_mask = jnp.zeros(n_steps, dtype=bool)
-        occlusion_mask = occlusion_mask.at[20:40].set(True)   # First occlusion: frames 20-39
+        occlusion_mask = occlusion_mask.at[20:40].set(True)  # First occlusion: frames 20-39
         occlusion_mask = occlusion_mask.at[80:100].set(True)  # Second occlusion: frames 80-99
 
         # Simulate drift during first occlusion (from 0 to 5 cm during frames 20-39)
@@ -243,7 +243,7 @@ class TestOcclusionDrift:
         # Continue with 8 cm error after second occlusion
         est_states = est_states.at[100:, 0].set(8.0)
 
-        drift = compute_occlusion_drift(est_states, gt_states, occlusion_mask, dt=1.0/30.0)
+        drift = compute_occlusion_drift(est_states, gt_states, occlusion_mask, dt=1.0 / 30.0)
 
         assert drift["num_occlusions"] == 2
         # First occlusion should have ~5 cm drift, second should have ~3 cm drift
@@ -259,7 +259,7 @@ class TestOcclusionDrift:
         occlusion_mask = jnp.zeros(n_steps, dtype=bool)
         occlusion_mask = occlusion_mask.at[50:52].set(True)
 
-        drift = compute_occlusion_drift(states, states, occlusion_mask, dt=1.0/30.0)
+        drift = compute_occlusion_drift(states, states, occlusion_mask, dt=1.0 / 30.0)
 
         # Should be filtered out as too short
         assert drift["num_occlusions"] == 0
@@ -290,8 +290,8 @@ class TestPRDCompliance:
         metrics = {
             "position_rmse_cm": 2.5,  # Fails (> 2.0)
             "velocity_rmse_cm_s": 8.0,  # Passes
-            "heading_rmse_deg": 5.0,   # Passes
-            "max_drift_cm": 20.0,      # Fails (> 15.0)
+            "heading_rmse_deg": 5.0,  # Passes
+            "max_drift_cm": 20.0,  # Fails (> 15.0)
         }
 
         compliance = evaluate_prd_compliance(metrics)
@@ -319,10 +319,10 @@ class TestPRDCompliance:
     def test_boundary_values(self):
         """Test PRD evaluation at exact threshold boundaries."""
         metrics = {
-            "position_rmse_cm": 2.0,      # Exactly at threshold
-            "velocity_rmse_cm_s": 10.0,   # Exactly at threshold
-            "heading_rmse_deg": 7.0,      # Exactly at threshold
-            "max_drift_cm": 15.0,         # Exactly at threshold
+            "position_rmse_cm": 2.0,  # Exactly at threshold
+            "velocity_rmse_cm_s": 10.0,  # Exactly at threshold
+            "heading_rmse_deg": 7.0,  # Exactly at threshold
+            "max_drift_cm": 15.0,  # Exactly at threshold
         }
 
         compliance = evaluate_prd_compliance(metrics)
