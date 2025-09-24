@@ -592,7 +592,6 @@ def ekf_step_functional(
     return new_carry, outputs
 
 
-@jax.jit
 def _functional_measurement_update(
     x_pred: ArrayLike,
     P_pred: ArrayLike,
@@ -603,54 +602,39 @@ def _functional_measurement_update(
     head_valid: bool,
     scan_inputs: EkfScanInputs,
 ) -> Tuple[Array, Array]:
-    """Perform measurement update step."""
-    # Create measurement vector - always use 3D format [x, y, heading]
-    measurement = jnp.array(
-        [
-            position[0],  # x position
-            position[1],  # y position
-            jnp.where(head_valid, heading, x_pred[4]),  # heading (or prediction if invalid)
-        ]
-    )
+    """Perform measurement update step using consolidated EKF path."""
+    # Create EKF state for consolidated update
+    ekf_state = EKFState(state=x_pred, covariance=P_pred, log_likelihood=0.0)
 
-    # Create measurement noise - large noise for invalid measurements
+    # Build measurement and noise using consolidated functions
     c = jnp.clip(confidence, 1e-3, 1.0)
-    pos_noise_var = (scan_inputs.position_noise_std / c) ** 2
-    noise_diag = jnp.array(
-        [
-            pos_noise_var,  # x position noise
-            pos_noise_var,  # y position noise
-            jnp.where(head_valid, scan_inputs.heading_noise_std**2, 1e6),  # heading noise
-        ]
-    )
-    R = jnp.diag(noise_diag)
 
-    # Measurement Jacobian for [x, y, heading]
-    H = jnp.array(
-        [
-            [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # x position
-            [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # y position
-            [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],  # heading
-        ]
-    )
+    # Use JAX conditional for traced arrays
+    def update_with_heading():
+        # Position + heading measurement
+        measurement = jnp.concatenate([position, jnp.array([heading])])
+        measurement_noise = create_measurement_noise(
+            scan_inputs.position_noise_std,
+            c,
+            has_heading=True,
+            heading_noise_std=scan_inputs.heading_noise_std,
+        )
+        result = _ekf_update_position_heading(
+            ekf_state, measurement, measurement_noise, scan_inputs.gate_threshold
+        )
+        return result.state.state, result.state.covariance
 
-    # Predicted measurement
-    h_pred = H @ x_pred
+    def update_position_only():
+        # Position-only measurement
+        measurement_noise = create_measurement_noise(
+            scan_inputs.position_noise_std, c, has_heading=False
+        )
+        result = _ekf_update_position_only(
+            ekf_state, position, measurement_noise, scan_inputs.gate_threshold
+        )
+        return result.state.state, result.state.covariance
 
-    # Innovation with angle wrapping
-    innovation = measurement - h_pred
-    innovation = innovation.at[2].set(wrap_angle(innovation[2]))
-
-    # Innovation covariance and Kalman gain
-    S = H @ P_pred @ H.T + R
-    K = kalman_gain(P_pred, H, R)
-
-    # State and covariance updates
-    x_update = x_pred + K @ innovation
-    I_KH = jnp.eye(8) - K @ H
-    P_update = I_KH @ P_pred @ I_KH.T + K @ R @ K.T
-
-    return x_update, P_update
+    return jax.lax.cond(head_valid, update_with_heading, update_position_only)
 
 
 def create_functional_scan_inputs(
@@ -789,7 +773,6 @@ def ekf_step_pytree(
     return new_carry, outputs
 
 
-@jax.jit
 def _pytree_measurement_update(
     x_pred: ArrayLike,
     P_pred: ArrayLike,
@@ -800,54 +783,34 @@ def _pytree_measurement_update(
     position_noise_std: float,
     heading_noise_std: float,
 ) -> Tuple[Array, Array]:
-    """Perform measurement update step for PyTree version."""
-    # Create measurement vector - always use 3D format [x, y, heading]
-    measurement = jnp.array(
-        [
-            position[0],  # x position
-            position[1],  # y position
-            jnp.where(head_valid, heading, x_pred[4]),  # heading (or prediction if invalid)
-        ]
-    )
+    """Perform measurement update step for PyTree version using consolidated EKF path."""
+    # Create EKF state for consolidated update
+    ekf_state = EKFState(state=x_pred, covariance=P_pred, log_likelihood=0.0)
 
-    # Create measurement noise - large noise for invalid measurements
+    # Build measurement and noise using consolidated functions
     c = jnp.clip(confidence, 1e-3, 1.0)
-    pos_noise_var = (position_noise_std / c) ** 2
-    noise_diag = jnp.array(
-        [
-            pos_noise_var,  # x position noise
-            pos_noise_var,  # y position noise
-            jnp.where(head_valid, heading_noise_std**2, 1e6),  # heading noise
-        ]
-    )
-    R = jnp.diag(noise_diag)
 
-    # Measurement Jacobian for [x, y, heading]
-    H = jnp.array(
-        [
-            [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # x position
-            [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # y position
-            [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],  # heading
-        ]
-    )
+    # Use JAX conditional for traced arrays
+    def update_with_heading():
+        # Position + heading measurement
+        measurement = jnp.concatenate([position, jnp.array([heading])])
+        measurement_noise = create_measurement_noise(
+            position_noise_std, c, has_heading=True, heading_noise_std=heading_noise_std
+        )
+        # Auto-compute gate threshold for 3 DoF
+        gate_threshold = chi_squared_threshold(3, p_value=0.01)
+        result = _ekf_update_position_heading(ekf_state, measurement, measurement_noise, gate_threshold)
+        return result.state.state, result.state.covariance
 
-    # Predicted measurement
-    h_pred = H @ x_pred
+    def update_position_only():
+        # Position-only measurement
+        measurement_noise = create_measurement_noise(position_noise_std, c, has_heading=False)
+        # Auto-compute gate threshold for 2 DoF
+        gate_threshold = chi_squared_threshold(2, p_value=0.01)
+        result = _ekf_update_position_only(ekf_state, position, measurement_noise, gate_threshold)
+        return result.state.state, result.state.covariance
 
-    # Innovation with angle wrapping
-    innovation = measurement - h_pred
-    innovation = innovation.at[2].set(wrap_angle(innovation[2]))
-
-    # Innovation covariance and Kalman gain
-    S = H @ P_pred @ H.T + R
-    K = kalman_gain(P_pred, H, R)
-
-    # State and covariance updates
-    x_update = x_pred + K @ innovation
-    I_KH = jnp.eye(8) - K @ H
-    P_update = I_KH @ P_pred @ I_KH.T + K @ R @ K.T
-
-    return x_update, P_update
+    return jax.lax.cond(head_valid, update_with_heading, update_position_only)
 
 
 def ekf_step_arrays(
@@ -869,11 +832,10 @@ def ekf_step_arrays(
         float,
     ],
 ) -> Tuple[EkfCarry, EkfOutputs]:
-    """JAX-compatible EKF step for lax.scan using structured arrays.
+    """JAX-compatible EKF step for lax.scan using consolidated update paths.
 
-    NOTE: Not JIT-compiled to allow for static argument optimization at call site.
-    Use ekf_step_arrays_pure() for pure JIT-compiled version or
-    ekf_step_arrays_optimized() for version with static filter parameters.
+    NOTE: Routes through ekf_step_arrays_pure() which maintains legacy interface
+    but uses consolidated Joseph-form update paths internally.
     """
     return ekf_step_arrays_pure(carry, inp)
 
