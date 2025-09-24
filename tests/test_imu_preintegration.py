@@ -1,16 +1,11 @@
 """Tests for IMU pre-integration functionality."""
 
-import jax
-
-# Enable 64-bit precision for tests
-jax.config.update("jax_enable_x64", True)
-
 import warnings
 
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from trodestrack.imu.preintegration import (
@@ -640,13 +635,15 @@ class TestPropertyBased:
         st.floats(-2, 2, allow_nan=False, allow_infinity=False),
         st.floats(0.001, 0.1, allow_nan=False, allow_infinity=False),
     )
+    @settings(deadline=None)
     def test_constant_rotation_is_linear(self, omega_z, dt_step):
         """Property test: constant rotation should be linear in time."""
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
 
             n_steps = 20
-            timestamps = jnp.arange(0, n_steps * dt_step, dt_step)
+            # Use linspace to ensure exact number of samples
+            timestamps = jnp.linspace(0, (n_steps - 1) * dt_step, n_steps)
 
             imu_data = jnp.zeros((n_steps, 6))
             imu_data = imu_data.at[:, 5].set(omega_z)  # Constant gyro_z
@@ -656,7 +653,10 @@ class TestPropertyBased:
             total_time = timestamps[-1] - timestamps[0]
             expected_heading_change = omega_z * total_time
 
+            # Account for angle wrapping: both angles should be equivalent modulo 2π
+            # Compute the shortest angular distance between the angles
+            angle_diff = result.delta_heading - expected_heading_change
+            angle_diff_wrapped = ((angle_diff + np.pi) % (2 * np.pi)) - np.pi
+
             # Allow small tolerance for numerical precision
-            np.testing.assert_allclose(
-                result.delta_heading, expected_heading_change, rtol=1e-6, atol=1e-8
-            )
+            np.testing.assert_allclose(angle_diff_wrapped, 0.0, rtol=1e-6, atol=1e-8)

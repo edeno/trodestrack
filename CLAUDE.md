@@ -399,6 +399,9 @@ trk = OnlineTracker(cfg)
 - Use **pytest** for testing.
 - Write **clean, modular code** with shorter functions/methods.
 - Prefer **functions over classes** in tests. Use pytest **fixtures** to share resources.
+- Use **type hints** throughout the codebase. `uv run mypy src/trodestrack --ignore-missing-imports` should pass without errors.
+- Run ruff for linting. `uv run ruff check src/ tests/` should pass without errors.
+- Use **black** for code formatting. `uv run black --check src/ tests/` should pass without errors.
 
 ---
 

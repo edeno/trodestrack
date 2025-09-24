@@ -9,11 +9,6 @@ Each test compares the JAX implementation against a high-resolution numerical
 integration baseline to ensure accuracy within specified tolerances.
 """
 
-import jax
-
-# Enable 64-bit precision for tests
-jax.config.update("jax_enable_x64", True)
-
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -355,7 +350,7 @@ class TestGoldenMotionProfiles:
         )
 
         # Deterministic trapezoidal baseline
-        from .baseline_integrator import baseline_trapezoidal_integration
+        from baseline_integrator import baseline_trapezoidal_integration
 
         baseline_result = baseline_trapezoidal_integration(
             np.array(imu_data),
@@ -428,7 +423,7 @@ class TestGoldenMotionProfiles:
         )
 
         # Deterministic trapezoidal baseline with same parameters
-        from .baseline_integrator import baseline_trapezoidal_integration
+        from baseline_integrator import baseline_trapezoidal_integration
 
         baseline_result = baseline_trapezoidal_integration(
             np.array(imu_data),
@@ -487,12 +482,6 @@ class TestGoldenMotionProfiles:
 
         # JAX implementation
         jax_result = preintegrate_imu_scan(imu_data, timestamps)
-
-        # These are the expected values from a known-good implementation
-        # (These would be established once and then used for regression testing)
-        expected_delta_position = jnp.array([1.234567, -0.987654])  # Placeholder values
-        expected_delta_velocity = jnp.array([2.345678, 1.876543])  # Placeholder values
-        expected_delta_heading = 0.567890  # Placeholder value
 
         # Note: In practice, these expected values would be computed once using the
         # high-resolution baseline and then stored as reference values

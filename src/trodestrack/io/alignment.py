@@ -1,6 +1,6 @@
 """Timestamp alignment utilities for synchronizing video and IMU data."""
 
-import warnings
+import logging
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
@@ -11,6 +11,8 @@ from ..constants import (
     DEFAULT_SYNC_SAMPLE_FRAMES,
     DEFAULT_SYNC_TOLERANCE_S,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _ensure_monotonic(timestamps: np.ndarray, name: str) -> None:
@@ -267,7 +269,7 @@ def _align_interpolate(
     """
     # For now, implement as nearest neighbor with interpolation info
     # Full interpolation requires knowing the IMU data shape
-    warnings.warn("Interpolation method not fully implemented, using nearest neighbor")
+    logger.warning("Interpolation method not fully implemented, using nearest neighbor")
     return _align_nearest(video_timestamps, imu_timestamps, max_gap)
 
 
@@ -317,7 +319,7 @@ def _align_subsample(
     decimation_factor = int(imu_rate / video_rate)
 
     if decimation_factor < 1:
-        warnings.warn("IMU rate lower than video rate, using nearest neighbor")
+        logger.warning("IMU rate lower than video rate, using nearest neighbor")
         return _align_nearest(video_timestamps, imu_timestamps, max_gap)
 
     # Subsample IMU timestamps
@@ -417,13 +419,13 @@ def check_timestamp_synchronization(
     sample_frames = DEFAULT_SYNC_SAMPLE_FRAMES // 4 if ptp_enabled else DEFAULT_SYNC_SAMPLE_FRAMES
 
     # Find nearest IMU samples for video frames
-    alignment_errors = []
+    alignment_errors_list = []
     for video_time in overlap_video_times[:sample_frames]:  # Sample first N frames
         time_diffs = np.abs(imu_timestamps - video_time)
         min_error = np.min(time_diffs)
-        alignment_errors.append(min_error)
+        alignment_errors_list.append(min_error)
 
-    alignment_errors = np.array(alignment_errors)
+    alignment_errors = np.array(alignment_errors_list)
     mean_error = np.mean(alignment_errors)
     max_error = np.max(alignment_errors)
 
@@ -478,7 +480,7 @@ def _estimate_offset_xcorr(video_timestamps: np.ndarray, imu_timestamps: np.ndar
     """
     # For now, use simple first-sample method
     # Full cross-correlation requires more sophisticated signal processing
-    warnings.warn("Cross-correlation method not implemented, using first sample")
+    logger.warning("Cross-correlation method not implemented, using first sample")
     return imu_timestamps[0] - video_timestamps[0]
 
 

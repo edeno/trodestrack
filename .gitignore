@@ -42,3 +42,4 @@ calibration_*.yaml
 
 # Log files
 *.log
+*.sh

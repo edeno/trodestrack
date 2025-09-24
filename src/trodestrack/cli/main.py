@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+from trodestrack import jax_setup  # noqa: F401
+
 from ..config.loader import load_config
 
 # Module-level logger
@@ -82,6 +84,15 @@ def create_parser() -> argparse.ArgumentParser:
         "--arena-height", type=float, default=150.0, help="Arena height in cm (default: 150.0)"
     )
 
+    # Benchmark command
+    benchmark_parser = subparsers.add_parser("benchmark", help="Run performance benchmarks")
+    benchmark_parser.add_argument(
+        "--type",
+        choices=["simple", "optimizations", "all"],
+        default="all",
+        help="Type of benchmark to run (default: all)",
+    )
+
     return parser
 
 
@@ -100,8 +111,25 @@ def cmd_smooth(args: argparse.Namespace) -> int:
         logger.info(f"Output directory: {config.output.output_dir}")
         logger.info(f"Filter type: {config.filter.filter_type}")
 
-        # TODO: Implement actual smoothing pipeline
-        logger.warning("Offline smoothing pipeline not yet implemented")
+        # Import and run smoothing pipeline
+        from ..runtime.offline import smooth_session
+
+        logger.info("Starting offline smoothing pipeline")
+        result = smooth_session(config)
+
+        # Print summary
+        n_frames = len(result.filtered_states)
+        duration = result.timestamps[-1] - result.timestamps[0]
+        logger.info("Smoothing completed successfully:")
+        logger.info(f"  - Processed {n_frames} frames over {duration:.1f} seconds")
+        logger.info(f"  - Final log-likelihood: {result.log_likelihood:.2f}")
+
+        if "smoothing_improvement" in result.diagnostics:
+            improvement = result.diagnostics["smoothing_improvement"][
+                "position_rmse_improvement_cm"
+            ]
+            logger.info(f"  - Position smoothing improvement: {improvement:.3f} cm RMS")
+
         return 0
 
     except FileNotFoundError as e:
@@ -109,6 +137,7 @@ def cmd_smooth(args: argparse.Namespace) -> int:
         return 1
     except Exception as e:
         logger.error(f"Error in smooth command: {e}")
+        logger.exception("Full traceback:")
         return 1
 
 
@@ -120,8 +149,55 @@ def cmd_online(args: argparse.Namespace) -> int:
         logger.info(f"Loading session config from: {args.config}")
         logger.info(f"Starting online tracker with {config.filter.filter_type}")
 
-        # TODO: Implement actual online tracker
-        logger.warning("Online tracking not yet implemented")
+        # Import streaming tracker
+        from ..io.loaders import load_imu_data, load_video_detections
+        from ..runtime.online import StreamingTracker
+
+        # Create streaming tracker
+        tracker = StreamingTracker(config)
+
+        # Load data for demonstration (in real use, this would be live streams)
+        video_data = None
+        imu_data = None
+
+        if config.video_file is not None:
+            logger.info(f"Loading video data from: {config.video_file}")
+            video_data = load_video_detections(config.video_file)
+
+        if config.imu_file is not None:
+            logger.info(f"Loading IMU data from: {config.imu_file}")
+            imu_data = load_imu_data(config.imu_file)
+
+        # Process data streams
+        tracker.process_data_streams(video_data, imu_data)
+
+        # Print summary
+        performance = tracker.get_performance_summary()
+        logger.info("Online tracking completed:")
+        logger.info(f"  - Processed {performance.get('total_frames', 0)} frames")
+        logger.info(
+            f"  - Average processing time: {performance.get('avg_processing_time_ms', 0):.2f} ms"
+        )
+        logger.info(f"  - Gating rate: {performance.get('gating_rate', 0)*100:.1f}%")
+
+        if performance.get("frames_per_second"):
+            logger.info(f"  - Processing rate: {performance['frames_per_second']:.1f} FPS")
+
+        # Save results if output directory specified
+        if config.output.save_states:
+            states, timestamps = tracker.get_state_estimates()
+            output_dir = config.output.output_dir
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            import numpy as np
+
+            np.savez(
+                output_dir / "online_states.npz",
+                states=np.array(states),
+                timestamps=np.array(timestamps),
+            )
+            logger.info(f"Results saved to: {output_dir}")
+
         return 0
 
     except FileNotFoundError as e:
@@ -129,6 +205,7 @@ def cmd_online(args: argparse.Namespace) -> int:
         return 1
     except Exception as e:
         logger.error(f"Error in online command: {e}")
+        logger.exception("Full traceback:")
         return 1
 
 
@@ -139,17 +216,136 @@ def cmd_report(args: argparse.Namespace) -> int:
             logger.error(f"Run directory does not exist: {args.run_dir}")
             return 1
 
-        output_path = args.output or args.run_dir / "report.pdf"
+        # Look for tracking results in the run directory
+        results_files = [
+            args.run_dir / "filtered_states.npz",
+            args.run_dir / "smoothed_states.npz",
+            args.run_dir / "tracking_results.npz",
+        ]
 
-        logger.info(f"Generating report from: {args.run_dir}")
-        logger.info(f"Output report: {output_path}")
+        results_file = None
+        for candidate in results_files:
+            if candidate.exists():
+                results_file = candidate
+                break
 
-        # TODO: Implement actual report generation
-        logger.warning("Report generation not yet implemented")
+        if results_file is None:
+            logger.error(f"No tracking results found in {args.run_dir}")
+            logger.info(
+                "Looking for: filtered_states.npz, smoothed_states.npz, or tracking_results.npz"
+            )
+            return 1
+
+        logger.info(f"Loading tracking results from: {results_file}")
+
+        # Load results
+        import numpy as np
+
+        data = np.load(results_file)
+
+        # Extract required arrays
+        estimated_states = data["states"] if "states" in data else data["filtered_states"]
+
+        # Look for ground truth (may not always be available)
+        ground_truth_states = None
+        if "ground_truth_states" in data:
+            ground_truth_states = data["ground_truth_states"]
+        elif "true_states" in data:
+            ground_truth_states = data["true_states"]
+
+        # Look for covariances
+        covariances = None
+        if "covariances" in data:
+            covariances = data["covariances"]
+        elif "filtered_covariances" in data:
+            covariances = data["filtered_covariances"]
+
+        timestamps = data.get("timestamps", None)
+
+        if ground_truth_states is None:
+            logger.error("No ground truth states found - cannot generate QA report")
+            logger.info("QA reports require ground truth for comparison")
+            return 1
+
+        if covariances is None:
+            logger.error("No covariance matrices found - cannot generate QA report")
+            return 1
+
+        logger.info(f"Loaded {len(estimated_states)} timesteps for analysis")
+
+        # Set up output directory for report
+        report_dir = args.run_dir / "qa_report"
+
+        # Import QA report generator
+        from ..qa.report import QAReportGenerator
+
+        # Generate comprehensive QA report
+        logger.info("Generating comprehensive QA report...")
+        generator = QAReportGenerator(report_dir, "tracking_analysis")
+
+        # Additional data from results file
+        kwargs = {}
+        if "occlusion_mask" in data:
+            kwargs["occlusion_mask"] = data["occlusion_mask"]
+        if "residuals" in data:
+            kwargs["residuals"] = data["residuals"]
+        if "measurement_validity" in data:
+            kwargs["measurement_validity"] = data["measurement_validity"]
+
+        # Convert numpy arrays to JAX arrays for QA functions
+        import jax.numpy as jnp
+
+        estimated_states_jax = jnp.array(estimated_states)
+        ground_truth_states_jax = jnp.array(ground_truth_states)
+        covariances_jax = jnp.array(covariances)
+        timestamps_jax = jnp.array(timestamps) if timestamps is not None else None
+
+        # Convert kwargs arrays to JAX as well
+        for key, value in kwargs.items():
+            if hasattr(value, "shape"):  # Check if it's an array-like object
+                kwargs[key] = jnp.array(value)
+
+        # Run analysis
+        results = generator.analyze_tracking_session(
+            estimated_states=estimated_states_jax,
+            ground_truth_states=ground_truth_states_jax,
+            covariances=covariances_jax,
+            timestamps=timestamps_jax,
+            **kwargs,
+        )
+
+        # Print summary to console
+        logger.info("QA Report Generation Complete!")
+        logger.info(f"Report directory: {report_dir}")
+        logger.info("Generated artifacts:")
+
+        for name, path in results["plots"].items():
+            logger.info(f"  - {name}: {Path(path).name}")
+
+        # Print key metrics
+        metrics = results["metrics"]
+        logger.info("Key Performance Metrics:")
+        logger.info(f"  - Position RMSE: {metrics.get('position_rmse_cm', 'N/A'):.2f} cm")
+        logger.info(f"  - Velocity RMSE: {metrics.get('velocity_rmse_cm_s', 'N/A'):.2f} cm/s")
+        logger.info(f"  - Heading RMSE: {metrics.get('heading_rmse_deg', 'N/A'):.2f}°")
+
+        # PRD compliance
+        if "overall_prd_compliant" in metrics:
+            compliance = "✓ PASS" if metrics["overall_prd_compliant"] else "✗ FAIL"
+            logger.info(f"  - PRD Compliance: {compliance}")
+
         return 0
 
+    except FileNotFoundError as e:
+        logger.error(f"File not found: {e}")
+        return 1
+    except KeyError as e:
+        logger.error(f"Missing data in results file: {e}")
+        logger.info("Results file may be incomplete or in unexpected format")
+        return 1
     except Exception as e:
         logger.error(f"Error in report command: {e}")
+        logger.exception("Full traceback:")
         return 1
 
 
@@ -202,6 +398,34 @@ def cmd_calib_homography(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_benchmark(args: argparse.Namespace) -> int:
+    """Execute benchmark command."""
+    try:
+        logger.info(f"Running benchmarks: {args.type}")
+
+        # Import benchmark functions
+        from ..qa.benchmarks import (
+            run_jax_optimizations_benchmark,
+            run_simple_jax_benchmark,
+        )
+
+        if args.type in ["simple", "all"]:
+            logger.info("Running simple JAX benchmark")
+            run_simple_jax_benchmark()
+
+        if args.type in ["optimizations", "all"]:
+            logger.info("Running JAX optimizations benchmark")
+            run_jax_optimizations_benchmark()
+
+        logger.info("Benchmarks completed successfully")
+        return 0
+
+    except Exception as e:
+        logger.error(f"Error in benchmark command: {e}")
+        logger.exception("Full traceback:")
+        return 1
+
+
 def setup_logging(verbose: bool = False, quiet: bool = False) -> None:
     """Configure logging based on verbosity flags."""
     if quiet:
@@ -233,6 +457,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "online": cmd_online,
         "report": cmd_report,
         "calib-homography": cmd_calib_homography,
+        "benchmark": cmd_benchmark,
     }
 
     handler = command_handlers.get(args.command)

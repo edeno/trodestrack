@@ -1,11 +1,13 @@
 """Trodes LED output data loader."""
 
-import warnings
+import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 class TrodesLEDData:
@@ -145,19 +147,19 @@ def load_trodes_led_csv(file_path: Path) -> TrodesLEDData:
         raise ValueError(f"Missing required columns: {missing_cols}")
 
     # Extract data
-    timestamps = df["timestamp"].values
-    front_led = df[["front_x", "front_y"]].values
-    back_led = df[["back_x", "back_y"]].values
+    timestamps = np.asarray(df["timestamp"].values)
+    front_led = np.asarray(df[["front_x", "front_y"]].values)
+    back_led = np.asarray(df[["back_x", "back_y"]].values)
 
     # Handle confidence columns
     if "front_conf" in df.columns and "back_conf" in df.columns:
-        front_confidence = df["front_conf"].values
-        back_confidence = df["back_conf"].values
+        front_confidence = np.asarray(df["front_conf"].values)
+        back_confidence = np.asarray(df["back_conf"].values)
     else:
         # Default confidence to 1.0 if not provided
         front_confidence = np.ones(len(df))
         back_confidence = np.ones(len(df))
-        warnings.warn("No confidence columns found, defaulting to 1.0")
+        logger.warning("No confidence columns found, defaulting to 1.0")
 
     # Handle NaN values by setting confidence to 0
     front_nan_mask = np.isnan(front_led).any(axis=1)
@@ -229,7 +231,7 @@ def load_trodes_led_h5(file_path: Path) -> TrodesLEDData:
             else:
                 front_confidence = np.ones(len(timestamps))
                 back_confidence = np.ones(len(timestamps))
-                warnings.warn("No confidence data found in HDF5, defaulting to 1.0")
+                logger.warning("No confidence data found in HDF5, defaulting to 1.0")
 
             # Create metadata
             metadata = {

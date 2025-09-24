@@ -1,0 +1,225 @@
+"""Mahalanobis gating and measurement masking for outlier rejection.
+
+This module implements robust measurement processing:
+- Mahalanobis distance computation for outlier detection
+- Chi-squared gating for measurement validation
+- Measurement masking for handling missing/invalid data
+- Confidence-based filtering
+"""
+
+from typing import Optional, Tuple
+
+import jax
+import jax.numpy as jnp
+from jax import Array
+from jax.typing import ArrayLike
+
+from ._solvers import mahalanobis_distance as safe_mahalanobis_distance
+
+
+def mahalanobis_distance(
+    residual: ArrayLike,
+    covariance: ArrayLike,
+) -> Array:
+    """Compute Mahalanobis distance of residual.
+
+    Args:
+        residual: Measurement residual (z - h(x))
+        covariance: Residual covariance matrix (H @ P @ H^T + R)
+
+    Returns:
+        Mahalanobis distance
+    """
+    # Use the safe implementation from _solvers.py
+    return safe_mahalanobis_distance(residual, covariance)
+
+
+def mahalanobis_gate(
+    residual: ArrayLike,
+    covariance: ArrayLike,
+    threshold: float,
+) -> Array:
+    """Apply Mahalanobis gating to measurement.
+
+    Args:
+        residual: Measurement residual
+        covariance: Residual covariance matrix
+        threshold: Chi-squared gating threshold
+
+    Returns:
+        True if measurement passes gate, False if rejected
+    """
+    distance = mahalanobis_distance(residual, covariance)
+    return distance <= threshold
+
+
+@jax.jit
+def chi_squared_threshold(dof: int, p_value: float = 0.05) -> float:
+    """Compute chi-squared threshold for gating using lookup table.
+
+    JAX does not provide ppf (inverse CDF) for chi-squared distribution,
+    so we use a lookup table for common cases with reasonable fallback.
+
+    Args:
+        dof: Degrees of freedom (measurement dimension)
+        p_value: P-value for rejection (default: 0.05 for 95% confidence)
+
+    Returns:
+        Chi-squared threshold value
+    """
+    # Lookup table for common DOF and p-values (precomputed with SciPy)
+    # Rows: p-values [0.05, 0.01, 0.001], Columns: DOF [1, 2, 3, 4, 5]
+    thresholds = jnp.array(
+        [
+            [3.841459, 5.991465, 7.814728, 9.487729, 11.070498],  # p=0.05
+            [6.634897, 9.210340, 11.344867, 13.276704, 15.086272],  # p=0.01
+            [10.827566, 13.815511, 16.266189, 18.466776, 20.514982],  # p=0.001
+        ]
+    )
+
+    p_values = jnp.array([0.05, 0.01, 0.001])
+
+    # Find closest p-value in table
+    p_idx = jnp.argmin(jnp.abs(p_values - p_value))
+
+    # Handle DOF 1-5 with table lookup, use conservative fallback for others
+    def get_threshold():
+        return jnp.where(
+            (dof >= 1) & (dof <= 5),
+            thresholds[p_idx, dof - 1],
+            # Conservative fallback: 2*DOF for p=0.05, 3*DOF for smaller p
+            jnp.where(p_value <= 0.01, 3.0 * dof, 2.0 * dof),
+        )
+
+    return get_threshold()
+
+
+def create_measurement_mask(
+    measurements: jnp.ndarray,
+    confidences: jnp.ndarray,
+    min_confidence: float,
+) -> jnp.ndarray:
+    """Create boolean mask for valid measurements.
+
+    Args:
+        measurements: Measurement values
+        confidences: Measurement confidences [0, 1]
+        min_confidence: Minimum confidence threshold
+
+    Returns:
+        Boolean mask (True = valid, False = invalid)
+    """
+    # Check for finite values
+    finite_mask = jnp.isfinite(measurements)
+
+    # Check confidence threshold
+    confidence_mask = confidences >= min_confidence
+
+    # Combined mask
+    mask = finite_mask & confidence_mask
+
+    return mask
+
+
+def apply_measurement_mask(
+    measurements: ArrayLike,
+    covariance: ArrayLike,
+    jacobian: ArrayLike,
+    mask: ArrayLike,
+) -> Tuple[Array, Array, Array]:
+    """Apply measurement mask to filter out invalid measurements.
+
+    Args:
+        measurements: Full measurement vector
+        covariance: Full measurement covariance matrix
+        jacobian: Full measurement Jacobian matrix
+        mask: Boolean mask for valid measurements
+
+    Returns:
+        Tuple of (masked_measurements, masked_covariance, masked_jacobian)
+    """
+    # Extract valid measurements
+    valid_indices = jnp.where(mask)[0]
+
+    if len(valid_indices) == 0:
+        # No valid measurements - return empty arrays
+        n_states = jacobian.shape[1]
+        return (jnp.array([]), jnp.zeros((0, 0)), jnp.zeros((0, n_states)))
+
+    # Filter measurements
+    masked_measurements = measurements[valid_indices]
+
+    # Filter covariance matrix (select rows and columns)
+    masked_covariance = covariance[jnp.ix_(valid_indices, valid_indices)]
+
+    # Filter Jacobian (select rows)
+    masked_jacobian = jacobian[valid_indices, :]
+
+    return masked_measurements, masked_covariance, masked_jacobian
+
+
+@jax.jit
+def compute_innovation_covariance(
+    measurement_jacobian: ArrayLike,
+    state_covariance: ArrayLike,
+    measurement_noise: ArrayLike,
+) -> Array:
+    """Compute innovation covariance S = H @ P @ H^T + R.
+
+    Args:
+        measurement_jacobian: Measurement Jacobian H
+        state_covariance: State covariance P
+        measurement_noise: Measurement noise covariance R
+
+    Returns:
+        Innovation covariance matrix S
+    """
+    return measurement_jacobian @ state_covariance @ measurement_jacobian.T + measurement_noise
+
+
+def validate_and_gate_measurement(
+    measurement: ArrayLike,
+    predicted_measurement: ArrayLike,
+    innovation_covariance: ArrayLike,
+    confidence: float,
+    min_confidence: float = 0.5,
+    gating_threshold: Optional[float] = None,
+    measurement_dim: Optional[int] = None,
+) -> Tuple[Array, Array]:
+    """Validate and gate a single measurement.
+
+    Args:
+        measurement: Observed measurement
+        predicted_measurement: Predicted measurement h(x)
+        innovation_covariance: Innovation covariance S
+        confidence: Measurement confidence [0, 1]
+        min_confidence: Minimum confidence threshold
+        gating_threshold: Chi-squared gating threshold (computed if None)
+        measurement_dim: Measurement dimension for threshold computation
+
+    Returns:
+        Tuple of (is_valid, mahalanobis_distance)
+    """
+    # Check confidence threshold
+    if confidence < min_confidence:
+        return False, jnp.inf
+
+    # Check for finite values
+    if not jnp.all(jnp.isfinite(measurement)):
+        return False, jnp.inf
+
+    # Compute residual
+    residual = measurement - predicted_measurement
+
+    # Compute Mahalanobis distance
+    distance = mahalanobis_distance(residual, innovation_covariance)
+
+    # Apply gating
+    if gating_threshold is None:
+        if measurement_dim is None:
+            measurement_dim = len(measurement)
+        gating_threshold = chi_squared_threshold(measurement_dim, p_value=0.05)
+
+    is_valid = distance <= gating_threshold
+
+    return is_valid, distance

@@ -1,11 +1,13 @@
 """DeepLabCut keypoint data loader."""
 
-import warnings
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 class DLCKeypointData:
@@ -186,10 +188,12 @@ def load_dlc_csv(file_path: Path) -> DLCKeypointData:
         raise ValueError(f"Failed to read DLC CSV file: {e}")
 
     # Get scorer name (first level of columns)
-    scorer = df.columns.levels[0][0]
-
-    # Extract bodyparts (second level)
-    bodyparts = df.columns.levels[1]
+    if hasattr(df.columns, "levels"):
+        scorer = df.columns.levels[0][0]
+        # Extract bodyparts (second level)
+        bodyparts = df.columns.levels[1]
+    else:
+        raise ValueError("Expected MultiIndex columns in DLC CSV file")
 
     # Generate timestamps if not provided
     if df.index.name == "frame":
@@ -197,7 +201,7 @@ def load_dlc_csv(file_path: Path) -> DLCKeypointData:
         # This requires fps information - use metadata or assume 30 fps
         fps = 30.0  # Default assumption
         timestamps = df.index.values / fps
-        warnings.warn(f"No timestamp column found, assuming {fps} fps")
+        logger.warning("No timestamp column found, assuming %.1f fps", fps)
     else:
         timestamps = df.index.values
 
@@ -224,7 +228,7 @@ def load_dlc_csv(file_path: Path) -> DLCKeypointData:
                 confidences[bodypart] = likelihood_vals
 
         except KeyError:
-            warnings.warn(f"Could not extract data for bodypart: {bodypart}")
+            logger.warning("Could not extract data for bodypart: %s", bodypart)
             continue
 
     if not keypoints:
@@ -272,7 +276,12 @@ def load_dlc_h5(file_path: Path) -> DLCKeypointData:
 
     try:
         # Load data using pandas HDFStore format
-        df = pd.read_hdf(file_path)
+        data = pd.read_hdf(file_path)
+
+        # Ensure we have a DataFrame
+        if isinstance(data, pd.Series):
+            raise ValueError("Expected DataFrame, got Series from HDF5 file")
+        df = data
 
         # Process similar to CSV but from HDF5
         if isinstance(df.columns, pd.MultiIndex):
@@ -318,16 +327,18 @@ def _process_dlc_dataframe(df: pd.DataFrame, file_path: Path) -> DLCKeypointData
         DLCKeypointData container
     """
     # Get scorer name (first level of columns)
-    scorer = df.columns.levels[0][0]
-
-    # Extract bodyparts (second level)
-    bodyparts = df.columns.levels[1]
+    if hasattr(df.columns, "levels"):
+        scorer = df.columns.levels[0][0]
+        # Extract bodyparts (second level)
+        bodyparts = df.columns.levels[1]
+    else:
+        raise ValueError("Expected MultiIndex columns in DLC DataFrame")
 
     # Generate timestamps
     if df.index.name == "frame":
         fps = 30.0  # Default assumption
         timestamps = df.index.values / fps
-        warnings.warn(f"No timestamp column found, assuming {fps} fps")
+        logger.warning("No timestamp column found, assuming %.1f fps", fps)
     else:
         timestamps = df.index.values
 
@@ -362,7 +373,7 @@ def _process_dlc_dataframe(df: pd.DataFrame, file_path: Path) -> DLCKeypointData
                 confidences[bodypart] = likelihood_vals
 
         except KeyError:
-            warnings.warn(f"Could not extract data for bodypart: {bodypart}")
+            logger.warning("Could not extract data for bodypart: %s", bodypart)
             continue
 
     if not keypoints:

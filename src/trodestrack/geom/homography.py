@@ -2,13 +2,11 @@
 
 from typing import List, Union
 
-import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import jit
 
-# Enable 64-bit precision in JAX for accurate homography computations
-jax.config.update("jax_enable_x64", True)
+from ..models._solvers import safe_solve
 
 
 class HomographyTransform:
@@ -25,13 +23,14 @@ class HomographyTransform:
             ValueError: If matrix is not 3x3
         """
         # Convert to numpy array for validation
-        matrix = np.array(homography_matrix, dtype=np.float64)
+        matrix = jnp.array(homography_matrix, dtype=jnp.float64)
         if matrix.shape != (3, 3):
             raise ValueError("Homography matrix must be 3x3")
 
         # Store as JAX array for computation (use float64 for precision)
         self.H = jnp.array(matrix, dtype=jnp.float64)
-        self.H_inv = jnp.linalg.inv(self.H)
+        # Use safe_solve instead of storing inverse directly
+        self._use_safe_solve = True
 
     def pixel_to_cm(self, points_pixel: np.ndarray) -> np.ndarray:
         """
@@ -43,7 +42,7 @@ class HomographyTransform:
         Returns:
             Array of shape (N, 2) with cm coordinates
         """
-        return np.array(_transform_points_jax(jnp.array(points_pixel), self.H))
+        return jnp.array(_transform_points_jax(jnp.array(points_pixel), self.H))
 
     def cm_to_pixel(self, points_cm: np.ndarray) -> np.ndarray:
         """
@@ -55,7 +54,7 @@ class HomographyTransform:
         Returns:
             Array of shape (N, 2) with pixel coordinates
         """
-        return np.array(_transform_points_jax(jnp.array(points_cm), self.H_inv))
+        return jnp.array(_transform_points_with_inverse_jax(jnp.array(points_cm), self.H))
 
 
 @jit
@@ -76,6 +75,32 @@ def _transform_points_jax(points: jnp.ndarray, H: jnp.ndarray) -> jnp.ndarray:
 
     # Apply transformation: (3, N) = (3, 3) @ (3, N)
     transformed_homogeneous = H @ points_homogeneous.T
+
+    # Convert back to 2D coordinates (divide by w)
+    transformed_2d = transformed_homogeneous[:2] / transformed_homogeneous[2]
+
+    return transformed_2d.T
+
+
+@jit
+def _transform_points_with_inverse_jax(points: jnp.ndarray, H: jnp.ndarray) -> jnp.ndarray:
+    """
+    JAX-compiled homography transformation of points using safe matrix solve.
+
+    Args:
+        points: Array of shape (N, 2) with 2D coordinates
+        H: 3x3 homography matrix (inverse will be computed safely)
+
+    Returns:
+        Transformed points of shape (N, 2)
+    """
+    # Convert to homogeneous coordinates (N, 3)
+    ones = jnp.ones((points.shape[0], 1))
+    points_homogeneous = jnp.concatenate([points, ones], axis=1)
+
+    # Apply inverse transformation using safe solve: H^{-1} @ points = solve(H, points)
+    # Solve for each point: H @ transformed = original => transformed = H^{-1} @ original
+    transformed_homogeneous = safe_solve(H, points_homogeneous.T)
 
     # Convert back to 2D coordinates (divide by w)
     transformed_2d = transformed_homogeneous[:2] / transformed_homogeneous[2]
