@@ -407,17 +407,15 @@ def _ukf_update_position_heading(
 
     # Innovation with heading wrapping
     innovation = measurement - predicted_measurement
-    wrapped_heading_innov = jnp.arctan2(jnp.sin(innovation[2]), jnp.cos(innovation[2]))
-    innovation = innovation.at[2].set(wrapped_heading_innov)
+    innovation = innovation.at[2].set(wrap_angle(innovation[2]))
 
     # Innovation covariance
     # Handle angle wrapping for measurement points
     centered_measurement_points = measurement_points - predicted_measurement[None, :]
     # Wrap heading differences
-    wrapped_heading_diffs = jnp.arctan2(
-        jnp.sin(centered_measurement_points[:, 2]), jnp.cos(centered_measurement_points[:, 2])
+    centered_measurement_points = centered_measurement_points.at[:, 2].set(
+        wrap_angle(centered_measurement_points[:, 2])
     )
-    centered_measurement_points = centered_measurement_points.at[:, 2].set(wrapped_heading_diffs)
 
     innovation_cov = jnp.sum(
         weights_cov[:, None, None]
