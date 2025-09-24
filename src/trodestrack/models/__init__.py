@@ -17,10 +17,9 @@ from .ekf import (
     EKFFilter,
     EKFResult,
     EKFState,
-    create_ekf_step_arrays_optimized,
     create_initial_ekf_state,
     ekf_predict,
-    ekf_step_arrays_pure,
+    ekf_step_pytree,
     ekf_update,
 )
 from .gating import (
@@ -121,10 +120,9 @@ __all__ = [
     "EKFResult",
     "EKFFilter",
     "ekf_predict",
+    "ekf_step_pytree",
     "ekf_update",
     "create_initial_ekf_state",
-    "ekf_step_arrays_pure",
-    "create_ekf_step_arrays_optimized",
     # Unscented Kalman Filtering
     "UKFState",
     "UKFResult",

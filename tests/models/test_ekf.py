@@ -326,7 +326,6 @@ class TestEKFFilter:
             bias_drift_std=0.01,
             position_noise_std=1.0,
             heading_noise_std=0.1,
-            gate_threshold=9.21,
         )
 
     def test_filter_initialization(self):
@@ -522,13 +521,10 @@ def test_ekf_zero_confidence_is_safe():
 
 
 def test_gating_pos_heading_uses_chi2_3d():
-    from scipy.stats import chi2
-
-    th99 = float(chi2.ppf(0.99, df=3))  # ~11.34
+    """Test that position+heading measurements use proper 3-DOF gating."""
     ekf = EKFFilter(
         State2D(x=0, y=0, vx=0, vy=0, theta=0, b_gz=0, b_ax=0, b_ay=0),
         jnp.eye(8),
-        gate_threshold=th99,
     )
     # huge outlier
     res = ekf.update(position=jnp.array([50.0, 50.0]), heading=3.0, confidence=1.0)
