@@ -480,3 +480,61 @@ class TestEKFLinearCase:
         for ll in log_likelihoods:
             assert ll < 0  # Log-likelihood should be negative
             assert ll > -50  # But not excessively negative
+
+
+def test_ekf_update_heading_wrap():
+    ekf = EKFFilter(
+        initial_state=State2D(x=0, y=0, vx=0, vy=0, theta=3.10, b_gz=0, b_ax=0, b_ay=0), initial_covariance=jnp.eye(8) * 0.1
+    )
+    # measurement near -pi ~ +pi
+    res = ekf.update(position=jnp.array([0.0, 0.0]), heading=-3.10, confidence=1.0)
+    # innovation's heading component should be small (wrapped), and P stays SPD
+    assert abs(res.innovation[2]) < 0.1
+    w, _ = jnp.linalg.eigh(ekf.get_current_covariance())
+    assert jnp.all(w > 0)
+
+
+def test_ekf_near_singular_S_is_stable():
+    ekf = EKFFilter(
+        State2D(x=0, y=0, vx=0, vy=0, theta=0, b_gz=0, b_ax=0, b_ay=0),
+        jnp.eye(8) * 1e-6,
+        position_noise_std=1e-8,
+        heading_noise_std=1e-8,
+    )
+    # Two near-identical updates -> S almost singular
+    ekf.update(position=jnp.array([0.0, 0.0]), confidence=1.0)
+    res = ekf.update(position=jnp.array([1e-6, -1e-6]), confidence=1.0)
+    K = res.kalman_gain
+    P = ekf.get_current_covariance()
+    assert jnp.all(jnp.isfinite(K))
+    assert jnp.all(jnp.isfinite(P))
+    assert jnp.allclose(P, (P + P.T) / 2, atol=1e-9)
+
+
+def test_ekf_zero_confidence_is_safe():
+    ekf = EKFFilter(State2D(x=0, y=0, vx=0, vy=0, theta=0, b_gz=0, b_ax=0, b_ay=0), jnp.eye(8))
+    res = ekf.update(position=jnp.array([1000.0, 1000.0]), confidence=0.0)
+    # either gated or exerts negligible influence; in both cases finite & bounded
+    s = ekf.get_current_state()
+    assert jnp.isfinite(res.innovation).all()
+    assert abs(s.x) < 10 and abs(s.y) < 10
+
+
+def test_gating_pos_heading_uses_chi2_3d():
+    from scipy.stats import chi2
+
+    th99 = float(chi2.ppf(0.99, df=3))  # ~11.34
+    ekf = EKFFilter(State2D(x=0, y=0, vx=0, vy=0, theta=0, b_gz=0, b_ax=0, b_ay=0), jnp.eye(8), gate_threshold=th99)
+    # huge outlier
+    res = ekf.update(position=jnp.array([50.0, 50.0]), heading=3.0, confidence=1.0)
+    assert res.gated
+
+
+def test_units_accel_mps2_to_cmps2():
+    ekf = EKFFilter(State2D(x=0, y=0, vx=0, vy=0, theta=0, b_gz=0, b_ax=0, b_ay=0), jnp.eye(8), velocity_damping=0.0)
+    dt = 0.1
+    for _ in range(10):  # 1 s; a=1 m/s^2 -> vx = 100 cm/s; x = 50 cm
+        ekf.predict(dt, accel=jnp.array([1.0, 0.0]), gyro=jnp.array([0.0]))
+    s = ekf.get_current_state()
+    assert s.vx == pytest.approx(100.0, rel=1e-3)
+    assert s.x == pytest.approx(50.0, rel=1e-3)

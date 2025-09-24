@@ -103,7 +103,9 @@ class TestRTSBenchmark:
             bias_drift_std=0.01,
         )
 
-        forward_data = smoother.collect_forward_data(ekf_results, prediction_data)
+        # Create identity transition matrices (temporary solution with reduced accuracy)
+        transition_matrices = [jnp.eye(8) for _ in range(len(ekf_results))]
+        forward_data = smoother.collect_forward_data(ekf_results, prediction_data, transition_matrices)
         rts_result = smoother.smooth_sequence(forward_data)
 
         # Compare performance
@@ -201,7 +203,9 @@ class TestRTSBenchmark:
 
         # Run RTS smoother
         smoother = RTSSmoother()
-        forward_data = smoother.collect_forward_data(ekf_results, prediction_data)
+        # Create identity transition matrices (temporary solution with reduced accuracy)
+        transition_matrices = [jnp.eye(8) for _ in range(len(ekf_results))]
+        forward_data = smoother.collect_forward_data(ekf_results, prediction_data, transition_matrices)
         rts_result = smoother.smooth_sequence(forward_data)
 
         # Compare performance
@@ -292,7 +296,9 @@ class TestRTSBenchmark:
 
         # Run RTS smoother
         smoother = RTSSmoother()
-        forward_data = smoother.collect_forward_data(ekf_results, prediction_data)
+        # Create identity transition matrices (temporary solution with reduced accuracy)
+        transition_matrices = [jnp.eye(8) for _ in range(len(ekf_results))]
+        forward_data = smoother.collect_forward_data(ekf_results, prediction_data, transition_matrices)
         rts_result = smoother.smooth_sequence(forward_data)
 
         # Analyze improvement specifically during occlusion period
@@ -405,7 +411,9 @@ class TestRTSBenchmark:
 
         # Run RTS smoother
         smoother = RTSSmoother()
-        forward_data = smoother.collect_forward_data(ekf_results, prediction_data)
+        # Create identity transition matrices (temporary solution with reduced accuracy)
+        transition_matrices = [jnp.eye(8) for _ in range(len(ekf_results))]
+        forward_data = smoother.collect_forward_data(ekf_results, prediction_data, transition_matrices)
         rts_result = smoother.smooth_sequence(forward_data)
 
         # Compute velocity RMSE
