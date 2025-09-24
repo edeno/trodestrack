@@ -8,9 +8,51 @@ import jax.numpy as jnp
 import numpy as np
 
 import trodestrack.sim.synthetic as synthetic_module
+from trodestrack.models.dynamics import compute_state_jacobian
 from trodestrack.models.ekf import EKFFilter
 from trodestrack.models.rts_smoother import RTSSmoother, compute_smoothing_improvement
 from trodestrack.sim.synthetic import SimConfig, generate_synthetic_session
+
+
+def _compute_proper_transition_matrices(timeline, ekf_results, velocity_damping=0.1):
+    """Compute proper transition matrices from timeline data for RTS smoother testing.
+
+    Args:
+        timeline: List of (timestamp, imu_sample, video_detection) tuples
+        ekf_results: List of EKF filter results
+        velocity_damping: Velocity damping parameter
+
+    Returns:
+        List of transition matrices (one per EKF result)
+    """
+    transition_matrices = []
+
+    for i, ekf_result in enumerate(ekf_results):
+        # Get filtered state for this frame (EKFState.state is already an array)
+        state_array = ekf_result.state.state
+
+        # Get time delta (skip index 0 since that was the initial frame)
+        timeline_idx = i + 1  # EKF results start from timeline[1]
+        if timeline_idx < len(timeline):
+            timestamp = timeline[timeline_idx][0]
+            prev_timestamp = timeline[timeline_idx - 1][0]
+            dt = timestamp - prev_timestamp
+
+            # Get IMU sample for this frame
+            imu_sample = timeline[timeline_idx][1]
+            accel = jnp.array([imu_sample.accel[0], imu_sample.accel[1]])
+            gyro = jnp.array([imu_sample.gyro[2]])  # gz component
+        else:
+            # Fallback for edge cases
+            dt = 0.033  # 30 Hz default
+            accel = jnp.zeros(2)
+            gyro = jnp.zeros(1)
+
+        # Compute transition matrix using automatic differentiation
+        F = compute_state_jacobian(state_array, dt, accel, gyro, velocity_damping)
+        transition_matrices.append(F)
+
+    return transition_matrices
 
 
 class TestRTSBenchmark:
@@ -103,8 +145,8 @@ class TestRTSBenchmark:
             bias_drift_std=0.01,
         )
 
-        # Create identity transition matrices (temporary solution with reduced accuracy)
-        transition_matrices = [jnp.eye(8) for _ in range(len(ekf_results))]
+        # Compute proper transition matrices using timeline data
+        transition_matrices = _compute_proper_transition_matrices(timeline, ekf_results, velocity_damping=0.1)
         forward_data = smoother.collect_forward_data(ekf_results, prediction_data, transition_matrices)
         rts_result = smoother.smooth_sequence(forward_data)
 
@@ -203,8 +245,8 @@ class TestRTSBenchmark:
 
         # Run RTS smoother
         smoother = RTSSmoother()
-        # Create identity transition matrices (temporary solution with reduced accuracy)
-        transition_matrices = [jnp.eye(8) for _ in range(len(ekf_results))]
+        # Compute proper transition matrices using timeline data
+        transition_matrices = _compute_proper_transition_matrices(timeline, ekf_results, velocity_damping=0.1)
         forward_data = smoother.collect_forward_data(ekf_results, prediction_data, transition_matrices)
         rts_result = smoother.smooth_sequence(forward_data)
 
@@ -296,8 +338,8 @@ class TestRTSBenchmark:
 
         # Run RTS smoother
         smoother = RTSSmoother()
-        # Create identity transition matrices (temporary solution with reduced accuracy)
-        transition_matrices = [jnp.eye(8) for _ in range(len(ekf_results))]
+        # Compute proper transition matrices using timeline data
+        transition_matrices = _compute_proper_transition_matrices(timeline, ekf_results, velocity_damping=0.1)
         forward_data = smoother.collect_forward_data(ekf_results, prediction_data, transition_matrices)
         rts_result = smoother.smooth_sequence(forward_data)
 
@@ -411,8 +453,8 @@ class TestRTSBenchmark:
 
         # Run RTS smoother
         smoother = RTSSmoother()
-        # Create identity transition matrices (temporary solution with reduced accuracy)
-        transition_matrices = [jnp.eye(8) for _ in range(len(ekf_results))]
+        # Compute proper transition matrices using timeline data
+        transition_matrices = _compute_proper_transition_matrices(timeline, ekf_results, velocity_damping=0.1)
         forward_data = smoother.collect_forward_data(ekf_results, prediction_data, transition_matrices)
         rts_result = smoother.smooth_sequence(forward_data)
 

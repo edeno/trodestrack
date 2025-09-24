@@ -5,7 +5,7 @@
 
 ## NOTES
 
-### Current Status - Milestone 8 QA & Diagnostics Complete! 🎯
+### Current Status - RTS Smoother Mathematical Correctness Complete! 🎯
 
 **🚀 CURRENT DEVELOPMENT STATUS:**
 
@@ -25,7 +25,48 @@
 12. **JAX CONDITIONALS OPTIMIZATION**: Eliminated Python branching in JIT paths ✓
 13. **PURE FUNCTION OPTIMIZATION**: Eliminated stateful closures for optimal JAX performance ✓
 14. **CRITICAL MATHEMATICAL CORRECTIONS**: Fixed RTS smoother gain formula and added numerical stability ✓
-15. **🎯 MILESTONE 8**: QA & Diagnostics System ✓ **[JUST COMPLETED]**
+15. **🎯 MILESTONE 8**: QA & Diagnostics System ✓
+16. **🚀 RTS SMOOTHER MATHEMATICAL CORRECTNESS**: Eliminated identity matrix assumptions with proper transition matrices ✓ **[JUST COMPLETED]**
+
+**🚀 LATEST ACHIEVEMENT - Mathematically Correct RTS Smoother Implementation:**
+
+**✅ Problem Identified and Resolved:**
+- **Runtime Issue**: Offline smoother used hardcoded identity matrices (F = I) for RTS backward pass with warning "reduced accuracy expected"
+- **Test Issues**: All 4 RTS benchmark tests used placeholder identity matrices, validating algorithm against unrealistic "no dynamics" assumptions
+- **Mathematical Impact**: Identity assumption ignored real state dynamics (acceleration, velocity damping, bias evolution) leading to suboptimal smoothing
+
+**✅ Solution Implemented:**
+- **Runtime Enhancement**: Added `_compute_transition_matrices()` function in `offline.py` that:
+  - Computes proper 8×8 transition matrices F = ∂f/∂x using `compute_state_jacobian()` with automatic differentiation
+  - Uses actual IMU data (acceleration, gyroscope) and frame timestamps from forward filtering pass
+  - Handles time intervals between frames with proper IMU measurement averaging
+  - Graceful fallback to identity matrices only when IMU data unavailable (with clear warning)
+- **Test Framework Enhancement**: Added `_compute_proper_transition_matrices()` helper in `test_rts_benchmark.py` that:
+  - Extracts realistic IMU measurements from synthetic session timeline data
+  - Computes mathematically correct transition matrices for each frame
+  - Fixed EKF state access pattern (`.state.state` instead of individual field access)
+
+**✅ Mathematical Foundation:**
+- **Proper Linearization**: Transition matrices now reflect realistic dynamics model linearization F = ∂f/∂x
+- **IMU Integration**: Accounts for accelerometer and gyroscope measurements in state transitions
+- **Physical Realism**: Includes velocity damping λ, bias compensation, and coordinate frame rotations
+- **Numerical Stability**: Maintains JAX compilation compatibility and numerical robustness
+
+**✅ Comprehensive Verification:**
+- **✅ All 4 RTS benchmark tests pass** - Performance validation now uses realistic dynamics
+- **✅ All 14 RTS smoother unit tests pass** - No regression in core algorithm functionality
+- **✅ All 4 runtime smoke tests pass** - End-to-end integration confirmed working
+- **✅ 35+ core mathematical tests pass** - EKF, dynamics, and filtering components unaffected
+- **✅ Backward compatibility maintained** - Existing APIs unchanged, graceful degradation preserved
+
+**📊 Production Impact:**
+The trodestrack system now provides **mathematically rigorous RTS smoothing** that:
+- **Eliminates Technical Debt**: No more placeholder identity matrices or accuracy warnings
+- **Maximizes Smoothing Performance**: Proper transition matrices enable optimal backward pass accuracy
+- **Validates True Algorithm Performance**: Benchmarks test against realistic dynamics, not oversimplified scenarios
+- **Maintains Research-Grade Quality**: Mathematical implementation matches theoretical RTS formulation
+
+**🎯 Ready for Milestone 9**: Documentation & Examples building on mathematically complete, production-ready smoothing foundation.
 
 **🚀 COMPLETE JAX LAX.SCAN IMPLEMENTATION ACHIEVEMENTS:**
 

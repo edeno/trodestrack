@@ -19,6 +19,7 @@ from jax.typing import ArrayLike
 from ..config.schemas import SessionConfig
 from ..geom.homography import transform_points_pixel_to_cm
 from ..io.loaders import load_imu_data, load_video_detections
+from ..models.dynamics import compute_state_jacobian
 from ..models.ekf import EkfCarry, EKFFilter, ekf_step_pytree
 from ..models.rts_smoother import ForwardPassData, rts_smooth
 from ..models.state import State2D, create_initial_state
@@ -472,6 +473,79 @@ def _prepare_imu_blocks_for_frames(
     return imu_blocks
 
 
+def _compute_transition_matrices(
+    filtered_states: ArrayLike,
+    config: SessionConfig,
+    imu_data: dict,
+    frame_timestamps: ArrayLike,
+) -> Array:
+    """Compute proper transition matrices for RTS smoother using IMU data.
+
+    Args:
+        filtered_states: Filtered states from forward pass (n_frames, 8)
+        config: Session configuration
+        imu_data: IMU data dictionary with 'data' and 'timestamps'
+        frame_timestamps: Frame timestamps array
+
+    Returns:
+        Transition matrices F_k for each frame (n_frames, 8, 8)
+    """
+    n_frames = filtered_states.shape[0]
+    transition_matrices = []
+
+    # Extract IMU data arrays
+    imu_measurements = imu_data["data"]  # (n_samples, 6)
+    imu_timestamps = imu_data["timestamps"]
+
+    for k in range(n_frames):
+        # Get state at frame k
+        state_k = filtered_states[k]
+
+        # Get time interval
+        if k == 0:
+            dt = 0.033  # Default 30 Hz frame rate if no previous frame
+        else:
+            dt = float(frame_timestamps[k] - frame_timestamps[k-1])
+
+        # Find IMU measurements in this interval
+        if k == 0:
+            # For first frame, use measurements near the timestamp
+            t_start = frame_timestamps[k] - dt/2
+            t_end = frame_timestamps[k] + dt/2
+        else:
+            t_start = frame_timestamps[k-1]
+            t_end = frame_timestamps[k]
+
+        # Find IMU samples in this interval
+        mask = (imu_timestamps >= t_start) & (imu_timestamps <= t_end)
+
+        if jnp.sum(mask) > 0:
+            # Use average IMU measurements in this interval
+            interval_imu = imu_measurements[mask]
+            accel_avg = jnp.mean(interval_imu[:, :2], axis=0)  # ax, ay
+            gyro_avg = jnp.mean(interval_imu[:, 5:6], axis=0)   # gz
+        else:
+            # No IMU data in interval - use zeros (stationary assumption)
+            accel_avg = jnp.zeros(2)
+            gyro_avg = jnp.zeros(1)
+
+        # Convert to m/s² (from raw units already converted by loader)
+        # IMU data should already be in proper units from the loader
+
+        # Compute transition matrix F_k using automatic differentiation
+        F_k = compute_state_jacobian(
+            state_k,
+            dt,
+            accel_avg,
+            gyro_avg,
+            config.filter.velocity_damping
+        )
+
+        transition_matrices.append(F_k)
+
+    return jnp.stack(transition_matrices, axis=0)
+
+
 def _run_smoothing_pass(
     filtered_states: ArrayLike,
     filtered_covariances: ArrayLike,
@@ -486,16 +560,20 @@ def _run_smoothing_pass(
     if config.filter.filter_type == "ekf":
         logger.info("Running JAX-optimized RTS smoothing with true forward predictions")
 
-        # Compute transition matrices needed for RTS smoother
-        # For simplicity, use identity matrices as approximation since we don't have the exact
-        # IMU data and time deltas from the forward pass stored
-        n_frames = filtered_states.shape[0]
-        state_dim = filtered_states.shape[1]
-        transition_matrices = jnp.tile(jnp.eye(state_dim), (n_frames, 1, 1))
-
-        logger.warning(
-            "Using identity transition matrices for RTS smoother - reduced accuracy expected"
-        )
+        # Compute proper transition matrices needed for RTS smoother
+        if imu_data is not None and frame_timestamps is not None:
+            logger.info("Computing proper transition matrices using IMU data for RTS smoother")
+            transition_matrices = _compute_transition_matrices(
+                filtered_states, config, imu_data, frame_timestamps
+            )
+        else:
+            # Fallback to identity matrices if no IMU data available
+            logger.warning(
+                "No IMU data available - using identity transition matrices for RTS smoother (reduced accuracy expected)"
+            )
+            n_frames = filtered_states.shape[0]
+            state_dim = filtered_states.shape[1]
+            transition_matrices = jnp.tile(jnp.eye(state_dim), (n_frames, 1, 1))
 
         # Create forward pass data for RTS using true predictions from EKF forward pass
         forward_data = ForwardPassData(
