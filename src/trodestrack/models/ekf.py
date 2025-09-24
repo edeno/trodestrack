@@ -444,7 +444,7 @@ def ekf_step(carry: EkfCarry, inp: EkfInput) -> Tuple[EkfCarry, EkfOutputs]:
     bias_drift_std = filter_cfg.get("bias_drift_std", 0.01)
     position_noise_std = filter_cfg.get("position_noise_std", 1.0)
     heading_noise_std = filter_cfg.get("heading_noise_std", 0.1)
-    gate_threshold = filter_cfg.get("gate_threshold", 9.21)
+    _ = filter_cfg.get("gate_threshold", 9.21)  # Unused - thresholds auto-computed based on DoF
 
     # Prediction step
     # Extract IMU measurements (imu_block is guaranteed to be a valid array in our pipeline)
@@ -502,7 +502,7 @@ def ekf_step(carry: EkfCarry, inp: EkfInput) -> Tuple[EkfCarry, EkfOutputs]:
             measurement,
             measurement_noise,
             has_heading,
-            gate_threshold,
+            None,  # Auto-compute threshold based on DoF
         )
 
         # Extract filtered state and covariance
@@ -585,7 +585,7 @@ def ekf_step_pytree(
         bias_drift_std,
         position_noise_std,
         heading_noise_std,
-        gate_threshold,
+        _gate_threshold,  # Unused - thresholds auto-computed based on DoF
     ) = scan_input
 
     # Prediction step
@@ -672,7 +672,7 @@ def create_ekf_step_arrays_optimized(
     bias_drift_std: float,
     position_noise_std: float,
     heading_noise_std: float,
-    gate_threshold: float,
+    gate_threshold: float,  # NOTE: Unused - this function doesn't perform gating
 ):
     """Create optimized EKF step function with static filter parameters.
 
@@ -857,7 +857,7 @@ def ekf_step_arrays_pure(
         bias_drift_std,
         position_noise_std,
         heading_noise_std,
-        gate_threshold,
+        _gate_threshold,  # Unused - thresholds auto-computed based on DoF
     ) = inp
 
     # Prediction step
