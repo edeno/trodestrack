@@ -5,7 +5,9 @@ This module provides comprehensive metrics for evaluating tracking performance,
 including RMSE, NEES, and specialized drift analysis for occlusion periods.
 """
 
+import jax
 import jax.numpy as jnp
+from jax import lax
 import numpy as np
 from typing import Dict, Optional, Tuple, Union
 
@@ -92,19 +94,8 @@ def compute_nees(
     # Handle heading angle wrapping
     errors = errors.at[:, 4].set(_wrap_angle_difference(errors[:, 4]))
 
-    # Compute NEES for each timestep
-    nees_values = []
-    for i in range(len(errors)):
-        error = errors[i]
-        cov = covariances[i]
-
-        # NEES = e^T * P^{-1} * e
-        # Use pseudoinverse for numerical stability
-        cov_inv = jnp.linalg.pinv(cov)
-        nees_i = float(error.T @ cov_inv @ error)
-        nees_values.append(nees_i)
-
-    nees_array = jnp.array(nees_values)
+    # Compute NEES for each timestep using vectorized JAX operations
+    nees_array = _compute_nees_vectorized(errors, covariances)
 
     # Expected NEES for 8-DOF state
     expected_nees = 8.0
@@ -114,8 +105,39 @@ def compute_nees(
         "nees_std": float(jnp.std(nees_array)),
         "nees_expected": expected_nees,
         "nees_consistency_ratio": float(jnp.mean(nees_array) / expected_nees),
-        "nees_values": np.array(nees_values),  # Return as numpy for plotting
+        "nees_values": np.array(nees_array),  # Return as numpy for plotting
     }
+
+
+@jax.jit
+def _compute_nees_vectorized(errors: jnp.ndarray, covariances: jnp.ndarray) -> jnp.ndarray:
+    """Vectorized NEES computation using JAX lax.scan.
+
+    This replaces the Python for loop with JAX operations for better
+    performance and GPU compatibility.
+
+    Args:
+        errors: Estimation errors array (n_timesteps, state_dim)
+        covariances: Covariance matrices array (n_timesteps, state_dim, state_dim)
+
+    Returns:
+        NEES values array (n_timesteps,)
+    """
+    def nees_step(carry, inputs):
+        """Single step for computing NEES."""
+        error, cov = inputs
+
+        # NEES = e^T * P^{-1} * e
+        # Use pseudoinverse for numerical stability
+        cov_inv = jnp.linalg.pinv(cov)
+        nees_i = error.T @ cov_inv @ error
+
+        return carry, nees_i
+
+    # Run lax.scan to compute all NEES values
+    _, nees_values = lax.scan(nees_step, None, (errors, covariances))
+
+    return nees_values
 
 
 def compute_position_nees(
