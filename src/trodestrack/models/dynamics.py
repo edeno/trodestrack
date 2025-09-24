@@ -40,7 +40,7 @@ def rotation_matrix_2d(theta: float) -> jnp.ndarray:
     """
     cos_theta = jnp.cos(theta)
     sin_theta = jnp.sin(theta)
-    return jnp.array([[cos_theta, -sin_theta], [sin_theta, cos_theta]], dtype=jnp.float64)
+    return jnp.array([[cos_theta, -sin_theta], [sin_theta, cos_theta]])  # Respect global x64 policy
 
 
 def _check_damping_stability(dt: float, velocity_damping: float) -> None:

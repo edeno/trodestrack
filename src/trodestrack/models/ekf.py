@@ -949,10 +949,7 @@ def create_ekf_step_arrays_optimized(
             # Wrap heading innovation to [-π, π]
             innovation = innovation.at[2].set(wrap_angle(innovation[2]))
 
-            # Innovation covariance
-            S = H @ P_pred @ H.T + measurement_noise_matrix
-
-            # Kalman gain using stable solver
+            # Kalman gain using stable solver (no need to compute S explicitly)
             K = kalman_gain(P_pred, H, measurement_noise_matrix)
 
             # State update
@@ -1109,10 +1106,7 @@ def ekf_step_arrays_pure(
         # Wrap heading innovation to [-π, π]
         innovation = innovation.at[2].set(wrap_angle(innovation[2]))
 
-        # Innovation covariance
-        S = H @ P_pred @ H.T + measurement_noise_matrix
-
-        # Kalman gain using stable solver
+        # Kalman gain using stable solver (no need to compute S explicitly)
         K = kalman_gain(P_pred, H, measurement_noise_matrix)
 
         # State update

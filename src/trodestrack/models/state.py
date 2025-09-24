@@ -51,18 +51,19 @@ class State2D(BaseModel):
     )
 
 
-def state_to_array(state: State2D) -> Array:
+def state_to_array(state: State2D, dtype=None) -> Array:
     """Convert State2D to JAX array.
 
     Args:
         state: State2D instance
+        dtype: Optional dtype override (defaults to JAX default based on global x64 policy)
 
     Returns:
         8-dimensional JAX array [x, y, vx, vy, θ, b_gz, b_ax, b_ay]
     """
     return jnp.array(
         [state.x, state.y, state.vx, state.vy, state.theta, state.b_gz, state.b_ax, state.b_ay],
-        dtype=jnp.float64,
+        dtype=dtype,  # Let JAX use its default dtype (respects global x64 policy)
     )
 
 
