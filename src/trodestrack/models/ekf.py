@@ -614,7 +614,8 @@ def _functional_measurement_update(
     )
 
     # Create measurement noise - large noise for invalid measurements
-    pos_noise_var = (scan_inputs.position_noise_std / confidence) ** 2
+    c = jnp.clip(confidence, 1e-3, 1.0)
+    pos_noise_var = (scan_inputs.position_noise_std / c) ** 2
     noise_diag = jnp.array(
         [
             pos_noise_var,  # x position noise
@@ -642,7 +643,7 @@ def _functional_measurement_update(
 
     # Innovation covariance and Kalman gain
     S = H @ P_pred @ H.T + R
-    K = P_pred @ H.T @ jnp.linalg.pinv(S)
+    K = kalman_gain(P_pred, H, R)
 
     # State and covariance updates
     x_update = x_pred + K @ innovation
@@ -810,7 +811,8 @@ def _pytree_measurement_update(
     )
 
     # Create measurement noise - large noise for invalid measurements
-    pos_noise_var = (position_noise_std / confidence) ** 2
+    c = jnp.clip(confidence, 1e-3, 1.0)
+    pos_noise_var = (position_noise_std / c) ** 2
     noise_diag = jnp.array(
         [
             pos_noise_var,  # x position noise
@@ -838,7 +840,7 @@ def _pytree_measurement_update(
 
     # Innovation covariance and Kalman gain
     S = H @ P_pred @ H.T + R
-    K = P_pred @ H.T @ jnp.linalg.pinv(S)
+    K = kalman_gain(P_pred, H, R)
 
     # State and covariance updates
     x_update = x_pred + K @ innovation
@@ -952,7 +954,8 @@ def create_ekf_step_arrays_optimized(
         # Apply measurement update only if we have position measurements
         def apply_measurement_update():
             # Create measurement noise - scale by confidence
-            pos_noise_var = (position_noise_std / confidence) ** 2
+            c = jnp.clip(confidence, 1e-3, 1.0)
+            pos_noise_var = (position_noise_std / c) ** 2
 
             # Always use 3D measurement format: [x, y, heading]
             noise_diag = jnp.array(
@@ -982,15 +985,13 @@ def create_ekf_step_arrays_optimized(
             innovation = measurement - h_pred
 
             # Wrap heading innovation to [-π, π]
-            innovation = innovation.at[2].set(
-                jnp.remainder(innovation[2] + jnp.pi, 2 * jnp.pi) - jnp.pi
-            )
+            innovation = innovation.at[2].set(wrap_angle(innovation[2]))
 
             # Innovation covariance
             S = H @ P_pred @ H.T + measurement_noise_matrix
 
-            # Kalman gain using pseudoinverse for robustness
-            K = P_pred @ H.T @ jnp.linalg.pinv(S)
+            # Kalman gain using stable solver
+            K = kalman_gain(P_pred, H, measurement_noise_matrix)
 
             # State update
             x_update = x_pred + K @ innovation
@@ -1112,7 +1113,8 @@ def ekf_step_arrays_pure(
     # Apply measurement update only if we have position measurements
     def apply_measurement_update():
         # Create measurement noise - scale by confidence
-        pos_noise_var = (position_noise_std / confidence) ** 2
+        c = jnp.clip(confidence, 1e-3, 1.0)
+        pos_noise_var = (position_noise_std / c) ** 2
 
         # Always use 3D measurement format: [x, y, heading]
         # For missing measurements, noise is made very large to minimize impact
@@ -1143,15 +1145,13 @@ def ekf_step_arrays_pure(
         innovation = measurement - h_pred
 
         # Wrap heading innovation to [-π, π]
-        innovation = innovation.at[2].set(
-            jnp.remainder(innovation[2] + jnp.pi, 2 * jnp.pi) - jnp.pi
-        )
+        innovation = innovation.at[2].set(wrap_angle(innovation[2]))
 
         # Innovation covariance
         S = H @ P_pred @ H.T + measurement_noise_matrix
 
-        # Kalman gain using pseudoinverse for robustness
-        K = P_pred @ H.T @ jnp.linalg.pinv(S)
+        # Kalman gain using stable solver
+        K = kalman_gain(P_pred, H, measurement_noise_matrix)
 
         # State update
         x_update = x_pred + K @ innovation
