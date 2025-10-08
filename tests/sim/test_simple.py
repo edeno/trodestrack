@@ -60,6 +60,8 @@ def test_stationary_returns_correct_keys(config):
         "Z_cam_led1",
         "Z_cam_led2",
         "mask_cam",
+        "mask_led1",  # New: individual LED masks
+        "mask_led2",  # New: individual LED masks
         "confidence_led1",
         "confidence_led2",
         "bias_gyro",

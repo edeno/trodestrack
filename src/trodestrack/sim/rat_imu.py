@@ -27,113 +27,19 @@ from typing import Optional
 
 import numpy as np
 
+from .utils import (
+    SimOut,
+    confidence_to_noise_scale,
+    density_to_sample_std,
+    interp_angle,
+    ou_step,
+    rw_step,
+    wrap_angle,
+)
+
 # -----------------------------------------------------------------------------
-# Utilities
+# Gravity & IMU-specific utilities (not in utils.py)
 # -----------------------------------------------------------------------------
-
-
-def wrap_angle(a: float | np.ndarray) -> float | np.ndarray:
-    """Wrap angle to (-π, π]."""
-    return (a + np.pi) % (2 * np.pi) - np.pi
-
-
-def interp_angle(t_new: np.ndarray, t_old: np.ndarray, angles: np.ndarray) -> np.ndarray:
-    """
-    Interpolate wrapped angles using unwrap → interp → rewrap.
-
-    Prevents jumps at ±π discontinuity.
-
-    Args:
-        t_new: Query timestamps
-        t_old: Sample timestamps
-        angles: Angle values at t_old (wrapped to [-π, π])
-
-    Returns:
-        Interpolated angles at t_new (wrapped to [-π, π])
-    """
-    angles_unwrapped = np.unwrap(angles)
-    angles_interp = np.interp(t_new, t_old, angles_unwrapped)
-    return wrap_angle(angles_interp)  # type: ignore[return-value]
-
-
-def confidence_to_noise_scale(
-    confidence: np.ndarray, base_std: float, epsilon: float = 0.01
-) -> np.ndarray:
-    """
-    Map confidence scores to measurement noise scale.
-
-    Uses σ(c) = σ_base / √(ε + c) to avoid division by zero
-    and provide smooth scaling.
-
-    Args:
-        confidence: Confidence scores (0-1)
-        base_std: Base measurement noise std
-        epsilon: Small constant to prevent division by zero
-
-    Returns:
-        Noise scale factors (multiply by random samples)
-    """
-    return base_std / np.sqrt(epsilon + confidence)
-
-
-def density_to_sample_std(noise_density: float, dt: float) -> float:
-    """
-    Convert white noise density (units / √Hz) to discrete-time
-    per-sample standard deviation at sampling period dt.
-
-    Args:
-        noise_density: Noise density in units / √Hz
-        dt: Sampling period in seconds
-
-    Returns:
-        Per-sample standard deviation
-    """
-    return noise_density / np.sqrt(dt)
-
-
-def rw_step(bias: float, rw_density: float, dt: float, rng: np.random.Generator) -> float:
-    """
-    Random-walk increment for bias with density (units / √s).
-
-    bias_{t+1} = bias_t + N(0, rw_density² × dt)
-
-    Args:
-        bias: Current bias value
-        rw_density: Random walk density in units / √s
-        dt: Time step in seconds
-        rng: NumPy random generator
-
-    Returns:
-        Updated bias value
-    """
-    return bias + rw_density * np.sqrt(dt) * rng.standard_normal()
-
-
-def ou_step(
-    x: float,
-    mean: float,
-    tau: float,
-    sigma: float,
-    dt: float,
-    rng: np.random.Generator,
-) -> float:
-    """
-    Ornstein-Uhlenbeck process step (mean-reverting stochastic process).
-
-    dx = (mean - x) / tau × dt + sigma × √dt × N(0, 1)
-
-    Args:
-        x: Current value
-        mean: Long-term mean (equilibrium value)
-        tau: Time constant (relaxation time in seconds)
-        sigma: Noise intensity (units / √s)
-        dt: Time step in seconds
-        rng: NumPy random generator
-
-    Returns:
-        Updated value
-    """
-    return x + (mean - x) * (dt / tau) + sigma * np.sqrt(dt) * rng.standard_normal()
 
 
 def compute_gravity_in_tilted_frame(
@@ -305,7 +211,7 @@ class RatIMUSimConfig:
 
 def simulate_rat_imu(
     config: Optional[RatIMUSimConfig] = None, seed: int = 0
-) -> dict[str, np.ndarray]:
+) -> SimOut:
     """
     Simulate ground truth trajectory, IMU measurements, and camera observations.
 

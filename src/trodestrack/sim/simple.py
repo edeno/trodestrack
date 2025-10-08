@@ -22,6 +22,8 @@ from typing import Optional
 
 import numpy as np
 
+from .utils import SimOut, density_to_sample_std
+
 
 @dataclass
 class SimpleSimConfig:
@@ -64,7 +66,7 @@ def simulate_stationary(
     position: Optional[np.ndarray] = None,
     heading: float = 0.0,
     seed: int = 0,
-) -> dict[str, np.ndarray]:
+) -> SimOut:
     """Simulate stationary rat with no motion.
 
     Ground truth: constant position, zero velocity, constant heading.
@@ -122,14 +124,20 @@ def simulate_stationary(
     X_truth[:, 3] = 0.0  # vy
     X_truth[:, 4] = heading  # θ
 
-    # Generate constant biases
-    bias_gyro = rng.normal(0.0, config.gyro_bias_std)
-    bias_accel_x = rng.normal(0.0, config.accel_bias_std)
-    bias_accel_y = rng.normal(0.0, config.accel_bias_std)
+    # Generate constant biases (broadcast to arrays for API consistency)
+    bias_gyro_scalar = rng.normal(0.0, config.gyro_bias_std)
+    bias_accel_x_scalar = rng.normal(0.0, config.accel_bias_std)
+    bias_accel_y_scalar = rng.normal(0.0, config.accel_bias_std)
+
+    # Broadcast to arrays for consistency with rat_imu.py
+    bias_gyro = np.full(T_imu, bias_gyro_scalar)
+    bias_accel_x = np.full(T_imu, bias_accel_x_scalar)
+    bias_accel_y = np.full(T_imu, bias_accel_y_scalar)
 
     # IMU measurements
     # Gyro: no rotation, just noise + bias
-    gyro_noise = rng.normal(0.0, config.gyro_noise_density / np.sqrt(dt_imu), T_imu)
+    std_gyro = density_to_sample_std(config.gyro_noise_density, dt_imu)
+    gyro_noise = rng.normal(0.0, std_gyro, T_imu)
     gyro = bias_gyro + gyro_noise
 
     # Accelerometer: measures gravity in body frame + noise + bias
@@ -137,8 +145,9 @@ def simulate_stationary(
     accel_x_truth = -config.gravity * np.sin(heading)
     accel_y_truth = config.gravity * np.cos(heading)
 
-    accel_x_noise = rng.normal(0.0, config.accel_noise_density / np.sqrt(dt_imu), T_imu)
-    accel_y_noise = rng.normal(0.0, config.accel_noise_density / np.sqrt(dt_imu), T_imu)
+    std_accel = density_to_sample_std(config.accel_noise_density, dt_imu)
+    accel_x_noise = rng.normal(0.0, std_accel, T_imu)
+    accel_y_noise = rng.normal(0.0, std_accel, T_imu)
 
     accel_x = accel_x_truth + bias_accel_x + accel_x_noise
     accel_y = accel_y_truth + bias_accel_y + accel_y_noise
@@ -158,6 +167,10 @@ def simulate_stationary(
         ]
     )
 
+    # Single LED mask (for consistency, LED1 only)
+    mask_led1 = mask_cam.copy()
+    mask_led2 = np.zeros(T_cam, dtype=bool)  # LED2 always dropped
+
     return {
         "t_imu": t_imu,
         "t_cam_exp": t_cam_exp,
@@ -165,8 +178,10 @@ def simulate_stationary(
         "X_truth": X_truth,
         "U_imu": U_imu,
         "Z_cam_led1": Z_cam_led1,
-        "Z_cam_led2": np.zeros((T_cam, 2)),  # Not used
+        "Z_cam_led2": np.full((T_cam, 2), np.nan),  # Use NaN (dropped) convention
         "mask_cam": mask_cam,
+        "mask_led1": mask_led1,  # Same as mask_cam for single LED
+        "mask_led2": mask_led2,  # Always False (no LED2)
         "confidence_led1": np.ones(T_cam),
         "confidence_led2": np.zeros(T_cam),
         "bias_gyro": bias_gyro,
@@ -189,7 +204,7 @@ def simulate_constant_velocity(
     initial_position: Optional[np.ndarray] = None,
     velocity: Optional[np.ndarray] = None,
     seed: int = 0,
-) -> dict[str, np.ndarray]:
+) -> SimOut:
     """Simulate constant velocity motion (straight line).
 
     Ground truth: linear trajectory, constant velocity, constant heading.
@@ -281,6 +296,10 @@ def simulate_constant_velocity(
         ]
     )
 
+    # Single LED mask (for consistency, LED1 only)
+    mask_led1 = mask_cam.copy()
+    mask_led2 = np.zeros(T_cam, dtype=bool)
+
     return {
         "t_imu": t_imu,
         "t_cam_exp": t_cam_exp,
@@ -288,8 +307,10 @@ def simulate_constant_velocity(
         "X_truth": X_truth,
         "U_imu": U_imu,
         "Z_cam_led1": Z_cam_led1,
-        "Z_cam_led2": np.zeros((T_cam, 2)),
+        "Z_cam_led2": np.full((T_cam, 2), np.nan),  # Use NaN (dropped) convention
         "mask_cam": mask_cam,
+        "mask_led1": mask_led1,
+        "mask_led2": mask_led2,
         "confidence_led1": np.ones(T_cam),
         "confidence_led2": np.zeros(T_cam),
         "bias_gyro": bias_gyro,
@@ -313,7 +334,7 @@ def simulate_circular(
     radius: float = 0.3,
     angular_velocity: float = 1.0,
     seed: int = 0,
-) -> dict[str, np.ndarray]:
+) -> SimOut:
     """Simulate circular motion with constant angular velocity.
 
     Ground truth: circular trajectory, tangential velocity, rotating heading.
@@ -380,13 +401,20 @@ def simulate_circular(
     X_truth = np.column_stack([x, y, vx, vy, heading])
 
     # Generate constant biases
-    bias_gyro = rng.normal(0.0, config.gyro_bias_std)
-    bias_accel_x = rng.normal(0.0, config.accel_bias_std)
-    bias_accel_y = rng.normal(0.0, config.accel_bias_std)
+    # Generate constant biases (broadcast to arrays for API consistency)
+    bias_gyro_scalar = rng.normal(0.0, config.gyro_bias_std)
+    bias_accel_x_scalar = rng.normal(0.0, config.accel_bias_std)
+    bias_accel_y_scalar = rng.normal(0.0, config.accel_bias_std)
+    
+    # Broadcast to arrays for consistency with rat_imu.py
+    bias_gyro = np.full(T_imu, bias_gyro_scalar)
+    bias_accel_x = np.full(T_imu, bias_accel_x_scalar)
+    bias_accel_y = np.full(T_imu, bias_accel_y_scalar)
 
     # IMU measurements
     # Gyro: constant angular velocity + noise + bias
-    gyro_noise = rng.normal(0.0, config.gyro_noise_density / np.sqrt(dt_imu), T_imu)
+    std_gyro = density_to_sample_std(config.gyro_noise_density, dt_imu)
+    gyro_noise = rng.normal(0.0, std_gyro, T_imu)
     gyro = omega + bias_gyro + gyro_noise
 
     # Accelerometer: centripetal acceleration + gravity in body frame
@@ -401,8 +429,9 @@ def simulate_circular(
     accel_body_x = cos_h * accel_world_x + sin_h * accel_world_y - config.gravity * sin_h
     accel_body_y = -sin_h * accel_world_x + cos_h * accel_world_y + config.gravity * cos_h
 
-    accel_x_noise = rng.normal(0.0, config.accel_noise_density / np.sqrt(dt_imu), T_imu)
-    accel_y_noise = rng.normal(0.0, config.accel_noise_density / np.sqrt(dt_imu), T_imu)
+    std_accel = density_to_sample_std(config.accel_noise_density, dt_imu)
+    accel_x_noise = rng.normal(0.0, std_accel, T_imu)
+    accel_y_noise = rng.normal(0.0, std_accel, T_imu)
 
     accel_x = accel_body_x + bias_accel_x + accel_x_noise
     accel_y = accel_body_y + bias_accel_y + accel_y_noise
@@ -426,6 +455,10 @@ def simulate_circular(
         ]
     )
 
+    # Single LED mask (for consistency, LED1 only)
+    mask_led1 = mask_cam.copy()
+    mask_led2 = np.zeros(T_cam, dtype=bool)
+
     return {
         "t_imu": t_imu,
         "t_cam_exp": t_cam_exp,
@@ -433,8 +466,10 @@ def simulate_circular(
         "X_truth": X_truth,
         "U_imu": U_imu,
         "Z_cam_led1": Z_cam_led1,
-        "Z_cam_led2": np.zeros((T_cam, 2)),
+        "Z_cam_led2": np.full((T_cam, 2), np.nan),  # Use NaN (dropped) convention
         "mask_cam": mask_cam,
+        "mask_led1": mask_led1,
+        "mask_led2": mask_led2,
         "confidence_led1": np.ones(T_cam),
         "confidence_led2": np.zeros(T_cam),
         "bias_gyro": bias_gyro,
