@@ -23,13 +23,14 @@
 - [x] Create `tests/sim/test_rat_imu_gravity.py` – gravity and tilt tests (9 tests passing)
 - [x] Create `tests/sim/test_rat_imu.py` – OU dynamics, noise, dropouts, full scenarios (36 tests passing)
 - [x] Add property tests for deterministic seeds (9 Hypothesis-based tests passing)
-- [ ] Verify all Tiers 0–3 pass NEES & RMSE bounds from PRD
+- [x] Verify all Tiers 0–3 pass NEES & RMSE bounds from PRD (10 tests passing)
 
 ### 📊 Deliverables
 
-- Synthetic data validated (≤2 cm RMSE on analytic sims)
-- Tier 0–3 fully functional and reproducible
-- Foundation ready for EKF development
+- ✅ Synthetic data validated (≤2 cm RMSE on analytic sims)
+- ✅ Tier 0–3 fully functional and reproducible
+- ✅ QA metrics module implemented (qa/metrics.py)
+- ✅ Foundation ready for EKF development
 
 ---
 
