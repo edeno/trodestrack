@@ -189,8 +189,8 @@ def create_diagnostic_video(
     # Initialize artists
     print("Initializing artists...")
     rat = RatArtist(ax_arena)
-    led1 = LEDArtist(ax_arena, led_id=1, color=COLORS["blue"])
-    led2 = LEDArtist(ax_arena, led_id=2, color=COLORS["orange"])
+    led1 = LEDArtist(ax_arena, led_id=1, color=COLORS["blue"], show_residuals=True)
+    led2 = LEDArtist(ax_arena, led_id=2, color=COLORS["orange"], show_residuals=True)
     trail = TrailArtist(ax_arena, trail_length_s=trail_length_s, fps=fps)
     hud = HUDArtist(ax_arena)
     imu_panel = IMUPanelArtist(
@@ -371,6 +371,30 @@ def create_diagnostic_video(
         conf1 = sim_data["confidence_led1"][cam_idx]
         conf2 = sim_data["confidence_led2"][cam_idx]
 
+        # Compute expected LED positions from body model (for residuals)
+        # LED positions = body position + rotated LED offset
+        config = sim_data["config"]
+        cos_th = np.cos(theta)
+        sin_th = np.sin(theta)
+
+        if hasattr(config, "led1_offset_body"):
+            led1_offset = config.led1_offset_body
+            led1_expected_x = x + cos_th * led1_offset[0] - sin_th * led1_offset[1]
+            led1_expected_y = y + sin_th * led1_offset[0] + cos_th * led1_offset[1]
+        else:
+            led1_expected_x, led1_expected_y = None, None
+
+        if (
+            hasattr(config, "led2_offset_body")
+            and hasattr(config, "use_second_led")
+            and config.use_second_led
+        ):
+            led2_offset = config.led2_offset_body
+            led2_expected_x = x + cos_th * led2_offset[0] - sin_th * led2_offset[1]
+            led2_expected_y = y + sin_th * led2_offset[0] + cos_th * led2_offset[1]
+        else:
+            led2_expected_x, led2_expected_y = None, None
+
         # Update artists (events now shown in progress bar)
         rat.update(x, y, theta, vx, vy)
         led1.update(
@@ -378,12 +402,16 @@ def create_diagnostic_video(
             led1_pos[1] if not np.isnan(led1_pos[1]) else y,
             led1_visible,
             conf1,
+            led1_expected_x,
+            led1_expected_y,
         )
         led2.update(
             led2_pos[0] if not np.isnan(led2_pos[0]) else x,
             led2_pos[1] if not np.isnan(led2_pos[1]) else y,
             led2_visible,
             conf2,
+            led2_expected_x,
+            led2_expected_y,
         )
         trail.update(x, y)
 

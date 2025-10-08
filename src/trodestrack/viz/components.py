@@ -132,7 +132,14 @@ class LEDArtist:
     or last known position with red X when dropped out.
     """
 
-    def __init__(self, ax: Axes, led_id: int, color: str, marker_size: float = 0.008):
+    def __init__(
+        self,
+        ax: Axes,
+        led_id: int,
+        color: str,
+        marker_size: float = 0.008,
+        show_residuals: bool = False,
+    ):
         """Initialize LED artist.
 
         Args:
@@ -140,10 +147,12 @@ class LEDArtist:
             led_id: LED identifier (1 or 2)
             color: Color for this LED (e.g., COLORS["blue"])
             marker_size: Radius of LED marker in meters
+            show_residuals: Show residual lines from expected to observed position
         """
         self.led_id = led_id
         self.color = color
         self.marker_size = marker_size
+        self.show_residuals = show_residuals
 
         # LED marker: colored circle (reduced size for better hierarchy)
         (self.marker,) = ax.plot(
@@ -167,28 +176,65 @@ class LEDArtist:
             [], [], "x", color=COLORS["red"], markersize=12, linewidth=2, zorder=11
         )
 
+        # Residual visualization: expected position (small cross) + residual line
+        if show_residuals:
+            # Expected position marker (small cross)
+            (self.expected_marker,) = ax.plot(
+                [], [], "+", color=color, markersize=5, markeredgewidth=1.5, alpha=0.7, zorder=8
+            )
+            # Residual line from expected to observed
+            (self.residual_line,) = ax.plot(
+                [], [], "-", color=COLORS["red"], linewidth=1.0, alpha=0.6, zorder=8
+            )
+        else:
+            self.expected_marker = None
+            self.residual_line = None
+
         # Track last known position for dropout marker
         self.last_x = 0.0
         self.last_y = 0.0
 
-    def update(self, x: float, y: float, visible: bool, confidence: float = 1.0) -> list[Any]:
+    def update(
+        self,
+        x: float,
+        y: float,
+        visible: bool,
+        confidence: float = 1.0,
+        x_expected: float | None = None,
+        y_expected: float | None = None,
+    ) -> list[Any]:
         """Update LED position, visibility, and confidence.
 
         Args:
-            x: X position in meters
-            y: Y position in meters
+            x: Observed X position in meters
+            y: Observed Y position in meters
             visible: Whether LED is detected in this frame
             confidence: Detection confidence [0, 1] (used for halo alpha)
+            x_expected: Expected X position from body model (for residuals)
+            y_expected: Expected Y position from body model (for residuals)
 
         Returns:
             List of modified artists for blitting
         """
+        artists = [self.marker, self.halo, self.dropout_marker]
+
         if visible:
             # Show LED marker and confidence halo
             self.marker.set_data([x], [y])
             self.halo.center = (x, y)
             self.halo.set_alpha(confidence * 0.5)  # Scale alpha by confidence
             self.dropout_marker.set_data([], [])  # Hide dropout marker
+
+            # Show residuals if enabled and expected position provided
+            if self.show_residuals and x_expected is not None and y_expected is not None:
+                self.expected_marker.set_data([x_expected], [y_expected])
+                self.residual_line.set_data([x_expected, x], [y_expected, y])
+                artists.extend([self.expected_marker, self.residual_line])
+            elif self.show_residuals:
+                # Hide residual if no expected position
+                self.expected_marker.set_data([], [])
+                self.residual_line.set_data([], [])
+                artists.extend([self.expected_marker, self.residual_line])
 
             # Update last known position
             self.last_x, self.last_y = x, y
@@ -200,7 +246,13 @@ class LEDArtist:
             # Show red X at last known position
             self.dropout_marker.set_data([self.last_x], [self.last_y])
 
-        return [self.marker, self.halo, self.dropout_marker]
+            # Hide residuals when dropped out
+            if self.show_residuals:
+                self.expected_marker.set_data([], [])
+                self.residual_line.set_data([], [])
+                artists.extend([self.expected_marker, self.residual_line])
+
+        return artists
 
 
 class TrailArtist:
