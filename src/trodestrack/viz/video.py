@@ -34,7 +34,8 @@ def create_diagnostic_video(
     dpi: int = 100,
     codec: str = "h264",
     bitrate: int = 2000,
-) -> Path:
+    return_animation: bool = False,
+) -> Path | tuple[Path, Any, Any]:
     """Generate diagnostic video from simulation data.
 
     Creates multi-panel video showing:
@@ -52,9 +53,10 @@ def create_diagnostic_video(
         dpi: Figure resolution (dots per inch)
         codec: Video codec (default: "h264")
         bitrate: Video bitrate in kbps
+        return_animation: If True, return (path, anim, fig) for testing (default: False)
 
     Returns:
-        Path to created video file
+        Path to created video file, or (path, anim, fig) if return_animation=True
 
     Example:
         >>> from trodestrack.sim.rat_imu import simulate_rat_imu, RatIMUSimConfig
@@ -82,7 +84,7 @@ def create_diagnostic_video(
         figure=fig,
         hspace=0.35,
         wspace=0.3,
-        top=0.95,
+        top=0.90,  # Leave room for title and legend
         bottom=0.05,
         left=0.08,
         right=0.95,
@@ -122,9 +124,22 @@ def create_diagnostic_video(
     x_min, x_max = X_truth[:, 0].min(), X_truth[:, 0].max()
     y_min, y_max = X_truth[:, 1].min(), X_truth[:, 1].max()
 
+    # Ensure minimum span to avoid over-zoom on tight/stationary paths
+    min_span = 0.3  # meters
+    x_range = max(x_max - x_min, min_span)
+    y_range = max(y_max - y_min, min_span)
+
+    # Center the span if range was expanded
+    if x_max - x_min < min_span:
+        x_center = (x_min + x_max) / 2
+        x_min = x_center - min_span / 2
+        x_max = x_center + min_span / 2
+    if y_max - y_min < min_span:
+        y_center = (y_min + y_max) / 2
+        y_min = y_center - min_span / 2
+        y_max = y_center + min_span / 2
+
     # Add 5% padding (reduced from 10% for better data-ink ratio)
-    x_range = x_max - x_min
-    y_range = y_max - y_min
     padding = 0.05
     ax_arena.set_xlim(x_min - padding * x_range, x_max + padding * x_range)
     ax_arena.set_ylim(y_min - padding * y_range, y_max + padding * y_range)
@@ -219,8 +234,21 @@ def create_diagnostic_video(
             ):
                 event_times["long_dropout"].append(t)
 
+    # Debounce event markers (avoid clusters from jitter)
+    min_spacing = 0.3  # seconds
+    for event_type in event_times:
+        times = np.array(event_times[event_type])
+        if len(times) > 0:
+            # Keep first event, then only events ≥ min_spacing from previous kept
+            debounced = [times[0]]
+            for t in times[1:]:
+                if t - debounced[-1] >= min_spacing:
+                    debounced.append(t)
+            event_times[event_type] = debounced
+
     print(
-        f"  Found {len(event_times['led_swap'])} LED swaps, {len(event_times['long_dropout'])} dropout sequences"
+        f"  Found {len(event_times['led_swap'])} LED swaps, "
+        f"{len(event_times['long_dropout'])} dropout sequences (debounced)"
     )
 
     # Progress bar (shows timeline with current position and event markers)
@@ -277,24 +305,24 @@ def create_diagnostic_video(
             label="Path trail",
         ),
     ]
-    # Place legend outside arena (figure-level, below title)
-    fig.legend(
-        handles=legend_elements,
-        loc="upper center",
-        bbox_to_anchor=(0.275, 0.93),  # Position below title, above arena
-        ncol=5,  # Horizontal layout
-        fontsize=6,
-        frameon=True,
-        framealpha=0.9,
-        edgecolor="lightgray",
-    )
-
     # Overall title (includes frame rate for temporal context)
     title_str = (
         f"Diagnostic Video | {config.duration_s:.0f}s simulation | "
         f"{speedup:.1f}x speed | {fps} fps"
     )
-    fig.suptitle(title_str, fontsize=11, fontweight="normal")
+    fig.suptitle(title_str, fontsize=11, fontweight="normal", y=0.98)
+
+    # Place legend in top right corner of arena view (left column)
+    fig.legend(
+        handles=legend_elements,
+        loc="upper right",
+        bbox_to_anchor=(0.515, 0.92),  # Right edge of left column (arena)
+        ncol=1,  # Vertical layout
+        fontsize=6,
+        frameon=True,
+        framealpha=0.9,
+        edgecolor="lightgray",
+    )
 
     # Collect all artists that need to be returned for blitting
     all_artists = []
@@ -435,6 +463,9 @@ def create_diagnostic_video(
         anim.save(str(output_path), writer="pillow", fps=fps, dpi=dpi)
         print(f"✓ GIF saved: {output_path}")
 
-    plt.close(fig)
-
-    return output_path
+    # Return animation/figure for testing if requested, otherwise just path
+    if return_animation:
+        return output_path, anim, fig
+    else:
+        plt.close(fig)
+        return output_path
