@@ -42,7 +42,7 @@ class RatArtist:
             facecolor=COLORS["gray"],
             edgecolor="white",
             linewidth=2,
-            alpha=0.8,
+            alpha=0.9,  # Increased from 0.8 for prominence
             zorder=5,
         )
         ax.add_patch(self.body)
@@ -176,14 +176,14 @@ class LEDArtist:
         self.color = color
         self.marker_size = marker_size
 
-        # LED marker: colored circle
+        # LED marker: colored circle (reduced size for better hierarchy)
         (self.marker,) = ax.plot(
             [],
             [],
             "o",
             color=color,
-            markersize=8,
-            markeredgewidth=1.5,
+            markersize=6,  # Reduced from 8
+            markeredgewidth=1.0,  # Reduced from 1.5
             markeredgecolor="white",
             label=f"LED{led_id}",
             zorder=10,
@@ -300,32 +300,17 @@ class HUDArtist:
         Args:
             ax: Matplotlib axes to draw on
         """
-        # Time display (top-left, large)
-        self.time_text = ax.text(
+        # State info only (time shown in progress bar)
+        self.state_text = ax.text(
             0.02,
             0.98,
             "",
             transform=ax.transAxes,
             va="top",
             ha="left",
-            fontsize=11,
-            fontweight="bold",
-            family="monospace",
-            bbox=dict(boxstyle="round", facecolor="white", alpha=0.8, pad=0.3),
-            zorder=20,
-        )
-
-        # State info (below time, smaller)
-        self.state_text = ax.text(
-            0.02,
-            0.91,
-            "",
-            transform=ax.transAxes,
-            va="top",
-            ha="left",
             fontsize=8,
             family="monospace",
-            bbox=dict(boxstyle="round", facecolor="white", alpha=0.7, pad=0.3),
+            bbox=dict(boxstyle="round", facecolor="white", alpha=0.6, pad=0.3, edgecolor="none"),
             zorder=20,
         )
 
@@ -333,39 +318,33 @@ class HUDArtist:
         """Update HUD text with current state.
 
         Args:
-            t: Current time in seconds
+            t: Current time in seconds (unused - time shown in progress bar)
             state: Dictionary with state information:
                 - speed: Speed in m/s
                 - theta: Heading in radians
                 - led1_visible: LED1 detection status
                 - led2_visible: LED2 detection status
-                - conf1: LED1 confidence [0, 1]
-                - conf2: LED2 confidence [0, 1]
 
         Returns:
             List of modified text artists
         """
-        time_str = f"t = {t:.2f}s"
-
-        # Format state info
+        # Format state info (time and confidence removed - shown elsewhere)
         speed_ms = state.get("speed", 0.0)
         theta_rad = state.get("theta", 0.0)
         led1_vis = state.get("led1_visible", False)
         led2_vis = state.get("led2_visible", False)
-        conf1 = state.get("conf1", 0.0)
-        conf2 = state.get("conf2", 0.0)
 
+        # Compact display with reduced precision
         state_str = (
-            f"v = {speed_ms:.3f} m/s\n"
-            f"θ = {np.rad2deg(theta_rad):6.1f}°\n"
-            f"LED1: {'✓' if led1_vis else '✗'} ({conf1:.2f})\n"
-            f"LED2: {'✓' if led2_vis else '✗'} ({conf2:.2f})"
+            f"v = {speed_ms:.2f} m/s\n"
+            f"θ = {np.rad2deg(theta_rad):5.1f}°\n"
+            f"LED1: {'✓' if led1_vis else '✗'}\n"
+            f"LED2: {'✓' if led2_vis else '✗'}"
         )
 
-        self.time_text.set_text(time_str)
         self.state_text.set_text(state_str)
 
-        return [self.time_text, self.state_text]
+        return [self.state_text]
 
 
 class EventMarkerArtist:
@@ -501,41 +480,100 @@ class IMUPanelArtist:
             ax.spines["top"].set_visible(False)
             ax.spines["right"].set_visible(False)
 
+        # Add minor ticks at 0.5s intervals for temporal reference
+        from matplotlib.ticker import MultipleLocator
+
+        for ax in axes:
+            ax.xaxis.set_minor_locator(MultipleLocator(0.5))
+            ax.tick_params(which="minor", length=2, color="gray")
+
         # Only show x-ticks on bottom plot
         self.ax_gyro.set_xticklabels([])
         self.ax_accel_x.set_xticklabels([])
 
-    def update(self, t: float, imu_data: dict[str, float]) -> list[Any]:
-        """Add new IMU sample and scroll window.
+    def add_reference_bands(self, U_imu: np.ndarray, percentiles: tuple[float, float] = (10, 90)):
+        """Add shaded reference bands showing typical IMU ranges.
 
         Args:
-            t: Current time in seconds
-            imu_data: Dictionary with IMU measurements:
-                - gyro: Gyroscope measurement (rad/s)
-                - accel_x: Accelerometer X (m/s²)
-                - accel_y: Accelerometer Y (m/s²)
+            U_imu: (N, 3) array of IMU measurements [gyro, accel_x, accel_y]
+            percentiles: Tuple of (low, high) percentiles for bands (default: 10th-90th)
+        """
+        # Compute percentiles for each IMU channel
+        gyro_low, gyro_high = np.percentile(U_imu[:, 0], percentiles)
+        accel_x_low, accel_x_high = np.percentile(U_imu[:, 1], percentiles)
+        accel_y_low, accel_y_high = np.percentile(U_imu[:, 2], percentiles)
+
+        # Add shaded bands (subtle, low alpha)
+        self.ax_gyro.axhspan(
+            gyro_low, gyro_high, color=COLORS["blue"], alpha=0.1, zorder=1, linewidth=0
+        )
+        self.ax_accel_x.axhspan(
+            accel_x_low,
+            accel_x_high,
+            color=COLORS["red"],
+            alpha=0.1,
+            zorder=1,
+            linewidth=0,
+        )
+        self.ax_accel_y.axhspan(
+            accel_y_low,
+            accel_y_high,
+            color=COLORS["green"],
+            alpha=0.1,
+            zorder=1,
+            linewidth=0,
+        )
+
+    def update(
+        self,
+        t: float,
+        imu_data: dict[str, float] | None = None,
+        t_raw: np.ndarray | None = None,
+        imu_raw: dict[str, np.ndarray] | None = None,
+    ) -> list[Any]:
+        """Update IMU panel with new data.
+
+        Supports two modes:
+        1. Single sample mode: Pass imu_data (one point per frame, interpolated)
+        2. High-rate mode: Pass t_raw + imu_raw (shows actual IMU sampling)
+
+        Args:
+            t: Current video time in seconds
+            imu_data: (Mode 1) Single IMU sample dict with gyro, accel_x, accel_y
+            t_raw: (Mode 2) Array of raw IMU timestamps within window
+            imu_raw: (Mode 2) Dict with arrays: gyro, accel_x, accel_y
 
         Returns:
             List of modified artists
         """
-        # Append new data
-        self.time_buffer.append(t)
-        self.gyro_buffer.append(imu_data["gyro"])
-        self.accel_x_buffer.append(imu_data["accel_x"])
-        self.accel_y_buffer.append(imu_data["accel_y"])
+        if t_raw is not None and imu_raw is not None:
+            # High-rate mode: show all raw samples in window
+            self.gyro_line.set_data(t_raw, imu_raw["gyro"])
+            self.accel_x_line.set_data(t_raw, imu_raw["accel_x"])
+            self.accel_y_line.set_data(t_raw, imu_raw["accel_y"])
 
-        # Update line data
-        self.gyro_line.set_data(list(self.time_buffer), list(self.gyro_buffer))
-        self.accel_x_line.set_data(list(self.time_buffer), list(self.accel_x_buffer))
-        self.accel_y_line.set_data(list(self.time_buffer), list(self.accel_y_buffer))
+            # Set x-axis limits based on actual data range
+            if len(t_raw) > 0:
+                self.ax_gyro.set_xlim(t_raw[0], t_raw[-1])
+                self.ax_accel_x.set_xlim(t_raw[0], t_raw[-1])
+                self.ax_accel_y.set_xlim(t_raw[0], t_raw[-1])
+        else:
+            # Single sample mode (legacy): buffer interpolated points
+            self.time_buffer.append(t)
+            self.gyro_buffer.append(imu_data["gyro"])
+            self.accel_x_buffer.append(imu_data["accel_x"])
+            self.accel_y_buffer.append(imu_data["accel_y"])
 
-        # Update x-axis to show scrolling time window (y-axes remain fixed)
-        if len(self.time_buffer) > 1:
-            t_min = self.time_buffer[0]
-            t_max = self.time_buffer[-1]
-            self.ax_gyro.set_xlim(t_min, t_max)
-            self.ax_accel_x.set_xlim(t_min, t_max)
-            self.ax_accel_y.set_xlim(t_min, t_max)
+            self.gyro_line.set_data(list(self.time_buffer), list(self.gyro_buffer))
+            self.accel_x_line.set_data(list(self.time_buffer), list(self.accel_x_buffer))
+            self.accel_y_line.set_data(list(self.time_buffer), list(self.accel_y_buffer))
+
+            if len(self.time_buffer) > 1:
+                t_min = self.time_buffer[0]
+                t_max = self.time_buffer[-1]
+                self.ax_gyro.set_xlim(t_min, t_max)
+                self.ax_accel_x.set_xlim(t_min, t_max)
+                self.ax_accel_y.set_xlim(t_min, t_max)
 
         return [self.gyro_line, self.accel_x_line, self.accel_y_line]
 
@@ -571,6 +609,14 @@ class CameraPanelArtist:
         # Reference line at full confidence
         ax.axvline(1.0, color=COLORS["gray"], linestyle="--", linewidth=0.5)
 
+        # Text labels for confidence values (will update)
+        self.led1_text = ax.text(
+            1.02, 0.5, "", va="center", ha="left", fontsize=7, family="monospace"
+        )
+        self.led2_text = ax.text(
+            1.02, 1.5, "", va="center", ha="left", fontsize=7, family="monospace"
+        )
+
     def update(
         self, led1_visible: bool, conf1: float, led2_visible: bool, conf2: float
     ) -> list[Any]:
@@ -585,23 +631,108 @@ class CameraPanelArtist:
         Returns:
             List of modified artists
         """
-        # Update bar widths and colors
+        # Update bar widths, colors, and text labels
         if led1_visible:
             self.led1_bar.set_width(conf1)
             self.led1_bar.set_color(COLORS["blue"])
             self.led1_bar.set_alpha(0.6)
+            self.led1_text.set_text(f"{conf1:.2f}")
+            self.led1_text.set_color("black")
         else:
             self.led1_bar.set_width(0.05)  # Small bar for dropout
             self.led1_bar.set_color(COLORS["red"])
             self.led1_bar.set_alpha(0.3)
+            self.led1_text.set_text("(dropout)")
+            self.led1_text.set_color(COLORS["red"])
 
         if led2_visible:
             self.led2_bar.set_width(conf2)
             self.led2_bar.set_color(COLORS["orange"])
             self.led2_bar.set_alpha(0.6)
+            self.led2_text.set_text(f"{conf2:.2f}")
+            self.led2_text.set_color("black")
         else:
             self.led2_bar.set_width(0.05)
             self.led2_bar.set_color(COLORS["red"])
             self.led2_bar.set_alpha(0.3)
+            self.led2_text.set_text("(dropout)")
+            self.led2_text.set_color(COLORS["red"])
 
-        return [self.led1_bar, self.led2_bar]
+        return [self.led1_bar, self.led2_bar, self.led1_text, self.led2_text]
+
+
+class ProgressBarArtist:
+    """Show playback progress with event markers.
+
+    Displays a thin progress bar showing current position in video timeline,
+    with markers for key events (LED swaps, long dropouts).
+    """
+
+    def __init__(
+        self,
+        ax: Axes,
+        duration_s: float,
+        event_times: dict[str, list[float]] | None = None,
+    ):
+        """Initialize progress bar artist.
+
+        Args:
+            ax: Matplotlib axes to draw on
+            duration_s: Total duration of video in seconds
+            event_times: Dictionary mapping event types to lists of timestamps
+        """
+        self.ax = ax
+        self.duration_s = duration_s
+
+        # Set up axes (horizontal bar spanning 0-duration)
+        ax.set_xlim(0, duration_s)
+        ax.set_ylim(0, 1)
+        ax.set_yticks([])
+        ax.set_xlabel("time (s)", fontsize=8)
+        ax.spines["top"].set_visible(False)
+        ax.spines["left"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+        # Background bar (full duration, light gray)
+        self.background = ax.barh(
+            0.5, duration_s, height=0.6, left=0, color=COLORS["light_gray"], alpha=0.3
+        )[0]
+
+        # Progress bar (current position, blue)
+        self.progress_bar = ax.barh(0.5, 0, height=0.6, left=0, color=COLORS["blue"], alpha=0.6)[0]
+
+        # Current time marker (vertical line)
+        (self.time_marker,) = ax.plot([0, 0], [0, 1], color="black", linewidth=2, zorder=10)
+
+        # Event markers (vertical lines for swaps/dropouts)
+        if event_times:
+            for event_type, times in event_times.items():
+                if event_type == "led_swap":
+                    color = COLORS["orange"]
+                    marker = "v"
+                elif event_type == "long_dropout":
+                    color = COLORS["red"]
+                    marker = "x"
+                else:
+                    continue
+
+                for t in times:
+                    ax.axvline(t, color=color, alpha=0.4, linewidth=1, linestyle="--")
+                    ax.plot(t, 0.5, marker=marker, color=color, markersize=4, zorder=5)
+
+    def update(self, t: float) -> list[Any]:
+        """Update progress bar to current time.
+
+        Args:
+            t: Current time in seconds
+
+        Returns:
+            List of modified artists
+        """
+        # Update progress bar width
+        self.progress_bar.set_width(t)
+
+        # Update time marker position
+        self.time_marker.set_data([t, t], [0, 1])
+
+        return [self.progress_bar, self.time_marker]
