@@ -282,36 +282,55 @@ def test_gyro_white_noise_std() -> None:
 
 
 def test_accel_white_noise_std() -> None:
-    """Test that accelerometer white noise has correct std."""
+    """Test that accelerometer white noise has correct std.
+
+    Isolates noise by:
+    1. Zero tilt (no gravity in accelerometer frame)
+    2. Near-zero motion (minimal inertial acceleration)
+    3. Subtracting truth + bias to leave only white noise
+    """
     config = RatIMUSimConfig(
         duration_s=30.0,
         fs_imu=200.0,
         accel_noise_density=0.05,  # 0.05 m/s² / √Hz
         accel_bias_rw_density=0.0,  # No bias walk
-        # Minimal motion
-        sigma_yaw_rate=0.01,
-        sigma_a_fwd=0.01,
-        sigma_a_lat=0.01,
-        vel_drag=10.0,
+        # Zero tilt: no gravity component in accelerometer
+        imu_tilt_roll_deg=0.0,
+        imu_tilt_pitch_deg=0.0,
+        # Minimal motion: reduce inertial acceleration
+        sigma_yaw_rate=0.001,
+        sigma_a_fwd=0.001,
+        sigma_a_lat=0.001,
+        vel_drag=20.0,  # High drag kills motion quickly
     )
 
     sim = simulate_rat_imu(config, seed=123)
 
-    # Use x-axis accelerometer
-    accel_meas = sim["U_imu"][:, 1]
+    # Accelerometer measures: f = a_body - g_body (specific force)
+    # With zero tilt and minimal motion: f ≈ -g (pointing down)
+    # Subtract truth to isolate noise
+    accel_meas_x = sim["U_imu"][:, 1]
+    accel_body_x = sim["accel_body_truth"][:, 0]
+    bias_x = sim["bias_accel_x"]
 
-    # Expected std (specific force includes gravity, so use late samples where motion is small)
-    half = len(accel_meas) // 2
-    accel_late = accel_meas[half:]
+    # With zero tilt: g_body_x ≈ 0, so f_x ≈ a_body_x
+    # Noise = measurement - truth - bias
+    noise_x = accel_meas_x - accel_body_x - bias_x
+
+    # Use late samples to ensure steady state
+    half = len(noise_x) // 2
+    noise_late = noise_x[half:]
 
     dt = 1.0 / config.fs_imu
     expected_std = config.accel_noise_density / np.sqrt(dt)
 
-    # Std should be on order of expected (not exact due to gravity + motion)
-    observed_std = np.std(accel_late)
+    observed_std = np.std(noise_late)
 
-    # Loose check: should be within factor of 3
-    assert observed_std < 5 * expected_std
+    # Guard against divide-by-zero and validate tolerance
+    assert expected_std > 1e-10, f"Expected std too small: {expected_std}"
+    assert (
+        np.abs(observed_std - expected_std) / expected_std < TOLERANCE_NOISE_STD
+    ), f"Accel noise std {observed_std:.4f} differs from expected {expected_std:.4f}"
 
 
 def test_gyro_bias_random_walk() -> None:
