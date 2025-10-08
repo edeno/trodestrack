@@ -12,6 +12,7 @@ from typing import Any
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.collections import LineCollection
+from matplotlib.lines import Line2D
 from matplotlib.patches import Circle, FancyArrowPatch
 from matplotlib.text import Text
 from matplotlib.transforms import Affine2D
@@ -177,6 +178,8 @@ class LEDArtist:
         )
 
         # Residual visualization: expected position (small cross) + residual line
+        self.expected_marker: Line2D | None
+        self.residual_line: Line2D | None
         if show_residuals:
             # Expected position marker (small cross)
             (self.expected_marker,) = ax.plot(
@@ -226,11 +229,21 @@ class LEDArtist:
             self.dropout_marker.set_data([], [])  # Hide dropout marker
 
             # Show residuals if enabled and expected position provided
-            if self.show_residuals and x_expected is not None and y_expected is not None:
+            if (
+                self.show_residuals
+                and self.expected_marker is not None
+                and self.residual_line is not None
+                and x_expected is not None
+                and y_expected is not None
+            ):
                 self.expected_marker.set_data([x_expected], [y_expected])
                 self.residual_line.set_data([x_expected, x], [y_expected, y])
                 artists.extend([self.expected_marker, self.residual_line])
-            elif self.show_residuals:
+            elif (
+                self.show_residuals
+                and self.expected_marker is not None
+                and self.residual_line is not None
+            ):
                 # Hide residual if no expected position
                 self.expected_marker.set_data([], [])
                 self.residual_line.set_data([], [])
@@ -247,7 +260,11 @@ class LEDArtist:
             self.dropout_marker.set_data([self.last_x], [self.last_y])
 
             # Hide residuals when dropped out
-            if self.show_residuals:
+            if (
+                self.show_residuals
+                and self.expected_marker is not None
+                and self.residual_line is not None
+            ):
                 self.expected_marker.set_data([], [])
                 self.residual_line.set_data([], [])
                 artists.extend([self.expected_marker, self.residual_line])
@@ -262,7 +279,7 @@ class TrailArtist:
     with alpha gradient (old = transparent, new = opaque).
     """
 
-    def __init__(self, ax: Axes, trail_length_s: float, fps: int, color: str = None):
+    def __init__(self, ax: Axes, trail_length_s: float, fps: int, color: str | None = None):
         """Initialize trail artist.
 
         Args:
@@ -417,23 +434,31 @@ class EventMarkerArtist:
         if events.get("led_swap", False):
             self.banner.set_text("⚠ LED SWAP DETECTED")
             self.banner.set_color("red")
-            self.banner.get_bbox_patch().set_facecolor(COLORS["yellow"])
+            bbox = self.banner.get_bbox_patch()
+            if bbox is not None:
+                bbox.set_facecolor(COLORS["yellow"])
             self.timer = self.banner_duration_frames
 
         elif events.get("long_dropout", False) and self.timer == 0:
             self.banner.set_text("⚠ LONG DROPOUT")
             self.banner.set_color("white")
-            self.banner.get_bbox_patch().set_facecolor(COLORS["red"])
+            bbox = self.banner.get_bbox_patch()
+            if bbox is not None:
+                bbox.set_facecolor(COLORS["red"])
             self.timer = self.banner_duration_frames
 
         # Update banner visibility (fade out)
         if self.timer > 0:
             alpha = 0.9 * (self.timer / self.banner_duration_frames)
-            self.banner.get_bbox_patch().set_alpha(alpha)
+            bbox = self.banner.get_bbox_patch()
+            if bbox is not None:
+                bbox.set_alpha(alpha)
             self.timer -= 1
         else:
             self.banner.set_text("")
-            self.banner.get_bbox_patch().set_alpha(0.0)
+            bbox = self.banner.get_bbox_patch()
+            if bbox is not None:
+                bbox.set_alpha(0.0)
 
         return [self.banner]
 
@@ -608,10 +633,11 @@ class IMUPanelArtist:
                 self.ax_accel_y.set_xlim(t_raw[0], t_raw[-1])
         else:
             # Single sample mode (legacy): buffer interpolated points
-            self.time_buffer.append(t)
-            self.gyro_buffer.append(imu_data["gyro"])
-            self.accel_x_buffer.append(imu_data["accel_x"])
-            self.accel_y_buffer.append(imu_data["accel_y"])
+            if imu_data is not None:
+                self.time_buffer.append(t)
+                self.gyro_buffer.append(imu_data["gyro"])
+                self.accel_x_buffer.append(imu_data["accel_x"])
+                self.accel_y_buffer.append(imu_data["accel_y"])
 
             self.gyro_line.set_data(list(self.time_buffer), list(self.gyro_buffer))
             self.accel_x_line.set_data(list(self.time_buffer), list(self.accel_x_buffer))
@@ -804,15 +830,24 @@ class ProgressBarArtist:
 
                 # Add legend handle (only once per event type)
                 from matplotlib.lines import Line2D
+
                 legend_handles.append(
-                    Line2D([0], [0], marker=marker, color='w',
-                           markerfacecolor=color, markersize=6, label=label)
+                    Line2D(
+                        [0],
+                        [0],
+                        marker=marker,
+                        color="w",
+                        markerfacecolor=color,
+                        markersize=6,
+                        label=label,
+                    )
                 )
 
         # Add legend if there are any events
         if legend_handles:
-            ax.legend(handles=legend_handles, loc='upper right', fontsize=6,
-                     frameon=True, framealpha=0.8)
+            ax.legend(
+                handles=legend_handles, loc="upper right", fontsize=6, frameon=True, framealpha=0.8
+            )
 
     def update(self, t: float) -> list[Any]:
         """Update progress bar to current time.

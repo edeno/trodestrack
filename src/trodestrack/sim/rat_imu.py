@@ -205,6 +205,134 @@ class RatIMUSimConfig:
         default_factory=lambda: np.diag([0.01, 0.01, 0.05, 0.05, np.deg2rad(5.0) ** 2])
     )
 
+    def __post_init__(self):
+        """Validate configuration parameters."""
+        import warnings
+
+        # Duration validation
+        if self.duration_s <= 0:
+            raise ValueError(
+                f"Simulation duration must be positive, got {self.duration_s}s.\n"
+                f"Example: duration_s=60.0 (60 seconds)"
+            )
+
+        # Sampling rate validation
+        if self.fs_imu <= 0:
+            raise ValueError(
+                f"IMU sampling rate must be positive, got {self.fs_imu} Hz.\n"
+                f"Example: fs_imu=200.0 (200 Hz)"
+            )
+
+        if self.fs_cam <= 0:
+            raise ValueError(
+                f"Camera sampling rate must be positive, got {self.fs_cam} Hz.\n"
+                f"Example: fs_cam=30.0 (30 Hz)"
+            )
+
+        if self.fs_imu <= self.fs_cam:
+            warnings.warn(
+                f"IMU rate ({self.fs_imu} Hz) should typically be much higher than "
+                f"camera rate ({self.fs_cam} Hz) for proper sensor fusion. "
+                f"Consider fs_imu >= 100.0 Hz.",
+                UserWarning,
+            )
+
+        # Arena validation
+        if self.arena_w <= 0 or self.arena_h <= 0:
+            raise ValueError(
+                f"Arena dimensions must be positive, got width={self.arena_w}m, height={self.arena_h}m.\n"
+                f"Example: arena_w=2.0, arena_h=2.0 (2m × 2m arena)"
+            )
+
+        # Probability validation
+        if not 0 <= self.cam_dropout_prob <= 1:
+            raise ValueError(
+                f"Dropout probability must be in [0, 1], got {self.cam_dropout_prob}.\n"
+                f"Example: cam_dropout_prob=0.15 (15% dropout rate)"
+            )
+
+        if not 0 <= self.cam_dropout_correlation <= 1:
+            raise ValueError(
+                f"Dropout correlation must be in [0, 1], got {self.cam_dropout_correlation}.\n"
+                f"0 = independent dropouts, 1 = identical dropouts"
+            )
+
+        if not 0 <= self.led_swap_prob <= 1:
+            raise ValueError(
+                f"LED swap probability must be in [0, 1], got {self.led_swap_prob}.\n"
+                f"Example: led_swap_prob=0.05 (5% swap rate)"
+            )
+
+        if self.use_confidence:
+            if not 0 <= self.confidence_base <= 1:
+                raise ValueError(
+                    f"Base confidence must be in [0, 1], got {self.confidence_base}.\n"
+                    f"Example: confidence_base=0.95"
+                )
+
+            if not 0 <= self.confidence_dropout_decay <= 1:
+                raise ValueError(
+                    f"Confidence dropout decay must be in [0, 1], got {self.confidence_dropout_decay}.\n"
+                    f"Example: confidence_dropout_decay=0.3"
+                )
+
+        # Physical parameter validation
+        if self.speed_clip <= 0:
+            raise ValueError(
+                f"Speed clip must be positive, got {self.speed_clip} m/s.\n"
+                f"Example: speed_clip=1.5 (1.5 m/s max speed)"
+            )
+
+        if self.gravity <= 0:
+            raise ValueError(
+                f"Gravity must be positive, got {self.gravity} m/s².\n"
+                f"Standard Earth gravity: gravity=9.80665"
+            )
+
+        # Noise parameter validation
+        if self.cam_sigma_m < 0:
+            raise ValueError(
+                f"Camera noise must be non-negative, got {self.cam_sigma_m}m.\n"
+                f"Example: cam_sigma_m=0.005 (5mm std noise)"
+            )
+
+        if self.gyro_noise_density < 0 or self.accel_noise_density < 0:
+            raise ValueError(
+                f"IMU noise densities must be non-negative.\n"
+                f"Got gyro={self.gyro_noise_density}, accel={self.accel_noise_density}"
+            )
+
+        if self.gyro_bias_rw_density < 0 or self.accel_bias_rw_density < 0:
+            raise ValueError(
+                f"Bias random walk densities must be non-negative.\n"
+                f"Got gyro={self.gyro_bias_rw_density}, accel={self.accel_bias_rw_density}"
+            )
+
+        # Time constant validation
+        if self.tau_yaw_rate <= 0 or self.tau_a_fwd <= 0 or self.tau_a_lat <= 0:
+            raise ValueError(
+                f"OU time constants must be positive.\n"
+                f"Got tau_yaw_rate={self.tau_yaw_rate}, tau_a_fwd={self.tau_a_fwd}, tau_a_lat={self.tau_a_lat}"
+            )
+
+        # LED configuration validation
+        if not self.use_second_led and self.led_swap_prob > 0:
+            warnings.warn(
+                f"LED swap probability is {self.led_swap_prob} but use_second_led=False. "
+                f"Swaps require two LEDs. Set use_second_led=True or led_swap_prob=0.0",
+                UserWarning,
+            )
+
+        # Initial state validation
+        if self.m0.shape != (5,):
+            raise ValueError(
+                f"Initial state m0 must have shape (5,), got {self.m0.shape}.\n"
+                f"Expected: [x, y, vx, vy, theta]"
+            )
+
+        if self.P0.shape != (5, 5):
+            raise ValueError(f"Initial covariance P0 must have shape (5, 5), got {self.P0.shape}")
+
 
 # -----------------------------------------------------------------------------
 # Simulator

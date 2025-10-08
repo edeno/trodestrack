@@ -60,6 +60,61 @@ class SimpleSimConfig:
 
     gravity: float = 9.80665  # m/s²
 
+    def __post_init__(self):
+        """Validate configuration parameters."""
+        # Duration validation
+        if self.duration_s <= 0:
+            raise ValueError(
+                f"Simulation duration must be positive, got {self.duration_s}s.\n"
+                f"Example: duration_s=10.0 (10 seconds)"
+            )
+
+        # Sampling rate validation
+        if self.fs_imu <= 0:
+            raise ValueError(
+                f"IMU sampling rate must be positive, got {self.fs_imu} Hz.\n"
+                f"Example: fs_imu=200.0 (200 Hz)"
+            )
+
+        if self.fs_cam <= 0:
+            raise ValueError(
+                f"Camera sampling rate must be positive, got {self.fs_cam} Hz.\n"
+                f"Example: fs_cam=30.0 (30 Hz)"
+            )
+
+        # Probability validation
+        if not 0 <= self.cam_dropout_prob <= 1:
+            raise ValueError(
+                f"Dropout probability must be in [0, 1], got {self.cam_dropout_prob}.\n"
+                f"Example: cam_dropout_prob=0.05 (5% dropout rate)"
+            )
+
+        # Physical parameter validation
+        if self.gravity <= 0:
+            raise ValueError(
+                f"Gravity must be positive, got {self.gravity} m/s².\n"
+                f"Standard Earth gravity: gravity=9.80665"
+            )
+
+        # Noise parameter validation
+        if self.cam_noise_std < 0:
+            raise ValueError(
+                f"Camera noise must be non-negative, got {self.cam_noise_std}m.\n"
+                f"Example: cam_noise_std=0.002 (2mm std noise)"
+            )
+
+        if self.gyro_noise_density < 0 or self.accel_noise_density < 0:
+            raise ValueError(
+                f"IMU noise densities must be non-negative.\n"
+                f"Got gyro={self.gyro_noise_density}, accel={self.accel_noise_density}"
+            )
+
+        if self.gyro_bias_std < 0 or self.accel_bias_std < 0:
+            raise ValueError(
+                f"IMU bias stds must be non-negative.\n"
+                f"Got gyro={self.gyro_bias_std}, accel={self.accel_bias_std}"
+            )
+
 
 def simulate_stationary(
     config: Optional[SimpleSimConfig] = None,

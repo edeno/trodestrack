@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation
+from matplotlib.artist import Artist
 from matplotlib.gridspec import GridSpec
 
 from trodestrack.sim.utils import SimOut
@@ -207,7 +209,7 @@ def create_diagnostic_video(
 
     # Pre-compute event times for progress bar markers
     print("Detecting events...")
-    event_times = {"led_swap": [], "long_dropout": []}
+    event_times: dict[str, list[float]] = {"led_swap": [], "long_dropout": []}
 
     for frame_idx in range(n_frames):
         t = video_data["t_video"][frame_idx]
@@ -347,12 +349,15 @@ def create_diagnostic_video(
         led2_offset = config.led2_offset_body
 
     # Animation update function
-    def update_frame(frame_idx: int) -> None:
+    def update_frame(frame_idx: int) -> Iterable[Artist]:
         """Update all artists for a single frame.
 
         Note: Component update() methods return artist lists for blitting, but we ignore
         those returns since blit=False. With blitting disabled, matplotlib redraws the
         entire figure each frame, so we don't need to track individual artist changes.
+
+        Returns:
+            Empty list (blitting is disabled, so return value is ignored)
         """
         # Get data for this frame
         t = video_data["t_video"][frame_idx]
@@ -460,6 +465,8 @@ def create_diagnostic_video(
 
         # Progress bar
         progress_bar.update(t)
+
+        return []
 
     # Create animation
     print("Rendering animation...")

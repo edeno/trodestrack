@@ -44,19 +44,61 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Entry Point:**
 The package is configured with an entry point `trodestrack:main`, but the `main()` function needs to be implemented in `src/trodestrack/__init__.py`.
 
-**Adding Testing:**
-When adding tests, consider using pytest:
+**Testing:**
 
 ```bash
-uv add --dev pytest
-# Create tests/ directory or test files following pytest conventions
+# Run all tests
 uv run pytest
+
+# Run tests with coverage
+uv run pytest --cov=src/trodestrack --cov-report=html
+
+# Run specific test file
+uv run pytest tests/sim/test_simple.py -v
 ```
 
-**Adding Code Quality Tools:**
-For linting and formatting, consider:
+**Code Quality:**
+
+The project uses pre-commit hooks to enforce code quality standards:
 
 ```bash
-uv add --dev ruff  # For linting and formatting
-uv add --dev mypy  # For type checking
+# Install pre-commit hooks (one-time setup)
+uv run pre-commit install
+
+# Run hooks manually on all files
+uv run pre-commit run --all-files
+
+# Run hooks on staged files (happens automatically on commit)
+git commit -m "your message"
 ```
+
+**Manual Code Quality Commands:**
+
+```bash
+# Type checking
+uv run mypy src/trodestrack --ignore-missing-imports
+
+# Linting (with auto-fix)
+uv run ruff check src/ tests/ --fix
+
+# Formatting
+uv run black src/ tests/
+
+# Format check without modifying files
+uv run black --check src/ tests/
+```
+
+**Pre-commit Hooks:**
+
+The following hooks run automatically on commit:
+- `black` - Code formatting
+- `ruff` - Linting and import sorting (with auto-fix)
+- `ruff-format` - Additional formatting checks
+- `trailing-whitespace` - Remove trailing whitespace
+- `end-of-file-fixer` - Ensure files end with newline
+- `check-yaml` - Validate YAML syntax
+- `check-added-large-files` - Prevent committing large files
+- `check-merge-conflict` - Detect merge conflict markers
+- `debug-statements` - Detect debug statements
+
+**Note:** `mypy` is available as a manual check but not enforced in pre-commit hooks to avoid blocking commits on minor type issues in examples and scripts.
