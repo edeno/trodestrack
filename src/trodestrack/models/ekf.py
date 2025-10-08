@@ -64,6 +64,9 @@ class EKFConfig:
     Dynamics parameters:
         damping_coeff: Velocity damping coefficient λ (1/s)
         led_distance: Front-back LED spacing (m)
+
+    Filter parameters:
+        num_iter: Number of IEKF iterations (1=standard EKF, >1=iterated EKF)
     """
 
     # Process noise
@@ -84,6 +87,9 @@ class EKFConfig:
     # Dynamics
     damping_coeff: float = 0.5  # 1/s
     led_distance: float = 0.04  # 4 cm
+
+    # Filter
+    num_iter: int = 1  # Standard EKF (set >1 for IEKF)
 
 
 class EKFState(NamedTuple):
@@ -167,6 +173,38 @@ def wrap_angle(theta: jnp.ndarray) -> jnp.ndarray:
         Wrapped angle in (-π, π]
     """
     return jnp.arctan2(jnp.sin(theta), jnp.cos(theta))
+
+
+def gaussian_log_likelihood(innovation: jnp.ndarray, covariance: jnp.ndarray) -> jnp.ndarray:
+    """Compute Gaussian log-likelihood of innovation.
+
+    Computes log p(y | mu, Sigma) where y ~ N(mu, Sigma)
+    and innovation = y - mu.
+
+    Args:
+        innovation: Innovation vector (k,)
+        covariance: Innovation covariance (k, k)
+
+    Returns:
+        Log-likelihood (scalar)
+
+    Formula:
+        log_prob = -0.5 * (k*log(2π) + log(det(S)) + v^T S^{-1} v)
+    """
+    k = innovation.shape[0]
+
+    # Log determinant using Cholesky (more stable than det)
+    sign, logdet = jnp.linalg.slogdet(covariance)
+
+    # Mahalanobis distance: v^T S^{-1} v
+    # psd_solve computes S^{-1} @ v, then we dot with v
+    S_inv_v = psd_solve(covariance, innovation)
+    mahal = jnp.dot(innovation, S_inv_v)
+
+    # Gaussian log-likelihood
+    log_prob = -0.5 * (k * jnp.log(2 * jnp.pi) + logdet + mahal)
+
+    return log_prob
 
 
 # =============================================================================
@@ -473,8 +511,10 @@ def update_step(
     z_led2: jnp.ndarray,
     mask: bool,
     config: EKFConfig,
-) -> EKFState:
+) -> tuple[EKFState, float]:
     """EKF measurement update step using camera observations.
+
+    Supports iterated EKF (IEKF) via config.num_iter parameter.
 
     Args:
         state: Predicted state
@@ -484,13 +524,13 @@ def update_step(
         config: EKF configuration
 
     Returns:
-        Updated (filtered) state
+        Tuple of (updated_state, log_likelihood)
     """
     m_pred, P_pred = state.mean, state.cov
 
-    # If no valid observation, return prediction unchanged
+    # If no valid observation, return prediction unchanged with zero log-likelihood
     def no_update(m, P):
-        return EKFState(mean=m, cov=P)
+        return EKFState(mean=m, cov=P), 0.0
 
     # If valid observation, perform update
     def do_update(m, P):
@@ -510,11 +550,11 @@ def update_step(
             ]
         )
 
-        # If no valid observations, return prediction
+        # If no valid observations, return prediction with zero log-likelihood
         def no_leds_update(m_in, P_in):
-            return EKFState(mean=m_in, cov=P_in)
+            return EKFState(mean=m_in, cov=P_in), 0.0
 
-        # If at least one LED valid, perform update
+        # If at least one LED valid, perform update (with optional IEKF)
         def do_leds_update(m_in, P_in):
             # Measurement function
             def h(x):
@@ -522,44 +562,67 @@ def update_step(
 
             # Jacobian
             H = jacfwd(h)
-            H_x = H(m_in)
 
-            # Predicted measurement
-            z_pred = h(m_in)
+            # IEKF: Iterate re-linearization around posterior
+            def iekf_step(carry, _):
+                """Single IEKF iteration: re-linearize and update."""
+                m_iter, P_iter = carry
 
-            # Innovation (only for valid measurements)
-            innov_full = z_obs_full - z_pred
+                # Re-compute Jacobian at current estimate
+                H_x = H(m_iter)
+                z_pred = h(m_iter)
 
-            # For simplicity, use a fixed-size innovation with masked-out invalid values
-            # Set invalid innovations to zero (won't affect update due to zero rows in H)
-            innov = jnp.where(obs_mask, innov_full, 0.0)
+                # Innovation
+                innov_full = z_obs_full - z_pred
+                innov = jnp.where(obs_mask, innov_full, 0.0)
 
-            # Mask out invalid rows in H
-            H_masked = jnp.where(obs_mask[:, None], H_x, 0.0)
+                # Mask out invalid rows in H
+                H_masked = jnp.where(obs_mask[:, None], H_x, 0.0)
 
-            # Measurement noise (larger for invalid measurements to avoid singularity)
-            R_diag = jnp.where(
-                obs_mask,
-                config.measurement_noise_pos,
-                1e6,  # Large noise for invalid measurements
+                # Measurement noise (larger for invalid measurements)
+                R_diag = jnp.where(obs_mask, config.measurement_noise_pos, 1e6)
+                R = jnp.diag(R_diag)
+
+                # Innovation covariance
+                S = H_masked @ P_iter @ H_masked.T + R
+
+                # Kalman gain
+                K = psd_solve(S, H_masked @ P_iter).T
+
+                # Update mean
+                m_upd = m_iter + K @ innov
+
+                # Update covariance (Joseph form)
+                I_KH = jnp.eye(8) - K @ H_masked
+                P_upd = I_KH @ P_iter @ I_KH.T + K @ R @ K.T
+                P_upd = symmetrize(P_upd)
+
+                return (m_upd, P_upd), (S, innov)
+
+            # Run IEKF iterations
+            carry_init = (m_in, P_in)
+            (m_final, P_final), (S_all, innov_all) = lax.scan(
+                iekf_step, carry_init, jnp.arange(config.num_iter)
             )
-            R = jnp.diag(R_diag)
 
-            # Innovation covariance
-            S = H_masked @ P_in @ H_masked.T + R
+            # Extract final (last) iteration values
+            # lax.scan stacks outputs, so we take the last element
+            S_final = S_all[-1]
+            innov_final = innov_all[-1]
 
-            # Kalman gain
-            K = psd_solve(S, H_masked @ P_in).T
+            # Compute log-likelihood using final innovation and covariance
+            # Only include valid measurements in log-likelihood
+            n_valid = jnp.sum(obs_mask)
 
-            # Update mean
-            m_upd = m_in + K @ innov
+            def compute_log_lik():
+                return gaussian_log_likelihood(innov_final, S_final)
 
-            # Update covariance (Joseph form for numerical stability)
-            I_KH = jnp.eye(8) - K @ H_masked
-            P_upd = I_KH @ P_in @ I_KH.T + K @ R @ K.T
-            P_upd = symmetrize(P_upd)
+            def zero_log_lik():
+                return jnp.array(0.0)
 
-            return EKFState(mean=m_upd, cov=P_upd)
+            log_lik = lax.cond(n_valid > 0, compute_log_lik, zero_log_lik)
+
+            return EKFState(mean=m_final, cov=P_final), log_lik
 
         # Conditional update based on whether we have any valid LEDs
         return lax.cond(
@@ -635,7 +698,7 @@ def extended_kalman_filter(
 
     def filter_step(carry, t_idx):
         """Single filtering step at camera frame t_idx."""
-        state_prev, _ = carry
+        state_prev, log_lik_accum = carry
 
         # Current camera time
         t_current = t_cam_jax[t_idx]
@@ -681,8 +744,8 @@ def extended_kalman_filter(
         # Use lax.cond to handle first frame
         state_pred = lax.cond(t_idx == 0, no_propagate, propagate_from_prev, state_prev)
 
-        # Measurement update
-        state_filt = update_step(
+        # Measurement update (now returns state and log-likelihood)
+        state_filt, log_lik_k = update_step(
             state_pred,
             Z_cam_led1_jax[t_idx],
             Z_cam_led2_jax[t_idx],
@@ -698,19 +761,19 @@ def extended_kalman_filter(
             "predicted_cov": state_pred.cov,
         }
 
-        # Update carry
-        carry = (state_filt, t_idx)
+        # Update carry with accumulated log-likelihood
+        carry = (state_filt, log_lik_accum + log_lik_k)
 
         return carry, outputs
 
     # Run filter over all camera frames
-    carry_init = (initial_state, 0)
-    _, outputs = lax.scan(filter_step, carry_init, jnp.arange(n_cam))
+    carry_init = (initial_state, 0.0)
+    (_, log_lik_total), outputs = lax.scan(filter_step, carry_init, jnp.arange(n_cam))
 
     return EKFResult(
         filtered_means=outputs["filtered_mean"],
         filtered_covariances=outputs["filtered_cov"],
         predicted_means=outputs["predicted_mean"],
         predicted_covariances=outputs["predicted_cov"],
-        marginal_loglik=0.0,  # TODO: implement log-likelihood computation
+        marginal_loglik=float(log_lik_total),
     )
