@@ -1,0 +1,699 @@
+"""
+Rat IMU + Vision Simulator
+
+Generates synthetic ground-truth trajectories with realistic IMU measurements
+(gyroscope, accelerometer) and camera observations (LED positions with confidence).
+
+Features:
+- 2D planar motion with heading (5D state: x, y, vx, vy, θ)
+- Ornstein-Uhlenbeck processes for smooth, realistic motion
+- IMU measurements at high rate (default 200 Hz, configurable up to 30 kHz)
+- Camera observations at video rate (default 30 Hz)
+- Optional second LED for heading measurements
+- Optional confidence scores with correlation to dropouts/occlusions
+- Proper IMU physics: specific force (f = a - g), gravity with tilt, bias random walks, white noise
+- Arena boundary reflections with energy loss
+
+Coordinate Frames:
+- World: right-handed, x=horizontal, y=vertical, θ=heading (0=right, CCW+)
+- Body: attached to rat, x=forward, y=left, z=up (right-handed)
+- IMU: aligned with body (small misalignment optionally configurable)
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Optional
+
+import numpy as np
+
+# -----------------------------------------------------------------------------
+# Utilities
+# -----------------------------------------------------------------------------
+
+
+def wrap_angle(a: float | np.ndarray) -> float | np.ndarray:
+    """Wrap angle to (-π, π]."""
+    return (a + np.pi) % (2 * np.pi) - np.pi
+
+
+def interp_angle(t_new: np.ndarray, t_old: np.ndarray, angles: np.ndarray) -> np.ndarray:
+    """
+    Interpolate wrapped angles using unwrap → interp → rewrap.
+
+    Prevents jumps at ±π discontinuity.
+
+    Args:
+        t_new: Query timestamps
+        t_old: Sample timestamps
+        angles: Angle values at t_old (wrapped to [-π, π])
+
+    Returns:
+        Interpolated angles at t_new (wrapped to [-π, π])
+    """
+    angles_unwrapped = np.unwrap(angles)
+    angles_interp = np.interp(t_new, t_old, angles_unwrapped)
+    return wrap_angle(angles_interp)  # type: ignore[return-value]
+
+
+def confidence_to_noise_scale(
+    confidence: np.ndarray, base_std: float, epsilon: float = 0.01
+) -> np.ndarray:
+    """
+    Map confidence scores to measurement noise scale.
+
+    Uses σ(c) = σ_base / √(ε + c) to avoid division by zero
+    and provide smooth scaling.
+
+    Args:
+        confidence: Confidence scores (0-1)
+        base_std: Base measurement noise std
+        epsilon: Small constant to prevent division by zero
+
+    Returns:
+        Noise scale factors (multiply by random samples)
+    """
+    return base_std / np.sqrt(epsilon + confidence)
+
+
+def density_to_sample_std(noise_density: float, dt: float) -> float:
+    """
+    Convert white noise density (units / √Hz) to discrete-time
+    per-sample standard deviation at sampling period dt.
+
+    Args:
+        noise_density: Noise density in units / √Hz
+        dt: Sampling period in seconds
+
+    Returns:
+        Per-sample standard deviation
+    """
+    return noise_density / np.sqrt(dt)
+
+
+def rw_step(bias: float, rw_density: float, dt: float, rng: np.random.Generator) -> float:
+    """
+    Random-walk increment for bias with density (units / √s).
+
+    bias_{t+1} = bias_t + N(0, rw_density² × dt)
+
+    Args:
+        bias: Current bias value
+        rw_density: Random walk density in units / √s
+        dt: Time step in seconds
+        rng: NumPy random generator
+
+    Returns:
+        Updated bias value
+    """
+    return bias + rw_density * np.sqrt(dt) * rng.standard_normal()
+
+
+def ou_step(
+    x: float,
+    mean: float,
+    tau: float,
+    sigma: float,
+    dt: float,
+    rng: np.random.Generator,
+) -> float:
+    """
+    Ornstein-Uhlenbeck process step (mean-reverting stochastic process).
+
+    dx = (mean - x) / tau × dt + sigma × √dt × N(0, 1)
+
+    Args:
+        x: Current value
+        mean: Long-term mean (equilibrium value)
+        tau: Time constant (relaxation time in seconds)
+        sigma: Noise intensity (units / √s)
+        dt: Time step in seconds
+        rng: NumPy random generator
+
+    Returns:
+        Updated value
+    """
+    return x + (mean - x) * (dt / tau) + sigma * np.sqrt(dt) * rng.standard_normal()
+
+
+def compute_gravity_in_tilted_frame(
+    tilt_roll_rad: float, tilt_pitch_rad: float, gravity: float
+) -> tuple[float, float]:
+    """
+    Compute gravity components in IMU frame with small roll/pitch tilt.
+
+    In 2D planar motion (yaw only), the IMU is nominally level (z-up).
+    Small mounting errors cause roll/pitch tilt, projecting gravity
+    into the x-y (horizontal) plane.
+
+    3D rotation sequence (ZYX Euler): Yaw → Pitch → Roll
+    For planar motion with yaw handled separately, we only need pitch/roll tilt.
+
+    Gravity in world frame: g_world = [0, 0, -g]
+    After pitch (θ_p) and roll (θ_r) rotations:
+        g_x = g * sin(θ_p)
+        g_y = -g * sin(θ_r) * cos(θ_p)
+
+    Args:
+        tilt_roll_rad: Roll tilt angle in radians (rotation about x-axis)
+        tilt_pitch_rad: Pitch tilt angle in radians (rotation about y-axis)
+        gravity: Gravity magnitude in m/s²
+
+    Returns:
+        (g_x, g_y): Gravity components in tilted IMU frame (m/s²)
+
+    Note:
+        For small angles (~2-5°), these are approximately:
+        g_x ≈ g * θ_p, g_y ≈ -g * θ_r
+    """
+    cos_p = np.cos(tilt_pitch_rad)
+    sin_p = np.sin(tilt_pitch_rad)
+    sin_r = np.sin(tilt_roll_rad)
+
+    g_x = gravity * sin_p
+    g_y = -gravity * sin_r * cos_p
+
+    return g_x, g_y
+
+
+# -----------------------------------------------------------------------------
+# Configuration
+# -----------------------------------------------------------------------------
+
+
+@dataclass
+class RatIMUSimConfig:
+    """
+    Configuration for rat IMU + vision simulation.
+
+    Durations and Rates:
+        duration_s: Total simulation duration in seconds
+        fs_imu: IMU sampling rate in Hz
+        fs_cam: Camera sampling rate in Hz
+
+    Arena (meters):
+        arena_w: Arena width (x-axis)
+        arena_h: Arena height (y-axis)
+
+    Camera Model:
+        cam_sigma_m: Camera measurement noise std per axis (meters)
+        cam_dropout_prob: Probability of frame dropout (0-1)
+        cam_dropout_correlation: Correlation between LED1/LED2 dropouts (0=independent, 1=same)
+        cam_latency_s: Constant latency applied to timestamps (seconds)
+        cam_jitter_s: Timestamp jitter std (seconds)
+        use_confidence: Enable confidence score generation
+        confidence_base: Base confidence when detection is good (0-1)
+        confidence_dropout_decay: Confidence multiplier near dropouts
+
+    LED Configuration:
+        led1_offset_body: Position of LED1 in body frame [x, y] meters
+        use_second_led: Enable second LED for heading measurements
+        led2_offset_body: Position of LED2 in body frame [x, y] meters
+
+    IMU Noise (densities per √Hz for white noise):
+        gyro_noise_density: Gyroscope white noise (rad/s / √Hz)
+        accel_noise_density: Accelerometer white noise (m/s² / √Hz)
+
+    IMU Bias Random Walks (densities per √s):
+        gyro_bias_rw_density: Gyroscope bias random walk (rad/s / √s)
+        accel_bias_rw_density: Accelerometer bias random walk (m/s² / √s)
+
+    IMU Mounting and Gravity:
+        imu_tilt_roll_deg: Small constant roll misalignment (degrees)
+        imu_tilt_pitch_deg: Small constant pitch misalignment (degrees)
+        gravity: Gravitational acceleration magnitude (m/s²)
+
+    Motion Model (Ornstein-Uhlenbeck parameters):
+        tau_yaw_rate: Time constant for yaw rate (seconds)
+        sigma_yaw_rate: Noise intensity for yaw rate (rad/s / √s)
+        tau_a_fwd: Time constant for forward acceleration (seconds)
+        sigma_a_fwd: Noise intensity for forward accel (m/s² / √s)
+        tau_a_lat: Time constant for lateral acceleration (seconds)
+        sigma_a_lat: Noise intensity for lateral accel (m/s² / √s)
+
+    Physical Constraints:
+        vel_drag: Linear velocity damping coefficient (1/s)
+        speed_clip: Maximum speed clipping threshold (m/s)
+
+    Initial State:
+        m0: Initial state mean [x, y, vx, vy, θ]
+        P0: Initial state covariance (5×5)
+    """
+
+    # Durations / rates
+    duration_s: float = 60.0
+    fs_imu: float = 200.0
+    fs_cam: float = 30.0
+
+    # Arena (meters)
+    arena_w: float = 2.0
+    arena_h: float = 2.0
+
+    # Camera model
+    cam_sigma_m: float = 0.005  # 5 mm std noise per axis
+    cam_dropout_prob: float = 0.10
+    cam_dropout_correlation: float = (
+        0.8  # Correlation between LED1/LED2 dropouts (0=independent, 1=identical)
+    )
+    cam_latency_s: float = 0.05
+    cam_jitter_s: float = 0.005
+    use_confidence: bool = False
+    confidence_base: float = 0.95
+    confidence_dropout_decay: float = 0.3
+
+    # LED configuration
+    led1_offset_body: np.ndarray = field(default_factory=lambda: np.array([0.0, 0.0]))
+    use_second_led: bool = False
+    led2_offset_body: np.ndarray = field(default_factory=lambda: np.array([-0.05, 0.0]))
+
+    # IMU white noise densities (per √Hz)
+    gyro_noise_density: float = np.deg2rad(0.03)  # rad/s / √Hz
+    accel_noise_density: float = 0.03  # m/s² / √Hz
+
+    # IMU bias random-walk densities (per √s)
+    gyro_bias_rw_density: float = np.deg2rad(0.003)  # rad/s / √s
+    accel_bias_rw_density: float = 0.005  # m/s² / √s
+
+    # IMU mounting/tilt (small constant roll/pitch misalignment)
+    imu_tilt_roll_deg: float = 3.0  # Roll tilt in degrees
+    imu_tilt_pitch_deg: float = 2.0  # Pitch tilt in degrees
+    gravity: float = 9.80665  # m/s² (Earth gravity)
+
+    # Motion model (OU parameters)
+    tau_yaw_rate: float = 0.8  # s
+    sigma_yaw_rate: float = np.deg2rad(60.0)  # rad/s / √s
+    tau_a_fwd: float = 0.7  # s
+    sigma_a_fwd: float = 1.0  # m/s² / √s
+    tau_a_lat: float = 0.5  # s
+    sigma_a_lat: float = 0.5  # m/s² / √s
+
+    # Physical damping / limits
+    vel_drag: float = 0.4  # 1/s
+    speed_clip: float = 1.5  # m/s
+
+    # Initial state (truth)
+    m0: np.ndarray = field(default_factory=lambda: np.array([1.0, 1.0, 0.0, 0.0, 0.0]))
+    P0: np.ndarray = field(
+        default_factory=lambda: np.diag([0.01, 0.01, 0.05, 0.05, np.deg2rad(5.0) ** 2])
+    )
+
+
+# -----------------------------------------------------------------------------
+# Simulator
+# -----------------------------------------------------------------------------
+
+
+def simulate_rat_imu(
+    config: Optional[RatIMUSimConfig] = None, seed: int = 0
+) -> dict[str, np.ndarray]:
+    """
+    Simulate ground truth trajectory, IMU measurements, and camera observations.
+
+    Args:
+        config: Simulation configuration (uses defaults if None)
+        seed: Random seed for reproducibility
+
+    Returns:
+        Dictionary containing:
+            # Time arrays
+            t_imu: (T_imu,) IMU timestamps in seconds
+            t_cam_exp: (T_cam,) Camera exposure timestamps
+                       **USE THIS as measurement timestamp in your filter**
+            t_cam_obs: (T_cam,) Camera observation arrival times (exp + latency)
+                       Only needed for simulating queues/processing delays
+
+            # Ground truth at IMU rate
+            X_truth: (T_imu, 5) [x, y, vx, vy, θ] in world frame
+            yaw_rate_truth: (T_imu,) True yaw rate (rad/s) - for validation
+            accel_world_truth: (T_imu, 2) True INERTIAL accel [ax, ay] in world frame
+            accel_body_truth: (T_imu, 2) True INERTIAL accel [ax, ay] in body frame
+
+            # IMU measurements (body frame)
+            U_imu: (T_imu, 3) [ω_z, f_x, f_y] gyro (rad/s) + SPECIFIC FORCE (m/s²)
+                               Accelerometer measures: f = a_body - g_body (NOT inertial accel!)
+            bias_gyro: (T_imu,) gyroscope bias (rad/s)
+            bias_accel_x: (T_imu,) x-axis accelerometer bias (m/s²)
+            bias_accel_y: (T_imu,) y-axis accelerometer bias (m/s²)
+
+            # Camera measurements
+            Z_cam_led1: (T_cam, 2) LED1 position [x, y] in meters (NaN if dropped)
+            Z_cam_led2: (T_cam, 2) LED2 position [x, y] in meters (NaN if dropped/unused)
+            confidence_led1: (T_cam,) confidence scores 0-1 (if use_confidence=True)
+            confidence_led2: (T_cam,) confidence scores 0-1 (if use_confidence=True)
+            mask_cam: (T_cam,) boolean, True where either LED is valid (union, backward compat)
+            mask_led1: (T_cam,) boolean, True where LED1 is valid (independent dropout)
+            mask_led2: (T_cam,) boolean, True where LED2 is valid (independent dropout)
+
+            # Metadata
+            config: RatIMUSimConfig used for this simulation
+    """
+    if config is None:
+        config = RatIMUSimConfig()
+
+    rng = np.random.default_rng(seed)
+
+    # Time bases
+    dt_imu = 1.0 / config.fs_imu
+    dt_cam = 1.0 / config.fs_cam
+    T_imu = int(np.round(config.duration_s * config.fs_imu))
+    T_cam = int(np.round(config.duration_s * config.fs_cam))
+
+    t_imu = np.arange(T_imu) * dt_imu
+    t_cam_clean = np.arange(T_cam) * dt_cam
+
+    # Initialize truth state
+    L0 = np.linalg.cholesky(config.P0)
+    x = config.m0 + L0 @ rng.standard_normal(5)
+    x[4] = wrap_angle(x[4])  # wrap θ
+
+    # Initialize biases
+    b_gyro = 0.0
+    b_accel_x = 0.0
+    b_accel_y = 0.0
+
+    # Storage arrays
+    X_truth = np.zeros((T_imu, 5))
+    U_imu = np.zeros((T_imu, 3))
+    bias_gyro = np.zeros(T_imu)
+    bias_accel_x = np.zeros(T_imu)
+    bias_accel_y = np.zeros(T_imu)
+
+    # Ground truth channels for validation
+    yaw_rate_truth = np.zeros(T_imu)
+    accel_world_truth = np.zeros((T_imu, 2))
+    accel_body_truth = np.zeros((T_imu, 2))
+
+    # IMU noise parameters
+    std_gyro = density_to_sample_std(config.gyro_noise_density, dt_imu)
+    std_accel = density_to_sample_std(config.accel_noise_density, dt_imu)
+
+    # Compute gravity in tilted IMU frame (constant for entire simulation)
+    tilt_roll_rad = np.deg2rad(config.imu_tilt_roll_deg)
+    tilt_pitch_rad = np.deg2rad(config.imu_tilt_pitch_deg)
+    g_imu_x, g_imu_y = compute_gravity_in_tilted_frame(
+        tilt_roll_rad, tilt_pitch_rad, config.gravity
+    )
+
+    # OU process states (control inputs in body frame)
+    yaw_rate = 0.0
+    a_fwd = 0.0  # forward accel (m/s²)
+    a_lat = 0.0  # lateral accel (m/s²)
+
+    # Simulate at IMU rate
+    for t in range(T_imu):
+        px, py, vx, vy, theta = x
+
+        # --- 1) Update OU processes (smooth motion generators) ---
+        yaw_rate = ou_step(
+            yaw_rate,
+            mean=0.0,
+            tau=config.tau_yaw_rate,
+            sigma=config.sigma_yaw_rate,
+            dt=dt_imu,
+            rng=rng,
+        )
+        a_fwd = ou_step(
+            a_fwd,
+            mean=0.0,
+            tau=config.tau_a_fwd,
+            sigma=config.sigma_a_fwd,
+            dt=dt_imu,
+            rng=rng,
+        )
+        a_lat = ou_step(
+            a_lat,
+            mean=0.0,
+            tau=config.tau_a_lat,
+            sigma=config.sigma_a_lat,
+            dt=dt_imu,
+            rng=rng,
+        )
+
+        # --- 2) Rotate body-frame control to world frame ---
+        c, s = np.cos(theta), np.sin(theta)
+        ax_control_world = c * a_fwd - s * a_lat
+        ay_control_world = s * a_fwd + c * a_lat
+
+        # --- 3) Apply velocity damping (drag) ---
+        ax_world = ax_control_world - config.vel_drag * vx
+        ay_world = ay_control_world - config.vel_drag * vy
+
+        # --- 4) Integrate kinematics (semi-implicit Euler with second-order position) ---
+        vx_new = vx + ax_world * dt_imu
+        vy_new = vy + ay_world * dt_imu
+
+        # Smooth speed saturation (differentiable for JAX compatibility)
+        # Uses tanh-based saturation: v_sat = v_max * tanh(v / v_max)
+        speed = np.hypot(vx_new, vy_new)
+        if speed > 1e-6:  # Avoid division by zero
+            # Saturation factor: tanh(speed / speed_clip) ≈ 1 for speed << speed_clip
+            #                                              ≈ speed_clip/speed for speed >> speed_clip
+            sat_factor = np.tanh(speed / config.speed_clip) / (speed / config.speed_clip)
+            vx_new *= sat_factor
+            vy_new *= sat_factor
+
+        # Position update with trapezoidal velocity (2nd order accurate)
+        # p_new = p + 0.5 * (v_old + v_new) * dt = p + v_old * dt + 0.5 * a * dt²
+        px = px + vx * dt_imu + 0.5 * ax_world * dt_imu**2
+        py = py + vy * dt_imu + 0.5 * ay_world * dt_imu**2
+        theta = wrap_angle(theta + yaw_rate * dt_imu)
+
+        # Update velocity
+        vx = vx_new
+        vy = vy_new
+
+        # --- 5) Wall reflections (inelastic) ---
+        if px < 0.0:
+            px = -px
+            vx = -0.5 * vx
+        elif px > config.arena_w:
+            px = 2 * config.arena_w - px
+            vx = -0.5 * vx
+
+        if py < 0.0:
+            py = -py
+            vy = -0.5 * vy
+        elif py > config.arena_h:
+            py = 2 * config.arena_h - py
+            vy = -0.5 * vy
+
+        # Save truth
+        x = np.array([px, py, vx, vy, theta])
+        X_truth[t] = x
+
+        # --- 6) Bias random walks ---
+        b_gyro = rw_step(b_gyro, config.gyro_bias_rw_density, dt_imu, rng)
+        b_accel_x = rw_step(b_accel_x, config.accel_bias_rw_density, dt_imu, rng)
+        b_accel_y = rw_step(b_accel_y, config.accel_bias_rw_density, dt_imu, rng)
+
+        bias_gyro[t] = b_gyro
+        bias_accel_x[t] = b_accel_x
+        bias_accel_y[t] = b_accel_y
+
+        # --- 7) IMU measurements (body frame) ---
+        # Transform world accelerations to body frame (using current theta)
+        ax_body = c * ax_world + s * ay_world
+        ay_body = -s * ax_world + c * ay_world
+
+        # Store ground truth inertial acceleration for validation
+        yaw_rate_truth[t] = yaw_rate
+        accel_world_truth[t] = [ax_world, ay_world]
+        accel_body_truth[t] = [ax_body, ay_body]
+
+        # Accelerometer measures SPECIFIC FORCE = a_body - g_body
+        # Gravity in tilted IMU frame rotated by current yaw
+        g_body_x = c * g_imu_x + s * g_imu_y
+        g_body_y = -s * g_imu_x + c * g_imu_y
+
+        specific_force_x = ax_body - g_body_x
+        specific_force_y = ay_body - g_body_y
+
+        # Add bias and white noise to specific force
+        gyro_meas = yaw_rate + b_gyro + std_gyro * rng.standard_normal()
+        accel_x_meas = specific_force_x + b_accel_x + std_accel * rng.standard_normal()
+        accel_y_meas = specific_force_y + b_accel_y + std_accel * rng.standard_normal()
+
+        U_imu[t] = np.array([gyro_meas, accel_x_meas, accel_y_meas])
+
+    # --- 8) Camera observations ---
+    # Apply timestamp jitter and latency
+    # Exposure time: when light hits sensor (jittered from nominal)
+    # Arrival time: when data is available (exposure + latency)
+    # Note: No clipping to preserve Gaussian jitter; np.interp handles extrapolation
+    jitter = config.cam_jitter_s * rng.standard_normal(T_cam)
+    t_cam_exp = t_cam_clean + jitter
+    t_cam_obs = t_cam_exp + config.cam_latency_s
+
+    # Interpolate truth at EXPOSURE time (what pixels actually measure)
+    px_interp = np.interp(t_cam_exp, t_imu, X_truth[:, 0])
+    py_interp = np.interp(t_cam_exp, t_imu, X_truth[:, 1])
+    theta_interp = interp_angle(t_cam_exp, t_imu, X_truth[:, 4])
+
+    # Generate LED positions
+    def led_position(
+        px: np.ndarray, py: np.ndarray, theta: np.ndarray, offset_body: np.ndarray
+    ) -> np.ndarray:
+        """Transform LED from body frame to world frame."""
+        c, s = np.cos(theta), np.sin(theta)
+        led_x = px + c * offset_body[0] - s * offset_body[1]
+        led_y = py + s * offset_body[0] + c * offset_body[1]
+        return np.stack([led_x, led_y], axis=1)
+
+    led1_truth = led_position(px_interp, py_interp, theta_interp, config.led1_offset_body)
+
+    if config.use_second_led:
+        led2_truth = led_position(px_interp, py_interp, theta_interp, config.led2_offset_body)
+    else:
+        led2_truth = np.full((T_cam, 2), np.nan)
+
+    # Generate correlated dropouts for LED1 and LED2
+    # Use copula approach: generate correlated uniform random variables
+    if config.use_second_led:
+        # Generate correlated uniform random variables using Gaussian copula
+        # rho = correlation coefficient
+        rho = config.cam_dropout_correlation
+
+        # Generate bivariate normal with correlation rho
+        z1 = rng.standard_normal(T_cam)
+        z2 = rho * z1 + np.sqrt(1 - rho**2) * rng.standard_normal(T_cam)
+
+        # Transform to uniform via CDF
+        from scipy.stats import norm
+
+        u1 = norm.cdf(z1)
+        u2 = norm.cdf(z2)
+
+        # Apply threshold
+        mask_led1 = u1 > config.cam_dropout_prob
+        mask_led2 = u2 > config.cam_dropout_prob
+    else:
+        # Single LED case: only LED1 mask matters
+        mask_led1 = rng.random(T_cam) > config.cam_dropout_prob
+        mask_led2 = np.zeros(T_cam, dtype=bool)  # LED2 always dropped
+
+    # Legacy mask_cam for backward compatibility (union of both LEDs)
+    mask_cam = mask_led1 | mask_led2
+
+    # Generate confidence scores (optional)
+    if config.use_confidence:
+        # Base confidence with random variation
+        confidence_led1 = config.confidence_base * (0.8 + 0.4 * rng.random(T_cam))
+        confidence_led2 = (
+            config.confidence_base * (0.8 + 0.4 * rng.random(T_cam))
+            if config.use_second_led
+            else np.zeros(T_cam)
+        )
+
+        # Reduce confidence near dropouts (per-LED)
+        for i in range(T_cam):
+            # LED1 confidence
+            if not mask_led1[i]:
+                confidence_led1[i] = 0.0
+            else:
+                # Reduce confidence in neighboring frames
+                if i > 0 and not mask_led1[i - 1]:
+                    confidence_led1[i] *= config.confidence_dropout_decay
+                if i < T_cam - 1 and not mask_led1[i + 1]:
+                    confidence_led1[i] *= config.confidence_dropout_decay
+
+            # LED2 confidence (if enabled)
+            if config.use_second_led:
+                if not mask_led2[i]:
+                    confidence_led2[i] = 0.0
+                else:
+                    if i > 0 and not mask_led2[i - 1]:
+                        confidence_led2[i] *= config.confidence_dropout_decay
+                    if i < T_cam - 1 and not mask_led2[i + 1]:
+                        confidence_led2[i] *= config.confidence_dropout_decay
+
+        # Clip confidence to valid range [0, 1] to prevent numerical issues
+        np.clip(confidence_led1, 0.0, 1.0, out=confidence_led1)
+        np.clip(confidence_led2, 0.0, 1.0, out=confidence_led2)
+    else:
+        confidence_led1 = np.ones(T_cam)
+        confidence_led2 = np.ones(T_cam) if config.use_second_led else np.zeros(T_cam)
+
+    # Add measurement noise (scaled by confidence if enabled)
+    if config.use_confidence:
+        noise_scale_led1 = confidence_to_noise_scale(
+            confidence_led1, config.cam_sigma_m, epsilon=0.01
+        )
+        if config.use_second_led:
+            noise_scale_led2 = confidence_to_noise_scale(
+                confidence_led2, config.cam_sigma_m, epsilon=0.01
+            )
+        else:
+            noise_scale_led2 = np.zeros(T_cam)
+    else:
+        # Uniform noise (broadcast scalar to array for consistent indexing)
+        noise_scale_led1 = np.full(T_cam, config.cam_sigma_m)
+        noise_scale_led2 = (
+            np.full(T_cam, config.cam_sigma_m) if config.use_second_led else np.zeros(T_cam)
+        )
+
+    noise_led1 = noise_scale_led1[:, None] * rng.standard_normal((T_cam, 2))
+    Z_cam_led1 = led1_truth + noise_led1
+
+    if config.use_second_led:
+        noise_led2 = noise_scale_led2[:, None] * rng.standard_normal((T_cam, 2))
+        Z_cam_led2 = led2_truth + noise_led2
+    else:
+        Z_cam_led2 = np.full((T_cam, 2), np.nan)
+
+    # Apply independent dropouts to each LED
+    Z_cam_led1[~mask_led1] = np.nan
+    Z_cam_led2[~mask_led2] = np.nan
+
+    return {
+        # Time
+        "t_imu": t_imu,
+        "t_cam_exp": t_cam_exp,  # Exposure time (use for measurement timestamps)
+        "t_cam_obs": t_cam_obs,  # Observation arrival time (exposure + latency)
+        # Truth
+        "X_truth": X_truth,
+        "yaw_rate_truth": yaw_rate_truth,
+        "accel_world_truth": accel_world_truth,
+        "accel_body_truth": accel_body_truth,
+        # IMU
+        "U_imu": U_imu,
+        "bias_gyro": bias_gyro,
+        "bias_accel_x": bias_accel_x,
+        "bias_accel_y": bias_accel_y,
+        # Camera
+        "Z_cam_led1": Z_cam_led1,
+        "Z_cam_led2": Z_cam_led2,
+        "confidence_led1": confidence_led1,
+        "confidence_led2": confidence_led2,
+        "mask_cam": mask_cam,  # Union mask (backward compatibility)
+        "mask_led1": mask_led1,  # Individual LED1 mask
+        "mask_led2": mask_led2,  # Individual LED2 mask
+        # Config
+        "config": config,
+    }
+
+
+# -----------------------------------------------------------------------------
+# Convenience API
+# -----------------------------------------------------------------------------
+
+
+def make_default_config(**kwargs) -> RatIMUSimConfig:
+    """
+    Create a RatIMUSimConfig with optional overrides.
+
+    Args:
+        **kwargs: Fields to override in default config
+
+    Returns:
+        RatIMUSimConfig instance
+
+    Example:
+        >>> cfg = make_default_config(duration_s=120.0, fs_imu=1000.0, use_second_led=True)
+    """
+    config = RatIMUSimConfig()
+    for key, value in kwargs.items():
+        if hasattr(config, key):
+            setattr(config, key, value)
+        else:
+            raise ValueError(f"Unknown config parameter: {key}")
+    return config
