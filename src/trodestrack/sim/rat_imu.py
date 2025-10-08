@@ -372,6 +372,9 @@ def simulate_rat_imu(config: Optional[RatIMUSimConfig] = None, seed: int = 0) ->
             # Camera measurements
             Z_cam_led1: (T_cam, 2) LED1 position [x, y] in meters (NaN if dropped)
             Z_cam_led2: (T_cam, 2) LED2 position [x, y] in meters (NaN if dropped/unused)
+            led1_truth_cam: (T_cam, 2) Ground truth LED1 positions (before swaps/noise)
+            led2_truth_cam: (T_cam, 2) Ground truth LED2 positions (before swaps/noise)
+            swap_applied: (T_cam,) boolean, True where LED labels were swapped
             confidence_led1: (T_cam,) confidence scores 0-1 (if use_confidence=True)
             confidence_led2: (T_cam,) confidence scores 0-1 (if use_confidence=True)
             mask_cam: (T_cam,) boolean, True where either LED is valid (union, backward compat)
@@ -680,6 +683,8 @@ def simulate_rat_imu(config: Optional[RatIMUSimConfig] = None, seed: int = 0) ->
 
     # Simulate LED swaps (mislabeling front/back during close passes, reflections, etc.)
     # Only swap when both LEDs are visible (otherwise swap doesn't make sense)
+    swap_applied = np.zeros(T_cam, dtype=bool)  # Track which frames had swaps
+
     if config.use_second_led and config.led_swap_prob > 0:
         both_visible = mask_led1 & mask_led2
         swap_candidates = np.where(both_visible)[0]
@@ -687,6 +692,8 @@ def simulate_rat_imu(config: Optional[RatIMUSimConfig] = None, seed: int = 0) ->
             n_swaps = int(np.round(len(swap_candidates) * config.led_swap_prob))
             if n_swaps > 0:
                 swap_indices = rng.choice(swap_candidates, size=n_swaps, replace=False)
+                swap_applied[swap_indices] = True
+
                 # Swap LED positions and confidences at selected frames
                 Z_cam_led1[swap_indices], Z_cam_led2[swap_indices] = (
                     Z_cam_led2[swap_indices].copy(),
@@ -716,6 +723,9 @@ def simulate_rat_imu(config: Optional[RatIMUSimConfig] = None, seed: int = 0) ->
         # Camera
         "Z_cam_led1": Z_cam_led1,
         "Z_cam_led2": Z_cam_led2,
+        "led1_truth_cam": led1_truth,  # Ground truth LED1 positions (before swaps/noise)
+        "led2_truth_cam": led2_truth,  # Ground truth LED2 positions (before swaps/noise)
+        "swap_applied": swap_applied,  # Boolean mask: True where LED labels were swapped
         "confidence_led1": confidence_led1,
         "confidence_led2": confidence_led2,
         "mask_cam": mask_cam,  # Union mask (backward compatibility)

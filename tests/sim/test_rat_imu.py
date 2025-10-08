@@ -540,28 +540,69 @@ def test_confidence_reduced_near_dropout() -> None:
 
 
 def test_led_swap_occurs_when_enabled() -> None:
-    """Test that LED swaps occur when swap_prob > 0."""
+    """Test that LED swaps occur when swap_prob > 0 and are correctly tracked."""
     config = RatIMUSimConfig(
         duration_s=30.0,
         fs_cam=30.0,
         use_second_led=True,
         led_swap_prob=0.2,  # 20% swap rate
         cam_dropout_prob=0.05,  # Low dropout to get many swap candidates
+        led1_offset_body=np.array([0.05, 0.0]),
+        led2_offset_body=np.array([-0.05, 0.0]),
     )
 
     sim = simulate_rat_imu(config, seed=42)
 
-    # Count frames where both LEDs are visible
     mask1 = sim["mask_led1"]
     mask2 = sim["mask_led2"]
     both_visible = mask1 & mask2
+    swap_applied = sim["swap_applied"]
 
-    # With 20% swap prob, expect some swaps
-    # (Note: actual detection of swaps requires comparing to truth, which we don't have direct access to)
-    # Instead, verify that swap mechanism is triggered by checking code execution
+    # Count actual swaps
+    num_swaps = swap_applied.sum()
+    num_both_visible = both_visible.sum()
 
-    # This is a weak test - just verify simulation runs without error
-    assert both_visible.sum() > 0
+    # Should have some swaps given 20% rate
+    assert num_swaps > 0, "No swaps occurred despite 20% swap_prob"
+
+    # Swap rate should be approximately 20% of both-visible frames
+    if num_both_visible > 0:
+        observed_swap_rate = num_swaps / num_both_visible
+        # Binomial tolerance: within 3 sigma
+        p = config.led_swap_prob
+        sigma = np.sqrt(p * (1 - p) / num_both_visible)
+        assert (
+            np.abs(observed_swap_rate - p) < 3 * sigma
+        ), f"Swap rate {observed_swap_rate:.2%} differs from expected {p:.2%}"
+
+    # Verify swaps only occur when both visible
+    assert np.all(both_visible[swap_applied]), "Swaps occurred when LEDs not both visible"
+
+    # Verify that when swaps occur, measurements match swapped truth
+    led1_truth = sim["led1_truth_cam"]
+    led2_truth = sim["led2_truth_cam"]
+    Z1 = sim["Z_cam_led1"]
+    Z2 = sim["Z_cam_led2"]
+
+    # Check a few swapped frames
+    swapped_frames = np.where(swap_applied)[0]
+    if len(swapped_frames) > 0:
+        # Take first swapped frame
+        idx = swapped_frames[0]
+
+        # When swapped: Z1 should be near led2_truth, Z2 should be near led1_truth
+        # (within noise tolerance)
+        noise_tolerance = 5 * config.cam_sigma_m  # 5-sigma
+
+        dist_z1_to_truth2 = np.linalg.norm(Z1[idx] - led2_truth[idx])
+        dist_z2_to_truth1 = np.linalg.norm(Z2[idx] - led1_truth[idx])
+
+        assert (
+            dist_z1_to_truth2 < noise_tolerance
+        ), f"Swapped Z1 not near led2_truth: dist={dist_z1_to_truth2:.4f}m"
+        assert (
+            dist_z2_to_truth1 < noise_tolerance
+        ), f"Swapped Z2 not near led1_truth: dist={dist_z2_to_truth1:.4f}m"
 
 
 def test_led_swap_only_when_both_visible() -> None:
@@ -677,6 +718,9 @@ def test_output_keys_complete(minimal_config) -> None:
         "bias_accel_y",
         "Z_cam_led1",
         "Z_cam_led2",
+        "led1_truth_cam",  # NEW: Ground truth LED positions
+        "led2_truth_cam",  # NEW: Ground truth LED positions
+        "swap_applied",  # NEW: Swap tracking
         "confidence_led1",
         "confidence_led2",
         "mask_cam",

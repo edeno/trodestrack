@@ -306,6 +306,9 @@ def test_property_output_structure_complete(config: RatIMUSimConfig, seed: int) 
         "bias_accel_y",
         "Z_cam_led1",
         "Z_cam_led2",
+        "led1_truth_cam",  # NEW: Ground truth LED positions
+        "led2_truth_cam",  # NEW: Ground truth LED positions
+        "swap_applied",  # NEW: Swap tracking
         "confidence_led1",
         "confidence_led2",
         "mask_cam",
