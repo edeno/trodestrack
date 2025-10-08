@@ -218,11 +218,26 @@ def create_diagnostic_video(
         led1_visible = sim_data["mask_led1"][cam_idx]
         led2_visible = sim_data["mask_led2"][cam_idx]
 
-        # LED swap detection (spacing deviation)
+        # LED swap detection (spacing deviation + vector direction)
         if led1_visible and led2_visible:
+            # Check 1: Spacing deviation (catches occlusion-induced swaps)
             spacing = np.linalg.norm(led1_pos - led2_pos)
             expected_spacing = np.linalg.norm(config.led1_offset_body - config.led2_offset_body)
-            if abs(spacing - expected_spacing) > 0.5 * expected_spacing:
+            spacing_anomaly = abs(spacing - expected_spacing) > 0.5 * expected_spacing
+
+            # Check 2: LED vector direction (catches reflection/labeling swaps)
+            # Get body state for this frame
+            state = video_data["X_truth"][frame_idx]
+            theta = state[4]  # heading angle
+            body_x_axis = np.array([np.cos(theta), np.sin(theta)])
+            led_vector = led1_pos - led2_pos  # Vector from LED2 to LED1
+
+            # If LED1 is front and LED2 is back, dot product should be positive
+            # (led_vector should point in same direction as body X-axis)
+            dot_product = np.dot(led_vector, body_x_axis)
+            direction_anomaly = dot_product < 0  # Vector points backward = swap
+
+            if spacing_anomaly or direction_anomaly:
                 event_times["led_swap"].append(t)
 
         # Long dropout detection
@@ -324,35 +339,14 @@ def create_diagnostic_video(
         edgecolor="lightgray",
     )
 
-    # Collect all artists that need to be returned for blitting
-    all_artists = []
-
-    # Arena artists
-    all_artists.extend([rat.body, rat.heading_arrow, rat.velocity_arrow])
-    all_artists.extend([led1.marker, led1.halo, led1.dropout_marker])
-    all_artists.extend([led2.marker, led2.halo, led2.dropout_marker])
-    all_artists.append(trail.lines)
-    all_artists.append(hud.state_text)
-
-    # IMU artists
-    all_artists.extend([imu_panel.gyro_line, imu_panel.accel_x_line, imu_panel.accel_y_line])
-
-    # Camera artists
-    all_artists.extend(
-        [
-            camera_panel.led1_bar,
-            camera_panel.led2_bar,
-            camera_panel.led1_text,
-            camera_panel.led2_text,
-        ]
-    )
-
-    # Progress bar artists
-    all_artists.extend([progress_bar.progress_bar, progress_bar.time_marker])
-
     # Animation update function
-    def update_frame(frame_idx: int) -> list[Any]:
-        """Update all artists for a single frame."""
+    def update_frame(frame_idx: int) -> None:
+        """Update all artists for a single frame.
+
+        Note: Component update() methods return artist lists for blitting, but we ignore
+        those returns since blit=False. With blitting disabled, matplotlib redraws the
+        entire figure each frame, so we don't need to track individual artist changes.
+        """
         # Get data for this frame
         t = video_data["t_video"][frame_idx]
         state = video_data["X_truth"][frame_idx]  # [x, y, vx, vy, θ]
@@ -418,6 +412,8 @@ def create_diagnostic_video(
         hud_state = {
             "speed": speed,
             "theta": theta,
+            "vx": vx,
+            "vy": vy,
             "led1_visible": led1_visible,
             "led2_visible": led2_visible,
             "conf1": conf1,
@@ -438,19 +434,32 @@ def create_diagnostic_video(
                 "accel_x": U_imu_window[:, 1],
                 "accel_y": U_imu_window[:, 2],
             }
-            imu_panel.update(t, t_raw=t_imu_window, imu_raw=imu_raw)
+
+            # Extract ground truth for truth overlay (expected IMU values)
+            yaw_rate_truth_window = sim_data["yaw_rate_truth"][imu_mask]
+            accel_body_truth_window = sim_data["accel_body_truth"][imu_mask]
+            imu_truth = {
+                "yaw_rate": yaw_rate_truth_window,
+                "accel_x": accel_body_truth_window[:, 0],
+                "accel_y": accel_body_truth_window[:, 1],
+            }
+
+            imu_panel.update(t, t_raw=t_imu_window, imu_raw=imu_raw, imu_truth=imu_truth)
         else:
             # Fallback to interpolated single sample if no raw data in window
             imu_dict = {"gyro": imu[0], "accel_x": imu[1], "accel_y": imu[2]}
             imu_panel.update(t, imu_data=imu_dict)
 
-        # Camera panel
-        camera_panel.update(led1_visible, conf1, led2_visible, conf2)
+        # Camera panel with latency readout
+        # Compute latency: t_cam_obs - t_cam_exp (observation - exposure lag)
+        t_cam_exp = sim_data["t_cam_exp"][cam_idx]
+        t_cam_obs = sim_data["t_cam_obs"][cam_idx]
+        latency_ms = (t_cam_obs - t_cam_exp) * 1000  # Convert to milliseconds
+
+        camera_panel.update(led1_visible, conf1, led2_visible, conf2, latency_ms)
 
         # Progress bar
         progress_bar.update(t)
-
-        return all_artists
 
     # Create animation
     print("Rendering animation...")
@@ -459,7 +468,7 @@ def create_diagnostic_video(
         update_frame,
         frames=n_frames,
         interval=1000 / fps,
-        blit=True,
+        blit=False,  # Disabled: transforms on FancyArrowPatch don't work with blitting
         repeat=False,
     )
 
