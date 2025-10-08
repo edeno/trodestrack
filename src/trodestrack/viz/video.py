@@ -327,17 +327,24 @@ def create_diagnostic_video(
     )
     fig.suptitle(title_str, fontsize=11, fontweight="normal", y=0.98)
 
-    # Place legend in top right corner of arena view (left column)
+    # Place legend in top right corner (right column)
     fig.legend(
         handles=legend_elements,
         loc="upper right",
-        bbox_to_anchor=(0.515, 0.92),  # Right edge of left column (arena)
+        bbox_to_anchor=(0.98, 0.92),  # Top right corner of figure
         ncol=1,  # Vertical layout
         fontsize=6,
         frameon=True,
         framealpha=0.9,
         edgecolor="lightgray",
     )
+
+    # Pre-compute LED offsets (avoid hasattr checks per frame)
+    config = sim_data["config"]
+    led1_offset = getattr(config, "led1_offset_body", None)
+    led2_offset = None
+    if hasattr(config, "led2_offset_body") and getattr(config, "use_second_led", False):
+        led2_offset = config.led2_offset_body
 
     # Animation update function
     def update_frame(frame_idx: int) -> None:
@@ -367,23 +374,16 @@ def create_diagnostic_video(
 
         # Compute expected LED positions from body model (for residuals)
         # LED positions = body position + rotated LED offset
-        config = sim_data["config"]
         cos_th = np.cos(theta)
         sin_th = np.sin(theta)
 
-        if hasattr(config, "led1_offset_body"):
-            led1_offset = config.led1_offset_body
+        if led1_offset is not None:
             led1_expected_x = x + cos_th * led1_offset[0] - sin_th * led1_offset[1]
             led1_expected_y = y + sin_th * led1_offset[0] + cos_th * led1_offset[1]
         else:
             led1_expected_x, led1_expected_y = None, None
 
-        if (
-            hasattr(config, "led2_offset_body")
-            and hasattr(config, "use_second_led")
-            and config.use_second_led
-        ):
-            led2_offset = config.led2_offset_body
+        if led2_offset is not None:
             led2_expected_x = x + cos_th * led2_offset[0] - sin_th * led2_offset[1]
             led2_expected_y = y + sin_th * led2_offset[0] + cos_th * led2_offset[1]
         else:

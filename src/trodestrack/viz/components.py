@@ -171,9 +171,9 @@ class LEDArtist:
         self.halo = Circle((0, 0), radius=marker_size * 2, color=color, alpha=0.0, zorder=9)
         ax.add_patch(self.halo)
 
-        # Dropout marker: red X at last known position
+        # Dropout marker: red X at last known position (subtle)
         (self.dropout_marker,) = ax.plot(
-            [], [], "x", color=COLORS["red"], markersize=12, linewidth=2, zorder=11
+            [], [], "x", color=COLORS["red"], markersize=8, linewidth=2, alpha=0.7, zorder=11
         )
 
         # Residual visualization: expected position (small cross) + residual line
@@ -182,9 +182,9 @@ class LEDArtist:
             (self.expected_marker,) = ax.plot(
                 [], [], "+", color=color, markersize=5, markeredgewidth=1.5, alpha=0.7, zorder=8
             )
-            # Residual line from expected to observed
+            # Residual line from expected to observed (de-emphasized gray dashed)
             (self.residual_line,) = ax.plot(
-                [], [], "-", color=COLORS["red"], linewidth=1.0, alpha=0.6, zorder=8
+                [], [], "--", color=COLORS["gray"], linewidth=1.0, alpha=0.4, zorder=8
             )
         else:
             self.expected_marker = None
@@ -341,7 +341,7 @@ class HUDArtist:
         """Update HUD text with current state.
 
         Args:
-            t: Current time in seconds (unused - time shown in progress bar)
+            t: Current time in seconds
             state: Dictionary with state information:
                 - speed: Speed in m/s
                 - theta: Heading in radians
@@ -351,14 +351,15 @@ class HUDArtist:
         Returns:
             List of modified text artists
         """
-        # Format state info (time and confidence removed - shown elsewhere)
+        # Format state info
         speed_ms = state.get("speed", 0.0)
         theta_rad = state.get("theta", 0.0)
         led1_vis = state.get("led1_visible", False)
         led2_vis = state.get("led2_visible", False)
 
-        # Compact display with reduced precision
+        # Compact display with time, velocity, heading, LED status
         state_str = (
+            f"t = {t:.2f} s\n"
             f"v = {speed_ms:.2f} m/s\n"
             f"θ = {np.rad2deg(theta_rad):5.1f}°\n"
             f"LED1: {'✓' if led1_vis else '✗'}\n"
@@ -468,8 +469,9 @@ class IMUPanelArtist:
         self.config = config
 
         # Fixed y-axis limits (symmetric around zero for intuitive interpretation)
-        self.gyro_ylim = gyro_ylim if gyro_ylim is not None else (-5.0, 5.0)
-        self.accel_ylim = accel_ylim if accel_ylim is not None else (-15.0, 15.0)
+        # Defaults based on typical rat locomotion: gyro ±3 rad/s, accel ±10 m/s²
+        self.gyro_ylim = gyro_ylim if gyro_ylim is not None else (-3.0, 3.0)
+        self.accel_ylim = accel_ylim if accel_ylim is not None else (-10.0, 10.0)
 
         # Data buffers
         self.time_buffer: deque[float] = deque(maxlen=self.window_frames)
@@ -477,10 +479,21 @@ class IMUPanelArtist:
         self.accel_x_buffer: deque[float] = deque(maxlen=self.window_frames)
         self.accel_y_buffer: deque[float] = deque(maxlen=self.window_frames)
 
-        # Initialize line artists
+        # Initialize line artists (measured)
         (self.gyro_line,) = self.ax_gyro.plot([], [], "-", color=COLORS["blue"], linewidth=1)
         (self.accel_x_line,) = self.ax_accel_x.plot([], [], "-", color=COLORS["red"], linewidth=1)
         (self.accel_y_line,) = self.ax_accel_y.plot([], [], "-", color=COLORS["green"], linewidth=1)
+
+        # Initialize truth line artists (ground truth overlays)
+        (self.gyro_truth_line,) = self.ax_gyro.plot(
+            [], [], "--", color="black", linewidth=1, alpha=0.6, label="truth"
+        )
+        (self.accel_x_truth_line,) = self.ax_accel_x.plot(
+            [], [], "--", color="black", linewidth=1, alpha=0.6, label="truth"
+        )
+        (self.accel_y_truth_line,) = self.ax_accel_y.plot(
+            [], [], "--", color="black", linewidth=1, alpha=0.6, label="truth"
+        )
 
         # Zero reference lines
         self.ax_gyro.axhline(0, color=COLORS["gray"], linestyle="-", linewidth=0.5)
@@ -553,6 +566,7 @@ class IMUPanelArtist:
         imu_data: dict[str, float] | None = None,
         t_raw: np.ndarray | None = None,
         imu_raw: dict[str, np.ndarray] | None = None,
+        imu_truth: dict[str, np.ndarray] | None = None,
     ) -> list[Any]:
         """Update IMU panel with new data.
 
@@ -565,6 +579,7 @@ class IMUPanelArtist:
             imu_data: (Mode 1) Single IMU sample dict with gyro, accel_x, accel_y
             t_raw: (Mode 2) Array of raw IMU timestamps within window
             imu_raw: (Mode 2) Dict with arrays: gyro, accel_x, accel_y
+            imu_truth: Ground truth IMU values with arrays: yaw_rate, accel_x, accel_y
 
         Returns:
             List of modified artists
@@ -574,6 +589,17 @@ class IMUPanelArtist:
             self.gyro_line.set_data(t_raw, imu_raw["gyro"])
             self.accel_x_line.set_data(t_raw, imu_raw["accel_x"])
             self.accel_y_line.set_data(t_raw, imu_raw["accel_y"])
+
+            # Update truth overlays if provided
+            if imu_truth is not None:
+                self.gyro_truth_line.set_data(t_raw, imu_truth["yaw_rate"])
+                self.accel_x_truth_line.set_data(t_raw, imu_truth["accel_x"])
+                self.accel_y_truth_line.set_data(t_raw, imu_truth["accel_y"])
+            else:
+                # Clear truth lines if no truth data
+                self.gyro_truth_line.set_data([], [])
+                self.accel_x_truth_line.set_data([], [])
+                self.accel_y_truth_line.set_data([], [])
 
             # Set x-axis limits based on actual data range
             if len(t_raw) > 0:
@@ -591,6 +617,11 @@ class IMUPanelArtist:
             self.accel_x_line.set_data(list(self.time_buffer), list(self.accel_x_buffer))
             self.accel_y_line.set_data(list(self.time_buffer), list(self.accel_y_buffer))
 
+            # Clear truth lines in single-sample mode (not supported)
+            self.gyro_truth_line.set_data([], [])
+            self.accel_x_truth_line.set_data([], [])
+            self.accel_y_truth_line.set_data([], [])
+
             if len(self.time_buffer) > 1:
                 t_min = self.time_buffer[0]
                 t_max = self.time_buffer[-1]
@@ -598,7 +629,14 @@ class IMUPanelArtist:
                 self.ax_accel_x.set_xlim(t_min, t_max)
                 self.ax_accel_y.set_xlim(t_min, t_max)
 
-        return [self.gyro_line, self.accel_x_line, self.accel_y_line]
+        return [
+            self.gyro_line,
+            self.accel_x_line,
+            self.accel_y_line,
+            self.gyro_truth_line,
+            self.accel_x_truth_line,
+            self.accel_y_truth_line,
+        ]
 
 
 class CameraPanelArtist:
@@ -640,16 +678,27 @@ class CameraPanelArtist:
             1.02, 1.5, "", va="center", ha="left", fontsize=7, family="monospace"
         )
 
+        # Latency readout (camera observation lag)
+        self.latency_text = ax.text(
+            0.5, 2.2, "", va="center", ha="center", fontsize=7, family="monospace"
+        )
+
     def update(
-        self, led1_visible: bool, conf1: float, led2_visible: bool, conf2: float
+        self,
+        led1_visible: bool,
+        conf1: float,
+        led2_visible: bool,
+        conf2: float,
+        latency_ms: float | None = None,
     ) -> list[Any]:
-        """Update confidence bars.
+        """Update confidence bars and latency display.
 
         Args:
             led1_visible: LED1 detection status
             conf1: LED1 confidence [0, 1]
             led2_visible: LED2 detection status
             conf2: LED2 confidence [0, 1]
+            latency_ms: Camera observation latency in milliseconds
 
         Returns:
             List of modified artists
@@ -681,7 +730,13 @@ class CameraPanelArtist:
             self.led2_text.set_text("(dropout)")
             self.led2_text.set_color(COLORS["red"])
 
-        return [self.led1_bar, self.led2_bar, self.led1_text, self.led2_text]
+        # Update latency display
+        if latency_ms is not None:
+            self.latency_text.set_text(f"latency: {latency_ms:.1f} ms")
+        else:
+            self.latency_text.set_text("")
+
+        return [self.led1_bar, self.led2_bar, self.led1_text, self.led2_text, self.latency_text]
 
 
 class ProgressBarArtist:
@@ -728,20 +783,36 @@ class ProgressBarArtist:
         (self.time_marker,) = ax.plot([0, 0], [0, 1], color="black", linewidth=2, zorder=10)
 
         # Event markers (vertical lines for swaps/dropouts)
+        legend_handles = []
         if event_times:
             for event_type, times in event_times.items():
                 if event_type == "led_swap":
                     color = COLORS["orange"]
                     marker = "v"
+                    label = "LED swap"
                 elif event_type == "long_dropout":
                     color = COLORS["red"]
                     marker = "x"
+                    label = "Dropout"
                 else:
                     continue
 
+                # Plot markers and collect for legend
                 for t in times:
                     ax.axvline(t, color=color, alpha=0.4, linewidth=1, linestyle="--")
                     ax.plot(t, 0.5, marker=marker, color=color, markersize=4, zorder=5)
+
+                # Add legend handle (only once per event type)
+                from matplotlib.lines import Line2D
+                legend_handles.append(
+                    Line2D([0], [0], marker=marker, color='w',
+                           markerfacecolor=color, markersize=6, label=label)
+                )
+
+        # Add legend if there are any events
+        if legend_handles:
+            ax.legend(handles=legend_handles, loc='upper right', fontsize=6,
+                     frameon=True, framealpha=0.8)
 
     def update(self, t: float) -> list[Any]:
         """Update progress bar to current time.
