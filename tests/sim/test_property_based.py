@@ -74,10 +74,12 @@ def test_property_rat_imu_produces_valid_output(config: RatIMUSimConfig, seed: i
     assert not np.any(np.isinf(sim["X_truth"])), "Ground truth contains Inf"
     assert not np.any(np.isinf(sim["U_imu"])), "IMU measurements contain Inf"
 
-    # Time monotonicity
+    # Time monotonicity (standardized policy across all tests)
+    # IMU: strictly monotonic (no jitter)
     assert np.all(np.diff(sim["t_imu"]) > 0), "IMU time not monotonic"
-    # Camera exposure time can have jitter, so check that MOST diffs are positive
-    # (jitter is normally distributed, so occasional negative diffs can occur)
+
+    # Camera: mostly monotonic (Gaussian jitter can cause occasional reordering)
+    # Policy: require ≥95% of intervals positive
     cam_diffs = np.diff(sim["t_cam_exp"])
     positive_rate = (cam_diffs > 0).mean()
     assert positive_rate > 0.95, f"Camera time mostly monotonic: {positive_rate:.1%} positive"
