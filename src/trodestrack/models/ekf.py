@@ -125,12 +125,15 @@ def symmetrize(A: jnp.ndarray) -> jnp.ndarray:
     """Symmetrize a matrix to maintain numerical stability.
 
     Args:
-        A: Square matrix
+        A: Square matrix or batch of matrices (..., n, n)
 
     Returns:
         Symmetrized matrix (A + A^T) / 2
+
+    Note:
+        Uses jnp.swapaxes instead of .T to support batched operations.
     """
-    return 0.5 * (A + A.T)
+    return 0.5 * (A + jnp.swapaxes(A, -1, -2))
 
 
 def psd_solve(A: jnp.ndarray, b: jnp.ndarray, diagonal_boost: float = 1e-9) -> jnp.ndarray:
