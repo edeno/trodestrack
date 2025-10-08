@@ -126,8 +126,58 @@ def create_diagnostic_video(
     )
     camera_panel = CameraPanelArtist(ax_camera)
 
-    # Add legend to arena
-    ax_arena.legend(loc="upper right", fontsize=8)
+    # Add legend entries for heading and velocity
+    from matplotlib.lines import Line2D
+
+    legend_elements = [
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            markerfacecolor=COLORS["blue"],
+            markersize=8,
+            label="LED1 (front)",
+        ),
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            markerfacecolor=COLORS["orange"],
+            markersize=8,
+            label="LED2 (back)",
+        ),
+        Line2D(
+            [0],
+            [0],
+            color="black",
+            linewidth=3,
+            marker=">",
+            markersize=8,
+            label="Heading (orientation)",
+        ),
+        Line2D(
+            [0],
+            [0],
+            color=COLORS["purple"],
+            linewidth=2,
+            marker=">",
+            markersize=7,
+            label="Velocity (motion)",
+        ),
+        Line2D(
+            [0],
+            [0],
+            color=COLORS["blue"],
+            linewidth=1.5,
+            alpha=0.5,
+            label="Path trail",
+        ),
+    ]
+    ax_arena.legend(
+        handles=legend_elements, loc="upper right", fontsize=7, framealpha=0.9
+    )
 
     # Overall title
     config = sim_data["config"]
@@ -138,7 +188,7 @@ def create_diagnostic_video(
     all_artists = []
 
     # Arena artists
-    all_artists.extend([rat.body, rat.nose])
+    all_artists.extend([rat.body, rat.heading_arrow, rat.velocity_arrow])
     all_artists.extend([led1.marker, led1.halo, led1.dropout_marker])
     all_artists.extend([led2.marker, led2.halo, led2.dropout_marker])
     all_artists.append(trail.lines)
@@ -186,7 +236,7 @@ def create_diagnostic_video(
         long_dropout = not (led1_visible or led2_visible)
 
         # Update artists
-        rat.update(x, y, theta)
+        rat.update(x, y, theta, vx, vy)
         led1.update(
             led1_pos[0] if not np.isnan(led1_pos[0]) else x,
             led1_pos[1] if not np.isnan(led1_pos[1]) else y,

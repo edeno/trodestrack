@@ -12,17 +12,17 @@ from typing import Any
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.collections import LineCollection
-from matplotlib.patches import Circle, Wedge
+from matplotlib.patches import Circle
 from matplotlib.text import Text
 
 from trodestrack.viz.styles import COLORS
 
 
 class RatArtist:
-    """Visualize rat body, orientation, and scale.
+    """Visualize rat body, orientation, and velocity.
 
-    The rat is represented as a circle (body) with a wedge (nose) indicating
-    heading direction.
+    The rat is represented as a circle (body) with a heading arrow and
+    velocity vector for clear motion indication.
     """
 
     def __init__(self, ax: Axes, body_radius: float = 0.03):
@@ -32,44 +32,128 @@ class RatArtist:
             ax: Matplotlib axes to draw on
             body_radius: Radius of rat body circle in meters (default: 3cm)
         """
+        self.ax = ax
         self.body_radius = body_radius
 
-        # Rat body: gray circle
-        self.body = Circle((0, 0), radius=body_radius, color=COLORS["gray"], alpha=0.7, zorder=5)
+        # Rat body: gray circle with white edge for visibility
+        self.body = Circle(
+            (0, 0),
+            radius=body_radius,
+            facecolor=COLORS["gray"],
+            edgecolor="white",
+            linewidth=2,
+            alpha=0.8,
+            zorder=5,
+        )
         ax.add_patch(self.body)
 
-        # Nose: black wedge indicating heading (±30° cone)
-        self.nose = Wedge(
-            (0, 0),
-            r=body_radius,
-            theta1=-30,
-            theta2=30,
-            color="black",
-            alpha=0.9,
-            zorder=6,
+        # Heading arrow: large, prominent arrow indicating orientation
+        # Extends well beyond body for clear visibility
+        self.heading_arrow = ax.arrow(
+            0,
+            0,
+            body_radius * 1.8,
+            0,
+            head_width=body_radius * 1.2,
+            head_length=body_radius * 0.8,
+            fc="black",
+            ec="white",
+            linewidth=1.5,
+            alpha=1.0,
+            zorder=7,
+            length_includes_head=True,
         )
-        ax.add_patch(self.nose)
 
-    def update(self, x: float, y: float, theta: float) -> list[Any]:
-        """Update rat position and orientation.
+        # Velocity vector: colored arrow showing motion direction and speed
+        # Different color from heading to distinguish orientation vs motion
+        self.velocity_arrow = ax.arrow(
+            0,
+            0,
+            0,
+            0,
+            head_width=body_radius * 0.8,
+            head_length=body_radius * 0.6,
+            fc=COLORS["purple"],
+            ec="white",
+            linewidth=1.0,
+            alpha=0.7,
+            zorder=6,
+            length_includes_head=True,
+        )
+
+    def update(
+        self, x: float, y: float, theta: float, vx: float = 0.0, vy: float = 0.0
+    ) -> list[Any]:
+        """Update rat position, orientation, and velocity.
 
         Args:
             x: X position in meters
             y: Y position in meters
             theta: Heading angle in radians (0 = +X axis, counterclockwise)
+            vx: X velocity in m/s (optional, for velocity arrow)
+            vy: Y velocity in m/s (optional, for velocity arrow)
 
         Returns:
             List of modified artists for blitting
         """
+        # Update body position
         self.body.center = (x, y)
-        self.nose.center = (x, y)
 
-        # Convert theta to degrees for wedge
-        theta_deg = np.rad2deg(theta)
-        self.nose.theta1 = theta_deg - 30
-        self.nose.theta2 = theta_deg + 30
+        # Remove and recreate heading arrow (matplotlib arrows don't update well)
+        self.heading_arrow.remove()
 
-        return [self.body, self.nose]
+        # Heading arrow: fixed length, shows orientation
+        arrow_length = self.body_radius * 1.8
+        dx_heading = arrow_length * np.cos(theta)
+        dy_heading = arrow_length * np.sin(theta)
+
+        self.heading_arrow = self.ax.arrow(
+            x,
+            y,
+            dx_heading,
+            dy_heading,
+            head_width=self.body_radius * 1.2,
+            head_length=self.body_radius * 0.8,
+            fc="black",
+            ec="white",
+            linewidth=1.5,
+            alpha=1.0,
+            zorder=7,
+            length_includes_head=True,
+        )
+
+        # Remove and recreate velocity arrow
+        self.velocity_arrow.remove()
+
+        # Velocity arrow: length proportional to speed, shows motion direction
+        speed = np.hypot(vx, vy)
+        if speed > 0.01:  # Only show if moving (> 1 cm/s)
+            # Scale velocity arrow length: 0.5 m/s = body_radius * 2
+            vel_scale = 4.0  # Scale factor
+            dx_vel = vx * vel_scale
+            dy_vel = vy * vel_scale
+
+            self.velocity_arrow = self.ax.arrow(
+                x,
+                y,
+                dx_vel,
+                dy_vel,
+                head_width=self.body_radius * 0.8,
+                head_length=self.body_radius * 0.6,
+                fc=COLORS["purple"],
+                ec="white",
+                linewidth=1.0,
+                alpha=0.7,
+                zorder=6,
+                length_includes_head=True,
+            )
+        else:
+            # If not moving, create invisible arrow (0 length)
+            self.velocity_arrow = self.ax.arrow(
+                x, y, 0, 0, head_width=0, head_length=0, alpha=0, zorder=6
+            )
+
+        return [self.body, self.heading_arrow, self.velocity_arrow]
 
 
 class LEDArtist:
@@ -364,6 +448,8 @@ class IMUPanelArtist:
         window_s: float,
         fps: int,
         config: Any = None,
+        gyro_ylim: tuple[float, float] | None = None,
+        accel_ylim: tuple[float, float] | None = None,
     ):
         """Initialize IMU panel artist.
 
@@ -372,10 +458,16 @@ class IMUPanelArtist:
             window_s: Time window to display in seconds
             fps: Video frame rate
             config: Simulation config (for reference lines)
+            gyro_ylim: Fixed y-axis limits for gyro plot (rad/s). Default: (-5, 5)
+            accel_ylim: Fixed y-axis limits for accel plots (m/s²). Default: (-15, 15)
         """
         self.ax_gyro, self.ax_accel_x, self.ax_accel_y = axes
         self.window_frames = int(window_s * fps)
         self.config = config
+
+        # Fixed y-axis limits (symmetric around zero for intuitive interpretation)
+        self.gyro_ylim = gyro_ylim if gyro_ylim is not None else (-5.0, 5.0)
+        self.accel_ylim = accel_ylim if accel_ylim is not None else (-15.0, 15.0)
 
         # Data buffers
         self.time_buffer: deque[float] = deque(maxlen=self.window_frames)
@@ -392,6 +484,11 @@ class IMUPanelArtist:
         self.ax_gyro.axhline(0, color=COLORS["gray"], linestyle="-", linewidth=0.5)
         self.ax_accel_x.axhline(0, color=COLORS["gray"], linestyle="-", linewidth=0.5)
         self.ax_accel_y.axhline(0, color=COLORS["gray"], linestyle="-", linewidth=0.5)
+
+        # Set fixed y-axis limits
+        self.ax_gyro.set_ylim(self.gyro_ylim)
+        self.ax_accel_x.set_ylim(self.accel_ylim)
+        self.ax_accel_y.set_ylim(self.accel_ylim)
 
         # Labels
         self.ax_gyro.set_ylabel("gyro\n(rad/s)", fontsize=8)
@@ -432,34 +529,13 @@ class IMUPanelArtist:
         self.accel_x_line.set_data(list(self.time_buffer), list(self.accel_x_buffer))
         self.accel_y_line.set_data(list(self.time_buffer), list(self.accel_y_buffer))
 
-        # Auto-scale axes to show window
+        # Update x-axis to show scrolling time window (y-axes remain fixed)
         if len(self.time_buffer) > 1:
             t_min = self.time_buffer[0]
             t_max = self.time_buffer[-1]
             self.ax_gyro.set_xlim(t_min, t_max)
-
-            # Auto-scale y-axes with padding
-            if len(self.gyro_buffer) > 0:
-                gyro_arr = np.array(list(self.gyro_buffer))
-                gyro_range = np.ptp(gyro_arr)
-                gyro_pad = max(0.1, gyro_range * 0.1)
-                self.ax_gyro.set_ylim(gyro_arr.min() - gyro_pad, gyro_arr.max() + gyro_pad)
-
-            if len(self.accel_x_buffer) > 0:
-                accel_x_arr = np.array(list(self.accel_x_buffer))
-                accel_x_range = np.ptp(accel_x_arr)
-                accel_x_pad = max(0.5, accel_x_range * 0.1)
-                self.ax_accel_x.set_ylim(
-                    accel_x_arr.min() - accel_x_pad, accel_x_arr.max() + accel_x_pad
-                )
-
-            if len(self.accel_y_buffer) > 0:
-                accel_y_arr = np.array(list(self.accel_y_buffer))
-                accel_y_range = np.ptp(accel_y_arr)
-                accel_y_pad = max(0.5, accel_y_range * 0.1)
-                self.ax_accel_y.set_ylim(
-                    accel_y_arr.min() - accel_y_pad, accel_y_arr.max() + accel_y_pad
-                )
+            self.ax_accel_x.set_xlim(t_min, t_max)
+            self.ax_accel_y.set_xlim(t_min, t_max)
 
         return [self.gyro_line, self.accel_x_line, self.accel_y_line]
 
