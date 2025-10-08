@@ -407,19 +407,29 @@ def create_diagnostic_video(
         repeat=False,
     )
 
-    # Save video
+    # Save video with codec fallback chain
     print(f"Encoding video to {output_path}...")
-    try:
-        # Try ffmpeg writer
-        from matplotlib.animation import FFMpegWriter
+    from matplotlib.animation import FFMpegWriter
 
-        writer = FFMpegWriter(fps=fps, codec=codec, bitrate=bitrate)
-        anim.save(str(output_path), writer=writer, dpi=dpi)
-        print(f"✓ Video saved: {output_path}")
-    except Exception as e:
-        print(f"✗ FFmpeg encoding failed: {e}")
-        print("  Falling back to pillow (GIF)...")
+    # Try multiple codecs in order of preference
+    codec_fallbacks = ["libx264", "h264", "mpeg4"]
+    if codec not in codec_fallbacks:
+        codec_fallbacks.insert(0, codec)  # User-specified codec first
 
+    video_saved = False
+    for try_codec in codec_fallbacks:
+        try:
+            writer = FFMpegWriter(fps=fps, codec=try_codec, bitrate=bitrate)
+            anim.save(str(output_path), writer=writer, dpi=dpi)
+            print(f"✓ Video saved: {output_path} (codec: {try_codec})")
+            video_saved = True
+            break
+        except Exception as e:
+            print(f"  Codec '{try_codec}' failed: {e}")
+            continue
+
+    if not video_saved:
+        print("✗ All video codecs failed, falling back to GIF...")
         # Fallback to GIF
         output_path = output_path.with_suffix(".gif")
         anim.save(str(output_path), writer="pillow", fps=fps, dpi=dpi)

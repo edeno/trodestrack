@@ -12,8 +12,9 @@ from typing import Any
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.collections import LineCollection
-from matplotlib.patches import Circle
+from matplotlib.patches import Circle, FancyArrowPatch
 from matplotlib.text import Text
+from matplotlib.transforms import Affine2D
 
 from trodestrack.viz.styles import COLORS
 
@@ -48,38 +49,35 @@ class RatArtist:
         ax.add_patch(self.body)
 
         # Heading arrow: large, prominent arrow indicating orientation
-        # Extends well beyond body for clear visibility
-        self.heading_arrow = ax.arrow(
-            0,
-            0,
-            body_radius * 1.8,
-            0,
-            head_width=body_radius * 1.2,
-            head_length=body_radius * 0.8,
-            fc="black",
-            ec="white",
+        # Use FancyArrowPatch with transforms for efficient updates
+        arrow_length = body_radius * 1.8
+        self.heading_arrow = FancyArrowPatch(
+            (0, 0),
+            (arrow_length, 0),
+            mutation_scale=body_radius * 30,
             linewidth=1.5,
+            edgecolor="white",
+            facecolor="black",
             alpha=1.0,
             zorder=7,
-            length_includes_head=True,
         )
+        ax.add_patch(self.heading_arrow)
 
         # Velocity vector: colored arrow showing motion direction and speed
         # Different color from heading to distinguish orientation vs motion
-        self.velocity_arrow = ax.arrow(
-            0,
-            0,
-            0,
-            0,
-            head_width=body_radius * 0.8,
-            head_length=body_radius * 0.6,
-            fc=COLORS["purple"],
-            ec="white",
+        # Initialize with same length as heading arrow
+        self.velocity_arrow = FancyArrowPatch(
+            (0, 0),
+            (arrow_length, 0),
+            mutation_scale=body_radius * 25,
             linewidth=1.0,
+            edgecolor="white",
+            facecolor=COLORS["purple"],
             alpha=0.7,
             zorder=6,
-            length_includes_head=True,
+            visible=False,  # Hidden initially
         )
+        ax.add_patch(self.velocity_arrow)
 
     def update(
         self, x: float, y: float, theta: float, vx: float = 0.0, vy: float = 0.0
@@ -99,59 +97,30 @@ class RatArtist:
         # Update body position
         self.body.center = (x, y)
 
-        # Remove and recreate heading arrow (matplotlib arrows don't update well)
-        self.heading_arrow.remove()
+        # Update heading arrow using transform (no recreation needed)
+        T_heading = Affine2D().rotate_around(0, 0, theta).translate(x, y) + self.ax.transData
+        self.heading_arrow.set_transform(T_heading)
 
-        # Heading arrow: fixed length, shows orientation
-        arrow_length = self.body_radius * 1.8
-        dx_heading = arrow_length * np.cos(theta)
-        dy_heading = arrow_length * np.sin(theta)
-
-        self.heading_arrow = self.ax.arrow(
-            x,
-            y,
-            dx_heading,
-            dy_heading,
-            head_width=self.body_radius * 1.2,
-            head_length=self.body_radius * 0.8,
-            fc="black",
-            ec="white",
-            linewidth=1.5,
-            alpha=1.0,
-            zorder=7,
-            length_includes_head=True,
-        )
-
-        # Remove and recreate velocity arrow
-        self.velocity_arrow.remove()
-
-        # Velocity arrow: length proportional to speed, shows motion direction
+        # Update velocity arrow using transform (scale by speed + rotate by velocity direction)
         speed = np.hypot(vx, vy)
-        if speed > 0.01:  # Only show if moving (> 1 cm/s)
-            # Scale velocity arrow length: 0.5 m/s = body_radius * 2
-            vel_scale = 4.0  # Scale factor
-            dx_vel = vx * vel_scale
-            dy_vel = vy * vel_scale
 
-            self.velocity_arrow = self.ax.arrow(
-                x,
-                y,
-                dx_vel,
-                dy_vel,
-                head_width=self.body_radius * 0.8,
-                head_length=self.body_radius * 0.6,
-                fc=COLORS["purple"],
-                ec="white",
-                linewidth=1.0,
-                alpha=0.7,
-                zorder=6,
-                length_includes_head=True,
+        if speed > 0.01:  # Only show if moving > 1 cm/s
+            vel_angle = np.arctan2(vy, vx)
+            vel_scale = 4.0  # Amplification for visibility
+            vel_length = speed * vel_scale
+
+            # Scale arrow length relative to default, then rotate and translate
+            arrow_length = self.body_radius * 1.8
+            scale_factor = vel_length / arrow_length
+            T_vel = (
+                Affine2D().scale(scale_factor, 1.0).rotate_around(0, 0, vel_angle).translate(x, y)
+                + self.ax.transData
             )
+            self.velocity_arrow.set_transform(T_vel)
+            self.velocity_arrow.set_visible(True)
         else:
-            # If not moving, create invisible arrow (0 length)
-            self.velocity_arrow = self.ax.arrow(
-                x, y, 0, 0, head_width=0, head_length=0, alpha=0, zorder=6
-            )
+            # Hide when stationary
+            self.velocity_arrow.set_visible(False)
 
         return [self.body, self.heading_arrow, self.velocity_arrow]
 
@@ -279,11 +248,13 @@ class TrailArtist:
                 [self.positions[i], self.positions[i + 1]] for i in range(len(self.positions) - 1)
             ]
 
-            # Fade alpha from 0 (oldest) to 0.6 (newest)
+            # Fade alpha from 0 (oldest) to 0.6 (newest) using RGBA per segment
+            # COLORS["blue"] = "#2166AC" → RGB (0.133, 0.4, 0.675)
             alphas = np.linspace(0.0, 0.6, len(segments))
+            colors = [(0.133, 0.4, 0.675, a) for a in alphas]
 
             self.lines.set_segments(segments)
-            self.lines.set_alpha(alphas)
+            self.lines.set_colors(colors)
 
         return [self.lines]
 
@@ -469,10 +440,10 @@ class IMUPanelArtist:
         self.ax_accel_x.set_ylim(self.accel_ylim)
         self.ax_accel_y.set_ylim(self.accel_ylim)
 
-        # Labels
-        self.ax_gyro.set_ylabel("gyro\n(rad/s)", fontsize=8)
-        self.ax_accel_x.set_ylabel("accel X\n(m/s²)", fontsize=8)
-        self.ax_accel_y.set_ylabel("accel Y\n(m/s²)", fontsize=8)
+        # Labels (explicit body-frame for EKF debugging)
+        self.ax_gyro.set_ylabel("gyro\n(body rad/s)", fontsize=8)
+        self.ax_accel_x.set_ylabel("accel X\n(body m/s²)", fontsize=8)
+        self.ax_accel_y.set_ylabel("accel Y\n(body m/s²)", fontsize=8)
         self.ax_accel_y.set_xlabel("time (s)", fontsize=8)
 
         # Remove top spine, keep bottom for x-axis

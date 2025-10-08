@@ -39,12 +39,13 @@ def prepare_video_data(
         - Heading: angle-aware interpolation (wraps at ±π)
         - Camera events (dropouts, swaps): nearest-neighbor (discrete)
     """
-    # Determine video timeline
+    # Determine video timeline using arange (not linspace) to avoid off-by-one
+    # linspace includes endpoint, giving n_frames-1 intervals → wrong fps
     t_start = 0.0
     t_end = float(sim_data["t_imu"][-1])
-    duration_video = (t_end - t_start) / speedup
-    n_frames = int(duration_video * fps)
-    t_video = np.linspace(t_start, t_end, n_frames)
+    dt = speedup / fps  # Time step per frame
+    t_video = np.arange(t_start, t_end + 1e-9, dt)
+    n_frames = len(t_video)
 
     # Interpolate IMU measurements (linear)
     U_imu = np.column_stack(
@@ -66,10 +67,14 @@ def prepare_video_data(
         ]
     )
 
-    # Camera data: nearest-neighbor for discrete events
-    # Find nearest camera frame for each video frame
-    cam_idx = np.searchsorted(sim_data["t_cam_exp"], t_video, side="right") - 1
-    cam_idx = np.clip(cam_idx, 0, len(sim_data["t_cam_exp"]) - 1)
+    # Camera data: true nearest-neighbor for discrete events
+    # Find nearest camera frame for each video frame (not just previous)
+    idx = np.searchsorted(sim_data["t_cam_exp"], t_video)
+    idx0 = np.clip(idx - 1, 0, len(sim_data["t_cam_exp"]) - 1)
+    idx1 = np.clip(idx, 0, len(sim_data["t_cam_exp"]) - 1)
+    left = sim_data["t_cam_exp"][idx0]
+    right = sim_data["t_cam_exp"][idx1]
+    cam_idx = np.where(np.abs(t_video - left) <= np.abs(right - t_video), idx0, idx1)
 
     return {
         "t_video": t_video,
