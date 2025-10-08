@@ -115,6 +115,7 @@ class RatIMUSimConfig:
         led1_offset_body: Position of LED1 in body frame [x, y] meters
         use_second_led: Enable second LED for heading measurements
         led2_offset_body: Position of LED2 in body frame [x, y] meters
+        led_swap_prob: Probability of swapping LED1/LED2 labels per visible frame (0-1)
 
     IMU Noise (densities per √Hz for white noise):
         gyro_noise_density: Gyroscope white noise (rad/s / √Hz)
@@ -171,6 +172,7 @@ class RatIMUSimConfig:
     led1_offset_body: np.ndarray = field(default_factory=lambda: np.array([0.0, 0.0]))
     use_second_led: bool = False
     led2_offset_body: np.ndarray = field(default_factory=lambda: np.array([-0.05, 0.0]))
+    led_swap_prob: float = 0.0  # Probability of swapping LED1/LED2 labels per frame
 
     # IMU white noise densities (per √Hz)
     gyro_noise_density: float = np.deg2rad(0.03)  # rad/s / √Hz
@@ -209,9 +211,7 @@ class RatIMUSimConfig:
 # -----------------------------------------------------------------------------
 
 
-def simulate_rat_imu(
-    config: Optional[RatIMUSimConfig] = None, seed: int = 0
-) -> SimOut:
+def simulate_rat_imu(config: Optional[RatIMUSimConfig] = None, seed: int = 0) -> SimOut:
     """
     Simulate ground truth trajectory, IMU measurements, and camera observations.
 
@@ -272,10 +272,10 @@ def simulate_rat_imu(
     x = config.m0 + L0 @ rng.standard_normal(5)
     x[4] = wrap_angle(x[4])  # wrap θ
 
-    # Initialize biases
-    b_gyro = 0.0
-    b_accel_x = 0.0
-    b_accel_y = 0.0
+    # Initialize biases (type: float | ndarray to support rw_step return type)
+    b_gyro: float | np.ndarray = 0.0
+    b_accel_x: float | np.ndarray = 0.0
+    b_accel_y: float | np.ndarray = 0.0
 
     # Storage arrays
     X_truth = np.zeros((T_imu, 5))
@@ -549,6 +549,26 @@ def simulate_rat_imu(
     # Apply independent dropouts to each LED
     Z_cam_led1[~mask_led1] = np.nan
     Z_cam_led2[~mask_led2] = np.nan
+
+    # Simulate LED swaps (mislabeling front/back during close passes, reflections, etc.)
+    # Only swap when both LEDs are visible (otherwise swap doesn't make sense)
+    if config.use_second_led and config.led_swap_prob > 0:
+        both_visible = mask_led1 & mask_led2
+        swap_candidates = np.where(both_visible)[0]
+        if len(swap_candidates) > 0:
+            n_swaps = int(np.round(len(swap_candidates) * config.led_swap_prob))
+            if n_swaps > 0:
+                swap_indices = rng.choice(swap_candidates, size=n_swaps, replace=False)
+                # Swap LED positions and confidences at selected frames
+                Z_cam_led1[swap_indices], Z_cam_led2[swap_indices] = (
+                    Z_cam_led2[swap_indices].copy(),
+                    Z_cam_led1[swap_indices].copy(),
+                )
+                if config.use_confidence:
+                    confidence_led1[swap_indices], confidence_led2[swap_indices] = (
+                        confidence_led2[swap_indices].copy(),
+                        confidence_led1[swap_indices].copy(),
+                    )
 
     return {
         # Time

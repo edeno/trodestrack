@@ -137,9 +137,7 @@ def test_specific_force_vs_inertial_accel_difference():
     # Expected gravity magnitude in tilted frame
     tilt_roll_rad = np.deg2rad(config.imu_tilt_roll_deg)
     tilt_pitch_rad = np.deg2rad(config.imu_tilt_pitch_deg)
-    g_x, g_y = compute_gravity_in_tilted_frame(
-        tilt_roll_rad, tilt_pitch_rad, config.gravity
-    )
+    g_x, g_y = compute_gravity_in_tilted_frame(tilt_roll_rad, tilt_pitch_rad, config.gravity)
     expected_g_magnitude = np.hypot(g_x, g_y)
 
     # Mean instantaneous magnitude should be close to expected gravity magnitude

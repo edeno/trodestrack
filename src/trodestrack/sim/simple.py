@@ -257,15 +257,19 @@ def simulate_constant_velocity(
     X_truth[:, 3] = vy
     X_truth[:, 4] = heading
 
-    # Generate constant biases
-    bias_gyro = rng.normal(0.0, config.gyro_bias_std)
-    bias_accel_x = rng.normal(0.0, config.accel_bias_std)
-    bias_accel_y = rng.normal(0.0, config.accel_bias_std)
+    # Generate constant biases (broadcast to arrays for API consistency)
+    bias_gyro_scalar = rng.normal(0.0, config.gyro_bias_std)
+    bias_accel_x_scalar = rng.normal(0.0, config.accel_bias_std)
+    bias_accel_y_scalar = rng.normal(0.0, config.accel_bias_std)
+
+    bias_gyro = np.full(T_imu, bias_gyro_scalar)
+    bias_accel_x = np.full(T_imu, bias_accel_x_scalar)
+    bias_accel_y = np.full(T_imu, bias_accel_y_scalar)
 
     # IMU measurements
     # Gyro: no rotation (constant heading), just noise + bias
     gyro_noise = rng.normal(0.0, config.gyro_noise_density / np.sqrt(dt_imu), T_imu)
-    gyro = bias_gyro + gyro_noise
+    gyro = bias_gyro_scalar + gyro_noise
 
     # Accelerometer: measures gravity only (no linear acceleration in inertial frame)
     # In body frame: a_x = -g*sin(θ), a_y = g*cos(θ)
@@ -275,8 +279,8 @@ def simulate_constant_velocity(
     accel_x_noise = rng.normal(0.0, config.accel_noise_density / np.sqrt(dt_imu), T_imu)
     accel_y_noise = rng.normal(0.0, config.accel_noise_density / np.sqrt(dt_imu), T_imu)
 
-    accel_x = accel_x_truth + bias_accel_x + accel_x_noise
-    accel_y = accel_y_truth + bias_accel_y + accel_y_noise
+    accel_x = accel_x_truth + bias_accel_x_scalar + accel_x_noise
+    accel_y = accel_y_truth + bias_accel_y_scalar + accel_y_noise
 
     U_imu = np.column_stack([gyro, accel_x, accel_y])
 
@@ -405,7 +409,7 @@ def simulate_circular(
     bias_gyro_scalar = rng.normal(0.0, config.gyro_bias_std)
     bias_accel_x_scalar = rng.normal(0.0, config.accel_bias_std)
     bias_accel_y_scalar = rng.normal(0.0, config.accel_bias_std)
-    
+
     # Broadcast to arrays for consistency with rat_imu.py
     bias_gyro = np.full(T_imu, bias_gyro_scalar)
     bias_accel_x = np.full(T_imu, bias_accel_x_scalar)
