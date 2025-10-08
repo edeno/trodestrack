@@ -54,6 +54,30 @@
 ✅ All 100 simulation tests passing
 ✅ Ready for commit
 
-**Next:** Milestone 2 - Filter Implementation (EKF/UKF)
+### Task: Implement EKF (Milestone 2)
+
+✅ Created `src/trodestrack/models/ekf.py` with:
+
+- 8-state model: [x, y, vx, vy, θ, b_gz, b_ax, b_ay]
+- IMU pre-integration between camera frames
+- Dual-LED measurement updates
+- Graceful handling of missing LED observations
+- Numerical stability (Cholesky, symmetrization, Joseph form)
+- JAX-native implementation with lax.scan and lax.cond
+
+✅ Created `tests/filters/test_ekf_analytic.py`:
+
+- 7 tests covering stationary, constant velocity, circular motion
+- Vision dropout handling
+- NEES consistency checks
+- State initialization edge cases
+
+✅ Code review completed:
+
+- Fixed critical issues (unused variables, formatting, imports)
+- Added fallback for all-invalid LED observations
+- All 7 tests passing
+
+### Next: Milestone 2 - UKF Implementation or RTS Smoother
 
 ---

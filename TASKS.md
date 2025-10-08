@@ -40,10 +40,10 @@
 
 ### 🚀 EKF / UKF Development
 
-- [ ] `models/ekf.py`
-  - [ ] Implement prediction step with IMU pre-integration
-  - [ ] Implement measurement update with dual-LED positions
-  - [ ] Augment state for IMU biases
+- [x] `models/ekf.py`
+  - [x] Implement prediction step with IMU pre-integration
+  - [x] Implement measurement update with dual-LED positions
+  - [x] Augment state for IMU biases
 - [ ] `models/ukf.py`
   - [ ] Implement sigma-point prediction
   - [ ] Unscented transform for nonlinear measurement updates
@@ -54,10 +54,10 @@
 
 ### 🧪 Testing
 
-- [ ] `tests/filters/test_ekf_analytic.py`
-  - [ ] Stationary: reject IMU drift
-  - [ ] Constant velocity: maintain steady covariance
-  - [ ] Circular: converge gyro bias
+- [x] `tests/filters/test_ekf_analytic.py`
+  - [x] Stationary: reject IMU drift
+  - [x] Constant velocity: maintain steady covariance
+  - [x] Circular: converge gyro bias
 - [ ] `tests/filters/test_ukf_accuracy.py`
   - [ ] Compare EKF/UKF consistency and RMSE on OU motion
 - [ ] `tests/filters/test_bias_observability.py`
