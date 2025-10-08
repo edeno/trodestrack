@@ -128,17 +128,16 @@ def test_stationary_gyro_near_zero(config):
 
 
 def test_stationary_accel_measures_gravity(config):
-    """Test that accelerometer measures gravity in body frame."""
+    """Test that accelerometer measures specific force (≈0 for level-mounted, stationary IMU)."""
     heading = np.pi / 6  # 30 degrees
     sim = simulate_stationary(config, heading=heading, seed=42)
 
     accel_x = sim["U_imu"][:, 1]
     accel_y = sim["U_imu"][:, 2]
 
-    # Expected: a_x = -g*sin(θ), a_y = g*cos(θ)
-    g = config.gravity
-    expected_x = -g * np.sin(heading)
-    expected_y = g * np.cos(heading)
+    # Expected: specific force = 0 (no motion, gravity is along Z for level mounting)
+    expected_x = 0.0
+    expected_y = 0.0
 
     # Remove bias
     bias_x = sim["bias_accel_x"]

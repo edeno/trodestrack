@@ -70,7 +70,8 @@ def simulate_stationary(
     """Simulate stationary rat with no motion.
 
     Ground truth: constant position, zero velocity, constant heading.
-    IMU measures: gravity in body frame + noise + bias.
+    IMU measures: specific force (f = a - g) in body frame + noise + bias.
+        For level-mounted IMU with no motion: f_x = f_y ≈ 0 (gravity is along Z).
     Camera measures: fixed position + noise.
 
     Args:
@@ -140,17 +141,15 @@ def simulate_stationary(
     gyro_noise = rng.normal(0.0, std_gyro, T_imu)
     gyro = bias_gyro + gyro_noise
 
-    # Accelerometer: measures gravity in body frame + noise + bias
-    # In body frame: a_x = -g*sin(θ), a_y = g*cos(θ)
-    accel_x_truth = -config.gravity * np.sin(heading)
-    accel_y_truth = config.gravity * np.cos(heading)
-
+    # Accelerometer: measures specific force in body frame
+    # For level-mounted IMU (no tilt), gravity is along Z-axis
+    # X/Y specific force = 0 (no motion, no tilt) + bias + noise
     std_accel = density_to_sample_std(config.accel_noise_density, dt_imu)
     accel_x_noise = rng.normal(0.0, std_accel, T_imu)
     accel_y_noise = rng.normal(0.0, std_accel, T_imu)
 
-    accel_x = accel_x_truth + bias_accel_x + accel_x_noise
-    accel_y = accel_y_truth + bias_accel_y + accel_y_noise
+    accel_x = bias_accel_x + accel_x_noise
+    accel_y = bias_accel_y + accel_y_noise
 
     U_imu = np.column_stack([gyro, accel_x, accel_y])
 
@@ -189,12 +188,7 @@ def simulate_stationary(
         "bias_accel_y": bias_accel_y,
         "yaw_rate_truth": np.zeros(T_imu),
         "accel_world_truth": np.zeros((T_imu, 2)),
-        "accel_body_truth": np.column_stack(
-            [
-                np.full(T_imu, accel_x_truth),
-                np.full(T_imu, accel_y_truth),
-            ]
-        ),
+        "accel_body_truth": np.zeros((T_imu, 2)),  # No motion, no tilt → specific force = 0
         "config": config,
     }
 
@@ -208,7 +202,8 @@ def simulate_constant_velocity(
     """Simulate constant velocity motion (straight line).
 
     Ground truth: linear trajectory, constant velocity, constant heading.
-    IMU measures: zero angular velocity, zero linear acceleration (+ gravity + noise).
+    IMU measures: specific force (f = a - g) in body frame + noise + bias.
+        For level-mounted IMU with constant velocity: f_x = f_y ≈ 0 (no acceleration, gravity along Z).
     Camera measures: moving position + noise.
 
     Args:
@@ -268,19 +263,19 @@ def simulate_constant_velocity(
 
     # IMU measurements
     # Gyro: no rotation (constant heading), just noise + bias
-    gyro_noise = rng.normal(0.0, config.gyro_noise_density / np.sqrt(dt_imu), T_imu)
+    std_gyro = density_to_sample_std(config.gyro_noise_density, dt_imu)
+    gyro_noise = rng.normal(0.0, std_gyro, T_imu)
     gyro = bias_gyro_scalar + gyro_noise
 
-    # Accelerometer: measures gravity only (no linear acceleration in inertial frame)
-    # In body frame: a_x = -g*sin(θ), a_y = g*cos(θ)
-    accel_x_truth = -config.gravity * np.sin(heading)
-    accel_y_truth = config.gravity * np.cos(heading)
+    # Accelerometer: measures specific force in body frame
+    # For level-mounted IMU (no tilt), constant velocity in inertial frame:
+    # specific force = 0 (no acceleration, gravity is along Z) + bias + noise
+    std_accel = density_to_sample_std(config.accel_noise_density, dt_imu)
+    accel_x_noise = rng.normal(0.0, std_accel, T_imu)
+    accel_y_noise = rng.normal(0.0, std_accel, T_imu)
 
-    accel_x_noise = rng.normal(0.0, config.accel_noise_density / np.sqrt(dt_imu), T_imu)
-    accel_y_noise = rng.normal(0.0, config.accel_noise_density / np.sqrt(dt_imu), T_imu)
-
-    accel_x = accel_x_truth + bias_accel_x_scalar + accel_x_noise
-    accel_y = accel_y_truth + bias_accel_y_scalar + accel_y_noise
+    accel_x = bias_accel_x_scalar + accel_x_noise
+    accel_y = bias_accel_y_scalar + accel_y_noise
 
     U_imu = np.column_stack([gyro, accel_x, accel_y])
 
@@ -322,12 +317,7 @@ def simulate_constant_velocity(
         "bias_accel_y": bias_accel_y,
         "yaw_rate_truth": np.zeros(T_imu),
         "accel_world_truth": np.zeros((T_imu, 2)),  # No acceleration in world frame
-        "accel_body_truth": np.column_stack(
-            [
-                np.full(T_imu, accel_x_truth),
-                np.full(T_imu, accel_y_truth),
-            ]
-        ),
+        "accel_body_truth": np.zeros((T_imu, 2)),  # Constant velocity, no tilt → specific force = 0
         "config": config,
     }
 
@@ -342,7 +332,8 @@ def simulate_circular(
     """Simulate circular motion with constant angular velocity.
 
     Ground truth: circular trajectory, tangential velocity, rotating heading.
-    IMU measures: constant angular velocity (ω), centripetal acceleration + gravity.
+    IMU measures: specific force (f = a - g) in body frame + noise + bias.
+        For level-mounted IMU: f = centripetal acceleration rotated to body frame (gravity is along Z).
     Camera measures: moving position on circle + noise.
 
     Args:
@@ -421,17 +412,19 @@ def simulate_circular(
     gyro_noise = rng.normal(0.0, std_gyro, T_imu)
     gyro = omega + bias_gyro + gyro_noise
 
-    # Accelerometer: centripetal acceleration + gravity in body frame
-    # World frame: a_world = -rω² * [cos(angle), sin(angle)] (toward center)
+    # Accelerometer: measures specific force (f = a - g) in body frame
+    # For level-mounted IMU: gravity is along world Z, not in X/Y plane
+    # World frame centripetal acceleration: a_world = -rω² * [cos(angle), sin(angle)]
     accel_world_x = -radius * omega**2 * np.cos(angle)
     accel_world_y = -radius * omega**2 * np.sin(angle)
 
-    # Rotate to body frame: R(θ).T @ (a_world - [0, g])
+    # Specific force in world frame: f_world = a_world (since g is in Z)
+    # Rotate to body frame: R(θ).T @ f_world
     cos_h = np.cos(heading)
     sin_h = np.sin(heading)
 
-    accel_body_x = cos_h * accel_world_x + sin_h * accel_world_y - config.gravity * sin_h
-    accel_body_y = -sin_h * accel_world_x + cos_h * accel_world_y + config.gravity * cos_h
+    accel_body_x = cos_h * accel_world_x + sin_h * accel_world_y
+    accel_body_y = -sin_h * accel_world_x + cos_h * accel_world_y
 
     std_accel = density_to_sample_std(config.accel_noise_density, dt_imu)
     accel_x_noise = rng.normal(0.0, std_accel, T_imu)
