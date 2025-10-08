@@ -22,7 +22,7 @@
 - [x] Create `tests/sim/test_simple.py` – analytic scenarios (36 tests passing)
 - [x] Create `tests/sim/test_rat_imu_gravity.py` – gravity and tilt tests (9 tests passing)
 - [x] Create `tests/sim/test_rat_imu.py` – OU dynamics, noise, dropouts, full scenarios (36 tests passing)
-- [ ] Add property tests for deterministic seeds
+- [x] Add property tests for deterministic seeds (9 Hypothesis-based tests passing)
 - [ ] Verify all Tiers 0–3 pass NEES & RMSE bounds from PRD
 
 ### 📊 Deliverables
