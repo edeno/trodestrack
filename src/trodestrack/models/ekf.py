@@ -116,6 +116,11 @@ class EKFConfig:
     led_distance_tolerance: float = 0.3  # ±30% tolerance for LED spacing gating
     adaptive_heading_noise: bool = True  # Scale R_heading by baseline geometry
 
+    # Blackout-aware process noise (P0 mitigation for camera dropouts)
+    freeze_bias_during_blackout: bool = False  # Set bias Q=0 when no vision
+    reduce_imu_noise_during_blackout: bool = False  # Reduce input noise when no vision
+    blackout_imu_noise_scale: float = 0.5  # Scale factor for IMU noise (0.25-0.5 recommended)
+
 
 class EKFState(NamedTuple):
     """EKF state representation.
@@ -806,6 +811,7 @@ def predict_step(
     u_imu: jnp.ndarray,
     dt_imu: float,
     config: EKFConfig,
+    has_vision: bool = True,
 ) -> EKFState:
     """EKF prediction step using IMU measurement.
 
@@ -814,6 +820,7 @@ def predict_step(
         u_imu: IMU measurement [ω_z, f_x, f_y]
         dt_imu: IMU timestep
         config: EKF configuration
+        has_vision: Whether camera measurements are available (for blackout-aware Q)
 
     Returns:
         Predicted state
@@ -855,6 +862,16 @@ def predict_step(
     std_f = config.imu_accel_noise_density * jnp.sqrt(dt_imu)
     Q_u = jnp.diag(jnp.array([std_w**2, std_f**2, std_f**2]))
 
+    # Blackout-aware process noise: reduce IMU input noise when no vision
+    # (P0 mitigation - reduces t^3/2 white noise growth during dropouts)
+    # Use lax.cond instead of Python if to ensure both branches are traced
+    imu_noise_scale = lax.cond(
+        config.reduce_imu_noise_during_blackout,
+        lambda: lax.select(has_vision, 1.0, config.blackout_imu_noise_scale),
+        lambda: 1.0,
+    )
+    Q_u = Q_u * imu_noise_scale
+
     # G is ∂f/∂u: IMU input noise propagation matrix
     # Maps IMU measurement noise [ω_z, f_x, f_y] into state space
     theta = m[4]
@@ -862,6 +879,18 @@ def predict_step(
 
     # Total process noise: kinematic diffusion + IMU input noise
     Q = Q_proc + G @ Q_u @ G.T
+
+    # Blackout-aware process noise: freeze bias Q when no vision
+    # (P0 mitigation - prevents unobservable bias from random walking)
+    # Use lax.cond to ensure both branches are traced
+    bias_scale = lax.cond(
+        config.freeze_bias_during_blackout,
+        lambda: lax.select(has_vision, 1.0, 0.0),
+        lambda: 1.0,
+    )
+    Q = Q.at[5, 5].set(Q[5, 5] * bias_scale)  # gyro bias
+    Q = Q.at[6, 6].set(Q[6, 6] * bias_scale)  # accel_x bias
+    Q = Q.at[7, 7].set(Q[7, 7] * bias_scale)  # accel_y bias
 
     # Predict covariance
     P_pred = F_x @ P @ F_x.T + Q
@@ -1308,6 +1337,9 @@ def extended_kalman_filter(
         """Single filtering step at camera frame t_idx."""
         state_prev, log_lik_accum = carry
 
+        # Check if we have vision at this timestep (for blackout-aware Q)
+        has_vision_t = mask_cam_jax[t_idx]
+
         # Propagate using IMU samples in this segment
         def propagate_from_prev(state_in):
             """Propagate from previous camera frame to current."""
@@ -1329,7 +1361,7 @@ def extended_kalman_filter(
                         lambda: t_imu_jax[imu_idx] - t_imu_jax[imu_idx - 1],
                         lambda: jnp.array(dt_imu_mean),
                     )
-                    return predict_step(s, u, dt, config_for_filter)
+                    return predict_step(s, u, dt, config_for_filter, has_vision_t)
 
                 def no_propagate(s):
                     return s

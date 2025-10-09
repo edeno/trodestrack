@@ -367,10 +367,16 @@ def test_prd_dropout_drift_5s():
             arr[dropout_start_idx:dropout_end_idx] = False
             sim_data_dropout[key] = arr
 
-    # Run EKF with dropout - align damping only, use default (conservative) bias Q
-    # Default EKF bias Q is ~14x larger than sim, which is conservative but not catastrophic
+    # Run EKF with dropout - enable P0 mitigations for blackout-aware filtering
+    # P0 fixes from user playbook (reduces drift toward theoretical floor ~0.5m):
+    # 1. Freeze bias Q during blackout (prevents unobservable RW)
+    # 2. Reduce IMU white noise during blackout (reduces t^3/2 growth)
+    # 3. Align damping with simulation
     ekf_config_override = {
         "damping_coeff": 0.4,  # Match sim vel_drag
+        "freeze_bias_during_blackout": True,  # Set Q_bias=0 when no vision
+        "reduce_imu_noise_during_blackout": True,  # Scale IMU noise by 0.5
+        "blackout_imu_noise_scale": 0.5,  # Recommended range: 0.25-0.5
     }
     result = run_ekf_on_sim(
         sim_data_dropout, use_heading=True, ekf_config_override=ekf_config_override

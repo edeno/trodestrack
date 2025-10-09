@@ -45,9 +45,25 @@ The 0.15m drift requirement is **fundamentally unrealistic** with current sensor
 4. Zero-velocity updates (ZUPT) if rat is stationary
 5. Use RTS smoother offline (has vision before/after gap to constrain estimates)
 
+**RTS Smoother Validation:**
+
+Tested offline smoothing on the same 5s dropout scenario:
+- **Online (EKF filter)**: 1.67m drift
+- **Offline (RTS smoother)**: 0.71m drift (2.4x improvement!)
+- **Theoretical floor**: ~0.46m (white noise limit)
+- **PRD target**: 0.15m (requires ~3x lower IMU noise)
+
+**Key Insight:** RTS smoother approaches theoretical floor (0.71m vs 0.46m = 1.5x), while online filter is 3.6x above theory. Smoother uses vision before AND after the gap to constrain estimates, drastically reducing error accumulation.
+
+**To achieve 0.15m offline:**
+- Reduce IMU accel noise density from 0.05 → 0.017 m/s²/√Hz (~3x reduction)
+- OR: Add constant-speed pseudo-measurements during dropout
+- OR: Implement ZUPT (if rat is stationary)
+
 **Files Created/Modified:**
 
 - [diagnostics/noise_scaling_check.py](diagnostics/noise_scaling_check.py) - NEW: Quantitative drift analysis
+- [src/trodestrack/models/ekf.py](src/trodestrack/models/ekf.py) - Added blackout-aware Q framework (needs debug)
 - [tests/filters/test_prd_acceptance.py](tests/filters/test_prd_acceptance.py#L46-L73) - run_ekf_on_sim() with override
 - [tests/filters/test_prd_acceptance.py](tests/filters/test_prd_acceptance.py#L283-L326) - Updated docstring with analysis
 
