@@ -123,7 +123,11 @@
   - **NOTE**: Already implemented in `rat_imu.py` (lines 510-522)
   - Inelastic reflections with coefficient of restitution = 0.5
   - Tests added in `tests/sim/test_arena_physics.py` (13 tests passing)
-- [ ] Add anisotropic drag (forward ≠ lateral)
+- [x] Add anisotropic drag (forward ≠ lateral)
+  - Implemented in `rat_imu.py` (lines 215-217, 336-358, 516-531)
+  - Body-frame drag: `drag_fwd` (streamlined) vs `drag_lat` (sideways)
+  - Backward compatible with legacy `vel_drag` parameter
+  - Tests added in `tests/sim/test_anisotropic_drag.py` (13 tests passing)
 - [ ] Add optional wall reflection probability for LED artifacts
 - [ ] Add persistent LED swaps (event-based, not per-frame)
 

@@ -2,6 +2,42 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-09 - Anisotropic Drag Implementation
+
+**Added:**
+- **Anisotropic Drag Physics** (`src/trodestrack/sim/rat_imu.py`)
+  - New parameters: `drag_fwd` (forward drag in body frame) and `drag_lat` (lateral drag in body frame)
+  - Realistic physics: forward drag < lateral drag models streamlined vs sideways motion
+  - Applied in body frame: drag rotates with animal heading
+  - Proper coordinate transformations: world ↔ body frame
+  - Default behavior: drag_fwd=drag_lat (isotropic) for backward compatibility
+
+- **Comprehensive Test Suite** (`tests/sim/test_anisotropic_drag.py`)
+  - 13 tests covering all aspects of anisotropic drag (all passing)
+  - **Basic drag behavior**: Lateral decay > forward decay
+  - **Frame correctness**: Drag applied in body frame, not world frame
+  - **Rotation interaction**: Drag behavior during heading changes and circular motion
+  - **Backward compatibility**: Isotropic case and legacy `vel_drag` parameter
+  - **Edge cases**: Zero drag, negative drag rejection, extreme ratios (50x)
+  - Run with: `uv run pytest tests/sim/test_anisotropic_drag.py -v`
+
+**Improved:**
+- **Configuration Validation**: Rejects negative drag coefficients with clear error messages
+- **Backward Compatibility**: Legacy `vel_drag` parameter still works (sets both drag_fwd and drag_lat)
+- **Documentation**: Added detailed docstrings explaining anisotropic drag concept
+
+**Testing:**
+- ✅ 13/13 tests passing in test_anisotropic_drag.py
+- ✅ Code reviewed and approved
+- ✅ Black, ruff passing
+- ✅ No regressions in existing tests (49 sim tests passing)
+
+**Task Progress:**
+- ✅ Milestone 3: Anisotropic drag (forward ≠ lateral) - COMPLETE
+- Updated TASKS.md to mark anisotropic drag as complete
+
+---
+
 ### Session: 2025-10-09 - Arena Boundary Physics Test Suite
 
 **Added:**

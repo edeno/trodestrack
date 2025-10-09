@@ -139,8 +139,16 @@ class RatIMUSimConfig:
         sigma_a_lat: Noise intensity for lateral accel (m/s² / √s)
 
     Physical Constraints:
-        vel_drag: Linear velocity damping coefficient (1/s)
+        vel_drag: Linear velocity damping coefficient (1/s) [DEPRECATED: use drag_fwd/drag_lat]
+        drag_fwd: Forward drag coefficient in body frame (1/s)
+        drag_lat: Lateral drag coefficient in body frame (1/s)
         speed_clip: Maximum speed clipping threshold (m/s)
+
+    Note on drag:
+        - Anisotropic drag: drag_fwd (streamlined) < drag_lat (sideways sliding)
+        - Applied in body frame: drag rotates with animal heading
+        - For backward compatibility: if only vel_drag is set, drag_fwd = drag_lat = vel_drag
+        - If drag_fwd/drag_lat are set, they override vel_drag
 
     Initial State:
         m0: Initial state mean [x, y, vx, vy, θ]
@@ -203,7 +211,9 @@ class RatIMUSimConfig:
     sigma_a_lat: float = 0.5  # m/s² / √s
 
     # Physical damping / limits
-    vel_drag: float = 0.4  # 1/s
+    vel_drag: float = 0.4  # 1/s (deprecated, use drag_fwd/drag_lat)
+    drag_fwd: float | None = None  # Forward drag in body frame (1/s)
+    drag_lat: float | None = None  # Lateral drag in body frame (1/s)
     speed_clip: float = 1.5  # m/s
 
     # Initial state (truth)
@@ -320,6 +330,31 @@ class RatIMUSimConfig:
             raise ValueError(
                 f"OU time constants must be positive.\n"
                 f"Got tau_yaw_rate={self.tau_yaw_rate}, tau_a_fwd={self.tau_a_fwd}, tau_a_lat={self.tau_a_lat}"
+            )
+
+        # Drag coefficient validation and backward compatibility
+        # Priority: drag_fwd/drag_lat > vel_drag
+        if self.drag_fwd is None and self.drag_lat is None:
+            # Use legacy vel_drag for both
+            self.drag_fwd = self.vel_drag
+            self.drag_lat = self.vel_drag
+        elif self.drag_fwd is None or self.drag_lat is None:
+            raise ValueError(
+                "Must specify both drag_fwd and drag_lat, or neither (use vel_drag).\n"
+                f"Got drag_fwd={self.drag_fwd}, drag_lat={self.drag_lat}"
+            )
+
+        # Validate drag coefficients are non-negative
+        if self.drag_fwd < 0:
+            raise ValueError(
+                f"Forward drag coefficient must be non-negative, got {self.drag_fwd} 1/s.\n"
+                f"Example: drag_fwd=0.3 (low streamlined drag)"
+            )
+
+        if self.drag_lat < 0:
+            raise ValueError(
+                f"Lateral drag coefficient must be non-negative, got {self.drag_lat} 1/s.\n"
+                f"Example: drag_lat=1.2 (high lateral sliding drag)"
             )
 
         # LED configuration validation
@@ -478,9 +513,22 @@ def simulate_rat_imu(config: Optional[RatIMUSimConfig] = None, seed: int = 0) ->
         ax_control_world = c * a_fwd - s * a_lat
         ay_control_world = s * a_fwd + c * a_lat
 
-        # --- 3) Apply velocity damping (drag) ---
-        ax_world = ax_control_world - config.vel_drag * vx
-        ay_world = ay_control_world - config.vel_drag * vy
+        # --- 3) Apply anisotropic velocity damping (drag in body frame) ---
+        # Transform world velocity to body frame
+        vx_body = c * vx + s * vy  # Forward velocity (along heading)
+        vy_body = -s * vx + c * vy  # Lateral velocity (perpendicular to heading)
+
+        # Apply drag in body frame (forward vs lateral drag differ)
+        ax_drag_body = -config.drag_fwd * vx_body
+        ay_drag_body = -config.drag_lat * vy_body
+
+        # Transform drag back to world frame
+        ax_drag_world = c * ax_drag_body - s * ay_drag_body
+        ay_drag_world = s * ax_drag_body + c * ay_drag_body
+
+        # Total acceleration in world frame
+        ax_world = ax_control_world + ax_drag_world
+        ay_world = ay_control_world + ay_drag_world
 
         # --- 4) Integrate kinematics (semi-implicit Euler with second-order position) ---
         vx_new = vx + ax_world * dt_imu
