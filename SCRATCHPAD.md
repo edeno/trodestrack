@@ -2,6 +2,287 @@
 
 Development notes and debugging history for trodestrack project.
 
+## 2025-10-09 - P0 Critical EKF Improvements (Clean Slate Branch)
+
+### Summary
+Implemented three critical P0 improvements to EKF robustness and correctness from PR_FIX_PLAN.md:
+1. ✅ Angle wrapping in predict/update (commit f8c99c3)
+2. ✅ Lifted subspace operator for exact 2D/4D measurements (commit 8776b5b)
+3. ✅ Confidence-scaled measurement noise (commit a75d16a)
+
+All 27 tests passing. Ready for χ² gating and heading pseudo-measurement next.
+
+---
+
+### Commit 1: Angle Wrapping (f8c99c3)
+
+**Problem:**
+- Heading angle θ grew unbounded through IMU integration (e.g., 5π instead of π)
+- Led to numerical issues and potential wraparound errors
+
+**Solution:**
+- Added `wrap_angle()` calls after predict step: `m_pred[4] = wrap_angle(m_pred[4])`
+- Added `wrap_angle()` calls after update step: `m_upd[4] = wrap_angle(m_upd[4])`
+- Uses `arctan2(sin(θ), cos(θ))` to map to (-π, π]
+
+**Tests:** [tests/filters/test_ekf_angle_wrapping.py](tests/filters/test_ekf_angle_wrapping.py)
+- 5 tests: wrap_angle correctness, predict/update wrapping, boundary continuity
+- All pass, no regression in 8 existing EKF tests
+
+---
+
+### Commit 2: Lifted Subspace Operator (8776b5b)
+
+**Problem:**
+- Previous implementation used 1e10 variance masking for partial LED observations
+- Caused numerical artifacts, diagonal log-likelihood approximation, incorrect NIS
+
+**Solution: Lifted Subspace Operator**
+Compute in active measurement subspace (2D or 4D), then lift to static 4D shapes:
+
+```python
+# 4D path (both LEDs):
+x4 = solve(S4, w4)
+
+# 2D path (single LED):
+M2 = selector_matrix  # (2, 4) picks active LED
+S2 = M2 @ S4 @ M2.T   # Project to 2D subspace
+x2 = solve(S2, M2 @ w4)
+x4_lifted = M2.T @ x2  # Lift back to 4D
+```
+
+**Key Improvements:**
+1. **Exact mathematics**: No variance hacks, proper dimensionality
+2. **Static shapes**: All arrays 4D for JAX JIT compatibility
+3. **Exact log-likelihood**: Correct k=2 or k=4 Gaussian statistics
+4. **Exact NIS**: Follows χ²(k) with correct degrees of freedom
+5. **Numerically stable**: Cholesky solves throughout
+
+**Implementation:**
+- `make_led_selector()`: Creates 2×4 selector for LED1 or LED2
+- `apply_lifted_inverse()`: S_eff^{-1} operator with static shapes
+- `compute_nis_and_loglik()`: Exact statistics in active subspace
+- Updated `update_step()`: Joseph form using lifted operator
+
+**Tests:** [tests/filters/test_ekf_partial_observations.py](tests/filters/test_ekf_partial_observations.py)
+- 7 tests: both LEDs, single LED (each), no LEDs, covariance reduction, no artifacts
+- All pass, no regression in 13 existing tests
+
+---
+
+### Commit 3: Confidence-Scaled Measurement Noise (a75d16a)
+
+**Problem:**
+- DLC provides confidence scores, but EKF treated all measurements equally
+- Low-confidence detections trusted as much as high-confidence ones
+
+**Solution: Adaptive Measurement Noise**
+Scale R inversely with confidence:
+```python
+R_eff[i] = R_base / clip(conf[i], 0.01, 1.0)
+```
+
+**Behavior:**
+- High confidence (→1.0): R ≈ R_base → trust measurement
+- Low confidence (→0.01): R = 100× R_base → distrust measurement
+- Default (None): conf = 1.0 → backward compatible
+
+**Implementation:**
+- Added optional `confidence` parameter to `update_step()`
+- Per-dimension scaling: [led1_x, led1_y, led2_x, led2_y]
+- Works with lifted subspace operator
+- Affects mean update, covariance, and log-likelihood
+
+**Tests:** [tests/filters/test_ekf_confidence_scaling.py](tests/filters/test_ekf_confidence_scaling.py)
+- 7 tests: high/low confidence effects on covariance and mean, clipping, log-likelihood
+- All pass, no regression
+
+---
+
+### Next: Heading Pseudo-Measurement Plan
+
+**Goal:** Add optional heading observation from LED pair to improve heading estimates.
+
+**Design: Optional + Adaptive + JAX-Friendly**
+
+#### Configuration
+```python
+@dataclass
+class EKFConfig:
+    # Heading measurement settings
+    use_heading_measurement: bool = False  # Master switch
+    led_distance: float | None = 0.04  # Expected spacing (None = auto-detect)
+    led_distance_tolerance: float = 0.3  # ±30% tolerance for gating
+    measurement_noise_heading: float = 0.05**2  # Base heading noise (rad²)
+    adaptive_heading_noise: bool = True  # Scale R by baseline quality
+```
+
+#### Implementation Strategy: Sequential Update with Large-R Gating
+
+**Why Sequential?**
+- Simpler than extending lifted operator to 5D
+- Fully JAX JIT-compatible (no branching issues)
+- Efficient (heading update is 1D, cheap)
+
+**JAX Compatibility Pattern:**
+```python
+def update_step(...):
+    # 1. Position update (existing 4D)
+    state_pos, ll_pos = update_positions_4d(...)
+
+    # 2. Heading update (always computed, gated via R)
+    heading_obs = arctan2(led2_y - led1_y, led2_x - led1_x)
+
+    # Validity checks (all JAX-traceable)
+    obs_spacing = norm(led2 - led1)
+    spacing_ratio = obs_spacing / config.led_distance
+    spacing_valid = (spacing_ratio > (1 - tol)) & (spacing_ratio < (1 + tol))
+    use_heading = config.use_heading_measurement & led1_valid & led2_valid & spacing_valid
+
+    # Adaptive noise with gating
+    R_heading_base = config.measurement_noise_heading
+    if config.adaptive_heading_noise:
+        # Shorter baseline → noisier heading
+        R_heading_base *= (config.led_distance / obs_spacing) ** 2
+
+    # Gate via large R (not branching!)
+    R_heading = lax.select(use_heading, R_heading_base, 1e6)
+
+    # Always perform update (JAX-friendly - no branches)
+    state_final, ll_heading = update_heading_1d(state_pos, heading_obs, R_heading, config)
+
+    return state_final, ll_pos + ll_heading
+```
+
+**Key Pattern: Large-R Gating**
+- Valid heading: `R ≈ 0.05²` → strong update
+- Invalid heading: `R = 1e6` → Kalman gain ≈ 0 → no update
+- No branching needed → JIT-friendly!
+
+#### Heading Measurement Function
+
+```python
+def update_heading_1d(state, heading_obs, R_heading, config):
+    """1D heading measurement update.
+
+    Args:
+        state: Current state (8D)
+        heading_obs: Observed heading (scalar)
+        R_heading: Heading measurement noise (scalar, large if invalid)
+        config: EKF config
+
+    Returns:
+        Updated state and log-likelihood
+    """
+    m, P = state.mean, state.cov
+
+    # Measurement function: h(x) = x[4] (heading)
+    h_pred = m[4]
+
+    # Innovation with angle wrapping!
+    innov = wrap_angle(heading_obs - h_pred)
+
+    # Jacobian: H = [0, 0, 0, 0, 1, 0, 0, 0]
+    H = jnp.zeros(8)
+    H = H.at[4].set(1.0)
+
+    # Innovation covariance
+    S = H @ P @ H + R_heading
+
+    # Kalman gain
+    K = (P @ H) / S
+
+    # Update
+    m_upd = m + K * innov
+    m_upd = m_upd.at[4].set(wrap_angle(m_upd[4]))  # Wrap after update
+
+    # Covariance (Joseph form)
+    I_KH = 1.0 - K[4]
+    P_upd = P - jnp.outer(K, K) * S + K @ K.T * R_heading
+    P_upd = symmetrize(P_upd)
+
+    # Log-likelihood
+    log_lik = -0.5 * (jnp.log(2*pi) + jnp.log(S) + innov**2 / S)
+
+    return EKFState(m_upd, P_upd), log_lik
+```
+
+#### Features
+
+**Automatic Spacing Detection:**
+```python
+if config.led_distance is None:
+    # Estimate from data (median of valid observations)
+    config.led_distance = estimate_led_spacing(Z_cam_led1, Z_cam_led2, mask)
+```
+
+**Adaptive Noise:**
+- Geometric: `R ∝ (expected / observed)²` - shorter baseline → noisier
+- Confidence: `R ∝ 1 / (conf_led1 * conf_led2)` - lower confidence → noisier
+
+**Gating:**
+- Spacing check: `|obs_spacing - expected| < tolerance * expected`
+- Confidence check: `min(conf) > threshold`
+- Both checks via boolean ops (JAX-traceable)
+
+#### Use Cases
+
+**Profile 1: Known rigid LEDs (implant)**
+```python
+config = EKFConfig(
+    use_heading_measurement=True,
+    led_distance=0.04,  # Known 4cm
+    led_distance_tolerance=0.15,  # ±15% (tight)
+)
+```
+
+**Profile 2: Unknown spacing**
+```python
+config = EKFConfig(
+    use_heading_measurement=True,
+    led_distance=None,  # Auto-detect from data
+    led_distance_tolerance=0.3,  # ±30% (loose)
+)
+```
+
+**Profile 3: Variable spacing (flexible)**
+```python
+config = EKFConfig(
+    use_heading_measurement=True,
+    led_distance=0.04,
+    led_distance_tolerance=0.5,  # ±50% (very loose)
+    adaptive_heading_noise=True,  # Essential for variable
+)
+```
+
+**Profile 4: Disable (single keypoint)**
+```python
+config = EKFConfig(
+    use_heading_measurement=False,  # No heading info
+)
+```
+
+#### Benefits
+
+1. **Optional**: Works with rigid LEDs, flexible, or single keypoints
+2. **Adaptive**: Auto-adjusts noise based on geometry and confidence
+3. **Robust**: Gates unreliable observations automatically
+4. **JAX-safe**: No branching, fully JIT-compatible
+5. **Efficient**: 1D update is cheap (~5% overhead)
+6. **Improves heading**: Faster convergence, smaller uncertainty
+
+#### Testing Plan
+
+- [ ] Test heading update improves convergence vs position-only
+- [ ] Test spacing gating rejects invalid observations
+- [ ] Test adaptive noise scales correctly with baseline
+- [ ] Test auto-detection estimates spacing correctly
+- [ ] Test with single LED (heading disabled automatically)
+- [ ] Test JAX JIT compilation works
+- [ ] Verify no regression in existing tests
+
+---
+
 ## 2025-10-09 - RTS Smoother Implementation Complete
 
 ### Summary
