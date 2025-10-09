@@ -138,6 +138,7 @@ class EKFResult(NamedTuple):
         predicted_means: Predicted state means at camera times (N_cam, 8)
         predicted_covariances: Predicted covariances at camera times (N_cam, 8, 8)
         marginal_loglik: Marginal log-likelihood of observations
+        estimated_led_distance: Auto-detected LED spacing (m), None if explicit
     """
 
     filtered_means: jnp.ndarray  # (N_cam, 8)
@@ -145,6 +146,7 @@ class EKFResult(NamedTuple):
     predicted_means: jnp.ndarray  # (N_cam, 8)
     predicted_covariances: jnp.ndarray  # (N_cam, 8, 8)
     marginal_loglik: float
+    estimated_led_distance: float | None
 
 
 # =============================================================================
@@ -1247,23 +1249,28 @@ def extended_kalman_filter(
     mask_cam_jax = jnp.array(mask_cam)
 
     # Auto-detect LED spacing if not specified
+    # Store estimated value to return in result (immutability: do NOT mutate config)
+    estimated_led_distance: float | None = None
+    config_for_filter: EKFConfig
+
     if ekf_config.led_distance is None:
-        estimated_spacing = estimate_led_spacing(Z_cam_led1_jax, Z_cam_led2_jax, mask_cam_jax)
-        # Update config with estimated spacing (create new config to avoid mutation)
+        estimated_led_distance = estimate_led_spacing(Z_cam_led1_jax, Z_cam_led2_jax, mask_cam_jax)
+        # Create new config with estimated spacing (do NOT mutate original)
         config_dict = {k: v for k, v in ekf_config.__dict__.items()}
-        config_dict["led_distance"] = estimated_spacing
-        ekf_config = EKFConfig(**config_dict)
+        config_dict["led_distance"] = estimated_led_distance
+        config_for_filter = EKFConfig(**config_dict)
+    else:
+        # Use original config as-is
+        config_for_filter = ekf_config
 
     # Initialize state
     if initial_state is None:
-        # led_distance is guaranteed non-None here after auto-detection
-        assert ekf_config.led_distance is not None
         initial_state = initialize_state(
             Z_cam_led1_jax,
             Z_cam_led2_jax,
             mask_cam_jax,
             dt_cam=float(jnp.mean(jnp.diff(t_cam_jax))),
-            led_distance=ekf_config.led_distance,
+            led_distance=config_for_filter.led_distance,  # type: ignore[arg-type]
         )
 
     n_cam = len(t_cam)
@@ -1322,7 +1329,7 @@ def extended_kalman_filter(
                         lambda: t_imu_jax[imu_idx] - t_imu_jax[imu_idx - 1],
                         lambda: jnp.array(dt_imu_mean),
                     )
-                    return predict_step(s, u, dt, ekf_config)
+                    return predict_step(s, u, dt, config_for_filter)
 
                 def no_propagate(s):
                     return s
@@ -1345,7 +1352,7 @@ def extended_kalman_filter(
             Z_cam_led1_jax[t_idx],
             Z_cam_led2_jax[t_idx],
             mask_cam_jax[t_idx],
-            ekf_config,
+            config_for_filter,
         )
 
         # Heading measurement update (sequential after position)
@@ -1354,7 +1361,7 @@ def extended_kalman_filter(
             state_after_pos,
             Z_cam_led1_jax[t_idx],
             Z_cam_led2_jax[t_idx],
-            ekf_config,
+            config_for_filter,
         )
 
         # Total log-likelihood for this frame
@@ -1383,4 +1390,5 @@ def extended_kalman_filter(
         predicted_means=outputs["predicted_mean"],
         predicted_covariances=outputs["predicted_cov"],
         marginal_loglik=float(log_lik_total),
+        estimated_led_distance=estimated_led_distance,
     )

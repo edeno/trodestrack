@@ -2,6 +2,53 @@
 
 Development notes and debugging history for trodestrack project.
 
+## 2025-10-09 - P0.6 Completed: Config Immutability (LED Spacing Inference)
+
+### Summary
+Completed P0.6 blocker from REVIEW.md: ensured filter configs are never mutated, with auto-detected LED spacing returned in results.
+
+**Implementation (commit TBD):**
+- ✅ Added `estimated_led_distance: float | None` field to EKFResult and UKFResult
+- ✅ Modified `extended_kalman_filter()` to create `config_for_filter` without mutating original
+- ✅ Modified `unscented_kalman_filter()` with identical pattern
+- ✅ Fixed UKFConfig type annotation to allow `led_distance: float | None`
+- ✅ All function calls use `config_for_filter` throughout execution
+
+**Test Coverage:**
+- ✅ 8 new tests in test_config_immutability.py (all passing)
+- ✅ No regressions in existing tests
+- ✅ Verified nested functions correctly receive `config_for_filter` via parameter passing
+
+**Key Implementation Pattern:**
+```python
+# In extended_kalman_filter() and unscented_kalman_filter():
+estimated_led_distance: float | None = None
+config_for_filter: Config
+
+if config.led_distance is None:
+    # Auto-detect LED spacing from observations
+    estimated_led_distance = estimate_led_spacing(Z1, Z2, mask)
+    # Create new config WITHOUT mutating original
+    config_dict = {k: v for k, v in config.__dict__.items()}
+    config_dict["led_distance"] = estimated_led_distance
+    config_for_filter = Config(**config_dict)
+else:
+    # Use original config as-is
+    config_for_filter = config
+
+# ... filter execution uses config_for_filter ...
+
+# Return estimated value in result
+return Result(..., estimated_led_distance=estimated_led_distance)
+```
+
+**PRD Requirement Satisfied:**
+- Configs remain immutable for reproducibility
+- Auto-detected parameters are returned in the result, not mutated into the config
+- Users can inspect what was auto-detected while preserving original config
+
+---
+
 ## 2025-10-09 - P0.5 Completed: Linalg Stability & Joseph Form
 
 ### Summary

@@ -5,8 +5,8 @@
 - ✅ P0.2: Generalized χ² Envelopes (commit ab0c75d)
 - ✅ P0.3: UKF Heading Measurement (commit cb5fa85)
 - ✅ P0.4: State-Dimension Generalization in Smoothers (commit 51067f0)
-- ✅ **P0.5: Linalg Stability & Joseph Form (this session)**
-- [ ] P0.6: Fix Config Mutation (LED spacing inference)
+- ✅ P0.5: Linalg Stability & Joseph Form (commit 88e5ac9)
+- ✅ **P0.6: Fix Config Mutation (LED spacing inference) (this session)**
 - [ ] P0.7: Fix Test Defects & Flakes
 
 ---

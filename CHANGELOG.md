@@ -2,6 +2,44 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-09 - P0.6: Config Immutability (LED Spacing Inference)
+
+**Added:**
+- **Config Immutability Tests** (`tests/filters/test_config_immutability.py`)
+  - 8 new tests verifying EKF and UKF never mutate config objects
+  - 4 tests for EKF (explicit LED distance, auto-detect, return values)
+  - 4 tests for UKF (identical coverage)
+  - All tests verify `config.__dict__` unchanged before/after execution
+
+- **Result Fields for Auto-Detection** (`src/trodestrack/models/ekf.py`, `src/trodestrack/models/ukf.py`)
+  - Added `estimated_led_distance: float | None` to EKFResult and UKFResult
+  - Field is `None` when LED distance is explicit
+  - Field contains estimated value when `led_distance=None` in config
+
+**Changed:**
+- **EKF Config Handling** (`src/trodestrack/models/ekf.py`)
+  - `extended_kalman_filter()` now creates `config_for_filter` without mutating original
+  - When `ekf_config.led_distance is None`, estimates spacing and creates new config
+  - All internal execution uses `config_for_filter` (via parameter passing)
+  - Original config remains untouched
+
+- **UKF Config Handling** (`src/trodestrack/models/ukf.py`)
+  - `unscented_kalman_filter()` uses identical immutability pattern
+  - Fixed UKFConfig type annotation: `led_distance: float | None = 0.04`
+  - All internal execution uses `config_for_filter`
+
+**Testing:**
+- ✅ All 8 new tests passing (test_config_immutability.py)
+- ✅ No regressions in existing filter tests
+- ✅ Verified nested functions correctly receive `config_for_filter` via parameters
+
+**Impact:**
+- **PRD Compliance:** Satisfies reproducibility requirement (configs are immutable)
+- **User Experience:** Users can inspect auto-detected parameters via result fields
+- **API Clarity:** Separates input (config) from derived values (result)
+
+---
+
 ### Session: 2025-10-09 - P0.5: Linalg Stability & Joseph Form
 
 **Added:**
