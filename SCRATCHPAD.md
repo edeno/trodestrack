@@ -35,8 +35,10 @@ Completed P0.4 blocker from REVIEW.md: removed hardcoded state dimensions from o
 - Supports ablation studies with reduced states (position-only, no bias, etc.)
 - Maintains PRD reproducibility requirements
 
+**Status:** ✅ P0.4 COMPLETE - Marked in REVIEW.md, committed as 51067f0
+
 **Next P0 Blockers:**
-- P0.5: Linalg stability with Joseph form
+- **P0.5 (NEXT):** Linalg stability with Joseph form
 - P0.6: Fix config mutation (LED spacing inference)
 - P0.7: Fix test defects and flakes
 

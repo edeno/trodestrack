@@ -63,11 +63,15 @@ Below are symbol line maps to help you jump to the right places:
      - ✅ Sequential update architecture (position → heading)
      - ✅ 5 new tests + 11 total UKF tests passing (no regressions)
 
-4. **State‑Dimension Generalization in Smoothers**
+4. ✅ **COMPLETED: State‑Dimension Generalization in Smoothers** (commit 51067f0)
    - **Why**: Future 3D and state changes must not break smoothing.
-   - **Touchpoints**:
-     - `src/trodestrack/runtime/offline.py: rts_smoother`, `sigma_point_smoother` — derive `n = filtered_means.shape[-1]`; remove hardcoded 8s.
-     - Extract `build_Q_rate(config, n)`; use in both EKF/UKF smoothers.
+   - **Completed**:
+     - ✅ Added `build_Q_rate(config, n)` helper function
+     - ✅ Modified `rts_smoother()` to derive `n = filtered_means.shape[1]`
+     - ✅ Modified `sigma_point_smoother()` to derive `n` from data
+     - ✅ Replaced hardcoded 8×8 Q_rate and jnp.eye(8) with dimension-aware versions
+     - ✅ 13 new tests (dimensions 4, 6, 8, 10, 12) + 7 existing tests passing
+     - ✅ Updated all docstrings to use (n,) instead of (8,)
 
 5. **Stability: Linalg Hardening & Joseph Form**
    - **Why**: Prevent divergence with near‑singular covariances and keep PSD.
