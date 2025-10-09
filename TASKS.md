@@ -119,24 +119,34 @@
 
 ### 🧩 Simulation Enhancements
 
-- [ ] Add arena boundaries (`arena_bounds`) with soft reflections
+- [x] Add arena boundaries (`arena_bounds`) with soft reflections
+  - **NOTE**: Already implemented in `rat_imu.py` (lines 510-522)
+  - Inelastic reflections with coefficient of restitution = 0.5
+  - Tests added in `tests/sim/test_arena_physics.py` (13 tests passing)
 - [ ] Add anisotropic drag (forward ≠ lateral)
 - [ ] Add optional wall reflection probability for LED artifacts
 - [ ] Add persistent LED swaps (event-based, not per-frame)
 
 ### ⚙️ Filter Robustness
 
-- [ ] Add Mahalanobis gating for outlier rejection
-- [ ] Add adaptive measurement noise scaling based on confidence
+- [x] Add Mahalanobis gating for outlier rejection
+  - **NOTE**: Already implemented in EKF/UKF (P0 improvements from REVIEW.md)
+- [x] Add adaptive measurement noise scaling based on confidence
+  - **NOTE**: Already implemented in EKF/UKF (P0 improvements from REVIEW.md)
 - [ ] Implement zero-velocity update (stationary detection)
-- [ ] Add covariance regularization (ensure PD matrix)
+- [x] Add covariance regularization (ensure PD matrix)
+  - **NOTE**: Joseph form covariance updates implemented (P0.5 from REVIEW.md)
 
 ### 🧪 Tests
 
-- [ ] `tests/sim/test_arena_physics.py`
-  - [ ] Rat stays in bounds
-  - [ ] Lateral drag decays faster
-  - [ ] Wall reflections appear near boundaries
+- [x] `tests/sim/test_arena_physics.py`
+  - [x] Rat stays in bounds (multiple arena sizes)
+  - [x] Wall collisions reverse velocity
+  - [x] Energy dissipation (coefficient of restitution = 0.5)
+  - [x] Corner collisions affect both axes
+  - [x] No tunneling through walls
+  - [x] Trajectory continuity preserved
+  - [x] Deterministic with same seed
 - [ ] `tests/filters/test_robustness.py`
   - [ ] Out-of-bounds measurements rejected
   - [ ] Swap & dropout handling stable

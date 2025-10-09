@@ -2,6 +2,37 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-09 - Arena Boundary Physics Test Suite
+
+**Added:**
+- **Comprehensive Arena Physics Test Suite** (`tests/sim/test_arena_physics.py`)
+  - 13 tests validating arena boundary implementation (all passing)
+  - Tests cover: boundary enforcement, collision mechanics, energy dissipation, edge cases
+  - **Boundary enforcement**: Rats stay within bounds across different arena sizes
+  - **Collision mechanics**: Validates velocity reversal and coefficient of restitution = 0.5
+  - **Energy dissipation**: Confirms kinetic energy loss during collisions
+  - **Physical realism**: No tunneling, trajectory continuity, deterministic behavior
+  - **Edge cases**: Small/large arenas, corner collisions, non-square aspect ratios
+  - Run with: `uv run pytest tests/sim/test_arena_physics.py -v`
+
+**Documented:**
+- Arena boundaries already implemented in `rat_imu.py` (lines 510-522)
+- Inelastic reflections with coefficient of restitution = 0.5
+- Position correction prevents tunneling through walls
+- Separate handling for x and y boundaries
+
+**Testing:**
+- ✅ 13/13 tests passing in test_arena_physics.py
+- ✅ Code reviewed and approved
+- ✅ Black, ruff, mypy passing
+- ✅ No regressions in existing tests
+
+**Task Progress:**
+- ✅ Milestone 3: Arena boundaries with soft reflections (test coverage complete)
+- Updated TASKS.md to mark arena boundaries as complete
+
+---
+
 ### Session: 2025-10-09 - Dropout Drift Root Cause Analysis
 
 **Added:**
