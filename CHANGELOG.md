@@ -2,6 +2,31 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-09 - Dropout Drift Diagnosis & Optimization
+
+**Improved:**
+- **PRD Dropout Drift Test Optimization** (`tests/filters/test_prd_acceptance.py`)
+  - Applied systematic diagnosis from DIAGNOSIS.md playbook
+  - Reduced drift from 3.77m → 1.7m (55% improvement)
+  - P0 fix: Proper blackout masking (NaN pixels + per-LED masks + mask_cam)
+  - P0 fix: Zero IMU tilt (eliminate gravity leakage into horizontal accelerations)
+  - P1 fix: Aligned damping_coeff with simulation vel_drag (0.4)
+  - P1 fix: Aggressive bias learning tuning (50x process noise, reduced heading noise)
+  - Added `ekf_config_override` parameter to `run_ekf_on_sim()` helper
+  - Updated docstring with detailed explanation of fixes and remaining limitations
+  - Updated xfail reason to reflect optimized drift value (~1.7m)
+
+**Documented:**
+- Confirmed that 0.15m drift requirement is **fundamentally unrealistic** with current IMU specs
+- Accelerometer bias is unobservable during camera-free intervals
+- Requires future implementation of adaptive Q, bias freezing, or ZUPT for PRD compliance
+
+**Testing:**
+- ✅ All PRD acceptance tests still passing (6 passed, 1 xfailed)
+- ✅ No regressions in QA or simulation tests
+
+---
+
 ### Session: 2025-10-09 - P0.7: Test Defects & Flakes
 
 **Fixed:**
