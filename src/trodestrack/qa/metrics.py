@@ -334,12 +334,17 @@ def compute_nis(
     return nis
 
 
-def compute_nis_stats(nis: NDArray[np.float64], measurement_dim: int) -> dict[str, float]:
+def compute_nis_stats(
+    nis: NDArray[np.float64],
+    measurement_dim: int,
+    confidence: float = 0.95,
+) -> dict[str, float]:
     """Compute summary statistics for NIS consistency check.
 
     Args:
         nis: NIS values per timestep, shape (N,)
         measurement_dim: Dimension of measurement (degrees of freedom for chi-squared)
+        confidence: Confidence level for chi-squared bounds (default: 0.95 for 95% CI)
 
     Returns:
         Dictionary with keys:
@@ -347,15 +352,16 @@ def compute_nis_stats(nis: NDArray[np.float64], measurement_dim: int) -> dict[st
         - std: Standard deviation
         - min: Minimum NIS
         - max: Maximum NIS
-        - chi2_lower_95: Lower 95% confidence bound for chi^2(measurement_dim)
-        - chi2_upper_95: Upper 95% confidence bound for chi^2(measurement_dim)
-        - pct_in_bounds: Percentage of NIS values within 95% CI
+        - chi2_lower: Lower confidence bound for chi^2(measurement_dim)
+        - chi2_upper: Upper confidence bound for chi^2(measurement_dim)
+        - pct_in_bounds: Percentage of NIS values within confidence interval
+        - confidence: Confidence level used (for reference)
 
     Example:
         >>> import numpy as np
         >>> np.random.seed(42)
         >>> nis = np.random.chisquare(df=4, size=100)
-        >>> stats = compute_nis_stats(nis, measurement_dim=4)
+        >>> stats = compute_nis_stats(nis, measurement_dim=4, confidence=0.95)
         >>> # Mean should be approximately measurement_dim for consistent filter
         >>> 3.0 < stats['mean'] < 5.0
         True
@@ -363,23 +369,18 @@ def compute_nis_stats(nis: NDArray[np.float64], measurement_dim: int) -> dict[st
         >>> stats['pct_in_bounds'] > 90.0
         True
     """
-    from scipy.stats import chi2
-
-    # Chi-squared 95% confidence interval
-    lower = chi2.ppf(0.025, df=measurement_dim)
-    upper = chi2.ppf(0.975, df=measurement_dim)
-
-    in_bounds = np.sum((nis >= lower) & (nis <= upper))
-    pct_in_bounds = 100.0 * in_bounds / len(nis)
+    lower, upper = chi2_bounds(df=measurement_dim, confidence=confidence)
+    pct_in_bounds = within_envelope(nis, df=measurement_dim, confidence=confidence) * 100.0
 
     return {
         "mean": float(np.mean(nis)),
         "std": float(np.std(nis)),
         "min": float(np.min(nis)),
         "max": float(np.max(nis)),
-        "chi2_lower_95": float(lower),
-        "chi2_upper_95": float(upper),
+        "chi2_lower": float(lower),
+        "chi2_upper": float(upper),
         "pct_in_bounds": float(pct_in_bounds),
+        "confidence": float(confidence),
     }
 
 
@@ -452,12 +453,17 @@ def compute_residual_autocorrelation(
         return acf_all
 
 
-def compute_nees_stats(nees: NDArray[np.float64], state_dim: int) -> dict[str, float]:
+def compute_nees_stats(
+    nees: NDArray[np.float64],
+    state_dim: int,
+    confidence: float = 0.95,
+) -> dict[str, float]:
     """Compute summary statistics for NEES consistency check.
 
     Args:
         nees: NEES values per timestep, shape (N,)
         state_dim: Dimension of state (degrees of freedom for chi-squared)
+        confidence: Confidence level for chi-squared bounds (default: 0.95 for 95% CI)
 
     Returns:
         Dictionary with keys:
@@ -465,15 +471,16 @@ def compute_nees_stats(nees: NDArray[np.float64], state_dim: int) -> dict[str, f
         - std: Standard deviation
         - min: Minimum NEES
         - max: Maximum NEES
-        - chi2_lower_95: Lower 95% confidence bound for chi^2(state_dim)
-        - chi2_upper_95: Upper 95% confidence bound for chi^2(state_dim)
-        - pct_in_bounds: Percentage of NEES values within 95% CI
+        - chi2_lower: Lower confidence bound for chi^2(state_dim)
+        - chi2_upper: Upper confidence bound for chi^2(state_dim)
+        - pct_in_bounds: Percentage of NEES values within confidence interval
+        - confidence: Confidence level used (for reference)
 
     Example:
         >>> import numpy as np
         >>> np.random.seed(42)
         >>> nees = np.random.chisquare(df=5, size=100)
-        >>> stats = compute_nees_stats(nees, state_dim=5)
+        >>> stats = compute_nees_stats(nees, state_dim=5, confidence=0.95)
         >>> # Mean should be approximately state_dim for consistent filter
         >>> 4.0 < stats['mean'] < 6.0
         True
@@ -481,28 +488,63 @@ def compute_nees_stats(nees: NDArray[np.float64], state_dim: int) -> dict[str, f
         >>> stats['pct_in_bounds'] > 90.0
         True
     """
-    from scipy.stats import chi2
-
-    # Chi-squared 95% confidence interval
-    lower = chi2.ppf(0.025, df=state_dim)
-    upper = chi2.ppf(0.975, df=state_dim)
-
-    in_bounds = np.sum((nees >= lower) & (nees <= upper))
-    pct_in_bounds = 100.0 * in_bounds / len(nees)
+    lower, upper = chi2_bounds(df=state_dim, confidence=confidence)
+    pct_in_bounds = within_envelope(nees, df=state_dim, confidence=confidence) * 100.0
 
     return {
         "mean": float(np.mean(nees)),
         "std": float(np.std(nees)),
         "min": float(np.min(nees)),
         "max": float(np.max(nees)),
-        "chi2_lower_95": float(lower),
-        "chi2_upper_95": float(upper),
+        "chi2_lower": float(lower),
+        "chi2_upper": float(upper),
         "pct_in_bounds": float(pct_in_bounds),
+        "confidence": float(confidence),
     }
+
+
+def chi2_bounds(df: int, confidence: float = 0.95) -> tuple[float, float]:
+    """Compute confidence interval for chi-squared distribution.
+
+    Args:
+        df: Degrees of freedom (measurement/state dimensionality)
+        confidence: Confidence level (default: 0.95 for 95% CI)
+
+    Returns:
+        Tuple of (lower_bound, upper_bound) for the confidence interval
+
+    Example:
+        >>> lower, upper = chi2_bounds(df=2, confidence=0.95)
+        >>> print(f"95% CI for χ²(2): [{lower:.3f}, {upper:.3f}]")
+        95% CI for χ²(2): [0.051, 7.378]
+
+        >>> lower, upper = chi2_bounds(df=4, confidence=0.99)
+        >>> print(f"99% CI for χ²(4): [{lower:.3f}, {upper:.3f}]")
+        99% CI for χ²(4): [0.297, 14.860]
+
+    Notes:
+        Common use cases:
+        - df=2: Position-only updates (x, y)
+        - df=4: Dual-LED updates (x1, y1, x2, y2)
+        - df=5: Position + velocity (x, y, vx, vy, θ)
+        - df=8: Full state (x, y, vx, vy, θ, b_gz, b_ax, b_ay)
+
+        For NEES/NIS consistency checks, approximately `confidence*100`% of
+        values should fall within this interval if the filter is well-calibrated.
+    """
+    from scipy.stats import chi2
+
+    alpha = 1.0 - confidence
+    lower = float(chi2.ppf(alpha / 2, df=df))
+    upper = float(chi2.ppf(1.0 - alpha / 2, df=df))
+
+    return lower, upper
 
 
 def chi2_ci95(df: int) -> tuple[float, float]:
     """Compute 95% confidence interval for chi-squared distribution.
+
+    This is a convenience wrapper around chi2_bounds() with confidence=0.95.
 
     Args:
         df: Degrees of freedom (measurement/state dimensionality)
@@ -529,12 +571,47 @@ def chi2_ci95(df: int) -> tuple[float, float]:
         For NEES/NIS consistency checks, approximately 95% of values should
         fall within this interval if the filter is well-calibrated.
     """
-    from scipy.stats import chi2
+    return chi2_bounds(df=df, confidence=0.95)
 
-    lower = float(chi2.ppf(0.025, df=df))
-    upper = float(chi2.ppf(0.975, df=df))
 
-    return lower, upper
+def within_envelope(
+    values: NDArray[np.float64],
+    df: int,
+    confidence: float = 0.95,
+) -> float:
+    """Compute percentage of values within chi-squared confidence envelope.
+
+    Args:
+        values: Array of chi-squared-distributed values (e.g., NEES or NIS), shape (N,)
+        df: Degrees of freedom (measurement/state dimensionality)
+        confidence: Confidence level (default: 0.95 for 95% CI)
+
+    Returns:
+        Percentage of values within bounds, in range [0.0, 1.0]
+
+    Example:
+        >>> import numpy as np
+        >>> np.random.seed(42)
+        >>> nees_values = np.random.chisquare(df=4, size=1000)
+        >>> pct = within_envelope(nees_values, df=4, confidence=0.95)
+        >>> print(f"{pct*100:.1f}% within 95% envelope")
+        94.8% within 95% envelope
+
+        >>> # With 99% confidence, more values should be within bounds
+        >>> pct_99 = within_envelope(nees_values, df=4, confidence=0.99)
+        >>> print(f"{pct_99*100:.1f}% within 99% envelope")
+        99.1% within 99% envelope
+
+    Notes:
+        For a well-calibrated filter, approximately `confidence*100`% of NEES
+        or NIS values should fall within the chi-squared confidence envelope.
+        Significant deviations indicate filter miscalibration:
+        - Too many outside upper bound → underconfident filter (P too large)
+        - Too many outside lower bound → overconfident filter (P too small)
+    """
+    lower, upper = chi2_bounds(df=df, confidence=confidence)
+    within_bounds = (values >= lower) & (values <= upper)
+    return float(np.mean(within_bounds))
 
 
 def compute_dropout_drift(

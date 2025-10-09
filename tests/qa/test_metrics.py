@@ -313,9 +313,11 @@ def test_nees_stats():
     # Check all required keys present
     assert "mean" in stats
     assert "std" in stats
-    assert "chi2_lower_95" in stats
-    assert "chi2_upper_95" in stats
+    assert "chi2_lower" in stats
+    assert "chi2_upper" in stats
     assert "pct_in_bounds" in stats
+    assert "confidence" in stats
+    assert stats["confidence"] == 0.95  # Default confidence
 
     # Mean should be approximately state_dim for chi-squared(state_dim)
     assert 4.0 < stats["mean"] < 6.0
@@ -335,9 +337,11 @@ def test_nis_stats():
     # Check all required keys present
     assert "mean" in stats
     assert "std" in stats
-    assert "chi2_lower_95" in stats
-    assert "chi2_upper_95" in stats
+    assert "chi2_lower" in stats
+    assert "chi2_upper" in stats
     assert "pct_in_bounds" in stats
+    assert "confidence" in stats
+    assert stats["confidence"] == 0.95  # Default confidence
 
     # Mean should be approximately meas_dim for chi-squared(meas_dim)
     assert 3.0 < stats["mean"] < 5.0
@@ -354,6 +358,73 @@ def test_chi2_ci95():
     lower, upper = chi2_ci95(df=4)
     assert_allclose(lower, 0.484, atol=0.01)
     assert_allclose(upper, 11.143, atol=0.01)
+
+
+def test_chi2_bounds_95():
+    """chi2_bounds should match chi2_ci95 for 95% confidence."""
+    from trodestrack.qa.metrics import chi2_bounds
+
+    # Should match chi2_ci95 exactly
+    for df in [2, 4, 5, 8]:
+        lower_old, upper_old = chi2_ci95(df=df)
+        lower_new, upper_new = chi2_bounds(df=df, confidence=0.95)
+        assert_allclose(lower_new, lower_old, rtol=1e-10)
+        assert_allclose(upper_new, upper_old, rtol=1e-10)
+
+
+def test_chi2_bounds_different_confidences():
+    """chi2_bounds should work with different confidence levels."""
+    from trodestrack.qa.metrics import chi2_bounds
+
+    # 90% CI should be narrower than 95% CI
+    lower_90, upper_90 = chi2_bounds(df=4, confidence=0.90)
+    lower_95, upper_95 = chi2_bounds(df=4, confidence=0.95)
+    lower_99, upper_99 = chi2_bounds(df=4, confidence=0.99)
+
+    # Wider confidence → wider interval
+    assert lower_90 > lower_95
+    assert lower_95 > lower_99
+    assert upper_90 < upper_95
+    assert upper_95 < upper_99
+
+
+def test_within_envelope_basic():
+    """within_envelope should correctly identify values in/out of bounds."""
+    from trodestrack.qa.metrics import within_envelope
+
+    # Generate chi-squared samples
+    np.random.seed(42)
+    df = 4
+    values = np.random.chisquare(df, size=1000)
+
+    # With 95% confidence, expect ~95% within bounds
+    pct = within_envelope(values, df=df, confidence=0.95)
+    assert 0.93 < pct < 0.97, f"Expected ~95%, got {pct*100:.1f}%"
+
+    # With 99% confidence, expect ~99% within bounds
+    pct_99 = within_envelope(values, df=df, confidence=0.99)
+    assert 0.97 < pct_99 < 1.0, f"Expected ~99%, got {pct_99*100:.1f}%"
+    assert pct_99 > pct, "99% envelope should contain more values than 95%"
+
+
+def test_within_envelope_edge_cases():
+    """within_envelope should handle edge cases correctly."""
+    from trodestrack.qa.metrics import within_envelope
+
+    # All zeros → 0% within bounds (below lower threshold)
+    values = np.zeros(100)
+    pct = within_envelope(values, df=4, confidence=0.95)
+    assert pct == 0.0
+
+    # All very large values → 0% within bounds (above upper threshold)
+    values = np.full(100, 1000.0)
+    pct = within_envelope(values, df=4, confidence=0.95)
+    assert pct == 0.0
+
+    # Values at mean of chi-squared → 100% within bounds
+    values = np.full(100, 4.0)  # Mean of chi-squared(4) = 4
+    pct = within_envelope(values, df=4, confidence=0.95)
+    assert pct == 1.0
 
 
 # =============================================================================
