@@ -164,7 +164,7 @@ def test_heading_error_known_error():
     est_heading = np.array([0.1, np.pi / 2 + 0.1, np.pi - 0.1])
 
     error = compute_heading_error(true_heading, est_heading)
-    assert_allclose(error, np.rad2deg(0.1), atol=0.01)
+    assert_allclose(error, 0.1, atol=1e-10)  # Returns radians (SI unit)
 
 
 def test_heading_error_wrapping():
@@ -175,7 +175,7 @@ def test_heading_error_wrapping():
     est_heading = np.array([-0.1])
 
     error = compute_heading_error(true_heading, est_heading)
-    assert_allclose(error, np.rad2deg(0.2), atol=0.01)
+    assert_allclose(error, 0.2, atol=1e-10)  # Returns radians (SI unit)
 
     # Test wrap-around at ±π
     true_heading = np.array([np.pi - 0.1])
@@ -183,7 +183,7 @@ def test_heading_error_wrapping():
 
     error = compute_heading_error(true_heading, est_heading)
     # Shortest path: 0.2 rad (not 2π - 0.2)
-    assert_allclose(error, np.rad2deg(0.2), atol=0.01)
+    assert_allclose(error, 0.2, atol=1e-10)  # Returns radians (SI unit)
 
 
 def test_heading_rmse():

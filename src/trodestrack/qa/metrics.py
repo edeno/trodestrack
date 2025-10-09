@@ -1,13 +1,15 @@
 """Quality assurance metrics for tracking performance evaluation.
 
 This module provides metrics to validate filter accuracy and consistency against
-PRD requirements:
-- Position RMSE <= 2 cm
-- Velocity RMSE <= 10 cm/s
-- Heading error <= 7 degrees
+PRD requirements (all in SI units):
+- Position RMSE <= 0.02 m (2 cm)
+- Velocity RMSE <= 0.10 m/s (10 cm/s)
+- Heading error <= 0.122 rad (7 degrees)
 
 Additionally provides NEES (Normalized Estimation Error Squared) for filter
 consistency checks.
+
+All functions use SI units (meters, m/s, radians) for inputs and outputs.
 """
 
 from __future__ import annotations
@@ -25,25 +27,25 @@ def compute_position_rmse(
     """Compute root mean square error for 2D position estimates.
 
     Args:
-        positions_true: Ground truth positions, shape (N, 2) in cm
-        positions_est: Estimated positions, shape (N, 2) in cm
+        positions_true: Ground truth positions, shape (N, 2) in meters
+        positions_est: Estimated positions, shape (N, 2) in meters
         mask: Optional validity mask, shape (N,). Only valid (True) entries used.
 
     Returns:
-        RMSE in cm
+        RMSE in meters
 
     Example:
         >>> true_pos = np.array([[0.0, 0.0], [1.0, 1.0]])
         >>> est_pos = np.array([[0.1, 0.1], [1.1, 1.1]])
         >>> rmse = compute_position_rmse(true_pos, est_pos)
-        >>> print(f"{rmse:.2f} cm")
-        0.14 cm
+        >>> print(f"{rmse:.4f} m")
+        0.1414 m
 
         >>> # With mask
         >>> mask = np.array([True, False])  # Ignore second sample
         >>> rmse_masked = compute_position_rmse(true_pos, est_pos, mask=mask)
-        >>> print(f"{rmse_masked:.2f} cm")
-        0.14 cm
+        >>> print(f"{rmse_masked:.4f} m")
+        0.1414 m
     """
     if positions_true.shape != positions_est.shape:
         raise ValueError(
@@ -81,19 +83,19 @@ def compute_velocity_rmse(
     """Compute root mean square error for 2D velocity estimates.
 
     Args:
-        velocities_true: Ground truth velocities, shape (N, 2) in cm/s
-        velocities_est: Estimated velocities, shape (N, 2) in cm/s
+        velocities_true: Ground truth velocities, shape (N, 2) in m/s
+        velocities_est: Estimated velocities, shape (N, 2) in m/s
         mask: Optional validity mask, shape (N,). Only valid (True) entries used.
 
     Returns:
-        RMSE in cm/s
+        RMSE in m/s
 
     Example:
-        >>> true_vel = np.array([[10.0, 0.0], [10.0, 0.0]])
-        >>> est_vel = np.array([[10.5, 0.2], [10.3, -0.1]])
+        >>> true_vel = np.array([[0.10, 0.0], [0.10, 0.0]])
+        >>> est_vel = np.array([[0.105, 0.002], [0.103, -0.001]])
         >>> rmse = compute_velocity_rmse(true_vel, est_vel)
-        >>> print(f"{rmse:.2f} cm/s")
-        0.44 cm/s
+        >>> print(f"{rmse:.4f} m/s")
+        0.0044 m/s
     """
     if velocities_true.shape != velocities_est.shape:
         raise ValueError(
@@ -134,14 +136,14 @@ def compute_heading_error(
         headings_est: Estimated headings, shape (N,) in radians
 
     Returns:
-        Mean absolute error in degrees
+        Mean absolute error in radians
 
     Example:
         >>> true_heading = np.array([0.0, np.pi/2, np.pi])
         >>> est_heading = np.array([0.1, np.pi/2 + 0.1, np.pi - 0.1])
         >>> mae = compute_heading_error(true_heading, est_heading)
-        >>> print(f"{mae:.2f} deg")
-        5.73 deg
+        >>> print(f"{mae:.4f} rad ({np.rad2deg(mae):.2f} deg)")
+        0.1000 rad (5.73 deg)
     """
     if headings_true.shape != headings_est.shape:
         raise ValueError(f"Shape mismatch: true {headings_true.shape} vs est {headings_est.shape}")
@@ -153,13 +155,10 @@ def compute_heading_error(
     diff = headings_true - headings_est
     diff_wrapped = np.arctan2(np.sin(diff), np.cos(diff))
 
-    # Mean absolute error in radians
+    # Mean absolute error in radians (SI unit)
     mae_rad = np.mean(np.abs(diff_wrapped))
 
-    # Convert to degrees
-    mae_deg = np.rad2deg(mae_rad)
-
-    return float(mae_deg)
+    return float(mae_rad)
 
 
 def compute_heading_rmse(

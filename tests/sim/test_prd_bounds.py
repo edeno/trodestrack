@@ -1,9 +1,9 @@
 """Test that simulation tiers meet PRD accuracy requirements.
 
-This module validates that Tiers 0-3 simulations satisfy the PRD acceptance criteria:
-- Position RMSE <= 2 cm
-- Velocity RMSE <= 10 cm/s
-- Heading error <= 7 degrees
+This module validates that Tiers 0-3 simulations satisfy the PRD acceptance criteria (SI units):
+- Position RMSE <= 0.02 m (2 cm)
+- Velocity RMSE <= 0.10 m/s (10 cm/s)
+- Heading error <= 0.122 rad (7 degrees)
 
 These bounds represent the minimum accuracy requirements for the tracking system.
 Tests use ground truth from simulations (perfect "filter" = just return ground truth).
@@ -27,12 +27,12 @@ from trodestrack.sim.rat_imu import simulate_rat_imu, RatIMUSimConfig
 
 
 # =============================================================================
-# PRD Requirements (from PRD.md Section 4)
+# PRD Requirements (from PRD.md Section 4) - All in SI units
 # =============================================================================
 
-PRD_POSITION_RMSE_CM = 2.0  # Position RMSE <= 2 cm
-PRD_VELOCITY_RMSE_CM_S = 10.0  # Velocity RMSE <= 10 cm/s
-PRD_HEADING_ERROR_DEG = 7.0  # Heading error <= 7 degrees
+PRD_POSITION_RMSE_M = 0.02  # Position RMSE <= 0.02 m (2 cm)
+PRD_VELOCITY_RMSE_M_S = 0.10  # Velocity RMSE <= 0.10 m/s (10 cm/s)
+PRD_HEADING_ERROR_RAD = np.deg2rad(7.0)  # Heading error <= 0.122 rad (7 degrees)
 
 
 # =============================================================================
@@ -112,7 +112,7 @@ def test_tier1_rat_imu_position_rmse_within_prd():
     )
 
     # Ground truth vs itself should be perfect
-    assert pos_rmse <= PRD_POSITION_RMSE_CM  # Will be 0.0 for ground truth
+    assert pos_rmse <= PRD_POSITION_RMSE_M  # Will be 0.0 for ground truth
 
 
 def test_tier1_rat_imu_velocity_rmse_within_prd():
@@ -125,7 +125,7 @@ def test_tier1_rat_imu_velocity_rmse_within_prd():
         result["X_truth"][:, 2:4],
     )
 
-    assert vel_rmse <= PRD_VELOCITY_RMSE_CM_S
+    assert vel_rmse <= PRD_VELOCITY_RMSE_M_S
 
 
 def test_tier1_rat_imu_heading_error_within_prd():
@@ -138,7 +138,7 @@ def test_tier1_rat_imu_heading_error_within_prd():
         result["X_truth"][:, 4],
     )
 
-    assert heading_err <= PRD_HEADING_ERROR_DEG
+    assert heading_err <= PRD_HEADING_ERROR_RAD
 
 
 # =============================================================================
