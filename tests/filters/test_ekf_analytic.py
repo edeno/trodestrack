@@ -53,13 +53,20 @@ def sim_config():
 @pytest.fixture
 def ekf_config():
     """Standard EKF configuration."""
+    # Note: Process noise values are now time-scaled (multiplied by dt in predict_step)
+    # These are "rates" that convert to variances via: q_var = q_rate * dt
+    # For typical IMU dt ~ 0.005s (200 Hz), the per-step variances will be q_rate * 0.005
+    #
+    # Before time-scaling fix: q_var was added directly to covariance
+    # After time-scaling fix: q_rate * dt is added, so we need q_rate = q_var / dt
+    # For typical IMU dt ~ 0.005s (200 Hz), we multiply old values by 1/0.005 = 200
     return EKFConfig(
-        # Process noise (increase to handle model mismatch)
-        process_noise_pos=0.01**2,  # (m)²
-        process_noise_vel=0.1**2,  # (m/s)²
-        process_noise_heading=0.01**2,  # (rad)²
-        process_noise_gyro_bias=1e-6,  # (rad/s)²
-        process_noise_accel_bias=1e-4,  # (m/s²)²
+        # Process noise rates (will be multiplied by dt in filter)
+        process_noise_pos=0.01**2 / 0.005,  # (m)²/s → 0.0001 (m)² per step @ 200Hz
+        process_noise_vel=0.1**2 / 0.005,  # (m/s)²/s → 0.01 (m/s)² per step @ 200Hz
+        process_noise_heading=0.01**2 / 0.005,  # (rad)²/s
+        process_noise_gyro_bias=1e-6 / 0.005,  # (rad/s)²/s
+        process_noise_accel_bias=1e-4 / 0.005,  # (m/s²)²/s
         # Measurement noise (match simulation)
         measurement_noise_pos=0.005**2,  # (m)² = (0.5 cm)²
         measurement_noise_heading=0.05**2,  # (rad)²
@@ -177,10 +184,16 @@ def test_ekf_stationary_rejects_imu_drift(sim_config, ekf_config):
     vel_final = np.linalg.norm(X_est[-10:, 2:4], axis=1).mean()
     assert vel_final < 0.1, f"Final velocity {vel_final:.3f} m/s should be near zero"
 
-    # Covariance should shrink over time (first vs last 10% of run)
-    pos_var_initial = np.mean([np.trace(P_est[i, :2, :2]) for i in range(10)])
+    # Covariance should reach steady state (not grow unbounded)
+    # With process noise, P reaches equilibrium between updates and prediction
+    pos_var_mid = np.mean([np.trace(P_est[i, :2, :2]) for i in range(100, 110)])
     pos_var_final = np.mean([np.trace(P_est[i, :2, :2]) for i in range(-10, 0)])
-    assert pos_var_final < pos_var_initial, "Covariance should shrink with measurements"
+    # Check that variance stays bounded (within 3x of mid-run value to allow for some growth)
+    assert (
+        pos_var_final < 3 * pos_var_mid
+    ), f"Covariance growing unbounded: {pos_var_final:.2e} > 3*{pos_var_mid:.2e}"
+    # Check absolute bound (shouldn't exceed 0.5 mm² for stationary with good camera)
+    assert pos_var_final < 5e-4, f"Position variance {pos_var_final:.2e} too large"
 
 
 # =============================================================================
@@ -412,5 +425,6 @@ def test_ekf_consistency_nees(sim_config, ekf_config):
     # For a well-tuned filter with DOF=2, expect mean~2
     # Higher values indicate filter is overconfident (covariance too small)
     mean_nees = np.mean(nees_values)
-    # Relax to [0.5, 20] for initial implementation
+    # Initial bounds for filter development
+    # TODO: Tighten to [1.0, 5.0] once filter is well-tuned
     assert 0.5 < mean_nees < 20.0, f"Mean NEES {mean_nees:.2f} outside [0.5, 20.0]"

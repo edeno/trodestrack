@@ -4,8 +4,8 @@ This module implements a 2D EKF with 8-state model:
     x_k = [x, y, vx, vy, θ, b_gz, b_ax, b_ay]^T
 
 Where:
-    - (x, y): Position in cm
-    - (vx, vy): Velocity in cm/s
+    - (x, y): Position in meters
+    - (vx, vy): Velocity in m/s
     - θ: Heading angle in radians
     - b_gz: Gyroscope z-axis bias in rad/s
     - b_ax, b_ay: Accelerometer x, y biases in m/s²
@@ -46,12 +46,16 @@ from jax import jacfwd, lax
 class EKFConfig:
     """Extended Kalman Filter configuration.
 
-    Process noise (Q matrix diagonal):
-        process_noise_pos: Position process noise (m²)
-        process_noise_vel: Velocity process noise (m/s)²
-        process_noise_heading: Heading process noise (rad²)
-        process_noise_gyro_bias: Gyro bias random walk (rad/s)²
-        process_noise_accel_bias: Accel bias random walk (m/s²)²
+    Process noise rates (Q matrix diagonal, variance per unit time):
+        process_noise_pos: Position process noise rate (m²/s)
+        process_noise_vel: Velocity process noise rate (m/s)²/s
+        process_noise_heading: Heading process noise rate (rad²/s)
+        process_noise_gyro_bias: Gyro bias random walk rate (rad/s)²/s
+        process_noise_accel_bias: Accel bias random walk rate (m/s²)²/s
+
+        Note: These rates are multiplied by dt in predict_step to produce variances.
+              For a desired per-step variance q_var at dt_typical, set:
+              q_rate = q_var / dt_typical
 
     Measurement noise (R matrix diagonal):
         measurement_noise_pos: Camera position noise (m²)
@@ -330,10 +334,10 @@ def initialize_state(
     cov_init = jnp.diag(
         jnp.array(
             [
-                0.01**2,  # x: 1 cm std
-                0.01**2,  # y: 1 cm std
-                0.1**2,  # vx: 10 cm/s std
-                0.1**2,  # vy: 10 cm/s std
+                0.01**2,  # x: 1 cm (0.01 m) std
+                0.01**2,  # y: 1 cm (0.01 m) std
+                0.1**2,  # vx: 10 cm/s (0.1 m/s) std
+                0.1**2,  # vy: 10 cm/s (0.1 m/s) std
                 0.1**2,  # θ: ~6 deg std
                 0.05**2,  # b_gz: 0.05 rad/s std
                 0.1**2,  # b_ax: 0.1 m/s² std
@@ -482,21 +486,46 @@ def predict_step(
     # Predict mean
     m_pred = f(m)
 
-    # Process noise (Q matrix)
-    Q = jnp.diag(
-        jnp.array(
-            [
-                config.process_noise_pos,
-                config.process_noise_pos,
-                config.process_noise_vel,
-                config.process_noise_vel,
-                config.process_noise_heading,
-                config.process_noise_gyro_bias,
-                config.process_noise_accel_bias,
-                config.process_noise_accel_bias,
-            ]
-        )
-    )
+    # Time-scaled process noise for random walks and kinematic diffusion
+    # Biases: random walk ~ q_b * dt
+    q_bg = config.process_noise_gyro_bias * dt_imu
+    q_bax = config.process_noise_accel_bias * dt_imu
+    q_bay = config.process_noise_accel_bias * dt_imu
+
+    # Kinematics: simple dt scaling (could use dt² for position if needed)
+    q_px = config.process_noise_pos * dt_imu
+    q_py = config.process_noise_pos * dt_imu
+    q_vx = config.process_noise_vel * dt_imu
+    q_vy = config.process_noise_vel * dt_imu
+    q_th = config.process_noise_heading * dt_imu
+
+    Q_proc = jnp.diag(jnp.array([q_px, q_py, q_vx, q_vy, q_th, q_bg, q_bax, q_bay]))
+
+    # IMU input noise mapped into state via linearization
+    # Input noise standard deviations from densities
+    std_w = config.imu_gyro_noise_density * jnp.sqrt(dt_imu)
+    std_f = config.imu_accel_noise_density * jnp.sqrt(dt_imu)
+    Q_u = jnp.diag(jnp.array([std_w**2, std_f**2, std_f**2]))
+
+    # G is ∂f/∂u evaluated at (m, u)
+    # For our dynamics:
+    #   θ_{k+1} = θ_k + (ω_z - b_gz) * dt  →  ∂θ/∂ω_z = dt
+    #   v_{k+1} = v_k + R(θ)(f - b_a) * dt  →  ∂v/∂f = R(θ) * dt
+    #   p_{k+1} = p_k + v_k * dt + 0.5 * R(θ)(f - b_a) * dt²  →  ∂p/∂f = R(θ) * 0.5 * dt²
+    theta = m[4]
+    c, s = jnp.cos(theta), jnp.sin(theta)
+    R_2d = jnp.array([[c, -s], [s, c]])
+
+    # Build G matrix: state (8) × input (3)
+    # Rows: [x, y, vx, vy, θ, b_gz, b_ax, b_ay]
+    # Cols: [ω_z, f_x, f_y]
+    G = jnp.zeros((8, 3))
+    G = G.at[4, 0].set(dt_imu)  # θ depends on ω_z
+    G = G.at[2:4, 1:3].set(R_2d * dt_imu)  # velocity depends on force
+    G = G.at[0:2, 1:3].set(R_2d * (0.5 * dt_imu * dt_imu))  # position depends on force
+
+    # Total process noise: kinematic diffusion + IMU input noise
+    Q = Q_proc + G @ Q_u @ G.T
 
     # Predict covariance
     P_pred = F_x @ P @ F_x.T + Q
@@ -572,15 +601,13 @@ def update_step(
                 H_x = H(m_iter)
                 z_pred = h(m_iter)
 
-                # Innovation
+                # Innovation (full 4-D)
                 innov_full = z_obs_full - z_pred
+
+                # Mask invalid rows: zero them out and give large variance
                 innov = jnp.where(obs_mask, innov_full, 0.0)
-
-                # Mask out invalid rows in H
                 H_masked = jnp.where(obs_mask[:, None], H_x, 0.0)
-
-                # Measurement noise (larger for invalid measurements)
-                R_diag = jnp.where(obs_mask, config.measurement_noise_pos, 1e6)
+                R_diag = jnp.where(obs_mask, config.measurement_noise_pos, 1e10)
                 R = jnp.diag(R_diag)
 
                 # Innovation covariance
@@ -597,30 +624,30 @@ def update_step(
                 P_upd = I_KH @ P_iter @ I_KH.T + K @ R @ K.T
                 P_upd = symmetrize(P_upd)
 
-                return (m_upd, P_upd), (S, innov)
+                return (m_upd, P_upd), (S, innov, obs_mask)
 
             # Run IEKF iterations
             carry_init = (m_in, P_in)
-            (m_final, P_final), (S_all, innov_all) = lax.scan(
+            (m_final, P_final), (S_all, innov_all, mask_all) = lax.scan(
                 iekf_step, carry_init, jnp.arange(config.num_iter)
             )
 
             # Extract final (last) iteration values
-            # lax.scan stacks outputs, so we take the last element
             S_final = S_all[-1]
             innov_final = innov_all[-1]
+            mask_final = mask_all[-1]
 
-            # Compute log-likelihood using final innovation and covariance
-            # Only include valid measurements in log-likelihood
-            n_valid = jnp.sum(obs_mask)
-
-            def compute_log_lik():
-                return gaussian_log_likelihood(innov_final, S_final)
-
-            def zero_log_lik():
-                return jnp.array(0.0)
-
-            log_lik = lax.cond(n_valid > 0, compute_log_lik, zero_log_lik)
+            # Compute log-likelihood using only valid dimensions
+            # NOTE: This uses diagonal approximation (assumes independent dimensions)
+            # which is reasonable for partial observations but slightly optimistic
+            # for full covariance coupling. For exact likelihood on masked observations,
+            # use submatrix extraction, but that's not JAX-compatible without dynamic shapes.
+            log_lik_per_dim = -0.5 * (
+                jnp.log(2 * jnp.pi)
+                + jnp.log(jnp.diag(S_final))
+                + innov_final**2 / jnp.diag(S_final)
+            )
+            log_lik = jnp.where(mask_final, log_lik_per_dim, 0.0).sum()
 
             return EKFState(mean=m_final, cov=P_final), log_lik
 
@@ -696,21 +723,41 @@ def extended_kalman_filter(
 
     n_cam = len(t_cam)
 
+    # Precompute IMU indices for each camera interval
+    # For efficient scanning, we create a fixed-size index array with padding
+    max_imu_per_frame = int(jnp.ceil((t_imu_jax[-1] - t_imu_jax[0]) / len(t_cam) * 2)) + 10
+
+    # Compute mean IMU timestep for fallback when imu_idx == 0
+    dt_imu_mean = float(jnp.mean(jnp.diff(t_imu_jax)))
+
+    def compute_imu_index_arrays():
+        """Build padded index arrays for IMU samples between camera frames."""
+        all_indices = []
+        for i in range(n_cam):
+            if i == 0:
+                # First frame: no IMU propagation
+                indices = jnp.full(max_imu_per_frame, -1, dtype=jnp.int32)
+            else:
+                t_prev = t_cam_jax[i - 1]
+                t_current = t_cam_jax[i]
+                # Find IMU samples in (t_prev, t_current]
+                mask = (t_imu_jax > t_prev) & (t_imu_jax <= t_current)
+                valid_indices = jnp.where(mask, size=max_imu_per_frame, fill_value=-1)[0]
+                indices = valid_indices
+            all_indices.append(indices)
+        return jnp.array(all_indices)
+
+    imu_index_arrays = compute_imu_index_arrays()
+
     def filter_step(carry, t_idx):
         """Single filtering step at camera frame t_idx."""
         state_prev, log_lik_accum = carry
 
-        # Current camera time
-        t_current = t_cam_jax[t_idx]
-
-        # Propagate using all IMU samples between frames
+        # Propagate using IMU samples in this segment
         def propagate_from_prev(state_in):
             """Propagate from previous camera frame to current."""
-            t_prev = t_cam_jax[t_idx - 1]
-
-            # Find IMU indices in this interval
-            imu_mask = (t_imu_jax > t_prev) & (t_imu_jax <= t_current)
-            imu_indices = jnp.where(imu_mask, size=len(t_imu_jax), fill_value=-1)[0]
+            # Get IMU indices for this interval
+            imu_indices = imu_index_arrays[t_idx]
 
             # Predict forward using each IMU sample
             def propagate_imu(state, imu_idx):
@@ -721,11 +768,11 @@ def extended_kalman_filter(
                 def do_propagate(s):
                     # Get IMU sample and timestep
                     u = U_imu_jax[imu_idx]
-                    # Compute dt using conditional to avoid negative index
+                    # Compute dt (use mean when at first index)
                     dt = lax.cond(
                         imu_idx > 0,
                         lambda: t_imu_jax[imu_idx] - t_imu_jax[imu_idx - 1],
-                        lambda: jnp.array(0.005),  # Default 200 Hz
+                        lambda: jnp.array(dt_imu_mean),
                     )
                     return predict_step(s, u, dt, ekf_config)
 
