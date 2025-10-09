@@ -2,6 +2,72 @@
 
 Development notes and debugging history for trodestrack project.
 
+## 2025-10-09 - P0.7 Completed: Test Defects & Flakes
+
+### Summary
+Completed P0.7 blocker from REVIEW.md: fixed test defects and flakes to improve CI stability and test correctness.
+
+**Implementation (commit TBD):**
+- ✅ Fixed test_dropout_diagnostic.py script-style side effects (wrapped in main + `if __name__ == '__main__'`)
+- ✅ Fixed test_ukf_accuracy.py incorrect RMSE function usage (replaced `compute_position_rmse` with `compute_velocity_rmse` for velocity metrics)
+- ✅ Fixed test_vision_robustness.py swap verifiability (added assertions using ground truth `swap_applied` mask)
+- ✅ Fixed test_prd_acceptance.py dropout drift test (changed from `@pytest.mark.skip` to `@pytest.mark.xfail(strict=False)`)
+
+**Test Coverage:**
+- ✅ test_dropout_diagnostic.py no longer executes at import
+- ✅ test_ukf_accuracy.py now uses correct RMSE functions (2 call sites fixed)
+- ✅ test_vision_robustness.py now verifies swaps against ground truth mask (3 tests improved)
+- ✅ test_prd_dropout_drift_5s now runs and marks as XFAIL (instead of SKIP)
+- ✅ All modified tests passing/xfailing as expected
+
+**Key Fixes:**
+
+1. **test_dropout_diagnostic.py** - Diagnostic script, not a test suite:
+   ```python
+   def main():
+       # All plotting/analysis code moved here
+       ...
+
+   if __name__ == "__main__":
+       main()
+   ```
+
+2. **test_ukf_accuracy.py** - Wrong RMSE function for velocities:
+   ```python
+   # Before: compute_position_rmse(velocities, truth_vel)  # WRONG
+   # After:
+   vel_rmse = compute_velocity_rmse(result.filtered_means[:, 2:4], truth_vel)
+   ```
+
+3. **test_vision_robustness.py** - Swap verification using ground truth:
+   ```python
+   # Now uses sim["swap_applied"] mask to verify swaps occurred
+   swap_applied = sim["swap_applied"]
+   n_swaps = np.sum(swap_applied & both_visible)
+   assert n_swaps > 0, "Expected swaps to occur"
+   ```
+
+4. **test_prd_acceptance.py** - XFAIL instead of SKIP:
+   ```python
+   # Changed from @pytest.mark.skip to:
+   @pytest.mark.xfail(
+       strict=False,
+       reason="PRD §4.2 requirement (0.15m after 5s) is unrealistic..."
+   )
+   ```
+
+**Impact:**
+- **CI Stability:** No accidental test execution at import time
+- **Test Correctness:** Velocity metrics use correct RMSE function
+- **Test Verifiability:** Swap tests now check ground truth, not indirect heuristics
+- **Test Reporting:** Dropout drift test runs and reports XFAIL (shows actual vs expected)
+
+**All P0 Blockers Complete!**
+- P0.1-P0.7 are all done
+- Ready to proceed with P1 items or continue with TASKS.md milestones
+
+---
+
 ## 2025-10-09 - P0.6 Completed: Config Immutability (LED Spacing Inference)
 
 ### Summary

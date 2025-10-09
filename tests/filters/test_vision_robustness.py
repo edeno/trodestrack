@@ -30,19 +30,22 @@ class TestLEDSwap:
         )
         sim = simulate_rat_imu(config, seed=42)
 
-        # Check that LED positions differ from truth at some frames
-        # (indicating swaps occurred)
+        # Check swap_applied mask to verify swaps occurred
         both_visible = sim["mask_led1"] & sim["mask_led2"]
         n_visible = np.sum(both_visible)
         assert n_visible > 0, "Need both LEDs visible to test swaps"
 
-        # Compute distance from LED measurements to expected LED1 truth position
-        # If swaps occurred, some frames will have large residuals for LED1
-        # (because LED1 measurement is actually at LED2 truth position)
-        # This is an indirect test since we don't store ground truth LED positions
-        # in the output, but it validates swap logic runs without errors
+        # Verify swaps actually occurred using ground truth mask
+        swap_applied = sim["swap_applied"]
+        n_swaps = np.sum(swap_applied & both_visible)
+        assert n_swaps > 0, "Expected swaps to occur with led_swap_prob=0.2"
 
-        # At minimum, verify shape and no NaN where both visible
+        # Verify swap rate is approximately correct (allow variance due to RNG)
+        # Expected: 20% of visible frames, allow 10-30% due to randomness
+        swap_rate = n_swaps / n_visible
+        assert 0.1 < swap_rate < 0.3, f"Swap rate {swap_rate:.2%} outside expected range"
+
+        # Verify shape and no NaN where both visible
         assert sim["Z_cam_led1"].shape[0] == sim["Z_cam_led2"].shape[0]
         assert not np.any(np.isnan(sim["Z_cam_led1"][both_visible]))
         assert not np.any(np.isnan(sim["Z_cam_led2"][both_visible]))
@@ -58,6 +61,18 @@ class TestLEDSwap:
         )
         sim = simulate_rat_imu(config, seed=123)
 
+        # Verify swaps only occur when both LEDs visible (using ground truth mask)
+        swap_applied = sim["swap_applied"]
+        both_visible = sim["mask_led1"] & sim["mask_led2"]
+        swaps_when_both_visible = swap_applied & both_visible
+        swaps_when_not_both_visible = swap_applied & ~both_visible
+
+        # All swaps should occur when both visible
+        assert (
+            np.sum(swaps_when_not_both_visible) == 0
+        ), "Swaps should only occur when both LEDs visible"
+        assert np.sum(swaps_when_both_visible) > 0, "Expected some swaps when both LEDs visible"
+
         # LED1 measurements should be valid when LED1 visible
         assert not np.any(np.isnan(sim["Z_cam_led1"][sim["mask_led1"]]))
         # LED2 measurements should be NaN when LED2 dropped
@@ -72,6 +87,10 @@ class TestLEDSwap:
             cam_dropout_prob=0.0,
         )
         sim = simulate_rat_imu(config, seed=42)
+
+        # Verify no swaps using ground truth mask
+        swap_applied = sim["swap_applied"]
+        assert np.sum(swap_applied) == 0, "No swaps should occur with led_swap_prob=0"
 
         # With no swaps and no dropouts, LED positions should be smooth
         # (no sudden jumps from swaps)

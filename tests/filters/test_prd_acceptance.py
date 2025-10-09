@@ -274,17 +274,19 @@ def test_tier3_rat_imu_ekf_heading():
 # =============================================================================
 
 
-@pytest.mark.skip(
+@pytest.mark.xfail(
+    strict=False,
     reason="PRD §4.2 requirement (0.15m after 5s) is unrealistic with current IMU specs. "
     "Accelerometer bias is unobservable during camera dropouts, leading to ~3.7m drift. "
-    "This requires adaptive Q during dropouts or bias freezing (not yet implemented)."
+    "This requires adaptive Q during dropouts or bias freezing (not yet implemented). "
+    "See: tests/filters/test_dropout_diagnostic.py",
 )
 def test_prd_dropout_drift_5s():
     """PRD §4.2: Dropout drift should be <=0.15m after 5s camera blackout.
 
     KNOWN LIMITATION:
     ----------------
-    This test is currently SKIPPED because the 0.15m drift requirement is
+    This test is currently marked as xfail because the 0.15m drift requirement is
     unrealistic with current sensor noise specifications. The EKF experiences
     ~3.7m drift during 5s dropouts due to accelerometer bias being unobservable
     without camera measurements.

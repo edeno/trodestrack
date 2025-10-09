@@ -2,6 +2,53 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-09 - P0.7: Test Defects & Flakes
+
+**Fixed:**
+- **test_dropout_diagnostic.py Script Side Effects** (`tests/filters/test_dropout_diagnostic.py`)
+  - Moved all plotting/analysis code into `main()` function
+  - Added `if __name__ == "__main__":` guard
+  - File no longer executes code at import time (CI stability)
+  - Can now be imported safely for testing
+  - Run with: `python -m tests.filters.test_dropout_diagnostic`
+
+- **test_ukf_accuracy.py Incorrect RMSE Function** (`tests/filters/test_ukf_accuracy.py`)
+  - Fixed 2 call sites using `compute_position_rmse()` on velocity data
+  - Now correctly uses `compute_velocity_rmse()` for velocity metrics
+  - Added `compute_velocity_rmse` to imports
+  - Ensures correct SI unit handling (m/s vs m)
+
+- **test_vision_robustness.py Swap Verification** (`tests/filters/test_vision_robustness.py`)
+  - Enhanced 3 LED swap tests to use ground truth `swap_applied` mask
+  - `test_led_swap_occurs_when_enabled`: now verifies swap rate (10-30% expected)
+  - `test_led_swap_only_when_both_visible`: verifies swaps only when both LEDs visible
+  - `test_led_swap_zero_prob_no_swaps`: verifies zero swaps with `led_swap_prob=0`
+  - Replaced indirect heuristics with direct ground truth verification
+
+- **test_prd_acceptance.py Dropout Drift Test** (`tests/filters/test_prd_acceptance.py`)
+  - Changed `test_prd_dropout_drift_5s` from `@pytest.mark.skip` to `@pytest.mark.xfail(strict=False)`
+  - Test now runs and reports actual drift (3.77m) vs PRD requirement (0.15m)
+  - XFAIL shows known limitation without blocking CI
+  - Includes rationale: accelerometer bias unobservable during camera dropouts
+
+**Testing:**
+- ✅ test_dropout_diagnostic.py imports without side effects
+- ✅ test_ukf_accuracy.py: 2 tests passing with correct RMSE functions
+- ✅ test_vision_robustness.py: 4 LED swap tests passing with ground truth verification
+- ✅ test_prd_dropout_drift_5s: XFAIL as expected (drift 3.77m > 0.15m limit)
+- ✅ No regressions in existing tests
+
+**Impact:**
+- **CI Stability:** Eliminates import-time side effects
+- **Test Correctness:** Velocity metrics now use proper RMSE calculation
+- **Test Verifiability:** Swap tests check ground truth, not heuristics
+- **Test Transparency:** Dropout drift reports actual performance, not hidden via SKIP
+
+**P0 Blockers Status:**
+- ✅ P0.1-P0.7 Complete! All merge-gate blockers resolved.
+
+---
+
 ### Session: 2025-10-09 - P0.6: Config Immutability (LED Spacing Inference)
 
 **Added:**

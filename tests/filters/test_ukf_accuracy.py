@@ -21,7 +21,7 @@ from trodestrack.models.ukf import (
     UKFConfig,
     unscented_kalman_filter,
 )
-from trodestrack.qa.metrics import compute_nees, compute_position_rmse
+from trodestrack.qa.metrics import compute_nees, compute_position_rmse, compute_velocity_rmse
 from trodestrack.sim.simple import (
     SimpleSimConfig,
     simulate_circular,
@@ -135,7 +135,7 @@ def test_ukf_stationary_rejects_imu_drift(sim_config, ukf_config):
 
     # Compute metrics
     pos_rmse = compute_position_rmse(result.filtered_means[:, :2], truth_xy)
-    vel_rmse = compute_position_rmse(result.filtered_means[:, 2:4], truth_vel)
+    vel_rmse = compute_velocity_rmse(result.filtered_means[:, 2:4], truth_vel)
 
     # Check PRD requirements (slightly relaxed for UKF vs EKF differences)
     assert pos_rmse <= 0.025, f"Position RMSE {pos_rmse*100:.2f} cm exceeds 2.5 cm"
@@ -219,7 +219,7 @@ def test_ukf_constant_velocity_tracking(sim_config, ukf_config):
 
     # Compute metrics
     pos_rmse = compute_position_rmse(result.filtered_means[:, :2], truth_xy)
-    vel_rmse = compute_position_rmse(result.filtered_means[:, 2:4], truth_vel)
+    vel_rmse = compute_velocity_rmse(result.filtered_means[:, 2:4], truth_vel)
 
     # Check PRD requirements (slightly relaxed for UKF vs EKF differences)
     assert pos_rmse <= 0.025, f"Position RMSE {pos_rmse*100:.2f} cm exceeds 2.5 cm"
