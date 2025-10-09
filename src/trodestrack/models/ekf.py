@@ -177,6 +177,80 @@ def psd_solve(A: jnp.ndarray, b: jnp.ndarray, diagonal_boost: float = 1e-9) -> j
     return x
 
 
+def make_led_selector(only_led1: bool, only_led2: bool) -> jnp.ndarray:
+    """Create 2×4 selector matrix for single-LED observations.
+
+    Extracts the active 2D subspace from 4D measurement space.
+    Measurement layout: [led1_x, led1_y, led2_x, led2_y]
+
+    Args:
+        only_led1: True if only LED1 is valid
+        only_led2: True if only LED2 is valid
+
+    Returns:
+        M: 2×4 selector matrix
+            - LED1-only: rows [1,0,0,0] and [0,1,0,0]
+            - LED2-only: rows [0,0,1,0] and [0,0,0,1]
+    """
+    # LED1 selector: picks first 2 dimensions
+    M_led1 = jnp.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]])
+
+    # LED2 selector: picks last 2 dimensions
+    M_led2 = jnp.array([[0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
+
+    # Select based on which LED is valid
+    return lax.select(only_led1, M_led1, M_led2)
+
+
+def apply_lifted_inverse(
+    S4: jnp.ndarray,
+    w4: jnp.ndarray,
+    both_leds: bool,
+    only_led1: bool,
+    only_led2: bool,
+) -> jnp.ndarray:
+    """Apply effective inverse S⁻¹ to 4D vector with lifted subspace operator.
+
+    This computes x = S_eff⁻¹ @ w where S_eff is either:
+    - Full 4×4 innovation covariance (both LEDs valid)
+    - Lifted 2×2 subspace (only one LED valid)
+
+    The key insight: compute in active subspace, then lift back to 4D.
+    This avoids large variance hacks while keeping static shapes for JAX.
+
+    Args:
+        S4: Innovation covariance (4, 4)
+        w4: Vector to multiply (4,)
+        both_leds: True if both LEDs are valid
+        only_led1: True if only LED1 is valid
+        only_led2: True if only LED2 is valid
+
+    Returns:
+        x4: Result of S_eff⁻¹ @ w4 (4,) with static shape
+
+    Algorithm:
+        - Both LEDs: x4 = solve(S4, w4)
+        - Single LED: x4 = M2ᵀ @ solve(M2 @ S4 @ M2ᵀ, M2 @ w4)
+          where M2 is 2×4 selector for active LED
+
+    References:
+        - Matrix cookbook: subspace projections
+        - Lifted Kalman filtering for partial observations
+    """
+    # 4D path: both LEDs valid
+    x4_full = psd_solve(S4, w4)
+
+    # 2D path: single LED valid
+    M2 = make_led_selector(only_led1, only_led2)  # (2, 4)
+    S2 = M2 @ S4 @ M2.T  # (2, 2) - subspace innovation covariance
+    w2 = M2 @ w4  # (2,) - project to subspace
+    x2 = psd_solve(S2, w2)  # (2,) - solve in subspace
+    x4_lifted = M2.T @ x2  # (4,) - lift back to 4D
+
+    # Select based on LED validity (both branches return same shape)
+    return lax.select(both_leds, x4_full, x4_lifted)
+
+
 def wrap_angle(theta: jnp.ndarray) -> jnp.ndarray:
     """Wrap angle to (-π, π].
 
@@ -219,6 +293,64 @@ def gaussian_log_likelihood(innovation: jnp.ndarray, covariance: jnp.ndarray) ->
     log_prob = -0.5 * (k * jnp.log(2 * jnp.pi) + logdet + mahal)
 
     return log_prob
+
+
+def compute_nis_and_loglik(
+    innov4: jnp.ndarray,
+    S4: jnp.ndarray,
+    both_leds: bool,
+    only_led1: bool,
+    only_led2: bool,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Compute exact NIS and log-likelihood for 2D or 4D measurement.
+
+    Uses Cholesky decomposition for numerical stability and computes
+    statistics in the active measurement subspace (2D or 4D).
+
+    Args:
+        innov4: Innovation vector (4,) in full measurement space
+        S4: Innovation covariance (4, 4)
+        both_leds: True if both LEDs valid (4D measurement)
+        only_led1: True if only LED1 valid (2D measurement)
+        only_led2: True if only LED2 valid (2D measurement)
+
+    Returns:
+        Tuple of (nis, log_likelihood):
+            - nis: Normalized Innovation Squared (scalar)
+            - log_likelihood: Gaussian log-likelihood (scalar)
+
+    Notes:
+        - 4D case: Uses full innovation covariance
+        - 2D case: Projects to active subspace via selector matrix
+        - Both return exact statistics (no diagonal approximation)
+        - NIS follows χ²(k) where k=2 or 4 depending on measurement dim
+    """
+    from jax.scipy.linalg import cho_solve
+
+    # 4D branch: both LEDs valid
+    def compute_4d():
+        L4 = jnp.linalg.cholesky(S4 + 1e-9 * jnp.eye(4))
+        x4 = cho_solve((L4, True), innov4)
+        nis = jnp.dot(innov4, x4)
+        logdet = 2.0 * jnp.sum(jnp.log(jnp.diag(L4)))
+        loglik = -0.5 * (logdet + nis + 4 * jnp.log(2 * jnp.pi))
+        return nis, loglik
+
+    # 2D branch: single LED valid
+    def compute_2d():
+        M2 = make_led_selector(only_led1, only_led2)  # (2, 4)
+        S2 = M2 @ S4 @ M2.T  # (2, 2)
+        innov2 = M2 @ innov4  # (2,)
+
+        L2 = jnp.linalg.cholesky(S2 + 1e-9 * jnp.eye(2))
+        x2 = cho_solve((L2, True), innov2)
+        nis = jnp.dot(innov2, x2)
+        logdet = 2.0 * jnp.sum(jnp.log(jnp.diag(L2)))
+        loglik = -0.5 * (logdet + nis + 2 * jnp.log(2 * jnp.pi))
+        return nis, loglik
+
+    # Select based on LED validity
+    return lax.cond(both_leds, compute_4d, compute_2d)
 
 
 # =============================================================================
@@ -617,69 +749,87 @@ def update_step(
 
             # IEKF: Iterate re-linearization around posterior
             def iekf_step(carry, _):
-                """Single IEKF iteration: re-linearize and update."""
+                """Single IEKF iteration using lifted subspace operator.
+
+                Uses exact 2D/4D mathematics without variance hacks:
+                - 4D path: both LEDs valid
+                - 2D path: single LED valid, lifted via selector matrix
+
+                All arrays maintain static 4D shapes for JAX compatibility.
+                """
                 m_iter, P_iter = carry
 
                 # Re-compute Jacobian at current estimate
-                H_x_full = H(m_iter)
-                z_pred_full = h(m_iter)
+                H4 = H(m_iter)  # (4, 8)
+                z_pred_4 = h(m_iter)  # (4,)
 
-                # Build measurement update using masked approach (cleaner than 1e10 hack)
-                # Zero out invalid measurements and set corresponding R to very large value
-                # This is mathematically equivalent to ignoring those dimensions
-                innov_full = z_obs_full - z_pred_full
+                # Innovation in full 4D space
+                # Zero out invalid LED components to avoid NaN propagation
+                innov_4_raw = z_obs_full - z_pred_4  # (4,)
+                innov_4 = jnp.where(obs_mask, innov_4_raw, 0.0)  # Zero invalid components
 
-                # For invalid dimensions: set innovation to zero and measurement noise large
-                # This effectively removes their influence (Kalman gain ≈ 0 for those dims)
-                innov = jnp.where(obs_mask, innov_full, 0.0)
+                # Measurement noise (always 4D diagonal)
+                R4 = jnp.eye(4) * config.measurement_noise_pos
 
-                # Zero out rows of H for invalid measurements
-                H_x = jnp.where(obs_mask[:, None], H_x_full, 0.0)
+                # Innovation covariance (always 4×4)
+                S4 = H4 @ P_iter @ H4.T + R4
 
-                # Build R: small noise for valid, large for invalid (but not 1e10, use 1e6)
-                # We reduced from 1e10 to 1e6 to avoid numerical issues while still
-                # effectively ignoring invalid measurements
-                R_diag = jnp.where(obs_mask, config.measurement_noise_pos, 1e6)
-                R = jnp.diag(R_diag)
+                # Lifted inverse operator: v = S_eff⁻¹ @ innov_4
+                # This automatically handles 2D/4D based on LED validity
+                both_leds = led1_valid & led2_valid
+                only_led1 = led1_valid & (~led2_valid)
+                only_led2 = (~led1_valid) & led2_valid
 
-                # Innovation covariance
-                S = H_x @ P_iter @ H_x.T + R
+                v = apply_lifted_inverse(S4, innov_4, both_leds, only_led1, only_led2)
 
-                # Kalman gain (psd_solve handles numerical stability)
-                K = psd_solve(S, H_x @ P_iter).T
+                # Kalman update without forming K explicitly
+                # δx = (P H^T) @ v
+                PH_t = P_iter @ H4.T  # (8, 4)
+                delta_x = PH_t @ v  # (8,)
 
                 # Update mean
-                m_upd = m_iter + K @ innov
+                m_upd = m_iter + delta_x
 
                 # Wrap heading angle to (-π, π] after update
                 m_upd = m_upd.at[4].set(wrap_angle(m_upd[4]))
 
-                # Update covariance (Joseph form for numerical stability)
-                I_KH = jnp.eye(8) - K @ H_x
-                P_upd = I_KH @ P_iter @ I_KH.T + K @ R @ K.T
+                # Joseph-form covariance update: P ← P − P H^T (S_eff⁻¹ @ H P)
+                # Apply lifted inverse to each column of H P
+                HP = H4 @ P_iter  # (4, 8)
+
+                def apply_inv_to_col(col_idx):
+                    """Apply S_eff⁻¹ to column of HP."""
+                    col = HP[:, col_idx]
+                    return apply_lifted_inverse(S4, col, both_leds, only_led1, only_led2)
+
+                # Stack inverse-transformed columns
+                inv_S_HP = jnp.stack([apply_inv_to_col(i) for i in range(8)], axis=1)  # (4, 8)
+
+                # Complete Joseph form
+                PH_t_inv_S_HP = PH_t @ inv_S_HP  # (8, 8)
+                P_upd = P_iter - PH_t_inv_S_HP
                 P_upd = symmetrize(P_upd)
 
-                return (m_upd, P_upd), (S, innov, obs_mask)
+                return (m_upd, P_upd), (S4, innov_4, both_leds, only_led1, only_led2)
 
             # Run IEKF iterations
             carry_init = (m_in, P_in)
-            (m_final, P_final), (S_all, innov_all, mask_all) = lax.scan(
+            (m_final, P_final), (S_all, innov_all, both_all, led1_all, led2_all) = lax.scan(
                 iekf_step, carry_init, jnp.arange(config.num_iter)
             )
 
             # Extract final (last) iteration values
             S_final = S_all[-1]
             innov_final = innov_all[-1]
-            mask_final = mask_all[-1]
+            both_final = both_all[-1]
+            led1_final = led1_all[-1]
+            led2_final = led2_all[-1]
 
-            # Compute log-likelihood using only valid dimensions
-            # For masked observations, we compute the diagonal approximation
-            log_lik_per_dim = -0.5 * (
-                jnp.log(2 * jnp.pi)
-                + jnp.log(jnp.diag(S_final))
-                + innov_final**2 / jnp.diag(S_final)
+            # Compute exact log-likelihood using lifted subspace operator
+            # No diagonal approximation - uses correct dimensionality (2D or 4D)
+            _, log_lik = compute_nis_and_loglik(
+                innov_final, S_final, both_final, led1_final, led2_final
             )
-            log_lik = jnp.where(mask_final, log_lik_per_dim, 0.0).sum()
 
             return EKFState(mean=m_final, cov=P_final), log_lik
 
