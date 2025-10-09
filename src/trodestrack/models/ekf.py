@@ -84,16 +84,19 @@ class EKFConfig:
     process_noise_pos: float = 0.02  # m²/s → 1cm std @ 200Hz
     process_noise_vel: float = 2.0  # (m/s)²/s → 10cm/s std @ 200Hz
     process_noise_heading: float = 0.02  # rad²/s → 0.01rad std @ 200Hz
-    process_noise_gyro_bias: float = 2e-4  # (rad/s)²/s
-    process_noise_accel_bias: float = 0.02  # (m/s²)²/s
+    # Bias process noise: very slow drift (hours-scale)
+    # Reduced 100x from initial values to allow convergence
+    process_noise_gyro_bias: float = 2e-6  # (rad/s)²/s → slow drift
+    process_noise_accel_bias: float = 2e-4  # (m/s²)²/s → slow drift
 
     # Measurement noise
     measurement_noise_pos: float = 0.005**2  # (0.5 cm)²
     measurement_noise_heading: float = 0.05**2  # (~3 deg)²
 
-    # IMU noise
-    imu_gyro_noise_density: float = 0.001  # rad/s/√Hz
-    imu_accel_noise_density: float = 0.05  # m/s²/√Hz
+    # IMU noise densities (reduced 10x for better bias observability)
+    # At 400 Hz: gyro_std ≈ 0.002 rad/s, accel_std ≈ 0.1 m/s²
+    imu_gyro_noise_density: float = 0.0001  # rad/s/√Hz (was 0.001)
+    imu_accel_noise_density: float = 0.005  # m/s²/√Hz (was 0.05)
 
     # Dynamics
     damping_coeff: float = 0.5  # 1/s
