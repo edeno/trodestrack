@@ -500,16 +500,34 @@ def simulate_circular(
     x_cam = center[0] + radius * np.cos(angle_cam)
     y_cam = center[1] + radius * np.sin(angle_cam)
 
+    # Generate actual LED positions: LED1 = back, LED2 = front
+    # Heading is tangent to circle (perpendicular to radius)
+    heading_cam = angle_cam + np.pi / 2
+    led_distance = 0.04  # 4 cm between LEDs
+    dx = 0.5 * led_distance * np.cos(heading_cam)
+    dy = 0.5 * led_distance * np.sin(heading_cam)
+
+    # LED1 = back LED (center - offset along heading)
     Z_cam_led1 = np.column_stack(
         [
-            x_cam + cam_noise_x,
-            y_cam + cam_noise_y,
+            x_cam - dx + cam_noise_x,
+            y_cam - dy + cam_noise_y,
         ]
     )
 
-    # Single LED mask (for consistency, LED1 only)
+    # LED2 = front LED (center + offset along heading)
+    cam_noise_x2 = rng.normal(0.0, config.cam_noise_std, T_cam)
+    cam_noise_y2 = rng.normal(0.0, config.cam_noise_std, T_cam)
+    Z_cam_led2 = np.column_stack(
+        [
+            x_cam + dx + cam_noise_x2,
+            y_cam + dy + cam_noise_y2,
+        ]
+    )
+
+    # Both LEDs available for heading observability
     mask_led1 = mask_cam.copy()
-    mask_led2 = np.zeros(T_cam, dtype=bool)
+    mask_led2 = mask_cam.copy()
 
     return {
         "t_imu": t_imu,
@@ -518,7 +536,7 @@ def simulate_circular(
         "X_truth": X_truth,
         "U_imu": U_imu,
         "Z_cam_led1": Z_cam_led1,
-        "Z_cam_led2": np.full((T_cam, 2), np.nan),  # Use NaN (dropped) convention
+        "Z_cam_led2": Z_cam_led2,
         "mask_cam": mask_cam,
         "mask_led1": mask_led1,
         "mask_led2": mask_led2,

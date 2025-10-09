@@ -343,10 +343,11 @@ def initialize_state(
     )
 
     # Initial covariance (diagonal)
-    # Use very high heading uncertainty if only single LED
+    # Use large heading uncertainty to allow filter to learn from dynamics
+    # Even with dual LEDs, heading from short baseline (4 cm) is noisy
     heading_std = jnp.where(
         led1_valid & led2_valid,
-        0.1,  # ~6° when we have dual LEDs
+        jnp.pi / 4,  # ~45° even with dual LEDs (let filter refine from IMU)
         jnp.pi / 2,  # ~90° when no heading info (let IMU determine)
     )
 

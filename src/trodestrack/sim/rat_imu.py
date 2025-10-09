@@ -169,9 +169,16 @@ class RatIMUSimConfig:
     confidence_dropout_decay: float = 0.3
 
     # LED configuration
-    led1_offset_body: np.ndarray = field(default_factory=lambda: np.array([0.0, 0.0]))
+    # Convention: LED1 is rear, LED2 is front
+    # Body frame: x=forward, y=left, z=up (right-handed)
+    # LED vector (LED2 - LED1) points forward along heading
+    led1_offset_body: np.ndarray = field(
+        default_factory=lambda: np.array([-0.02, 0.0])
+    )  # Rear LED (2cm behind center)
     use_second_led: bool = False
-    led2_offset_body: np.ndarray = field(default_factory=lambda: np.array([-0.05, 0.0]))
+    led2_offset_body: np.ndarray = field(
+        default_factory=lambda: np.array([0.02, 0.0])
+    )  # Front LED (2cm ahead of center)
     led_swap_prob: float = 0.0  # Probability of swapping LED1/LED2 labels per frame
 
     # IMU white noise densities (per √Hz)
