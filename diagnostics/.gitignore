@@ -1,0 +1,9 @@
+# Ignore output files from diagnostic scripts
+*.png
+*.txt
+*.mp4
+*.gif
+.DS_Store
+
+# Keep the scripts and README
+!README.md
