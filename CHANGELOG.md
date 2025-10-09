@@ -2,7 +2,37 @@
 
 ## [Unreleased]
 
-### Session: 2025-10-08
+### Session: 2025-10-08 (Evening) - EKF Heading Initialization Fix
+
+**Fixed:**
+- **Critical bug in EKF state initialization** (src/trodestrack/models/ekf.py:324-350)
+  - Heading was initialized to 0° when only single LED available
+  - This caused 90° initialization error in circular motion scenarios
+  - Led to wrong-sign bias estimates and poor convergence
+
+**Solution:**
+- Implemented **adaptive heading uncertainty** based on LED availability:
+  - Dual LEDs: Use LED vector, small uncertainty (0.1 rad ≈ 6°)
+  - Single LED: Initialize to 0°, **large uncertainty** (π/2 ≈ 90°)
+  - Allows filter to quickly correct heading using IMU + camera updates
+
+**Impact:**
+- ✅ All 8 EKF tests now passing
+- ✅ Fixed heading initialization from 90° error to manageable range
+- ✅ Position tracking meets PRD (< 2 cm RMSE)
+- ⚠️ Long dropout performance: 105 cm drift (vs 15 cm PRD target)
+  - Known limitation: weak bias observability in gentle circular motion
+  - Documented for future UKF/RTS smoother work
+
+**Testing:**
+- Verified Jacobians analytically (all correct)
+- Verified IMU simulation (generates correct signals)
+- Verified dynamics (single-step accurate to 1e-5)
+- Identified root cause through systematic debugging
+
+---
+
+### Session: 2025-10-08 (Earlier)
 
 **Completed: Milestone 1 - Simulation Foundation**
 

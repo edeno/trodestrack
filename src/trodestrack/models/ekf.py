@@ -283,11 +283,6 @@ def initialize_state(
         ),
     )
 
-    # Heading: from LED vector if both available, else zero
-    led_vec = pos_led2 - pos_led1
-    heading_from_leds = jnp.arctan2(led_vec[1], led_vec[0])
-    heading_init = jnp.where(led1_valid & led2_valid, heading_from_leds, 0.0)
-
     # Velocity: estimate from first few valid frames
     def compute_velocity():
         """Compute initial velocity from first two valid observations."""
@@ -326,6 +321,13 @@ def initialize_state(
         jnp.zeros(2),
     )
 
+    # Heading: from LED vector if both available, else zero (with high uncertainty)
+    led_vec = pos_led2 - pos_led1
+    heading_from_leds = jnp.arctan2(led_vec[1], led_vec[0])
+    # Note: Velocity-based heading from 2 frames is very noisy (~170° error possible)
+    # Better to start at zero with high uncertainty and let filter learn from IMU
+    heading_init = jnp.where(led1_valid & led2_valid, heading_from_leds, 0.0)
+
     # Initial mean: [x, y, vx, vy, θ, b_gz, b_ax, b_ay]
     mean_init = jnp.array(
         [
@@ -341,6 +343,13 @@ def initialize_state(
     )
 
     # Initial covariance (diagonal)
+    # Use very high heading uncertainty if only single LED
+    heading_std = jnp.where(
+        led1_valid & led2_valid,
+        0.1,  # ~6° when we have dual LEDs
+        jnp.pi / 2,  # ~90° when no heading info (let IMU determine)
+    )
+
     cov_init = jnp.diag(
         jnp.array(
             [
@@ -348,7 +357,7 @@ def initialize_state(
                 0.01**2,  # y: 1 cm (0.01 m) std
                 0.1**2,  # vx: 10 cm/s (0.1 m/s) std
                 0.1**2,  # vy: 10 cm/s (0.1 m/s) std
-                0.1**2,  # θ: ~6 deg std
+                heading_std**2,  # θ: adaptive based on availability
                 0.05**2,  # b_gz: 0.05 rad/s std
                 0.1**2,  # b_ax: 0.1 m/s² std
                 0.1**2,  # b_ay: 0.1 m/s² std
