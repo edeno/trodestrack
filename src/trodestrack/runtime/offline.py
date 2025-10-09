@@ -106,7 +106,10 @@ def rts_smoother(
     dt_imu_mean = float(jnp.mean(jnp.diff(t_imu_jax)))
 
     # Precompute IMU indices for each camera interval (same as filter)
-    max_imu_per_frame = int(jnp.ceil((t_imu_jax[-1] - t_imu_jax[0]) / len(t_cam) * 2)) + 10
+    # Compute exact maximum per-frame count once (on CPU/NumPy) for robust padding
+    cuts = np.searchsorted(t_imu, t_cam)
+    counts = np.diff(np.r_[0, cuts])
+    max_imu_per_frame = int(counts.max())
 
     def compute_imu_index_arrays():
         """Build padded index arrays for IMU samples between camera frames."""
@@ -356,7 +359,10 @@ def sigma_point_smoother(
     dt_imu_mean = float(jnp.mean(jnp.diff(t_imu_jax)))
 
     # Precompute IMU indices
-    max_imu_per_frame = int(jnp.ceil((t_imu_jax[-1] - t_imu_jax[0]) / len(t_cam) * 2)) + 10
+    # Compute exact maximum per-frame count once (on CPU/NumPy) for robust padding
+    cuts = np.searchsorted(t_imu, t_cam)
+    counts = np.diff(np.r_[0, cuts])
+    max_imu_per_frame = int(counts.max())
 
     def compute_imu_index_arrays():
         """Build padded index arrays for IMU samples between camera frames."""

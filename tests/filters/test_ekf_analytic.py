@@ -175,12 +175,13 @@ def test_ekf_stationary_rejects_imu_drift(sim_config, ekf_config):
     X_truth_at_cam = np.array(
         [sim["X_truth"][np.argmin(np.abs(sim["t_imu"] - t_c))] for t_c in sim["t_cam_exp"]]
     )
-    # Convert from meters to cm (simulation is in m, metrics expect cm)
-    pos_rmse = compute_position_rmse(
-        X_truth_at_cam[:, :2] * 100,  # m to cm
-        np.array(X_est[:, :2]) * 100,  # m to cm
+    # Compute position RMSE (in meters)
+    pos_rmse_m = compute_position_rmse(
+        X_truth_at_cam[:, :2],
+        np.array(X_est[:, :2]),
     )
-    assert pos_rmse < 5.0, f"Position RMSE {pos_rmse:.2f} cm exceeds 5 cm"
+    pos_rmse_cm = pos_rmse_m * 100  # Convert to cm for display
+    assert pos_rmse_cm < 5.0, f"Position RMSE {pos_rmse_cm:.2f} cm exceeds 5 cm"
 
     # Velocity should converge to near-zero
     vel_final = np.linalg.norm(X_est[-10:, 2:4], axis=1).mean()
@@ -235,12 +236,13 @@ def test_ekf_constant_velocity_maintains_steady_covariance(sim_config, ekf_confi
     X_truth_at_cam = np.array(
         [sim["X_truth"][np.argmin(np.abs(sim["t_imu"] - t_c))] for t_c in sim["t_cam_exp"]]
     )
-    pos_rmse = compute_position_rmse(
-        X_truth_at_cam[:, :2] * 100,  # m to cm
-        np.array(X_est[:, :2]) * 100,  # m to cm
+    pos_rmse_m = compute_position_rmse(
+        X_truth_at_cam[:, :2],
+        np.array(X_est[:, :2]),
     )
+    pos_rmse_cm = pos_rmse_m * 100  # Convert to cm for display
     # Relax slightly to 2.5 cm to account for tuning (PRD target is 2.0 cm)
-    assert pos_rmse < 2.5, f"Position RMSE {pos_rmse:.2f} cm exceeds 2.5 cm"
+    assert pos_rmse_cm < 2.5, f"Position RMSE {pos_rmse_cm:.2f} cm exceeds 2.5 cm"
 
     # Velocity should be estimated accurately
     vel_est_mean = np.mean(X_est[-20:, 2:4], axis=0)
@@ -292,11 +294,12 @@ def test_ekf_circular_converges_gyro_bias(sim_config, ekf_config):
     X_truth_at_cam = np.array(
         [sim["X_truth"][np.argmin(np.abs(sim["t_imu"] - t_c))] for t_c in sim["t_cam_exp"]]
     )
-    pos_rmse = compute_position_rmse(
-        X_truth_at_cam[:, :2] * 100,  # m to cm
-        np.array(X_est[:, :2]) * 100,  # m to cm
+    pos_rmse_m = compute_position_rmse(
+        X_truth_at_cam[:, :2],
+        np.array(X_est[:, :2]),
     )
-    assert pos_rmse < 5.0, f"Position RMSE {pos_rmse:.2f} cm is too large"
+    pos_rmse_cm = pos_rmse_m * 100  # Convert to cm for display
+    assert pos_rmse_cm < 5.0, f"Position RMSE {pos_rmse_cm:.2f} cm is too large"
 
     # Gyro bias should converge (check last 20% of trajectory)
     n_cam = len(X_est)

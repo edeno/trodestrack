@@ -566,7 +566,10 @@ def unscented_kalman_filter(
     n_cam = len(t_cam)
 
     # Precompute IMU indices for each camera interval
-    max_imu_per_frame = int(jnp.ceil((t_imu_jax[-1] - t_imu_jax[0]) / len(t_cam) * 2)) + 10
+    # Compute exact maximum per-frame count once (on CPU/NumPy) for robust padding
+    cuts = np.searchsorted(t_imu, t_cam)
+    counts = np.diff(np.r_[0, cuts])
+    max_imu_per_frame = int(counts.max())
 
     # Compute mean IMU timestep for fallback
     dt_imu_mean = float(jnp.mean(jnp.diff(t_imu_jax)))

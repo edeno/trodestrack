@@ -622,8 +622,13 @@ def dynamics_function(
     Dynamics:
         θ_{k+1} = θ_k + (ω_z - b_gz) * dt
         v_{k+1} = v_k + R(θ) * (f - b_a) * dt - λ * v_k * dt
-        p_{k+1} = p_k + v_k * dt + 0.5 * a_k * dt²
+        p_{k+1} = p_k + v_k * dt + 0.5 * a_k * dt² - 0.5 * λ * v_k * dt²
         b_{k+1} = b_k  (biases are random walks with process noise)
+
+    The position update includes a second-order damping correction term
+    (-0.5 * λ * v * dt²) for consistency with the velocity damping term.
+    This correction is small at high sampling rates (200-400 Hz) but
+    improves accuracy at larger dt.
 
     Args:
         x: State (8,)
@@ -656,9 +661,10 @@ def dynamics_function(
     vel = jnp.array([vx, vy])
     vel_next = vel + accel_world * dt - damping * vel * dt
 
-    # Update position
+    # Update position (with consistent damping correction)
+    # Second-order damping term: -0.5 * λ * v * dt²
     pos = jnp.array([px, py])
-    pos_next = pos + vel * dt + 0.5 * accel_world * dt**2
+    pos_next = pos + vel * dt + 0.5 * accel_world * dt**2 - 0.5 * damping * vel * dt**2
 
     # Biases remain constant (process noise added separately in Q)
     return jnp.array(
@@ -1179,7 +1185,10 @@ def extended_kalman_filter(
 
     # Precompute IMU indices for each camera interval
     # For efficient scanning, we create a fixed-size index array with padding
-    max_imu_per_frame = int(jnp.ceil((t_imu_jax[-1] - t_imu_jax[0]) / len(t_cam) * 2)) + 10
+    # Compute exact maximum per-frame count once (on CPU/NumPy) for robust padding
+    cuts = np.searchsorted(t_imu, t_cam)
+    counts = np.diff(np.r_[0, cuts])
+    max_imu_per_frame = int(counts.max())
 
     # Compute mean IMU timestep for fallback when imu_idx == 0
     dt_imu_mean = float(jnp.mean(jnp.diff(t_imu_jax)))

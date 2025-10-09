@@ -13,6 +13,7 @@ consistency checks.
 from __future__ import annotations
 
 import numpy as np
+import scipy.linalg
 from numpy.typing import NDArray
 
 
@@ -250,10 +251,14 @@ def compute_nees(
         cov = covariances_est[i]
 
         # NEES = e^T * P^{-1} * e
-        # Use solve instead of inv for numerical stability
+        # Use Cholesky + triangular solves for stability on near-PSD matrices
         try:
-            cov_inv_error = np.linalg.solve(cov, error)
-            nees[i] = error @ cov_inv_error
+            # Compute L such that L @ L.T = cov
+            L = np.linalg.cholesky(cov)
+            # Solve L @ y = error for y
+            y = scipy.linalg.solve_triangular(L, error, lower=True)
+            # NEES = ||y||^2 = e^T @ inv(L @ L.T) @ e
+            nees[i] = y @ y
         except np.linalg.LinAlgError:
             # Singular covariance - filter is broken
             nees[i] = np.inf
@@ -315,10 +320,14 @@ def compute_nis(
         cov = innovation_covariances[i]
 
         # NIS = r^T * S^{-1} * r
-        # Use solve instead of inv for numerical stability
+        # Use Cholesky + triangular solves for stability on near-PSD matrices
         try:
-            cov_inv_innov = np.linalg.solve(cov, innov)
-            nis[i] = innov @ cov_inv_innov
+            # Compute L such that L @ L.T = cov
+            L = np.linalg.cholesky(cov)
+            # Solve L @ y = innov for y
+            y = scipy.linalg.solve_triangular(L, innov, lower=True)
+            # NIS = ||y||^2 = r^T @ inv(L @ L.T) @ r
+            nis[i] = y @ y
         except np.linalg.LinAlgError:
             # Singular covariance - filter is broken
             nis[i] = np.inf
@@ -420,8 +429,9 @@ def compute_residual_autocorrelation(
         var = np.var(residuals, ddof=1)
 
         if var == 0:
-            # Constant residuals (degenerate case)
-            return np.zeros(max_lag + 1)
+            # Constant residuals (degenerate case): ACF[0]=1, rest NaN
+            # This preserves identity at lag 0 but indicates "no information"
+            return np.concatenate(([1.0], np.full(max_lag, np.nan)))
 
         acf = np.zeros(max_lag + 1)
         for lag in range(max_lag + 1):
