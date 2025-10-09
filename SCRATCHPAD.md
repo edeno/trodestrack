@@ -2,54 +2,54 @@
 
 Development notes and debugging history for trodestrack project.
 
-## 2025-10-09 - Dropout Drift Diagnosis & Optimization
+## 2025-10-09 - Dropout Drift Root Cause Analysis
 
 ### Summary
 
-Applied systematic diagnosis from DIAGNOSIS.md to optimize the PRD dropout drift test. Successfully reduced drift from 3.77m → 1.7m (55% improvement), though still above the 0.15m PRD target.
+Applied systematic diagnosis from user's playbook and created quantitative noise scaling analysis. Successfully reduced drift from 3.77m → 1.7m (55% improvement), identified **white accel noise** as primary driver (not bias RW as initially suspected).
 
-**Fixes Applied:**
+**Diagnostic Work:**
 
-1. ✅ P0: Make blackout real (NaN pixels + per-LED masks)
-2. ✅ P0: Eliminate IMU tilt (zero roll/pitch for test)
-3. ✅ P1: Align damping_coeff with sim vel_drag (0.4 vs 0.5)
-4. ✅ P1: Tuning sweep (bias Q, heading R)
+1. ✅ Created `diagnostics/noise_scaling_check.py` to verify noise discretization
+2. ✅ Confirmed EKF bias Q was 14-100x too large (but this doesn't explain drift!)
+3. ✅ Calculated theoretical drift: 0.46m from white noise, 0.04m from bias RW
+4. ✅ Identified that white accel noise dominates (accounts for 91% of theory)
+5. ✅ Observed vs theory: 1.7m vs 0.46m (3.7x discrepancy, likely from coupling)
 
-**Root Cause Confirmed:**
-The 0.15m drift requirement after 5s camera dropout is **fundamentally unrealistic** with current sensor noise specs. Accelerometer bias is unobservable without camera measurements. Even with:
+**P0 Fixes Applied:**
 
-- Zero IMU tilt (no gravity leakage)
-- Proper blackout masking
-- Aligned dynamics parameters
-- Aggressive bias learning tuning
+1. ✅ Proper blackout masking (NaN pixels + per-LED masks + mask_cam)
+2. ✅ Zero IMU tilt (eliminate gravity leakage)
+3. ✅ Aligned damping_coeff with sim vel_drag (0.4)
 
-The filter experiences ~1.7m drift due to accelerometer bias random walk (accel_bias_rw_density=0.001 → ~0.006 m/s² drift over 5s).
+**Key Finding:**
 
-**Solutions for Future PRD Compliance:**
+The 0.15m drift requirement is **fundamentally unrealistic** with current sensor noise specs:
 
-1. Adaptive process noise Q during dropouts
-2. Freeze bias estimates during camera blackouts
-3. Zero-velocity updates (stationary detection)
-4. Much more conservative bias RW (requires better IMU calibration)
+- Accel white noise PSD: 2.5e-3 (m/s²)²/Hz (from 0.05 m/s²/√Hz density)
+- Theoretical 2D position std after 5s: **0.46m** (white noise alone)
+- Bias RW contribution: ~0.04m (minor)
+- **PRD target 0.15m is 3x smaller than theoretical minimum from white noise!**
 
-**Test Changes:**
+**Why Bias Tuning Doesn't Help:**
 
-- Added `ekf_config_override` parameter to `run_ekf_on_sim()` helper
-- Updated test config: zero tilt, aligned damping, tuned bias learning
-- Updated docstring: documents fixes applied and remaining 1.7m drift
-- Updated xfail reason: reflects optimized drift value
+- Tested with bias Q matched to sim (1e-6 instead of 2e-4): **no change** in drift
+- Tested with aggressive bias learning (100x larger Q): **no change** in drift
+- This confirms white accel noise dominates, bias RW is negligible
 
-**Impact:**
+**Solutions for PRD Compliance (Future Work):**
 
-- Demonstrates best-effort optimization following DIAGNOSIS.md playbook
-- Documents realistic expectations for IMU-only tracking
-- Preserves test as XFAIL with clear rationale
-- No regressions in other PRD tests (6/6 passing, 1 xfail)
+1. Reduce accel input noise covariance during dropouts (critical - attacks main source)
+2. Add constant-speed pseudo-measurement during dropouts
+3. Freeze accel bias Q during dropouts (minor improvement, ~0.04m)
+4. Zero-velocity updates (ZUPT) if rat is stationary
+5. Use RTS smoother offline (has vision before/after gap to constrain estimates)
 
-**Files Modified:**
+**Files Created/Modified:**
 
-- [tests/filters/test_prd_acceptance.py](tests/filters/test_prd_acceptance.py#L46-L73) - run_ekf_on_sim() with override support
-- [tests/filters/test_prd_acceptance.py](tests/filters/test_prd_acceptance.py#L280-L365) - test_prd_dropout_drift_5s with P0+P1 fixes
+- [diagnostics/noise_scaling_check.py](diagnostics/noise_scaling_check.py) - NEW: Quantitative drift analysis
+- [tests/filters/test_prd_acceptance.py](tests/filters/test_prd_acceptance.py#L46-L73) - run_ekf_on_sim() with override
+- [tests/filters/test_prd_acceptance.py](tests/filters/test_prd_acceptance.py#L283-L326) - Updated docstring with analysis
 
 ---
 

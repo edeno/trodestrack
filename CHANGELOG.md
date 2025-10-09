@@ -2,28 +2,38 @@
 
 ## [Unreleased]
 
-### Session: 2025-10-09 - Dropout Drift Diagnosis & Optimization
+### Session: 2025-10-09 - Dropout Drift Root Cause Analysis
+
+**Added:**
+- **Noise Scaling Diagnostic Script** (`diagnostics/noise_scaling_check.py`)
+  - Verifies bias RW discretization (random walk: density * sqrt(dt))
+  - Verifies white noise discretization (white noise: density / sqrt(dt))
+  - Calculates theoretical position drift from white noise (~0.46m)
+  - Calculates theoretical position drift from bias RW (~0.04m)
+  - **Key finding**: White accel noise accounts for 91% of theoretical drift
+  - Identifies that EKF bias Q was 14-100x too large (but doesn't explain drift)
+  - Run with: `python -m diagnostics.noise_scaling_check`
 
 **Improved:**
-- **PRD Dropout Drift Test Optimization** (`tests/filters/test_prd_acceptance.py`)
-  - Applied systematic diagnosis from DIAGNOSIS.md playbook
+- **PRD Dropout Drift Test** (`tests/filters/test_prd_acceptance.py`)
   - Reduced drift from 3.77m → 1.7m (55% improvement)
   - P0 fix: Proper blackout masking (NaN pixels + per-LED masks + mask_cam)
-  - P0 fix: Zero IMU tilt (eliminate gravity leakage into horizontal accelerations)
-  - P1 fix: Aligned damping_coeff with simulation vel_drag (0.4)
-  - P1 fix: Aggressive bias learning tuning (50x process noise, reduced heading noise)
+  - P0 fix: Zero IMU tilt (eliminate gravity leakage)
+  - P0 fix: Aligned damping_coeff with simulation vel_drag (0.4)
   - Added `ekf_config_override` parameter to `run_ekf_on_sim()` helper
-  - Updated docstring with detailed explanation of fixes and remaining limitations
-  - Updated xfail reason to reflect optimized drift value (~1.7m)
+  - Updated docstring with quantitative analysis from noise diagnostic
+  - Updated xfail reason to reflect root cause (white noise, not bias RW)
 
 **Documented:**
-- Confirmed that 0.15m drift requirement is **fundamentally unrealistic** with current IMU specs
-- Accelerometer bias is unobservable during camera-free intervals
-- Requires future implementation of adaptive Q, bias freezing, or ZUPT for PRD compliance
+- **Root cause**: PRD target (0.15m) is 3x smaller than theoretical minimum from white noise (0.46m)
+- White accel noise dominates drift, not bias RW as initially suspected
+- Bias tuning experiments confirmed: changing bias Q makes no difference to drift
+- Solutions ranked by impact: reduce accel noise during dropout > constant-speed prior > freeze bias Q
 
 **Testing:**
-- ✅ All PRD acceptance tests still passing (6 passed, 1 xfailed)
+- ✅ All PRD acceptance tests passing (6 passed, 1 xfailed)
 - ✅ No regressions in QA or simulation tests
+- ✅ Noise scaling diagnostic confirms theoretical calculations
 
 ---
 

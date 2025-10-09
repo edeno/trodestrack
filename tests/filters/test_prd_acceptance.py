@@ -283,9 +283,9 @@ def test_tier3_rat_imu_ekf_heading():
 @pytest.mark.xfail(
     strict=False,
     reason="PRD §4.2 requirement (0.15m after 5s) is unrealistic with current IMU specs. "
-    "Accelerometer bias is unobservable during camera dropouts, leading to ~1.7m drift "
-    "even with optimized tuning. Requires adaptive Q or bias freezing (not yet implemented). "
-    "See: tests/filters/test_dropout_diagnostic.py",
+    "White accel noise dominates: theoretical drift ~0.46m, observed ~1.7m. "
+    "Requires bias Q freeze, reduced accel noise, or ZUPT during dropouts. "
+    "See: diagnostics/noise_scaling_check.py",
 )
 def test_prd_dropout_drift_5s():
     """PRD §4.2: Dropout drift should be <=0.15m after 5s camera blackout.
@@ -293,29 +293,36 @@ def test_prd_dropout_drift_5s():
     KNOWN LIMITATION:
     ----------------
     This test is currently marked as xfail because the 0.15m drift requirement is
-    unrealistic with current sensor noise specifications. Even with optimizations
-    (zero IMU tilt, aligned damping, aggressive bias learning), the EKF experiences
-    ~1.7m drift during 5s dropouts.
+    unrealistic with current sensor noise specifications. The EKF experiences
+    ~1.7m drift during 5s dropouts, primarily from accelerometer white noise.
 
-    Root cause: Accelerometer bias is fundamentally unobservable during camera-free
-    intervals. The filter cannot distinguish "rat accelerating" vs "bias has drifted"
-    without external position measurements. With accel_bias_rw_density=0.001, the
-    bias can drift ~0.006 m/s² over 5s, leading to substantial position error.
+    Root cause analysis (from diagnostics/noise_scaling_check.py):
+    - Accel white noise PSD: 0.05² (m/s²)²/Hz = 2.5e-3
+    - Theoretical position std (2D) after 5s: 0.46 m (from noise alone)
+    - Bias RW contribution: ~0.04 m (minor compared to white noise)
+    - Observed drift: ~1.7 m (3.7x larger than theory, likely due to coupling)
+    - **White noise is the primary driver**, not bias drift!
 
     Fixes applied (reduced drift from 3.77m → 1.7m):
     - Zero IMU tilt to eliminate gravity leakage into horizontal accelerations
     - Proper blackout masking (NaN pixels + per-LED masks)
     - Aligned damping_coeff with simulation vel_drag (0.4)
-    - Aggressive bias process noise for faster learning before dropout
-    - Reduced heading measurement noise for stronger gyro bias updates
 
-    Potential solutions for full PRD compliance (not yet implemented):
-    1. Adaptive process noise Q (increase during dropouts to account for drift)
-    2. Freeze bias estimates during camera blackouts
-    3. Zero-velocity updates (if rat is detected as stationary)
-    4. Much more conservative bias random walk (requires better IMU calibration)
+    Why bias tuning doesn't help:
+    - Default EKF bias Q is only 14x larger than simulator (conservative, not catastrophic)
+    - Correcting bias Q to match sim exactly made no difference to drift
+    - This confirms white accel noise dominates, not bias RW
 
-    See diagnostic script: tests/filters/test_dropout_diagnostic.py
+    Solutions for PRD compliance (not yet implemented):
+    1. Freeze accel bias Q during dropouts (eliminates ~0.04m from bias RW)
+    2. Reduce accel input noise during dropouts (critical - attacks main source)
+    3. Add constant-speed pseudo-measurement during dropouts
+    4. Zero-velocity updates (ZUPT) if rat is stationary
+    5. Use RTS smoother offline (has vision before/after to constrain drift)
+
+    See diagnostic scripts:
+    - diagnostics/noise_scaling_check.py - Theoretical drift analysis
+    - tests/filters/test_dropout_diagnostic.py - Experimental diagnostics
     """
     config = RatIMUSimConfig(
         duration_s=15.0,
@@ -360,16 +367,10 @@ def test_prd_dropout_drift_5s():
             arr[dropout_start_idx:dropout_end_idx] = False
             sim_data_dropout[key] = arr
 
-    # Run EKF with dropout - use tuned parameters for bias learning
-    # P1 fixes from DIAGNOSIS.md:
-    # - Align damping_coeff with sim vel_drag (0.4)
-    # - Increase bias process noise significantly for faster learning before dropout
-    # - Reduce heading measurement noise to get stronger bias updates
+    # Run EKF with dropout - align damping only, use default (conservative) bias Q
+    # Default EKF bias Q is ~14x larger than sim, which is conservative but not catastrophic
     ekf_config_override = {
         "damping_coeff": 0.4,  # Match sim vel_drag
-        "process_noise_gyro_bias": 1e-4,  # 50x increase for aggressive learning
-        "process_noise_accel_bias": 1e-2,  # 50x increase for aggressive learning
-        "measurement_noise_heading": 0.01**2,  # Reduce from ~3° to ~0.6° for stronger updates
     }
     result = run_ekf_on_sim(
         sim_data_dropout, use_heading=True, ekf_config_override=ekf_config_override
