@@ -2,6 +2,44 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-09 - P0.4: State-Dimension Generalization in Smoothers
+
+**Changed:**
+- **Runtime Smoother Infrastructure** (`src/trodestrack/runtime/offline.py`)
+  - Added `build_Q_rate(config: EKFConfig | UKFConfig, n: int) -> jnp.ndarray` helper function
+  - Modified `rts_smoother()` to derive state dimension from `filtered_means.shape[1]`
+  - Modified `sigma_point_smoother()` to derive state dimension from data
+  - Replaced hardcoded 8×8 Q_rate matrices with dynamic `build_Q_rate(config, n)` calls
+  - Replaced hardcoded `jnp.eye(8)` with dimension-aware `jnp.eye(n)`
+  - Updated `SmootherResult` docstring: `(N_cam, 8)` → `(N_cam, n)`
+  - Updated `predict_between_frames_sigma()` docstring: `(8,)` → `(n,)`
+
+**Added:**
+- **State Dimension Test Suite** (`tests/runtime/test_offline_state_dim.py`)
+  - 3 unit tests for `build_Q_rate()` function
+  - 10 integration tests validating dimensions 4, 6, 8, 10, 12
+  - Tests for both RTS and sigma-point smoothers
+  - Mock dynamics to isolate smoother dimension handling
+
+**Testing:**
+- ✅ All 13 new tests passing (14.45s total runtime)
+- ✅ No regressions: 7/7 existing smoother tests still pass
+- ✅ Validates backward compatibility (8D behavior unchanged)
+
+**Impact:**
+- **Future 3D Extensions:** Smoothers now support 12D state (x,y,z, vx,vy,vz, roll,pitch,yaw, biases) without refactoring
+- **Ablation Studies:** Enables reduced-state experiments (position-only, no bias, etc.)
+- **Extensibility:** PRD Section 15 (3D Roadmap) unblocked
+- **Merge Gate:** P0.4 blocker resolved (REVIEW.md)
+
+**Breaking Changes:**
+- None (fully backward compatible)
+
+**Known Limitations:**
+- Non-8D states use uniform `process_noise_pos` for all dimensions (TODO comment added for future 3D noise structure)
+
+---
+
 ### Session: 2025-10-09 - QA Metrics Test Suite
 
 **Added:**

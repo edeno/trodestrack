@@ -2,6 +2,46 @@
 
 Development notes and debugging history for trodestrack project.
 
+## 2025-10-09 - P0.4 Completed: State-Dimension Generalization in Smoothers
+
+### Summary
+Completed P0.4 blocker from REVIEW.md: removed hardcoded state dimensions from offline smoothers.
+
+**Implementation (commit TBD):**
+- ✅ Added `build_Q_rate(config, n)` helper function for dynamic Q_rate construction
+- ✅ Modified `rts_smoother()` to derive `n = filtered_means.shape[1]`
+- ✅ Modified `sigma_point_smoother()` to derive `n = filtered_means.shape[1]`
+- ✅ Replaced hardcoded 8×8 Q_rate matrices with `build_Q_rate(config, n)` calls
+- ✅ Replaced hardcoded `jnp.eye(8)` with `jnp.eye(n)`
+- ✅ Updated SmootherResult docstring to reflect dimension n
+
+**Test Coverage:**
+- ✅ 13 tests passing (3 unit tests for `build_Q_rate()` + 10 integration tests)
+- ✅ Tests validate dimensions 4, 6, 8, 10, 12 for both RTS and sigma-point smoothers
+- ✅ No regressions (7/7 existing smoother tests still pass)
+- ✅ Code reviewed and approved after addressing docstring issue
+
+**Key Design Decisions:**
+1. **Dimension Derivation:** `n = filtered_means.shape[1]` - derive from data, not config
+2. **Q_rate Fallback:** For non-8D states, use uniform `process_noise_pos` with TODO for future 3D
+3. **Backward Compatibility:** 8D behavior unchanged (structured Q_rate preserved)
+
+**Files Changed:**
+- [src/trodestrack/runtime/offline.py](src/trodestrack/runtime/offline.py) - Added build_Q_rate(), updated smoothers
+- [tests/runtime/test_offline_state_dim.py](tests/runtime/test_offline_state_dim.py) - New test suite (13 tests)
+
+**Impact:**
+- Enables future 3D extensions (12D state) without smoother refactoring
+- Supports ablation studies with reduced states (position-only, no bias, etc.)
+- Maintains PRD reproducibility requirements
+
+**Next P0 Blockers:**
+- P0.5: Linalg stability with Joseph form
+- P0.6: Fix config mutation (LED spacing inference)
+- P0.7: Fix test defects and flakes
+
+---
+
 ## 2025-10-09 - P0.1-P0.3 Completed (REVIEW.md Priority Fixes)
 
 ### Summary

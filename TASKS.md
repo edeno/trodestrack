@@ -1,5 +1,16 @@
 # TASKS.md
 
+**NOTE:** Currently working through REVIEW.md P0 blockers before resuming milestone tasks.
+- ✅ P0.1: SI Unit Standardization (commit 99c70cb)
+- ✅ P0.2: Generalized χ² Envelopes (commit ab0c75d)
+- ✅ P0.3: UKF Heading Measurement (commit cb5fa85)
+- ✅ **P0.4: State-Dimension Generalization in Smoothers (this session)**
+- [ ] P0.5: Linalg Stability & Joseph Form
+- [ ] P0.6: Fix Config Mutation (LED spacing inference)
+- [ ] P0.7: Fix Test Defects & Flakes
+
+---
+
 ## 🧱 Milestone 1 — Simulation Foundation (Weeks 1–2)
 
 **Goal:** Establish and validate the simulation suite (Tiers 0–3) as the test bed for all filter work.

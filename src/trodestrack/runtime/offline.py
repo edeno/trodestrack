@@ -42,14 +42,71 @@ class SmootherResult(NamedTuple):
     """Smoother result (both EKF and UKF).
 
     Attributes:
-        smoothed_means: Smoothed state means at camera times (N_cam, 8)
-        smoothed_covariances: Smoothed covariances at camera times (N_cam, 8, 8)
+        smoothed_means: Smoothed state means at camera times (N_cam, n)
+        smoothed_covariances: Smoothed covariances at camera times (N_cam, n, n)
         marginal_loglik: Marginal log-likelihood from filter
+
+    where n is the state dimension (8 for standard 2D, 12 for future 3D, etc.)
     """
 
-    smoothed_means: jnp.ndarray  # (N_cam, 8)
-    smoothed_covariances: jnp.ndarray  # (N_cam, 8, 8)
+    smoothed_means: jnp.ndarray  # (N_cam, n)
+    smoothed_covariances: jnp.ndarray  # (N_cam, n, n)
     marginal_loglik: float
+
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+
+def build_Q_rate(config: EKFConfig | UKFConfig, n: int) -> jnp.ndarray:
+    """Build process noise rate matrix Q_rate for arbitrary state dimension.
+
+    For standard 8D state: [x, y, vx, vy, θ, b_gz, b_ax, b_ay]
+    For future 3D state: [x, y, z, vx, vy, vz, roll, pitch, yaw, biases...]
+
+    Args:
+        config: EKF or UKF configuration containing process noise parameters
+        n: State dimension
+
+    Returns:
+        Diagonal Q_rate matrix (n, n)
+
+    Note:
+        This function maps config noise parameters to state dimensions.
+        Standard mapping for 8D state:
+            - [0:2] = position (x, y) → process_noise_pos
+            - [2:4] = velocity (vx, vy) → process_noise_vel
+            - [4] = heading (θ) → process_noise_heading
+            - [5] = gyro bias (b_gz) → process_noise_gyro_bias
+            - [6:8] = accel bias (b_ax, b_ay) → process_noise_accel_bias
+
+        For non-standard dimensions, falls back to uniform noise = process_noise_pos.
+    """
+    # For standard 8D state, use the known mapping
+    if n == 8:
+        return jnp.diag(
+            jnp.array(
+                [
+                    config.process_noise_pos,  # x
+                    config.process_noise_pos,  # y
+                    config.process_noise_vel,  # vx
+                    config.process_noise_vel,  # vy
+                    config.process_noise_heading,  # θ
+                    config.process_noise_gyro_bias,  # b_gz
+                    config.process_noise_accel_bias,  # b_ax
+                    config.process_noise_accel_bias,  # b_ay
+                ]
+            )
+        )
+    else:
+        # For non-standard dimensions, use uniform noise
+        # TODO(P1): For future 3D/custom states, accept explicit noise vector
+        # or implement convention (first n/2 = position, second n/2 = velocity, etc.)
+        # Current fallback is conservative but may be too tight for velocity/angular states.
+        # Using process_noise_pos (0.02 m²/s) for ALL dimensions makes velocity states
+        # ~100x less noisy than they should be (process_noise_vel = 2.0 (m/s)²/s).
+        return jnp.diag(jnp.full(n, config.process_noise_pos))
 
 
 # =============================================================================
@@ -91,16 +148,18 @@ def rts_smoother(
     Note:
         The smoother runs backward in time, starting from the last filtered
         estimate (which equals the last smoothed estimate by definition).
+        State dimension is derived from filter_result.filtered_means.shape[1].
     """
     # Convert to JAX arrays
     t_imu_jax = jnp.array(t_imu)
     U_imu_jax = jnp.array(U_imu)
     t_cam_jax = jnp.array(t_cam)
 
-    # Extract filter outputs
-    filtered_means = filter_result.filtered_means  # (N_cam, 8)
-    filtered_covs = filter_result.filtered_covariances  # (N_cam, 8, 8)
+    # Extract filter outputs and derive state dimension from data
+    filtered_means = filter_result.filtered_means  # (N_cam, n)
+    filtered_covs = filter_result.filtered_covariances  # (N_cam, n, n)
     n_cam = len(t_cam)
+    n = filtered_means.shape[1]  # Derive state dimension from data
 
     # Compute mean IMU dt for fallback
     dt_imu_mean = float(jnp.mean(jnp.diff(t_imu_jax)))
@@ -145,21 +204,8 @@ def rts_smoother(
         # Get IMU indices for interval [t_idx, t_idx+1)
         imu_indices = imu_index_arrays[t_idx + 1]
 
-        # Process noise rates
-        Q_rate = jnp.diag(
-            jnp.array(
-                [
-                    ekf_config.process_noise_pos,
-                    ekf_config.process_noise_pos,
-                    ekf_config.process_noise_vel,
-                    ekf_config.process_noise_vel,
-                    ekf_config.process_noise_heading,
-                    ekf_config.process_noise_gyro_bias,
-                    ekf_config.process_noise_accel_bias,
-                    ekf_config.process_noise_accel_bias,
-                ]
-            )
-        )
+        # Process noise rates (derived from state dimension)
+        Q_rate = build_Q_rate(ekf_config, n)
 
         def propagate_one_imu(carry, imu_idx):
             """Propagate through one IMU sample."""
@@ -201,8 +247,8 @@ def rts_smoother(
             )
 
         # Scan through all IMU samples in this interval
-        # Initialize with identity Jacobian
-        F_init = jnp.eye(8)
+        # Initialize with identity Jacobian (dimension n)
+        F_init = jnp.eye(n)
         (x_pred, P_pred, F_total), _ = lax.scan(propagate_one_imu, (x_k, P_k, F_init), imu_indices)
 
         # Compute smoother gain: G = P_k @ F_total^T @ P_pred^{-1}
@@ -330,19 +376,20 @@ def sigma_point_smoother(
     Note:
         Uses unscented transform for prediction to compute cross-covariance
         between filtered[k] and predicted[k+1], which is needed for the gain.
+        State dimension is derived from filter_result.filtered_means.shape[1].
     """
     # Convert to JAX arrays
     t_imu_jax = jnp.array(t_imu)
     U_imu_jax = jnp.array(U_imu)
     t_cam_jax = jnp.array(t_cam)
 
-    # Extract filter outputs
-    filtered_means = filter_result.filtered_means  # (N_cam, 8)
-    filtered_covs = filter_result.filtered_covariances  # (N_cam, 8, 8)
+    # Extract filter outputs and derive state dimension from data
+    filtered_means = filter_result.filtered_means  # (N_cam, n)
+    filtered_covs = filter_result.filtered_covariances  # (N_cam, n, n)
     n_cam = len(t_cam)
+    n = filtered_means.shape[1]  # Derive state dimension from data
 
-    # Compute UKF sigma-point weights
-    n = 8  # state dimension
+    # Compute UKF sigma-point weights (dimension-dependent)
     alpha = ukf_config.alpha
     beta = ukf_config.beta
     kappa = ukf_config.kappa
@@ -384,21 +431,8 @@ def sigma_point_smoother(
     def f(x, u, dt):
         return dynamics_function(x, u, dt, ukf_config.damping_coeff)
 
-    # Process noise rates
-    Q_rate = jnp.diag(
-        jnp.array(
-            [
-                ukf_config.process_noise_pos,
-                ukf_config.process_noise_pos,
-                ukf_config.process_noise_vel,
-                ukf_config.process_noise_vel,
-                ukf_config.process_noise_heading,
-                ukf_config.process_noise_gyro_bias,
-                ukf_config.process_noise_accel_bias,
-                ukf_config.process_noise_accel_bias,
-            ]
-        )
-    )
+    # Process noise rates (derived from state dimension)
+    Q_rate = build_Q_rate(ukf_config, n)
 
     def predict_between_frames_sigma(
         t_idx: int, x_k: jnp.ndarray, P_k: jnp.ndarray
@@ -406,9 +440,9 @@ def sigma_point_smoother(
         """Predict from frame t_idx to t_idx+1 using sigma points.
 
         Returns:
-            m_pred: Predicted mean (8,)
-            P_pred: Predicted covariance (8, 8)
-            S_cross: Cross-covariance P(x_k, x_{k+1}) (8, 8)
+            m_pred: Predicted mean (n,)
+            P_pred: Predicted covariance (n, n)
+            S_cross: Cross-covariance P(x_k, x_{k+1}) (n, n)
         """
         imu_indices = imu_index_arrays[t_idx + 1]
 
