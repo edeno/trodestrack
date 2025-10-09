@@ -116,6 +116,14 @@ class RatIMUSimConfig:
         use_second_led: Enable second LED for heading measurements
         led2_offset_body: Position of LED2 in body frame [x, y] meters
         led_swap_prob: Probability of swapping LED1/LED2 labels per visible frame (0-1)
+        led_wall_reflection_prob: Probability of LED reflection artifacts near walls (0-1)
+            Example: 0.3 = 30% chance of mirrored detection when near wall
+            Range: [0, 1]
+            Units: probability (0 = disabled, 1 = always reflect when near wall)
+        led_wall_reflection_distance: Distance threshold from wall (m) within which reflections can occur
+            Example: 0.2 = reflections possible within 20cm of arena boundaries
+            Range: [0, inf), typically 0.1-0.5m
+            Units: meters (distance from rat center to nearest wall)
 
     IMU Noise (densities per √Hz for white noise):
         gyro_noise_density: Gyroscope white noise (rad/s / √Hz)
@@ -188,6 +196,12 @@ class RatIMUSimConfig:
         default_factory=lambda: np.array([0.02, 0.0])
     )  # Front LED (2cm ahead of center)
     led_swap_prob: float = 0.0  # Probability of swapping LED1/LED2 labels per frame
+    led_wall_reflection_prob: float = (
+        0.0  # Probability of LED reflection artifacts near walls (0-1)
+    )
+    led_wall_reflection_distance: float = (
+        0.2  # Distance from wall (m) within which reflections can occur
+    )
 
     # IMU white noise densities (per √Hz)
     gyro_noise_density: float = np.deg2rad(0.03)  # rad/s / √Hz
@@ -278,6 +292,18 @@ class RatIMUSimConfig:
             raise ValueError(
                 f"LED swap probability must be in [0, 1], got {self.led_swap_prob}.\n"
                 f"Example: led_swap_prob=0.05 (5% swap rate)"
+            )
+
+        if not 0 <= self.led_wall_reflection_prob <= 1:
+            raise ValueError(
+                f"LED wall reflection probability must be in [0, 1], got {self.led_wall_reflection_prob}.\n"
+                f"Example: led_wall_reflection_prob=0.3 (30% reflection rate near walls)"
+            )
+
+        if self.led_wall_reflection_distance < 0:
+            raise ValueError(
+                f"LED wall reflection distance must be non-negative, got {self.led_wall_reflection_distance}m.\n"
+                f"Example: led_wall_reflection_distance=0.2 (20cm threshold)"
             )
 
         if self.use_confidence:
@@ -430,6 +456,10 @@ def simulate_rat_imu(config: Optional[RatIMUSimConfig] = None, seed: int = 0) ->
         config = RatIMUSimConfig()
 
     rng = np.random.default_rng(seed)
+
+    # Type assertions for mypy (config.__post_init__ ensures these are not None)
+    assert config.drag_fwd is not None, "drag_fwd should be set by __post_init__"
+    assert config.drag_lat is not None, "drag_lat should be set by __post_init__"
 
     # Time bases
     dt_imu = 1.0 / config.fs_imu
@@ -743,6 +773,76 @@ def simulate_rat_imu(config: Optional[RatIMUSimConfig] = None, seed: int = 0) ->
     Z_cam_led1[~mask_led1] = np.nan
     Z_cam_led2[~mask_led2] = np.nan
 
+    # Simulate LED wall reflections (artifacts near arena boundaries)
+    # Physical basis: LED light reflects off arena walls (e.g., black plexiglass)
+    # creating spurious detections at mirrored positions. Common in SpikeGadgets
+    # setups with reflective arena materials. Detection probability increases near
+    # walls (within led_wall_reflection_distance).
+    led_reflection_applied = np.zeros(T_cam, dtype=bool)
+
+    if config.led_wall_reflection_prob > 0 and config.led_wall_reflection_distance > 0:
+        # Compute distance from rat center to nearest wall at each camera frame
+        dist_to_left = px_interp
+        dist_to_right = config.arena_w - px_interp
+        dist_to_bottom = py_interp
+        dist_to_top = config.arena_h - py_interp
+        dist_to_nearest_wall = np.minimum(
+            np.minimum(dist_to_left, dist_to_right),
+            np.minimum(dist_to_bottom, dist_to_top),
+        )
+
+        # Candidates: near wall and at least one LED visible
+        near_wall = dist_to_nearest_wall <= config.led_wall_reflection_distance
+        reflection_candidates = near_wall & (mask_led1 | mask_led2)
+        candidate_indices = np.where(reflection_candidates)[0]
+
+        if len(candidate_indices) > 0:
+            # Randomly select frames to apply reflection based on probability
+            n_reflections = int(np.round(len(candidate_indices) * config.led_wall_reflection_prob))
+            if n_reflections > 0:
+                reflection_indices = rng.choice(
+                    candidate_indices, size=n_reflections, replace=False
+                )
+                led_reflection_applied[reflection_indices] = True
+
+                # Apply reflection for each selected frame
+                for idx in reflection_indices:
+                    # Determine which wall is closest (using precomputed distances)
+                    dists = [
+                        (dist_to_left[idx], "left"),
+                        (dist_to_right[idx], "right"),
+                        (dist_to_bottom[idx], "bottom"),
+                        (dist_to_top[idx], "top"),
+                    ]
+                    _, closest_wall = min(dists)
+
+                    # Mirror LEDs across the closest wall
+                    # Reflection formula: x' = 2*wall_pos - x
+                    if closest_wall == "left":
+                        # Mirror across x = 0: x → 2*0 - x = -x
+                        if mask_led1[idx]:
+                            Z_cam_led1[idx, 0] = -Z_cam_led1[idx, 0]
+                        if mask_led2[idx]:
+                            Z_cam_led2[idx, 0] = -Z_cam_led2[idx, 0]
+                    elif closest_wall == "right":
+                        # Mirror across x = arena_w: x → 2*arena_w - x
+                        if mask_led1[idx]:
+                            Z_cam_led1[idx, 0] = 2 * config.arena_w - Z_cam_led1[idx, 0]
+                        if mask_led2[idx]:
+                            Z_cam_led2[idx, 0] = 2 * config.arena_w - Z_cam_led2[idx, 0]
+                    elif closest_wall == "bottom":
+                        # Mirror across y = 0: y → 2*0 - y = -y
+                        if mask_led1[idx]:
+                            Z_cam_led1[idx, 1] = -Z_cam_led1[idx, 1]
+                        if mask_led2[idx]:
+                            Z_cam_led2[idx, 1] = -Z_cam_led2[idx, 1]
+                    elif closest_wall == "top":
+                        # Mirror across y = arena_h: y → 2*arena_h - y
+                        if mask_led1[idx]:
+                            Z_cam_led1[idx, 1] = 2 * config.arena_h - Z_cam_led1[idx, 1]
+                        if mask_led2[idx]:
+                            Z_cam_led2[idx, 1] = 2 * config.arena_h - Z_cam_led2[idx, 1]
+
     # Simulate LED swaps (mislabeling front/back during close passes, reflections, etc.)
     # Only swap when both LEDs are visible (otherwise swap doesn't make sense)
     swap_applied = np.zeros(T_cam, dtype=bool)  # Track which frames had swaps
@@ -788,6 +888,7 @@ def simulate_rat_imu(config: Optional[RatIMUSimConfig] = None, seed: int = 0) ->
         "led1_truth_cam": led1_truth,  # Ground truth LED1 positions (before swaps/noise)
         "led2_truth_cam": led2_truth,  # Ground truth LED2 positions (before swaps/noise)
         "swap_applied": swap_applied,  # Boolean mask: True where LED labels were swapped
+        "led_reflection_applied": led_reflection_applied,  # Boolean mask: True where wall reflections were applied
         "confidence_led1": confidence_led1,
         "confidence_led2": confidence_led2,
         "mask_cam": mask_cam,  # Union mask (backward compatibility)

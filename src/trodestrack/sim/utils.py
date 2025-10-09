@@ -78,6 +78,14 @@ class SimOut(TypedDict):
     mask_led1: np.ndarray
     mask_led2: np.ndarray
 
+    # Ground truth LED positions (before noise/swaps/reflections)
+    led1_truth_cam: np.ndarray
+    led2_truth_cam: np.ndarray
+
+    # Artifact tracking
+    swap_applied: np.ndarray
+    led_reflection_applied: np.ndarray
+
     # Metadata
     config: Any  # Union of all config types
 

@@ -128,7 +128,12 @@
   - Body-frame drag: `drag_fwd` (streamlined) vs `drag_lat` (sideways)
   - Backward compatible with legacy `vel_drag` parameter
   - Tests added in `tests/sim/test_anisotropic_drag.py` (13 tests passing)
-- [ ] Add optional wall reflection probability for LED artifacts
+- [x] Add optional wall reflection probability for LED artifacts
+  - Implemented in `rat_imu.py` (lines 191-192, 766-834)
+  - Config parameters: `led_wall_reflection_prob` and `led_wall_reflection_distance`
+  - Reflections mirror LEDs across nearest wall when rat is near boundaries
+  - Tests added in `tests/sim/test_led_wall_reflections.py` (16 tests passing)
+  - New fields in SimOut: `led_reflection_applied`, `led1_truth_cam`, `led2_truth_cam`, `swap_applied`
 - [ ] Add persistent LED swaps (event-based, not per-frame)
 
 ### ⚙️ Filter Robustness

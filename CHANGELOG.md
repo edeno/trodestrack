@@ -2,6 +2,47 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-09 - LED Wall Reflection Artifacts
+
+**Added:**
+- **LED Wall Reflection Feature** (`src/trodestrack/sim/rat_imu.py`)
+  - New parameters: `led_wall_reflection_prob` (probability 0-1) and `led_wall_reflection_distance` (threshold in meters)
+  - Simulates realistic LED reflection artifacts near arena walls (e.g., black plexiglass)
+  - Reflections mirror LED detections across nearest wall when rat is within distance threshold
+  - Proper geometry: reflection formula x' = 2*wall_pos - x for each wall (left/right/top/bottom)
+  - Default behavior: disabled (prob=0) for backward compatibility
+  - New output fields: `led_reflection_applied` mask, `led1_truth_cam`, `led2_truth_cam`, `swap_applied`
+
+- **Comprehensive Test Suite** (`tests/sim/test_led_wall_reflections.py`)
+  - 16 tests covering all aspects of wall reflections (all passing)
+  - **Configuration**: Default values, parameter setting, validation
+  - **Geometry**: Mirrored positions, reflection probability, distance threshold
+  - **Output masks**: `led_reflection_applied` existence, type, correctness
+  - **Interaction**: Respects dropout masks, preserves NaN positions
+  - **Determinism**: Same seed → same reflections, different seeds → different patterns
+  - **Edge cases**: Single LED, corner positions, zero threshold
+  - Run with: `uv run pytest tests/sim/test_led_wall_reflections.py -v`
+
+**Improved:**
+- **Type Safety**: Added new fields to `SimOut` TypedDict in `utils.py`
+  - `led1_truth_cam`, `led2_truth_cam`: ground truth LED positions before noise/swaps/reflections
+  - `swap_applied`, `led_reflection_applied`: artifact tracking masks
+- **Configuration Validation**: Rejects invalid reflection parameters with clear error messages
+- **Documentation**: Enhanced config docstring with units, ranges, and examples
+- **Code Quality**: Added inline comments explaining reflection geometry
+
+**Testing:**
+- ✅ 16/16 tests passing in test_led_wall_reflections.py
+- ✅ Code reviewed and approved (all critical issues addressed)
+- ✅ Black, ruff, mypy passing (no errors)
+- ✅ No regressions in existing tests
+
+**Task Progress:**
+- ✅ Milestone 3: Add optional wall reflection probability for LED artifacts - COMPLETE
+- Updated TASKS.md to mark LED wall reflections as complete
+
+---
+
 ### Session: 2025-10-09 - Anisotropic Drag Implementation
 
 **Added:**
