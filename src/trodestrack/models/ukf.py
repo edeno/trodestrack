@@ -39,6 +39,8 @@ import jax.numpy as jnp
 import numpy as np
 from jax import lax, vmap
 
+from trodestrack.models.utils import build_G_matrix
+
 from trodestrack.models.ekf import (
     dynamics_function,
     initialize_state,
@@ -368,15 +370,9 @@ def predict_step(
     std_f = config.imu_accel_noise_density * jnp.sqrt(dt_imu)
     Q_u = jnp.diag(jnp.array([std_w**2, std_f**2, std_f**2]))
 
-    # Build G matrix for input noise propagation (same as EKF)
+    # Build G matrix for input noise propagation (shared utility with EKF)
     theta = m[4]
-    c, s = jnp.cos(theta), jnp.sin(theta)
-    R_2d = jnp.array([[c, -s], [s, c]])
-
-    G = jnp.zeros((8, 3))
-    G = G.at[4, 0].set(dt_imu)  # θ depends on ω_z
-    G = G.at[2:4, 1:3].set(R_2d * dt_imu)  # velocity depends on force
-    G = G.at[0:2, 1:3].set(R_2d * (0.5 * dt_imu * dt_imu))  # position depends on force
+    G = build_G_matrix(theta, dt_imu)
 
     Q = Q_proc + G @ Q_u @ G.T
     P_pred = P_pred + Q

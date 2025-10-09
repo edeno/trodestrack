@@ -36,6 +36,8 @@ import jax.numpy as jnp
 import numpy as np
 from jax import jacfwd, lax
 
+from trodestrack.models.utils import build_G_matrix
+
 
 # =============================================================================
 # Configuration & State
@@ -762,22 +764,10 @@ def predict_step(
     std_f = config.imu_accel_noise_density * jnp.sqrt(dt_imu)
     Q_u = jnp.diag(jnp.array([std_w**2, std_f**2, std_f**2]))
 
-    # G is ∂f/∂u evaluated at (m, u)
-    # For our dynamics:
-    #   θ_{k+1} = θ_k + (ω_z - b_gz) * dt  →  ∂θ/∂ω_z = dt
-    #   v_{k+1} = v_k + R(θ)(f - b_a) * dt  →  ∂v/∂f = R(θ) * dt
-    #   p_{k+1} = p_k + v_k * dt + 0.5 * R(θ)(f - b_a) * dt²  →  ∂p/∂f = R(θ) * 0.5 * dt²
+    # G is ∂f/∂u: IMU input noise propagation matrix
+    # Maps IMU measurement noise [ω_z, f_x, f_y] into state space
     theta = m[4]
-    c, s = jnp.cos(theta), jnp.sin(theta)
-    R_2d = jnp.array([[c, -s], [s, c]])
-
-    # Build G matrix: state (8) × input (3)
-    # Rows: [x, y, vx, vy, θ, b_gz, b_ax, b_ay]
-    # Cols: [ω_z, f_x, f_y]
-    G = jnp.zeros((8, 3))
-    G = G.at[4, 0].set(dt_imu)  # θ depends on ω_z
-    G = G.at[2:4, 1:3].set(R_2d * dt_imu)  # velocity depends on force
-    G = G.at[0:2, 1:3].set(R_2d * (0.5 * dt_imu * dt_imu))  # position depends on force
+    G = build_G_matrix(theta, dt_imu)
 
     # Total process noise: kinematic diffusion + IMU input noise
     Q = Q_proc + G @ Q_u @ G.T

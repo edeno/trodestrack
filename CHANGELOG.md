@@ -2,6 +2,53 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-09 - P2 DRY & Performance Refactor
+
+**Refactored:**
+- **G Matrix Utility** (`src/trodestrack/models/utils.py`)
+  - Created `build_G_matrix()` shared utility for EKF and UKF
+  - Eliminates code duplication (10 lines → 3 lines per filter)
+  - Documents IMU input noise propagation matrix construction
+
+**Improved:**
+- **EKF Refactor** (`src/trodestrack/models/ekf.py`)
+  - Replace inline G matrix construction with `build_G_matrix()` call
+  - Simplified predict_step from 15 lines to 4 lines for G matrix
+
+- **UKF Refactor** (`src/trodestrack/models/ukf.py`)
+  - Replace duplicate G matrix construction with shared utility
+  - Maintains identical behavior with cleaner code
+
+**Features:**
+- **DRY Compliance**: Single source of truth for G matrix construction
+- **Better Documentation**: Comprehensive docstring with mathematical derivation
+- **Type Safety**: Full type hints with JAX array types
+- **Examples**: Doctest demonstrating matrix structure
+
+**Testing:**
+- All 14 EKF/UKF tests passing (test_ekf_analytic.py, test_ukf_accuracy.py)
+- No regressions in filter behavior
+- Identical numerical results verified
+
+**Code Quality:**
+- Black formatted and ruff-checked
+- Mypy clean with proper type annotations
+- NumPy-style docstring with derivation
+- Example usage in doctest
+
+**Impact:**
+- ✅ Completes P2 items from PR_FIX_PLAN.md
+- ✅ Eliminates code duplication between EKF and UKF
+- ✅ Improves maintainability (single source of truth)
+- 📊 No regressions: all filter tests passing
+
+**Notes:**
+- G matrix maps IMU noise [ω_z, f_x, f_y] to state space
+- Shared utility ensures consistent noise propagation across filters
+- Future filters (e.g., IEKF) can reuse this utility
+
+---
+
 ### Session: 2025-10-09 - P1 Quality and Robustness Enhancements
 
 **Added:**
