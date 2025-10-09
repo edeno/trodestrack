@@ -286,3 +286,42 @@ Future improvements needed:
 - RTS smoother for better bias estimates
 
 ---
+
+## 2025-10-08 (Late) - Improved Dropout Test with Circular Motion
+
+### Test Update
+
+**Updated `test_ekf_long_dropout_drift()`:**
+
+- Replaced constant-velocity with **circular motion** (per user suggestion)
+- 25s total: 20s bias learning + 5s dropout
+- Gentle motion: 0.25 m/s speed, 0.3 rad/s turn (rat-realistic)
+- Higher IMU rate: 400 Hz for better observability
+- Now uses strict 15 cm PRD bound (was 150 cm relaxed bound)
+
+**Results:**
+
+- **Drift:** 54 cm (exceeds 15 cm PRD target)
+- **Gyro bias convergence:** Poor even with 20s circular motion
+  - True bias: 0.0027 rad/s
+  - Estimated: -0.0083 rad/s
+  - Error: 0.0109 rad/s (should be near 0)
+
+**Root Cause Identified:**
+
+Bias isn't converging properly even in bias-observable scenario. This reveals:
+
+1. **Process noise tuning:** Q for biases may be too high (preventing convergence)
+2. **Bias random walk model:** Current rates (2e-4 rad/s²/s) may be too large
+3. **IMU noise injection:** G @ Q_u @ G^T may be dominating bias update
+
+**Next Steps:**
+
+- Need to tune process noise for bias states
+- Consider tighter bounds on bias random walk
+- Validate that circular motion actually excites biases (check true accel)
+- May need IEKF (num_iter > 1) for nonlinear circular dynamics
+
+Test now properly validates PRD requirement with bias-observable motion.
+
+---

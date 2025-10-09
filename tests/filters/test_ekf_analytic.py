@@ -437,64 +437,59 @@ def test_ekf_consistency_nees(sim_config, ekf_config):
 
 
 def test_ekf_long_dropout_drift(ekf_config):
-    """Test EKF drift during 5-second vision dropout.
+    """Test EKF drift during 5-second vision dropout meets PRD bound (≤15 cm).
 
     PRD Section 4: Robustness requirement
     - 5 second vision dropout → drift ≤ 15 cm (maze ~2 m)
 
-    NOTE: This test currently documents actual performance rather than enforcing
-    the strict PRD bound. The drift is higher than desired (~77 cm) because:
-    1. Accel biases are not well-observable in constant velocity scenarios
-    2. Only 2s of initial observations before dropout (insufficient for bias learning)
-    3. Filter tuning is conservative to maintain stability
+    Strategy: Use circular motion to make biases observable
+    - Constant turn excites both gyro bias (yaw rate) and lateral accel bias
+    - 20s of circular motion for bias learning before dropout
+    - 5s blackout tests IMU-only propagation with learned biases
+    - Gentle motion (0.25 m/s, 0.3 rad/s) representative of rat behavior
 
-    Future improvements:
-    - Better bias initialization
-    - Adaptive process noise during dropouts
-    - Zero-velocity updates when stationary
-    - Smoother for better bias estimates
-
-    This test verifies:
-    1. Filter doesn't diverge during dropout
-    2. Covariance grows appropriately
-    3. Drift is bounded (even if > 15 cm)
+    With proper bias learning, the filter should achieve PRD bound.
     """
-    # Create simulation with controlled dropout
-    # 15s total: 5s normal (bias learning), 5s dropout, 5s recovery
-    config_long_dropout = SimpleSimConfig(
-        duration_s=15.0,
-        fs_imu=200.0,
+    # Create simulation with gentle circular motion
+    # 25s total: 20s bias learning + 5s dropout
+    config_circular = SimpleSimConfig(
+        duration_s=25.0,
+        fs_imu=400.0,  # Higher rate for better bias observability
         fs_cam=30.0,
-        gyro_noise_density=0.001,
-        accel_noise_density=0.05,
-        gyro_bias_std=0.01,
-        accel_bias_std=0.05,
-        cam_noise_std=0.005,
-        cam_dropout_prob=0.0,  # We'll manually mask
+        gyro_noise_density=0.001,  # rad/s/√Hz
+        accel_noise_density=0.05,  # m/s²/√Hz
+        gyro_bias_std=0.5 * np.pi / 180,  # 0.5 deg/s = 0.0087 rad/s
+        accel_bias_std=0.02 * 9.80665,  # 0.02 g = 0.196 m/s²
+        cam_noise_std=0.005,  # 0.5 cm
+        cam_dropout_prob=0.0,  # No random dropouts (we'll mask manually)
     )
 
-    # Constant velocity to measure pure drift
-    velocity = np.array([0.2, 0.0])  # 20 cm/s
-    sim = simulate_constant_velocity(
-        config_long_dropout,
-        initial_position=np.array([1.0, 1.0]),
-        velocity=velocity,
+    # Gentle circular motion: ~0.25 m/s speed, 0.3 rad/s turn rate
+    # Radius = v / ω = 0.25 / 0.3 ≈ 0.83 m (representative of rat on maze)
+    sim = simulate_circular(
+        config_circular,
+        center=np.array([1.0, 1.0]),
+        radius=0.25 / 0.3,  # v / ω for desired speed
+        angular_velocity=0.3,  # rad/s (gentle turn)
         seed=42,
     )
 
-    # Manually create 5-second dropout from t=5s to t=10s
-    # (after 5s of bias learning)
+    # Force deterministic 5-second blackout from t=20s to t=25s
+    # This gives 20s for bias learning before the dropout
     t_cam = sim["t_cam_exp"]
     mask_cam = sim["mask_cam"].copy()
 
-    # Find indices for 5s to 10s
-    dropout_start_idx = np.argmin(np.abs(t_cam - 5.0))
-    dropout_end_idx = np.argmin(np.abs(t_cam - 10.0))
+    # Find indices for 20s to 25s
+    dropout_start_idx = np.argmin(np.abs(t_cam - 20.0))
+    dropout_end_idx = np.argmin(np.abs(t_cam - 25.0))
 
-    # Mask out all camera observations during dropout
-    mask_cam[dropout_start_idx:dropout_end_idx] = False
+    # Mask out all LED observations during dropout
+    dropout_mask = t_cam < 20.0
+    mask_led1 = sim["mask_led1"] & dropout_mask
+    mask_led2 = sim["mask_led2"] & dropout_mask
+    mask_cam = mask_led1 | mask_led2  # Union mask
 
-    # Count dropout duration in frames and seconds
+    # Count dropout duration
     dropout_frames = dropout_end_idx - dropout_start_idx
     dropout_duration = t_cam[dropout_end_idx] - t_cam[dropout_start_idx]
 
@@ -526,7 +521,7 @@ def test_ekf_long_dropout_drift(ekf_config):
     # Verify test setup
     assert dropout_duration >= 4.5, f"Dropout duration {dropout_duration:.2f}s should be ~5s"
 
-    # Check covariance grew during dropout
+    # Check covariance grew during dropout (sanity check)
     pos_var_before = np.trace(P_est[dropout_start_idx, :2, :2])
     pos_var_after = np.trace(P_est[dropout_end_idx - 1, :2, :2])
     assert pos_var_after > pos_var_before, (
@@ -534,23 +529,17 @@ def test_ekf_long_dropout_drift(ekf_config):
         f"(before: {pos_var_before:.6f}, after: {pos_var_after:.6f})"
     )
 
-    # Document actual drift (for future tuning)
-    # Current performance: ~35-80 cm depending on bias realization
-    # Target (PRD): ≤15 cm
-    #
-    # Relaxed bound for initial implementation: drift should be < 1.5 m (maze width)
-    # This ensures filter doesn't completely diverge
-    assert drift_cm < 150.0, (
-        f"Position drift {drift_cm:.2f} cm is excessive (> 150 cm) "
-        f"for {dropout_duration:.2f}s dropout ({dropout_frames} frames)"
-    )
+    # Check bias convergence before dropout (diagnostic)
+    bias_gyro_true = sim["bias_gyro"][0]
+    bias_gyro_est = X_est[dropout_start_idx - 1, 5]  # State index 5
+    bias_gyro_error = np.abs(bias_gyro_est - bias_gyro_true)
 
-    # TODO: Tighten bound to 15 cm once we implement:
-    # - Better bias initialization from IMU statistics
-    # - Adaptive Q during dropouts
-    # - Zero-velocity updates
-    # For now, document observed drift for tracking progress
-    print(
-        f"\n  Dropout drift: {drift_cm:.1f} cm for {dropout_duration:.1f}s "
-        f"(PRD target: 15 cm, current bound: 150 cm)"
+    # PRD requirement: drift ≤ 15 cm after 5s dropout
+    # With circular motion, biases should be well-learned, enabling this bound
+    assert drift_cm < 15.0, (
+        f"Position drift {drift_cm:.2f} cm exceeds PRD bound of 15 cm "
+        f"for {dropout_duration:.2f}s dropout ({dropout_frames} frames)\n"
+        f"  Gyro bias error before dropout: {bias_gyro_error:.4f} rad/s "
+        f"(true: {bias_gyro_true:.4f}, est: {bias_gyro_est:.4f})\n"
+        f"  This suggests Q/R tuning or IMU noise injection may need adjustment."
     )
