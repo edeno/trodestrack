@@ -12,14 +12,20 @@ from matplotlib.animation import FuncAnimation
 from matplotlib.artist import Artist
 from matplotlib.gridspec import GridSpec
 
+from trodestrack.models.ekf import EKFResult
 from trodestrack.sim.utils import SimOut
 from trodestrack.viz.components import (
+    BiasEstimatePanelArtist,
     CameraPanelArtist,
+    FilterArtist,
     HUDArtist,
     IMUPanelArtist,
     LEDArtist,
+    NEESPanelArtist,
     ProgressBarArtist,
     RatArtist,
+    ResidualPanelArtist,
+    StateErrorPanelArtist,
     TrailArtist,
 )
 from trodestrack.viz.styles import COLORS, apply_tufte_style
@@ -29,6 +35,8 @@ from trodestrack.viz.utils import prepare_video_data
 def create_diagnostic_video(
     sim_data: SimOut,
     output_path: str | Path,
+    filter_results: EKFResult | None = None,
+    led_distance: float = 0.04,
     fps: int = 30,
     speedup: float = 1.0,
     time_window_s: float = 2.0,
@@ -38,16 +46,20 @@ def create_diagnostic_video(
     bitrate: int = 2000,
     return_animation: bool = False,
 ) -> Path | tuple[Path, Any, Any]:
-    """Generate diagnostic video from simulation data.
+    """Generate diagnostic video from simulation data with optional filter overlay.
 
     Creates multi-panel video showing:
     - Arena view (rat, LEDs, trail, HUD)
     - IMU time series (gyro, accel X, accel Y)
     - Camera status (confidence bars)
+    - Innovation residuals (if filter_results provided)
+    - Filter prediction overlay (if filter_results provided)
 
     Args:
         sim_data: Simulation output dictionary from simulate_rat_imu()
         output_path: Output video file path (e.g., "debug.mp4")
+        filter_results: Optional EKF filter results to overlay on visualization
+        led_distance: LED front-back spacing in meters (default: 0.04 = 4cm)
         fps: Video frame rate (frames per second)
         speedup: Playback speed multiplier (>1 faster, <1 slower)
         time_window_s: Time window for scrolling plots (seconds)
@@ -66,6 +78,12 @@ def create_diagnostic_video(
         >>> sim = simulate_rat_imu(config, seed=42)
         >>> create_diagnostic_video(sim, "debug.mp4", fps=30)
         PosixPath('debug.mp4')
+
+        # With filter results
+        >>> from trodestrack.models.ekf import extended_kalman_filter, EKFConfig
+        >>> result = extended_kalman_filter(EKFConfig(), ...)
+        >>> create_diagnostic_video(sim, "debug_filter.mp4", filter_results=result, fps=30)
+        PosixPath('debug_filter.mp4')
     """
     output_path = Path(output_path)
 
@@ -79,43 +97,101 @@ def create_diagnostic_video(
     print(f"  {n_frames} frames to render ({n_frames/fps:.1f}s video)")
 
     # Create figure with 16:9 aspect ratio (standard for video)
-    fig = plt.figure(figsize=(16, 9))
-    gs = GridSpec(
-        5,
-        2,
-        figure=fig,
-        hspace=0.35,
-        wspace=0.3,
-        top=0.90,  # Leave room for title and legend
-        bottom=0.05,
-        left=0.08,
-        right=0.95,
-        height_ratios=[1, 1, 1, 0.35, 0.25],  # Compact camera + progress bars
-    )
+    # Following Tufte's small multiples: use consistent grid for maximum information density
+    fig = plt.figure(figsize=(18, 10))  # Slightly larger for more panels
 
-    # Left column: Arena view (spans 3 rows)
-    ax_arena = fig.add_subplot(gs[:3, 0])
+    if filter_results is not None:
+        # Comprehensive diagnostic layout (3 columns x 5 rows)
+        # Column 1: Arena + Camera
+        # Column 2: IMU measurements
+        # Column 3: Filter diagnostics (errors, biases, NEES)
+        gs = GridSpec(
+            5,
+            3,
+            figure=fig,
+            hspace=0.4,
+            wspace=0.35,
+            top=0.92,
+            bottom=0.06,
+            left=0.06,
+            right=0.97,
+            height_ratios=[1.5, 1.5, 0.8, 0.8, 0.3],  # Arena + Camera | Diagnostics | Progress
+            width_ratios=[1.2, 1, 1],  # Arena wider | IMU | Filter diagnostics
+        )
+    else:
+        # Standard layout without filter (2 columns x 5 rows)
+        gs = GridSpec(
+            5,
+            2,
+            figure=fig,
+            hspace=0.35,
+            wspace=0.3,
+            top=0.90,
+            bottom=0.05,
+            left=0.08,
+            right=0.95,
+            height_ratios=[1, 1, 1, 0.35, 0.25],  # IMU + camera + progress
+        )
+
+    # =========================================================================
+    # Column 1: Arena view + Camera status
+    # =========================================================================
+    if filter_results is not None:
+        ax_arena = fig.add_subplot(gs[:2, 0])  # Spans 2 rows
+        ax_camera = fig.add_subplot(gs[2, 0])
+    else:
+        ax_arena = fig.add_subplot(gs[:3, 0])  # Spans 3 rows
+        ax_camera = fig.add_subplot(gs[3, :])
+
     ax_arena.set_aspect("equal")
-    ax_arena.set_xlabel("x (m)", fontsize=9)
-    ax_arena.set_ylabel("y (m)", fontsize=9)
-    ax_arena.set_title("Arena View", fontweight="normal", loc="left", fontsize=10)
-
-    # Enable grid for spatial reference (subtle, 0.1m or 0.2m spacing)
+    ax_arena.set_xlabel("x (m)", fontsize=8)
+    ax_arena.set_ylabel("y (m)", fontsize=8)
+    ax_arena.set_title("Arena View", fontweight="normal", loc="left", fontsize=9)
     ax_arena.grid(True, which="major", alpha=0.15, linewidth=0.5, linestyle="-")
-    ax_arena.set_axisbelow(True)  # Grid behind data
+    ax_arena.set_axisbelow(True)
 
-    # Right column: IMU plots (3 rows)
-    ax_gyro = fig.add_subplot(gs[0, 1])
-    ax_accel_x = fig.add_subplot(gs[1, 1], sharex=ax_gyro)
-    ax_accel_y = fig.add_subplot(gs[2, 1], sharex=ax_gyro)
+    ax_camera.set_title("Camera Status", fontweight="normal", loc="left", fontsize=9)
 
-    ax_gyro.set_title("IMU Measurements", fontweight="normal", loc="left", fontsize=10)
+    # =========================================================================
+    # Column 2: IMU measurements (unchanged)
+    # =========================================================================
+    if filter_results is not None:
+        ax_gyro = fig.add_subplot(gs[0, 1])
+        ax_accel_x = fig.add_subplot(gs[1, 1], sharex=ax_gyro)
+        ax_accel_y = fig.add_subplot(gs[2, 1], sharex=ax_gyro)
+    else:
+        ax_gyro = fig.add_subplot(gs[0, 1])
+        ax_accel_x = fig.add_subplot(gs[1, 1], sharex=ax_gyro)
+        ax_accel_y = fig.add_subplot(gs[2, 1], sharex=ax_gyro)
 
-    # Row 4: Camera status
-    ax_camera = fig.add_subplot(gs[3, :])
-    ax_camera.set_title("Camera Status", fontweight="normal", loc="left", fontsize=10)
+    ax_gyro.set_title("IMU Measurements", fontweight="normal", loc="left", fontsize=9)
 
-    # Row 5: Progress bar
+    # =========================================================================
+    # Column 3: Filter diagnostics (only if filter provided)
+    # =========================================================================
+    ax_residuals = None
+    ax_vel_error = None
+    ax_heading_error = None
+    ax_bias = None
+    ax_nees = None
+
+    if filter_results is not None:
+        # Row 0: Measurement residuals
+        ax_residuals = fig.add_subplot(gs[0, 2])
+
+        # Row 1: Velocity error (shared with Row 2 for heading)
+        ax_vel_error = fig.add_subplot(gs[1, 2])
+        ax_heading_error = fig.add_subplot(gs[2, 2], sharex=ax_vel_error)
+
+        # Row 2: Bias estimates (spans row 3)
+        ax_bias = fig.add_subplot(gs[3, :2])  # Spans columns 0-1
+
+        # Row 3: NEES consistency check
+        ax_nees = fig.add_subplot(gs[3, 2])
+
+    # =========================================================================
+    # Bottom row: Progress bar (spans all columns)
+    # =========================================================================
     ax_progress = fig.add_subplot(gs[4, :])
 
     # Extract config for convenience
@@ -206,6 +282,22 @@ def create_diagnostic_video(
     imu_panel.add_reference_bands(sim_data["U_imu"], percentiles=(10, 90))
 
     camera_panel = CameraPanelArtist(ax_camera)
+
+    # Conditional filter artists (only if filter results provided)
+    filter_artist = None
+    residual_panel = None
+    state_error_panel = None
+    bias_panel = None
+    nees_panel = None
+
+    if filter_results is not None:
+        filter_artist = FilterArtist(ax_arena)
+        residual_panel = ResidualPanelArtist(ax_residuals, window_s=time_window_s, fps=fps)
+        state_error_panel = StateErrorPanelArtist(
+            ax_vel_error, ax_heading_error, window_s=time_window_s, fps=fps
+        )
+        bias_panel = BiasEstimatePanelArtist(ax_bias, window_s=time_window_s, fps=fps)
+        nees_panel = NEESPanelArtist(ax_nees, window_s=time_window_s, fps=fps, state_dim=2)
 
     # Pre-compute event times for progress bar markers
     print("Detecting events...")
@@ -322,6 +414,22 @@ def create_diagnostic_video(
             label="Path trail",
         ),
     ]
+
+    # Add filter legend entry if filter results provided
+    if filter_results is not None:
+        legend_elements.append(
+            Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="w",
+                markerfacecolor="w",
+                markeredgecolor=COLORS["green"],
+                markeredgewidth=2,
+                markersize=8,
+                label="Filter Estimate (± 95% CI)",
+            )
+        )
     # Overall title (includes frame rate for temporal context)
     title_str = (
         f"Diagnostic Video | {config.duration_s:.0f}s simulation | "
@@ -462,6 +570,87 @@ def create_diagnostic_video(
         latency_ms = (t_cam_obs - t_cam_exp) * 1000  # Convert to milliseconds
 
         camera_panel.update(led1_visible, conf1, led2_visible, conf2, latency_ms)
+
+        # Filter overlay (if provided)
+        if filter_artist is not None and filter_results is not None:
+            # ================================================================
+            # Get filter estimates and ground truth at current camera frame
+            # ================================================================
+            x_est = filter_results.filtered_means[cam_idx]  # [x, y, vx, vy, θ, b_gz, b_ax, b_ay]
+            P_est = filter_results.filtered_covariances[cam_idx]  # 8x8 covariance
+            x_pred = filter_results.predicted_means[cam_idx]
+
+            # Ground truth at camera time
+            x_truth, y_truth, vx_truth, vy_truth, theta_truth = state
+
+            # ================================================================
+            # 1. Update filter position artist with uncertainty ellipse
+            # ================================================================
+            filter_artist.update(x_est[0], x_est[1], P_est)
+
+            # ================================================================
+            # 2. Compute and update measurement residuals (innovations)
+            # ================================================================
+            px_pred, py_pred, theta_pred = x_pred[0], x_pred[1], x_pred[4]
+
+            # Apply measurement function to compute predicted LED positions
+            dx = 0.5 * led_distance * np.cos(theta_pred)
+            dy = 0.5 * led_distance * np.sin(theta_pred)
+
+            led1_pred = np.array([px_pred - dx, py_pred - dy])  # Back LED
+            led2_pred = np.array([px_pred + dx, py_pred + dy])  # Front LED
+
+            # Compute residuals (innovation = observed - predicted)
+            resid_led1 = (
+                np.linalg.norm(led1_pos - led1_pred) * 100 if led1_visible else np.nan
+            )  # cm
+            resid_led2 = (
+                np.linalg.norm(led2_pos - led2_pred) * 100 if led2_visible else np.nan
+            )  # cm
+
+            residual_panel.update(t, resid_led1, resid_led2)
+
+            # ================================================================
+            # 3. Compute and update state estimation errors
+            # ================================================================
+            # Velocity errors (cm/s)
+            error_vx = (x_est[2] - vx_truth) * 100
+            error_vy = (x_est[3] - vy_truth) * 100
+
+            # Heading error (degrees, properly wrapped)
+            def wrap_angle(theta):
+                return np.arctan2(np.sin(theta), np.cos(theta))
+
+            error_heading_rad = wrap_angle(x_est[4] - theta_truth)
+            error_heading_deg = np.degrees(error_heading_rad)
+
+            state_error_panel.update(t, error_vx, error_vy, error_heading_deg)
+
+            # ================================================================
+            # 4. Update bias estimates (show filter learning IMU biases)
+            # ================================================================
+            gyro_bias = x_est[5]  # rad/s
+            accel_bias_x = x_est[6]  # m/s²
+            accel_bias_y = x_est[7]  # m/s²
+
+            bias_panel.update(t, gyro_bias, accel_bias_x, accel_bias_y)
+
+            # ================================================================
+            # 5. Compute and update NEES (filter consistency metric)
+            # ================================================================
+            # NEES for 2D position only (to match chi-squared bounds)
+            error_pos = np.array([x_est[0] - x_truth, x_est[1] - y_truth])
+            P_pos = P_est[:2, :2]
+
+            try:
+                # NEES = e^T * P^{-1} * e
+                cov_inv_error = np.linalg.solve(P_pos, error_pos)
+                nees_value = float(error_pos @ cov_inv_error)
+            except np.linalg.LinAlgError:
+                # Singular covariance - filter is broken
+                nees_value = np.nan
+
+            nees_panel.update(t, nees_value)
 
         # Progress bar
         progress_bar.update(t)

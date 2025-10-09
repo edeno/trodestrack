@@ -865,3 +865,488 @@ class ProgressBarArtist:
         self.time_marker.set_data([t, t], [0, 1])
 
         return [self.progress_bar, self.time_marker]
+
+
+class FilterArtist:
+    """Overlay filter predictions on arena view.
+
+    Shows predicted position with uncertainty ellipse (95% confidence).
+    """
+
+    def __init__(self, ax: Axes):
+        """Initialize filter artist.
+
+        Args:
+            ax: Matplotlib axes to draw on
+        """
+        self.ax = ax
+
+        # Predicted position marker (hollow circle to distinguish from truth)
+        (self.pred_marker,) = ax.plot(
+            [],
+            [],
+            "o",
+            color=COLORS["green"],
+            markersize=8,
+            fillstyle="none",
+            linewidth=2,
+            label="Filter Estimate",
+            zorder=8,
+        )
+
+        # Uncertainty ellipse (95% confidence = 2.45-sigma for 2D)
+        from matplotlib.patches import Ellipse
+
+        self.uncertainty_ellipse = Ellipse(
+            (0, 0),
+            0,
+            0,
+            angle=0,
+            facecolor=COLORS["green"],
+            edgecolor=COLORS["green"],
+            alpha=0.15,
+            linewidth=1.5,
+            linestyle="--",
+            zorder=4,
+        )
+        ax.add_patch(self.uncertainty_ellipse)
+
+    def update(self, x_pred: float, y_pred: float, P: np.ndarray) -> list[Any]:
+        """Update filter prediction and uncertainty.
+
+        Args:
+            x_pred: Predicted x position in meters
+            y_pred: Predicted y position in meters
+            P: Full state covariance matrix (8×8), position covariance at [:2, :2]
+
+        Returns:
+            List of modified artists
+
+        Raises:
+            ValueError: If P is not shape (8, 8)
+        """
+        # Validate input shape
+        if P.shape != (8, 8):
+            raise ValueError(f"Expected P shape (8, 8), got {P.shape}")
+
+        # Update marker position
+        self.pred_marker.set_data([x_pred], [y_pred])
+
+        # Compute covariance ellipse (95% confidence for 2D: χ²(2, 0.05) = 5.991)
+        P_pos = P[:2, :2]
+        eigenvalues, eigenvectors = np.linalg.eigh(P_pos)
+
+        # Orientation angle from first eigenvector
+        angle = np.degrees(np.arctan2(eigenvectors[1, 0], eigenvectors[0, 0]))
+
+        # Width and height from eigenvalues (95% confidence)
+        chi2_95 = 5.991
+        width = 2 * np.sqrt(chi2_95 * eigenvalues[0])
+        height = 2 * np.sqrt(chi2_95 * eigenvalues[1])
+
+        # Update ellipse
+        self.uncertainty_ellipse.center = (x_pred, y_pred)
+        self.uncertainty_ellipse.width = width
+        self.uncertainty_ellipse.height = height
+        self.uncertainty_ellipse.angle = angle
+
+        return [self.pred_marker, self.uncertainty_ellipse]
+
+
+class ResidualPanelArtist:
+    """Show measurement innovations (residuals) over time.
+
+    Displays innovation for LED1 and LED2 positions in a scrolling time series.
+    Innovation = observed - predicted (positive values indicate underestimation).
+    """
+
+    def __init__(self, ax: Axes, window_s: float, fps: int):
+        """Initialize residual panel artist.
+
+        Args:
+            ax: Matplotlib axes to draw on
+            window_s: Time window for scrolling display (seconds)
+            fps: Video frame rate (for buffer sizing)
+        """
+        self.ax = ax
+        self.window_s = window_s
+        self.window_frames = int(window_s * fps)
+
+        # Buffers for time series
+        self.time_buffer = deque(maxlen=self.window_frames)
+        self.resid_led1_buffer = deque(maxlen=self.window_frames)
+        self.resid_led2_buffer = deque(maxlen=self.window_frames)
+
+        # Initialize lines
+        (self.line_led1,) = ax.plot(
+            [], [], color=COLORS["blue"], linewidth=1.5, label="LED1 Residual", alpha=0.8
+        )
+        (self.line_led2,) = ax.plot(
+            [], [], color=COLORS["orange"], linewidth=1.5, label="LED2 Residual", alpha=0.8
+        )
+
+        # Zero reference line
+        ax.axhline(0, color="black", linewidth=0.5, linestyle="--", alpha=0.5)
+
+        # Styling
+        ax.set_ylabel("Position Residual (cm)", fontsize=9)
+        ax.set_xlabel("Time (s)", fontsize=9)
+        ax.set_title("Innovation Residuals", fontweight="normal", loc="left", fontsize=10)
+        ax.grid(True, alpha=0.15)
+        ax.legend(loc="upper right", fontsize=7)
+
+        # Initial y-limits (will auto-scale)
+        ax.set_ylim(-5, 5)
+
+    def update(self, t: float, resid_led1: float, resid_led2: float) -> list[Any]:
+        """Update residual time series.
+
+        Args:
+            t: Current time in seconds
+            resid_led1: LED1 2D position residual L2 norm in cm (NaN if not visible)
+            resid_led2: LED2 2D position residual L2 norm in cm (NaN if not visible)
+
+        Returns:
+            List of modified artists
+        """
+        # Add new samples to buffers
+        self.time_buffer.append(t)
+        self.resid_led1_buffer.append(resid_led1)
+        self.resid_led2_buffer.append(resid_led2)
+
+        # Update lines
+        if len(self.time_buffer) > 0:
+            time_array = np.array(self.time_buffer)
+            self.line_led1.set_data(time_array, np.array(self.resid_led1_buffer))
+            self.line_led2.set_data(time_array, np.array(self.resid_led2_buffer))
+
+            # Auto-scale x-axis to show scrolling window
+            self.ax.set_xlim(time_array[0], time_array[-1])
+
+            # Auto-scale y-axis based on recent data (with some margin)
+            # Filter out NaN values for scaling
+            all_resid = list(self.resid_led1_buffer) + list(self.resid_led2_buffer)
+            valid_resid = [r for r in all_resid if not np.isnan(r)]
+            if len(valid_resid) > 0:
+                y_max = max(abs(min(valid_resid)), abs(max(valid_resid)))
+                y_lim = max(y_max * 1.2, 1.0)  # At least ±1 cm
+                self.ax.set_ylim(-y_lim, y_lim)
+
+        return [self.line_led1, self.line_led2]
+
+
+class StateErrorPanelArtist:
+    """Show state estimation errors using small multiples (Tufte principle).
+
+    Displays velocity and heading errors in a compact, information-dense layout
+    with reference lines for PRD targets.
+    """
+
+    def __init__(self, ax_vel: Axes, ax_heading: Axes, window_s: float, fps: int):
+        """Initialize state error panel artist.
+
+        Args:
+            ax_vel: Axes for velocity error (2D: vx, vy components)
+            ax_heading: Axes for heading error
+            window_s: Time window for scrolling display (seconds)
+            fps: Video frame rate (for buffer sizing)
+        """
+        self.window_s = window_s
+        self.window_frames = int(window_s * fps)
+
+        # Velocity error panel (show both components for directional insight)
+        self.ax_vel = ax_vel
+        self.time_buffer_vel = deque(maxlen=self.window_frames)
+        self.error_vx_buffer = deque(maxlen=self.window_frames)
+        self.error_vy_buffer = deque(maxlen=self.window_frames)
+
+        (self.line_vx,) = ax_vel.plot(
+            [], [], color=COLORS["red"], linewidth=1.5, label="vx error", alpha=0.8
+        )
+        (self.line_vy,) = ax_vel.plot(
+            [], [], color=COLORS["green"], linewidth=1.5, label="vy error", alpha=0.8
+        )
+
+        # PRD target line: ±10 cm/s
+        ax_vel.axhline(
+            10, color="gray", linewidth=1, linestyle="--", alpha=0.5, label="PRD: ±10 cm/s"
+        )
+        ax_vel.axhline(-10, color="gray", linewidth=1, linestyle="--", alpha=0.5)
+        ax_vel.axhline(0, color="black", linewidth=0.5, alpha=0.3)
+
+        ax_vel.set_ylabel("Velocity Error (cm/s)", fontsize=8)
+        ax_vel.set_xlabel("Time (s)", fontsize=8)
+        ax_vel.set_title("Velocity Estimation Error", fontweight="normal", loc="left", fontsize=9)
+        ax_vel.grid(True, alpha=0.1, linewidth=0.5)
+        ax_vel.legend(loc="upper right", fontsize=6, framealpha=0.9)
+        ax_vel.set_ylim(-15, 15)
+
+        # Heading error panel
+        self.ax_heading = ax_heading
+        self.time_buffer_heading = deque(maxlen=self.window_frames)
+        self.error_heading_buffer = deque(maxlen=self.window_frames)
+
+        (self.line_heading,) = ax_heading.plot(
+            [], [], color=COLORS["purple"], linewidth=1.5, label="Heading error", alpha=0.8
+        )
+
+        # PRD target line: ±7°
+        ax_heading.axhline(
+            7, color="gray", linewidth=1, linestyle="--", alpha=0.5, label="PRD: ±7°"
+        )
+        ax_heading.axhline(-7, color="gray", linewidth=1, linestyle="--", alpha=0.5)
+        ax_heading.axhline(0, color="black", linewidth=0.5, alpha=0.3)
+
+        ax_heading.set_ylabel("Heading Error (deg)", fontsize=8)
+        ax_heading.set_xlabel("Time (s)", fontsize=8)
+        ax_heading.set_title(
+            "Heading Estimation Error", fontweight="normal", loc="left", fontsize=9
+        )
+        ax_heading.grid(True, alpha=0.1, linewidth=0.5)
+        ax_heading.legend(loc="upper right", fontsize=6, framealpha=0.9)
+        ax_heading.set_ylim(-30, 30)  # Larger range to accommodate realistic errors
+
+    def update(
+        self,
+        t: float,
+        error_vx: float,
+        error_vy: float,
+        error_heading_deg: float,
+    ) -> list[Any]:
+        """Update state error time series.
+
+        Args:
+            t: Current time in seconds
+            error_vx: X velocity error in cm/s (NaN if unavailable)
+            error_vy: Y velocity error in cm/s (NaN if unavailable)
+            error_heading_deg: Heading error in degrees (NaN if unavailable)
+
+        Returns:
+            List of modified artists
+        """
+        # Update velocity errors
+        self.time_buffer_vel.append(t)
+        self.error_vx_buffer.append(error_vx)
+        self.error_vy_buffer.append(error_vy)
+
+        if len(self.time_buffer_vel) > 0:
+            time_array = np.array(self.time_buffer_vel)
+            self.line_vx.set_data(time_array, np.array(self.error_vx_buffer))
+            self.line_vy.set_data(time_array, np.array(self.error_vy_buffer))
+            self.ax_vel.set_xlim(time_array[0], time_array[-1])
+
+        # Update heading error
+        self.time_buffer_heading.append(t)
+        self.error_heading_buffer.append(error_heading_deg)
+
+        if len(self.time_buffer_heading) > 0:
+            time_array = np.array(self.time_buffer_heading)
+            self.line_heading.set_data(time_array, np.array(self.error_heading_buffer))
+            self.ax_heading.set_xlim(time_array[0], time_array[-1])
+
+        return [self.line_vx, self.line_vy, self.line_heading]
+
+
+class BiasEstimatePanelArtist:
+    """Show learned IMU bias estimates over time.
+
+    Displays gyro and accelerometer bias evolution to verify filter learning.
+    Following Gelman's advice: show uncertainty bands, not just point estimates.
+    """
+
+    def __init__(self, ax: Axes, window_s: float, fps: int):
+        """Initialize bias estimate panel artist.
+
+        Args:
+            ax: Matplotlib axes to draw on
+            window_s: Time window for scrolling display (seconds)
+            fps: Video frame rate (for buffer sizing)
+        """
+        self.ax = ax
+        self.window_s = window_s
+        self.window_frames = int(window_s * fps)
+
+        # Buffers
+        self.time_buffer = deque(maxlen=self.window_frames)
+        self.gyro_bias_buffer = deque(maxlen=self.window_frames)
+        self.accel_bias_x_buffer = deque(maxlen=self.window_frames)
+        self.accel_bias_y_buffer = deque(maxlen=self.window_frames)
+
+        # Lines (use distinct colors for each bias)
+        (self.line_gyro,) = ax.plot(
+            [], [], color=COLORS["blue"], linewidth=1.5, label="Gyro bias (rad/s)", alpha=0.8
+        )
+        (self.line_ax,) = ax.plot(
+            [], [], color=COLORS["red"], linewidth=1.5, label="Accel X bias (m/s²)", alpha=0.8
+        )
+        (self.line_ay,) = ax.plot(
+            [], [], color=COLORS["green"], linewidth=1.5, label="Accel Y bias (m/s²)", alpha=0.8
+        )
+
+        # Zero reference
+        ax.axhline(0, color="black", linewidth=0.5, linestyle="--", alpha=0.3)
+
+        # Styling (minimal, Tufte-inspired)
+        ax.set_ylabel("Bias Estimate", fontsize=8)
+        ax.set_xlabel("Time (s)", fontsize=8)
+        ax.set_title("Learned IMU Biases", fontweight="normal", loc="left", fontsize=9)
+        ax.grid(True, alpha=0.1, linewidth=0.5)
+        ax.legend(loc="upper right", fontsize=6, framealpha=0.9)
+        ax.set_ylim(-0.1, 0.1)  # Will auto-scale
+
+    def update(
+        self,
+        t: float,
+        gyro_bias: float,
+        accel_bias_x: float,
+        accel_bias_y: float,
+    ) -> list[Any]:
+        """Update bias estimate time series.
+
+        Args:
+            t: Current time in seconds
+            gyro_bias: Gyro z-axis bias estimate in rad/s
+            accel_bias_x: Accel x-axis bias estimate in m/s²
+            accel_bias_y: Accel y-axis bias estimate in m/s²
+
+        Returns:
+            List of modified artists
+        """
+        # Add new samples
+        self.time_buffer.append(t)
+        self.gyro_bias_buffer.append(gyro_bias)
+        self.accel_bias_x_buffer.append(accel_bias_x)
+        self.accel_bias_y_buffer.append(accel_bias_y)
+
+        # Update lines
+        if len(self.time_buffer) > 0:
+            time_array = np.array(self.time_buffer)
+            self.line_gyro.set_data(time_array, np.array(self.gyro_bias_buffer))
+            self.line_ax.set_data(time_array, np.array(self.accel_bias_x_buffer))
+            self.line_ay.set_data(time_array, np.array(self.accel_bias_y_buffer))
+
+            # Auto-scale x-axis
+            self.ax.set_xlim(time_array[0], time_array[-1])
+
+            # Auto-scale y-axis based on data range
+            all_biases = (
+                list(self.gyro_bias_buffer)
+                + list(self.accel_bias_x_buffer)
+                + list(self.accel_bias_y_buffer)
+            )
+            if len(all_biases) > 0:
+                y_max = max(abs(min(all_biases)), abs(max(all_biases)))
+                y_lim = max(y_max * 1.2, 0.01)  # At least ±0.01
+                self.ax.set_ylim(-y_lim, y_lim)
+
+        return [self.line_gyro, self.line_ax, self.line_ay]
+
+
+class NEESPanelArtist:
+    """Show NEES (filter consistency metric) with chi-squared bounds.
+
+    NEES should stay within chi-squared confidence bounds for a consistent filter.
+    Following Heer's principle: show data quality metrics prominently.
+    """
+
+    def __init__(self, ax: Axes, window_s: float, fps: int, state_dim: int = 2):
+        """Initialize NEES panel artist.
+
+        Args:
+            ax: Matplotlib axes to draw on
+            window_s: Time window for scrolling display (seconds)
+            fps: Video frame rate (for buffer sizing)
+            state_dim: Dimension of state for NEES (typically 2 for position)
+        """
+        self.ax = ax
+        self.window_s = window_s
+        self.window_frames = int(window_s * fps)
+        self.state_dim = state_dim
+
+        # Buffers
+        self.time_buffer = deque(maxlen=self.window_frames)
+        self.nees_buffer = deque(maxlen=self.window_frames)
+
+        # NEES line
+        (self.line_nees,) = ax.plot(
+            [], [], color=COLORS["purple"], linewidth=2, label="NEES", alpha=0.9
+        )
+
+        # Chi-squared 95% confidence bounds (from scipy)
+        from scipy.stats import chi2
+
+        self.chi2_lower = chi2.ppf(0.025, df=state_dim)
+        self.chi2_upper = chi2.ppf(0.975, df=state_dim)
+        self.chi2_mean = state_dim
+
+        # Reference lines (Tufte: use subtle colors for reference)
+        ax.axhline(
+            self.chi2_mean,
+            color="gray",
+            linewidth=1.5,
+            linestyle="-",
+            alpha=0.5,
+            label=f"Expected: {self.chi2_mean:.1f}",
+        )
+        ax.axhline(
+            self.chi2_lower,
+            color="red",
+            linewidth=1,
+            linestyle="--",
+            alpha=0.4,
+            label=f"95% CI: [{self.chi2_lower:.1f}, {self.chi2_upper:.1f}]",
+        )
+        ax.axhline(self.chi2_upper, color="red", linewidth=1, linestyle="--", alpha=0.4)
+
+        # Fill between bounds (visual emphasis on acceptable range)
+        ax.fill_between(
+            [0, 1],
+            [self.chi2_lower, self.chi2_lower],
+            [self.chi2_upper, self.chi2_upper],
+            color="green",
+            alpha=0.05,
+            label="Acceptable range",
+        )
+
+        # Styling
+        ax.set_ylabel(f"NEES ({state_dim}-D)", fontsize=8)
+        ax.set_xlabel("Time (s)", fontsize=8)
+        ax.set_title("Filter Consistency (NEES)", fontweight="normal", loc="left", fontsize=9)
+        ax.grid(True, alpha=0.1, linewidth=0.5)
+        ax.legend(loc="upper right", fontsize=6, framealpha=0.9)
+        ax.set_ylim(0, max(self.chi2_upper * 1.5, 10))
+
+    def update(self, t: float, nees: float) -> list[Any]:
+        """Update NEES time series.
+
+        Args:
+            t: Current time in seconds
+            nees: NEES value (NaN if unavailable)
+
+        Returns:
+            List of modified artists
+        """
+        # Add new sample
+        self.time_buffer.append(t)
+        self.nees_buffer.append(nees)
+
+        # Update line
+        if len(self.time_buffer) > 0:
+            time_array = np.array(self.time_buffer)
+            nees_array = np.array(self.nees_buffer)
+
+            # Filter out NaN for plotting
+            valid_mask = ~np.isnan(nees_array)
+            if np.any(valid_mask):
+                self.line_nees.set_data(time_array[valid_mask], nees_array[valid_mask])
+
+            # Auto-scale x-axis
+            self.ax.set_xlim(time_array[0], time_array[-1])
+
+            # Auto-scale y-axis based on data (but keep bounds visible)
+            valid_nees = nees_array[valid_mask]
+            if len(valid_nees) > 0:
+                y_max = max(np.max(valid_nees), self.chi2_upper)
+                self.ax.set_ylim(0, y_max * 1.2)
+
+        return [self.line_nees]

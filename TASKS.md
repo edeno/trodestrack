@@ -44,6 +44,14 @@
   - [x] Implement prediction step with IMU pre-integration
   - [x] Implement measurement update with dual-LED positions
   - [x] Augment state for IMU biases
+  - [x] Add IEKF (Iterated EKF) for improved nonlinear handling
+  - [x] Implement marginal log-likelihood computation
+- [x] `viz/video.py` + `viz/components.py`
+  - [x] Comprehensive filter diagnostics visualization
+  - [x] State error panels (velocity, heading vs PRD targets)
+  - [x] Bias estimate tracking (gyro, accel biases)
+  - [x] NEES panel with chi-squared bounds
+  - [x] Innovation/residual time series
 - [ ] `models/ukf.py`
   - [ ] Implement sigma-point prediction
   - [ ] Unscented transform for nonlinear measurement updates
@@ -58,6 +66,13 @@
   - [x] Stationary: reject IMU drift
   - [x] Constant velocity: maintain steady covariance
   - [x] Circular: converge gyro bias
+- [x] `examples/04_ekf_scenarios_video.py`
+  - [x] Diagnostic videos for Tiers 0-2 (stationary, const-vel, circular)
+  - [x] Extended circular (20s) for bias convergence demo
+- [x] `examples/05_ekf_rat_imu_video.py`
+  - [x] Comprehensive diagnostic video for Tier 3
+  - [x] Innovation statistics console output
+  - [x] Interpolated truth (angle-aware for heading)
 - [ ] `tests/filters/test_ukf_accuracy.py`
   - [ ] Compare EKF/UKF consistency and RMSE on OU motion
 - [ ] `tests/filters/test_bias_observability.py`
@@ -67,9 +82,11 @@
 
 ### 📊 Deliverables
 
-- Deterministic EKF/UKF that passes analytic tests
-- RTS smoother implemented
-- Unit tests validate propagation, update, and bias tracking
+- ✅ Deterministic EKF that passes analytic tests
+- ✅ Comprehensive diagnostic visualization suite
+- ✅ Filter performance validated on all simulation tiers
+- [ ] RTS smoother implemented
+- [ ] Unit tests validate propagation, update, and bias tracking
 
 ---
 

@@ -5,6 +5,7 @@
 ### Completed Simulation Infrastructure
 
 **Implemented Modules:**
+
 - `sim/simple.py` - Analytic simulations (stationary, constant velocity, circular)
 - `sim/rat_imu.py` - Realistic rat motion with full IMU physics
 - `sim/utils.py` - Shared utilities and SimOut TypedDict
@@ -13,6 +14,7 @@
 - `tests/filters/test_vision_robustness.py` - **NEW**: Tier 3 vision robustness tests
 
 **Recent Improvements:**
+
 - ✅ Gravity & tilt physics (specific force = a_body - g_body)
 - ✅ Independent LED dropout with correlation parameter
 - ✅ Timestamp jitter without clipping bias
@@ -29,6 +31,7 @@
 ### Overall Assessment
 
 **Strengths:**
+
 - Excellent progressive complexity model (analytic → stochastic → full realism)
 - Clear isolation of concerns (dynamics, sensors, vision, environment)
 - Well-aligned with TDD principles (test-driven development)
@@ -44,6 +47,7 @@ This plan effectively implements a "simulation ladder" where each tier builds on
 ### Tier 0: Analytic Baselines
 
 **Proposed Scenarios:**
+
 - Stationary (x=0, v=0, θ=const)
 - Constant velocity (v=const, θ=const)
 - Uniform circular turn (θ̇=const, |v|=const)
@@ -52,18 +56,21 @@ This plan effectively implements a "simulation ladder" where each tier builds on
 ✅ **FULLY IMPLEMENTED** in `sim/simple.py` with examples in `01_simple_simulations.py`
 
 **Strengths:**
+
 - Perfect for validating filter math (Kalman gain, covariance propagation)
 - Closed-form ground truth eliminates simulation bugs as confound
 - Fast execution enables property-based testing (hypothesis library)
 - Already demonstrates EKF should collapse to linear KF in these cases
 
 **Gaps:**
+
 - ⚠️ No explicit tests yet for:
   - Zero-velocity update when stationary (should reject IMU drift)
   - Covariance consistency (NEES χ² test with known distributions)
   - Numerical stability at very small velocities (heading observability)
 
 **Recommendation:**
+
 - **Priority: HIGH** - Add unit tests validating filter behavior on these scenarios
 - Create `tests/filters/test_ekf_analytic.py` with:
   - `test_stationary_rejects_imu_drift()` - verify position doesn't drift
@@ -78,6 +85,7 @@ This plan effectively implements a "simulation ladder" where each tier builds on
 ### Tier 1: Controlled Stochasticity
 
 **Proposed Addition:**
+
 - Ornstein-Uhlenbeck velocity/yaw rate (mean-reverting, smooth)
 - Known autocorrelation → predictable filter performance
 - Bridge between deterministic and fully stochastic
@@ -86,17 +94,20 @@ This plan effectively implements a "simulation ladder" where each tier builds on
 ✅ **ALREADY IMPLEMENTED** in `rat_imu.py` (OU for velocity, yaw rate)
 
 **Strengths:**
+
 - Realistic smooth motion without chaotic trajectories
 - Tunable correlation time enables sensitivity analysis
 - OU parameters (σ, λ) directly map to Q matrix tuning
 - Differentiable dynamics support gradient-based Q optimization
 
 **Gaps:**
+
 - ⚠️ No tests validating OU parameter impact on filter performance
 - ⚠️ No comparison of estimated vs true OU statistics (stationarity check)
 - ⚠️ Missing "known-OU" scenario with matched process noise
 
 **Recommendation:**
+
 - **Priority: MEDIUM** - Add diagnostic tests, not critical for v1
 - Create `tests/sim/test_ou_validation.py`:
   - `test_ou_matches_theoretical_variance()` - verify σ²/(2λ) steady-state
@@ -112,6 +123,7 @@ This plan effectively implements a "simulation ladder" where each tier builds on
 ### Tier 2: Sensor Realism
 
 **Proposed Features:**
+
 - Bias random walks (gyro, accel)
 - White noise densities (discrete-time sampling)
 - Timestamp jitter & latency
@@ -119,18 +131,21 @@ This plan effectively implements a "simulation ladder" where each tier builds on
 
 **Current Coverage:**
 ✅ **FULLY IMPLEMENTED** in `rat_imu.py`:
+
 - Bias RW with configurable σ_bias
 - Noise densities converted via `density_to_sample_std()`
 - Jitter + latency (no clipping bias)
 - High-rate IMU generation (20 kHz default)
 
 **Strengths:**
+
 - Matches SpikeGadgets IMU specs (noise densities from datasheet)
 - Bias estimation is core PRD requirement (state augmentation)
 - Jitter fix (removing `np.clip`) ensures unbiased timestamp distribution
 - Already includes gravity + tilt (added in recent work)
 
 **Gaps:**
+
 - ⚠️ No systematic tests for bias observability vs trajectory richness
   - Stationary → gyro bias unobservable
   - Straight line → lateral accel bias unobservable
@@ -139,6 +154,7 @@ This plan effectively implements a "simulation ladder" where each tier builds on
 - ⚠️ No timestamp jitter robustness tests (extreme jitter, latency >> dt_cam)
 
 **Recommendation:**
+
 - **Priority: HIGH** - Bias estimation is critical for PRD
 - Create `tests/filters/test_bias_observability.py`:
   - `test_stationary_gyro_bias_unobservable()` - P_bias should grow
@@ -158,6 +174,7 @@ This plan effectively implements a "simulation ladder" where each tier builds on
 ### Tier 3: Vision Realism
 
 **Proposed Features:**
+
 - Dropout (occlusions, reflections)
 - Confidence-dependent noise
 - Dual LEDs (heading measurement, swap detection)
@@ -165,6 +182,7 @@ This plan effectively implements a "simulation ladder" where each tier builds on
 
 **Current Coverage:**
 ✅ **FULLY IMPLEMENTED** (as of Oct 8, 2025):
+
 - Independent LED dropout with correlation parameter (Gaussian copula)
 - Confidence → noise scaling via `confidence_to_noise_scale()`
 - Dual LED support with configurable spacing
@@ -173,6 +191,7 @@ This plan effectively implements a "simulation ladder" where each tier builds on
 - ✅ **Comprehensive test suite** in `test_vision_robustness.py` (16 tests, NEW)
 
 **Strengths:**
+
 - Correlation parameter enables testing partial vs full dropouts
 - Confidence scaling matches DLC output distributions
 - Separate masks allow testing "heading from velocity" fallback
@@ -181,12 +200,14 @@ This plan effectively implements a "simulation ladder" where each tier builds on
 - Tests cover long occlusions, confidence scaling, dual LED heading accuracy
 
 **Test Coverage Summary (test_vision_robustness.py):**
+
 - ✅ `TestLEDSwap`: 4 tests validating swap behavior, confidence swapping
 - ✅ `TestLongOcclusion`: 3 tests validating dropout durations (including ≥3s occlusions)
 - ✅ `TestConfidenceScaling`: 4 tests validating noise inflation, zero-confidence rejection
 - ✅ `TestDualLEDHeading`: 5 tests validating heading observability, LED spacing, independent/correlated dropouts
 
 **Remaining Gaps:**
+
 - ⚠️ No confidence validation against empirical DLC data
   - Current `confidence_to_noise_scale()` is heuristic (not data-driven)
   - **Action:** Document as configurable, revisit with real data
@@ -194,6 +215,7 @@ This plan effectively implements a "simulation ladder" where each tier builds on
   - **Action:** Defer to Tier 4 (arena physics)
 
 **Status: COMPLETED (Oct 8, 2025)**
+
 - ✅ LED swap implemented with `led_swap_prob` config parameter
 - ✅ Comprehensive test suite validates all vision features
 - ✅ Tests ready for filter implementation (currently validate simulation only)
@@ -204,6 +226,7 @@ This plan effectively implements a "simulation ladder" where each tier builds on
 ### Tier 4: Environment & Dynamics
 
 **Proposed Features:**
+
 - Arena boundaries (reflection, gating)
 - Speed saturation (realistic turning radius)
 - Heading-dependent drag (forward vs lateral)
@@ -211,10 +234,12 @@ This plan effectively implements a "simulation ladder" where each tier builds on
 
 **Current Coverage:**
 ✅ **PARTIALLY IMPLEMENTED**:
+
 - Speed saturation via smooth tanh (JAX-compatible)
 - Isotropic drag (`vel_drag` parameter)
 
 **Gaps:**
+
 - ⚠️ No arena boundaries in simulation
   - Rat can wander off maze → unrealistic for ~2m track
   - Need soft walls (reflection) or hard bounds (truncation)
@@ -225,8 +250,10 @@ This plan effectively implements a "simulation ladder" where each tier builds on
   - Current model allows instant direction changes at high speed (unrealistic)
 
 **Recommendation:**
+
 - **Priority: MEDIUM** - Important for realism, but filters should handle without explicit model
 - Add to `rat_imu.py`:
+
   ```python
   # Arena bounds (2D box)
   arena_bounds: tuple[float, float, float, float] = (0, 200, 0, 150)  # xmin, xmax, ymin, ymax
@@ -238,6 +265,7 @@ This plan effectively implements a "simulation ladder" where each tier builds on
   # Wall reflection for vision (spurious detections)
   wall_reflection_prob: float = 0.05  # Per-frame probability near walls
   ```
+
 - Create `tests/sim/test_arena_physics.py`:
   - `test_rat_stays_in_bounds()` - with soft walls, position stays in arena
   - `test_wall_reflection_outside_bounds()` - reflected detections have x,y outside arena
@@ -253,6 +281,7 @@ This plan effectively implements a "simulation ladder" where each tier builds on
 ### Tier 5: Full PRD-like Session
 
 **Proposed Scenarios:**
+
 - 30-minute session with PRD-realistic parameters
 - Stress tests: long occlusions, rapid turns, handling events
 - Ablations: IMU-only, vision-only, fusion vs baselines
@@ -263,18 +292,21 @@ This plan effectively implements a "simulation ladder" where each tier builds on
 ❌ **NOT YET IMPLEMENTED**
 
 **Strengths of Proposed Plan:**
+
 - Direct validation of PRD acceptance criteria
 - Ablations isolate sensor contributions (quantify fusion benefit)
 - Benchmarks ensure production readiness
 - Full session length exposes long-term drift, bias convergence
 
 **Gaps:**
+
 - Currently no filter implementation to test against
 - No NEES computation utilities
 - No benchmark harness (pytest-benchmark exists but not configured)
 - No "handling event" simulation (rat picked up, placed back down)
 
 **Recommendation:**
+
 - **Priority: LOW for now** - Defer until filter implementation exists
 - This tier validates the *filter*, not the *simulation*
 - Prerequisites:
@@ -297,6 +329,7 @@ This plan effectively implements a "simulation ladder" where each tier builds on
 ## Recommended Implementation Priority
 
 ### Phase 1: Foundation (Weeks 1-2)
+
 **Goal:** Validate simulation correctness and analytic filter behavior
 
 1. **Tier 0 Tests** (HIGH priority, 2-3 hours)
@@ -319,6 +352,7 @@ This plan effectively implements a "simulation ladder" where each tier builds on
 ---
 
 ### Phase 2: Filter Development (Weeks 3-5)
+
 **Goal:** Implement EKF/UKF and smoother
 
 1. **EKF Implementation** (`models/ekf.py`)
@@ -341,6 +375,7 @@ This plan effectively implements a "simulation ladder" where each tier builds on
 ---
 
 ### Phase 3: Robustness (Weeks 6-7)
+
 **Goal:** Handle realistic edge cases
 
 1. **Tier 2 Bias Observability** (MEDIUM priority, 5-6 hours)
@@ -359,6 +394,7 @@ This plan effectively implements a "simulation ladder" where each tier builds on
 ---
 
 ### Phase 4: Integration & Benchmarking (Week 8)
+
 **Goal:** PRD acceptance criteria
 
 1. **Tier 5 Full Session Tests** (10-12 hours)
@@ -380,7 +416,7 @@ This plan effectively implements a "simulation ladder" where each tier builds on
 
 ## Missing from Tier Plan
 
-### Additional Test Categories to Consider:
+### Additional Test Categories to Consider
 
 1. **Corner Cases Not Covered:**
    - Zero-velocity updates (stationary detection)
@@ -409,7 +445,7 @@ This plan effectively implements a "simulation ladder" where each tier builds on
 
 ## Alignment with PRD
 
-### Acceptance Criteria Coverage:
+### Acceptance Criteria Coverage
 
 | PRD Criterion | Tier | Status | Gap |
 |---------------|------|--------|-----|
@@ -428,19 +464,19 @@ This plan effectively implements a "simulation ladder" where each tier builds on
 
 ## Recommendations Summary
 
-### Immediate Next Steps (This Week):
+### Immediate Next Steps (This Week)
 
 1. **Add Tier 0 analytic filter tests** - validates filter math without simulation confounds
 2. **Add Tier 3 LED swap** - critical for heading robustness
 3. **Add long dropout test** - directly tests PRD criterion
 
-### Before Filter Implementation:
+### Before Filter Implementation
 
 1. **Complete Tier 2 noise validation** - ensures simulation matches hardware specs
 2. **Add NEES utilities** in `qa/metrics.py` - needed for all filter tests
 3. **Document test strategy** - this PLANNING.md serves as blueprint
 
-### After Filter Implementation:
+### After Filter Implementation
 
 1. **Tier 1 OU matching tests** - validates process noise tuning
 2. **Tier 4 arena physics** - optional for v1, but improves realism
@@ -475,17 +511,20 @@ This plan effectively implements a "simulation ladder" where each tier builds on
 ## Conclusion
 
 The proposed 5-tier test plan is **excellent and well-structured**. It provides:
+
 - Clear progression from simple to complex
 - Isolation of failure modes
 - Direct mapping to PRD acceptance criteria
 - TDD-compatible workflow (tests before implementation)
 
 **Current simulation infrastructure (rat_imu.py, simple.py, utils.py) fully supports Tiers 0-3** and partially supports Tier 4. The main gaps are:
+
 1. Missing test files (easy to add)
 2. LED swap feature (small addition to rat_imu.py)
 3. Arena physics (optional for v1)
 
 **Recommended approach:**
+
 - Implement Tier 0-3 tests immediately (simulation is ready)
 - Use these tests to validate filter implementation (TDD)
 - Add Tier 4-5 tests after filter works on simpler scenarios
