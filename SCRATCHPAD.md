@@ -64,6 +64,18 @@ The 8% excess over theory (0.54m vs 0.50m) likely comes from:
 - ✅ All existing smoother tests pass (no regressions)
 - ✅ All PRD acceptance tests pass (filter tests unaffected)
 
+**Visualization:**
+
+Created diagnostic video comparing filter vs IEKS smoother:
+- **File**: `output/dropout_smoother_comparison.mp4`
+- **Script**: `examples/06_dropout_smoother_comparison.py`
+- Shows side-by-side comparison of:
+  - Arena trajectories (filter in red, smoothed in blue)
+  - Position error time series with drift annotations
+  - Heading error showing convergence
+  - Bias estimates demonstrating backward propagation
+- Clearly illustrates how smoother uses vision *after* gap to pull estimates back
+
 ---
 
 ## 2025-10-09 - Dropout Drift Root Cause Analysis
