@@ -2,6 +2,58 @@
 
 Development notes and debugging history for trodestrack project.
 
+## 2025-10-09 - UKF Implementation Complete
+
+### Summary
+Implemented Unscented Kalman Filter (UKF) for sensor-fused rat tracking. All tests pass, code reviewed and approved.
+
+### Implementation
+- **File**: [src/trodestrack/models/ukf.py](src/trodestrack/models/ukf.py)
+- **Tests**: [tests/filters/test_ukf_accuracy.py](tests/filters/test_ukf_accuracy.py)
+- **Lines**: ~690 lines (UKF), ~470 lines (tests)
+
+### Key Features
+- Sigma-point generation (2n+1 = 17 points for 8D state)
+- Unscented transform for prediction and measurement updates
+- Numerical stability: Cholesky regularization + covariance symmetrization
+- Consistent with dynamax reference implementation
+- Compatible with existing EKF initialization and dynamics
+
+### Test Results
+All 6 tests passing (13.83s total):
+- ✓ Stationary: Position RMSE ≤ 2.5cm (PRD requirement met)
+- ✓ Constant velocity: Velocity RMSE ≤ 10 cm/s
+- ✓ Circular motion: Gyro bias converges within 0.01 rad/s
+- ✓ UKF vs EKF stationary: Comparable accuracy
+- ✓ UKF vs EKF circular: Within 15% (UKF handles nonlinearity well)
+- ✓ Marginal log-likelihood: Finite and reasonable
+
+### Code Review Findings
+- ✓ Mathematical correctness verified against dynamax and Särkkä (2013)
+- ✓ Weights sum to 1.0 (verified numerically)
+- ✓ Numerical stability appropriate for production use
+- ✓ Type hints complete (mypy passes)
+- ✓ Documentation excellent (NumPy-style docstrings)
+- **Status**: APPROVED - Ready to merge
+
+### Hyperparameters
+Default UKF hyperparameters (from dynamax/Julier & Uhlmann):
+- alpha = 1.732 (sqrt(3)) - Sigma-point spread
+- beta = 2.0 - Gaussian optimal for second-order accuracy
+- kappa = 1.0 - Secondary scaling parameter
+
+### Performance
+- Computation: ~3x slower than EKF (17 function evaluations vs 1+Jacobian)
+- Accuracy: Comparable to EKF on rat tracking (mild nonlinearity)
+- Throughput: >10x realtime on CPU (meets PRD offline requirement)
+
+### Next Steps
+- [Milestone 2] Implement UKF smoother (sigma-point RTS)
+- [Milestone 2] Complete RTS smoother for EKF
+- [Milestone 3] Add robustness testing (long dropouts, LED swaps)
+
+---
+
 ## 2025-10-09 - EKF Gyro Bias Convergence Time
 
 ### Problem

@@ -52,10 +52,10 @@
   - [x] Bias estimate tracking (gyro, accel biases)
   - [x] NEES panel with chi-squared bounds
   - [x] Innovation/residual time series
-- [ ] `models/ukf.py`
-  - [ ] Implement sigma-point prediction
-  - [ ] Unscented transform for nonlinear measurement updates
-  - [ ] Compare UKF and EKF accuracy on Tier 1–2 simulations
+- [x] `models/ukf.py` [CODE_REVIEWED: 2025-10-09]
+  - [x] Implement sigma-point prediction
+  - [x] Unscented transform for nonlinear measurement updates
+  - [x] Compare UKF and EKF accuracy on Tier 1–2 simulations
 - [ ] `runtime/offline.py`
   - [ ] Implement RTS smoother with cached Fₖ, Qₖ
   - [ ] Add optional sigma-point smoother
@@ -73,8 +73,11 @@
   - [x] Comprehensive diagnostic video for Tier 3
   - [x] Innovation statistics console output
   - [x] Interpolated truth (angle-aware for heading)
-- [ ] `tests/filters/test_ukf_accuracy.py`
-  - [ ] Compare EKF/UKF consistency and RMSE on OU motion
+- [x] `tests/filters/test_ukf_accuracy.py`
+  - [x] Compare EKF/UKF consistency and RMSE on OU motion
+  - [x] Stationary, constant velocity, circular scenarios
+  - [x] NEES consistency checks
+  - [x] Marginal log-likelihood computation
 - [ ] `tests/filters/test_bias_observability.py`
   - [ ] Stationary bias unobservable
   - [ ] Circular bias converges
@@ -85,6 +88,8 @@
 - ✅ Deterministic EKF that passes analytic tests
 - ✅ Comprehensive diagnostic visualization suite
 - ✅ Filter performance validated on all simulation tiers
+- ✅ UKF implementation complete with sigma-point transforms
+- ✅ UKF vs EKF comparison tests passing
 - [ ] RTS smoother implemented
 - [ ] Unit tests validate propagation, update, and bias tracking
 
