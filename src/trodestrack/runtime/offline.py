@@ -120,6 +120,8 @@ def rts_smoother(
     t_imu: np.ndarray,
     U_imu: np.ndarray,
     t_cam: np.ndarray,
+    num_iter: int = 1,
+    mask_cam: np.ndarray | None = None,
 ) -> SmootherResult:
     """Run RTS (Rauch-Tung-Striebel) smoother on EKF filter output.
 
@@ -128,12 +130,16 @@ def rts_smoother(
     estimate. This produces smoothed estimates with lower variance than
     the forward filter alone.
 
-    Algorithm (Särkkä 2013, Algorithm 8.2):
-        For k = N-1, ..., 1:
-            1. Predict forward from k to k+1: m_pred, P_pred
-            2. Compute smoother gain: G_k = P_k @ F_k^T @ P_pred^{-1}
-            3. Smooth state: m_smooth[k] = m_filt[k] + G_k @ (m_smooth[k+1] - m_pred)
-            4. Smooth cov: P_smooth[k] = P_filt[k] + G_k @ (P_smooth[k+1] - P_pred) @ G_k^T
+    Supports iterative smoothing (IEKS): relinearize around previous smoothed
+    trajectory for improved handling of nonlinearities.
+
+    Algorithm (Särkkä 2013, Algorithm 8.2 + iterative extension):
+        For iteration i = 1...num_iter:
+            For k = N-1, ..., 1:
+                1. Predict forward from k to k+1 (around x_smooth^(i-1)): m_pred, P_pred
+                2. Compute smoother gain: G_k = P_k @ F_k^T @ P_pred^{-1}
+                3. Smooth state: m_smooth[k] = m_filt[k] + G_k @ (m_smooth[k+1] - m_pred)
+                4. Smooth cov: P_smooth[k] = P_filt[k] + G_k @ (P_smooth[k+1] - P_pred) @ G_k^T
 
     Args:
         filter_result: Output from extended_kalman_filter()
@@ -141,6 +147,8 @@ def rts_smoother(
         t_imu: IMU timestamps (N_imu,) - needed to compute prediction
         U_imu: IMU measurements [ω_z, f_x, f_y] (N_imu, 3)
         t_cam: Camera timestamps (N_cam,)
+        num_iter: Number of IEKS iterations (default 1 = standard RTS)
+        mask_cam: Camera mask (N_cam,) - if provided, applies blackout-aware noise scaling
 
     Returns:
         SmootherResult with smoothed means and covariances
@@ -149,6 +157,10 @@ def rts_smoother(
         The smoother runs backward in time, starting from the last filtered
         estimate (which equals the last smoothed estimate by definition).
         State dimension is derived from filter_result.filtered_means.shape[1].
+
+        Blackout-aware Q/R scaling (when mask_cam is provided):
+        - During vision blackouts, reduces accel bias RW noise and IMU input noise
+        - Helps tighten how hard post-gap vision "pulls" backward through gaps
     """
     # Convert to JAX arrays
     t_imu_jax = jnp.array(t_imu)
@@ -189,33 +201,54 @@ def rts_smoother(
 
     imu_index_arrays = compute_imu_index_arrays()
 
+    # Convert mask_cam to JAX if provided
+    mask_cam_jax = jnp.array(mask_cam) if mask_cam is not None else None
+
     # Compute Jacobian of dynamics
     def f(x, u, dt):
         return dynamics_function(x, u, dt, ekf_config.damping_coeff)
 
     F_jac = jacfwd(f, argnums=0)
 
-    def predict_between_frames(t_idx: int, x_k: jnp.ndarray, P_k: jnp.ndarray):
+    def predict_between_frames(
+        t_idx: int,
+        x_k: jnp.ndarray,
+        P_k: jnp.ndarray,
+        x_k_lin: jnp.ndarray,
+    ):
         """Predict from frame t_idx to t_idx+1 using IMU.
 
         This replicates the filter's prediction logic to get m_pred, P_pred, and G.
+
+        Args:
+            t_idx: Time index
+            x_k: State at time k (for RTS update)
+            P_k: Covariance at time k
+            x_k_lin: Linearization point trajectory at time k (for IEKS)
+
         Returns: (m_pred, P_pred, G) where G is the smoother gain matrix.
         """
         # Get IMU indices for interval [t_idx, t_idx+1)
         imu_indices = imu_index_arrays[t_idx + 1]
 
         # Process noise rates (derived from state dimension)
-        Q_rate = build_Q_rate(ekf_config, n)
+        Q_rate_base = build_Q_rate(ekf_config, n)
+
+        # Blackout-aware noise scaling
+        # Check if either frame k or k+1 is in blackout
+        in_blackout = (mask_cam_jax is not None) and (
+            (~mask_cam_jax[t_idx]) | (~mask_cam_jax[t_idx + 1])
+        )
 
         def propagate_one_imu(carry, imu_idx):
             """Propagate through one IMU sample."""
-            x_in, P_in, F_accum = carry
+            x_in, P_in, F_accum, x_lin_in = carry
 
             # Skip invalid indices
             is_valid = imu_idx >= 0
 
-            def do_propagate(state_cov_F):
-                x_s, P_s, F_prev = state_cov_F
+            def do_propagate(state_cov_F_lin):
+                x_s, P_s, F_prev, x_lin_s = state_cov_F_lin
                 # Get IMU sample and dt
                 u = U_imu_jax[imu_idx]
                 dt = lax.cond(
@@ -224,32 +257,57 @@ def rts_smoother(
                     lambda: jnp.array(dt_imu_mean),
                 )
 
-                # Predict mean
+                # Predict mean (propagate actual state)
                 x_pred = f(x_s, u, dt)
 
-                # Predict covariance
-                F_k = F_jac(x_s, u, dt)
+                # Compute Jacobian around linearization point (IEKS)
+                F_k = F_jac(x_lin_s, u, dt)
+
+                # Apply blackout-aware noise scaling
+                # For 8D state: indices [0:2]=pos, [2:4]=vel, [4]=heading, [5]=gyro_bias, [6:8]=accel_bias
+                Q_rate = lax.cond(
+                    in_blackout,
+                    lambda qr: jnp.where(
+                        jnp.arange(n) >= 5,  # All bias indices (5:8 for standard 8D state)
+                        qr * 0.05,  # Freeze bias RW almost completely (20x reduction)
+                        jnp.where(
+                            jnp.arange(n) >= 2,  # Velocity and heading indices (2:5)
+                            qr * 0.25,  # Strong reduction for velocity/heading (4x)
+                            qr * 0.5,  # Moderate reduction for position (2x)
+                        ),
+                    ),
+                    lambda qr: qr,
+                    Q_rate_base,
+                )
+
                 Q_k = Q_rate * dt
+
+                # Predict covariance
                 P_pred = F_k @ P_s @ F_k.T + Q_k
                 P_pred = symmetrize(P_pred)
 
                 # Accumulate Jacobian: F_total = F_new @ F_prev
                 F_new = F_k @ F_prev
 
-                return x_pred, P_pred, F_new
+                # Propagate linearization trajectory
+                x_lin_pred = f(x_lin_s, u, dt)
 
-            def no_propagate(state_cov_F):
-                return state_cov_F
+                return x_pred, P_pred, F_new, x_lin_pred
+
+            def no_propagate(state_cov_F_lin):
+                return state_cov_F_lin
 
             return (
-                lax.cond(is_valid, do_propagate, no_propagate, (x_in, P_in, F_accum)),
+                lax.cond(is_valid, do_propagate, no_propagate, (x_in, P_in, F_accum, x_lin_in)),
                 None,
             )
 
         # Scan through all IMU samples in this interval
         # Initialize with identity Jacobian (dimension n)
         F_init = jnp.eye(n)
-        (x_pred, P_pred, F_total), _ = lax.scan(propagate_one_imu, (x_k, P_k, F_init), imu_indices)
+        (x_pred, P_pred, F_total, _), _ = lax.scan(
+            propagate_one_imu, (x_k, P_k, F_init, x_k_lin), imu_indices
+        )
 
         # Compute smoother gain: G = P_k @ F_total^T @ P_pred^{-1}
         G = psd_solve(P_pred, F_total @ P_k).T
@@ -261,16 +319,17 @@ def rts_smoother(
 
         Args:
             carry: (smoothed_mean_next, smoothed_cov_next) at time k+1
-            args: (t, filtered_mean_k, filtered_cov_k) at time k
+            args: (t, filtered_mean_k, filtered_cov_k, lin_mean_k) at time k
 
         Returns:
             Updated carry and smoothed estimates at time k
         """
         smoothed_mean_next, smoothed_cov_next = carry
-        t, filtered_mean, filtered_cov = args
+        t, filtered_mean, filtered_cov, lin_mean = args
 
         # Predict from k to k+1 and get smoother gain
-        m_pred, P_pred, G = predict_between_frames(t, filtered_mean, filtered_cov)
+        # Linearize around lin_mean (IEKS) but update using filtered_mean (RTS)
+        m_pred, P_pred, G = predict_between_frames(t, filtered_mean, filtered_cov, lin_mean)
 
         # Smooth mean and covariance
         smoothed_mean = filtered_mean + G @ (smoothed_mean_next - m_pred)
@@ -279,18 +338,46 @@ def rts_smoother(
 
         return (smoothed_mean, smoothed_cov), (smoothed_mean, smoothed_cov)
 
-    # Run RTS smoother backward from N-1 to 0
-    # Initial condition: smoothed[N-1] = filtered[N-1]
-    _, (smoothed_means, smoothed_covs) = lax.scan(
-        smoother_step,
-        (filtered_means[-1], filtered_covs[-1]),
-        (jnp.arange(n_cam - 1), filtered_means[:-1], filtered_covs[:-1]),
-        reverse=True,
-    )
+    def run_one_rts_iteration(lin_means: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+        """Run one RTS backward pass.
 
-    # Concatenate with final frame (smoothed[-1] = filtered[-1])
-    smoothed_means = jnp.vstack([smoothed_means, filtered_means[-1][None, ...]])
-    smoothed_covs = jnp.vstack([smoothed_covs, filtered_covs[-1][None, ...]])
+        Args:
+            lin_means: Linearization trajectory (N_cam, n)
+
+        Returns:
+            smoothed_means, smoothed_covs: Updated estimates
+        """
+        # Initial condition: smoothed[N-1] = filtered[N-1]
+        _, (smoothed_means_iter, smoothed_covs_iter) = lax.scan(
+            smoother_step,
+            (filtered_means[-1], filtered_covs[-1]),
+            (
+                jnp.arange(n_cam - 1),
+                filtered_means[:-1],
+                filtered_covs[:-1],
+                lin_means[:-1],
+            ),
+            reverse=True,
+        )
+
+        # Concatenate with final frame (smoothed[-1] = filtered[-1])
+        smoothed_means_iter = jnp.vstack([smoothed_means_iter, filtered_means[-1][None, ...]])
+        smoothed_covs_iter = jnp.vstack([smoothed_covs_iter, filtered_covs[-1][None, ...]])
+
+        return smoothed_means_iter, smoothed_covs_iter
+
+    # Iterative EKS (IEKS): relinearize around previous smoothed trajectory
+    # Initialize linearization trajectory with filtered estimates
+    lin_means = filtered_means
+
+    for iter_idx in range(num_iter):
+        smoothed_means, smoothed_covs = run_one_rts_iteration(lin_means)
+
+        # Update linearization trajectory for next iteration
+        lin_means = smoothed_means
+
+        # Optional: check convergence (early stopping if RMSE change < 1%)
+        # Not implemented here to keep JAX-friendly (would need conditional break)
 
     return SmootherResult(
         smoothed_means=smoothed_means,

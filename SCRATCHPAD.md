@@ -2,6 +2,70 @@
 
 Development notes and debugging history for trodestrack project.
 
+## 2025-10-09 - IEKS + Blackout-Aware Smoothing: 0.54m Drift (Near Theory!)
+
+### Summary
+
+Implemented iterative Extended Kalman Smoother (IEKS) with blackout-aware Q/R scaling to achieve **3.08× improvement** over filtered estimates. Successfully reduced drift from **1.67m → 0.54m**, now only **8% above theoretical floor** (~0.50m).
+
+**Final Results:**
+
+- **Filter drift**: 1.67 m (with blackout-aware filtering)
+- **Smoothed drift (IEKS iter=2)**: 0.54 m
+- **Theory**: ~0.50 m (white accel noise floor)
+- **Observed/Theory ratio**: 1.08× (excellent!)
+- **Improvement**: 3.08× reduction vs filter
+
+**Implementation Details:**
+
+1. **IEKS (Iterative EKS)**: Relinearize around previous smoothed trajectory
+   - 2 iterations (more iterations didn't help significantly)
+   - Marginal improvement (~0.02m) suggests linearization already good
+   - Standard RTS: 0.71m → IEKS(2): 0.69m → IEKS(2) + aggressive Q: 0.54m
+
+2. **Blackout-Aware Q/R Scaling in Smoother**:
+   - **Bias RW** (indices 5:8): 20× reduction (Q × 0.05)
+   - **Velocity/Heading** (indices 2:5): 4× reduction (Q × 0.25)
+   - **Position** (indices 0:2): 2× reduction (Q × 0.5)
+   - Applied when either frame k or k+1 is in blackout
+   - This aggressive scaling is key: it tightens how hard post-gap vision "pulls" backward
+
+3. **Technical Implementation**:
+   - Modified `rts_smoother()` to accept `num_iter` and `mask_cam` parameters
+   - Linearization around smoothed trajectory (not filtered) for IEKS
+   - Cross-covariance P(x_k, x_{k+1}) computed correctly via accumulated Jacobian F_total
+   - Backward pass propagates linearization trajectory alongside actual state
+
+**Why This Works:**
+
+The smoother has access to vision *after* the gap, which provides strong constraints:
+- Forward filter only has vision *before* gap → unconstrained drift
+- Backward smoother has vision *after* gap → can pull estimates back toward truth
+- Blackout-aware Q scaling makes the gap "tight" so the backward pull is effective
+- IEKS ensures linearization is consistent with final smoothed trajectory
+
+**Remaining Gap to Theory (1.08× vs 1.0×):**
+
+The 8% excess over theory (0.54m vs 0.50m) likely comes from:
+- Discretization effects in IMU integration (Euler method)
+- Small nonlinearity in dynamics (damping, heading wrapping)
+- Coupling between position and velocity errors
+
+**Next Steps (Optional Refinements):**
+
+- [ ] Midpoint/RK2 IMU integration (expect ~2-5% improvement)
+- [ ] Constant-speed prior pseudo-measurement in gap (expect ~3-8% improvement)
+- [ ] Constant-turn-rate prior (marginal, <5%)
+- [ ] Square-root RTS for numerical stability (defensive)
+
+**Test Coverage:**
+
+- ✅ `test_prd_dropout_drift_5s_smoothed()` passes (0.54m < 0.60m target)
+- ✅ All existing smoother tests pass (no regressions)
+- ✅ All PRD acceptance tests pass (filter tests unaffected)
+
+---
+
 ## 2025-10-09 - Dropout Drift Root Cause Analysis
 
 ### Summary

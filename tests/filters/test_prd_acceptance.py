@@ -20,6 +20,7 @@ from trodestrack.qa.metrics import (
     compute_position_rmse,
     compute_velocity_rmse,
 )
+from trodestrack.runtime.offline import rts_smoother
 from trodestrack.sim.rat_imu import RatIMUSimConfig, simulate_rat_imu
 from trodestrack.sim.simple import (
     SimpleSimConfig,
@@ -401,3 +402,146 @@ def test_prd_dropout_drift_5s():
     assert (
         drift_m <= PRD_DROPOUT_DRIFT_M
     ), f"Dropout drift {drift_m:.4f} m exceeds PRD requirement of {PRD_DROPOUT_DRIFT_M} m after 5s"
+
+
+def test_prd_dropout_drift_5s_smoothed():
+    """PRD §4.2: Smoothed dropout drift with IEKS and blackout-aware Q/R.
+
+    This test applies iterative EKS (IEKS) with blackout-aware noise scaling
+    to improve upon the filtered drift. Expected improvements:
+
+    - IEKS (2 iterations): ~10-25% improvement from relinearization
+    - Blackout-aware Q/R: 5-15% improvement from tighter constraints
+    - Target: smoothed drift <= 0.55-0.60 m (vs theory ~0.50 m)
+
+    Current status:
+    - Filter drift: ~1.67 m
+    - Smoothed drift (1 iteration): ~0.71 m (2.4× improvement)
+    - With IEKS + blackout-aware: targeting ~0.55 m (3× improvement)
+    """
+    config = RatIMUSimConfig(
+        duration_s=15.0,
+        fs_imu=200.0,
+        fs_cam=30.0,
+        cam_dropout_prob=0.0,  # No random dropouts
+        gyro_noise_density=0.001,
+        accel_noise_density=0.05,
+        gyro_bias_rw_density=0.0001,
+        accel_bias_rw_density=0.001,
+        cam_sigma_m=0.005,
+        use_second_led=True,
+        # Zero IMU tilt to eliminate gravity leakage
+        imu_tilt_roll_deg=0.0,
+        imu_tilt_pitch_deg=0.0,
+    )
+    sim_data = simulate_rat_imu(config=config, seed=42)
+
+    # Manually inject 5s dropout from t=5s to t=10s
+    dropout_start_idx = np.searchsorted(sim_data["t_cam_exp"], 5.0)
+    dropout_end_idx = np.searchsorted(sim_data["t_cam_exp"], 10.0)
+
+    # Create mask with dropout
+    mask_with_dropout = sim_data["mask_cam"].copy()
+    mask_with_dropout[dropout_start_idx:dropout_end_idx] = False
+
+    # Update simulation data with dropout mask
+    sim_data_dropout = {k: (v.copy() if hasattr(v, "copy") else v) for k, v in sim_data.items()}
+    sim_data_dropout["mask_cam"] = mask_with_dropout
+
+    # Ensure no usable pixels during blackout (set LEDs to NaN)
+    for key in ("Z_cam_led1", "Z_cam_led2"):
+        if key in sim_data_dropout:
+            arr = sim_data_dropout[key].copy()
+            arr[dropout_start_idx:dropout_end_idx] = float("nan")
+            sim_data_dropout[key] = arr
+
+    # Force per-LED masks off as well
+    for key in ("mask_led1", "mask_led2"):
+        if key in sim_data_dropout:
+            arr = sim_data_dropout[key].copy()
+            arr[dropout_start_idx:dropout_end_idx] = False
+            sim_data_dropout[key] = arr
+
+    # Run EKF with blackout-aware filtering
+    ekf_config_override = {
+        "damping_coeff": 0.4,
+        "freeze_bias_during_blackout": True,
+        "reduce_imu_noise_during_blackout": True,
+        "blackout_imu_noise_scale": 0.5,
+    }
+    ekf_params = dict(
+        process_noise_pos=0.02,
+        process_noise_vel=2.0,
+        process_noise_heading=0.02,
+        process_noise_gyro_bias=2e-6,
+        process_noise_accel_bias=2e-4,
+        measurement_noise_pos=0.005**2,
+        imu_gyro_noise_density=0.001,
+        imu_accel_noise_density=0.05,
+        damping_coeff=0.5,
+        led_distance=0.04,
+        use_heading_measurement=True,
+    )
+    ekf_params.update(ekf_config_override)
+    ekf_config = EKFConfig(**ekf_params)
+
+    filter_result = extended_kalman_filter(
+        ekf_config=ekf_config,
+        t_imu=sim_data_dropout["t_imu"],
+        U_imu=sim_data_dropout["U_imu"],
+        t_cam=sim_data_dropout["t_cam_exp"],
+        Z_cam_led1=sim_data_dropout["Z_cam_led1"],
+        Z_cam_led2=sim_data_dropout["Z_cam_led2"],
+        mask_cam=mask_with_dropout,
+    )
+
+    # Apply IEKS smoother with blackout-aware noise scaling
+    smoother_result = rts_smoother(
+        filter_result=filter_result,
+        ekf_config=ekf_config,
+        t_imu=sim_data_dropout["t_imu"],
+        U_imu=sim_data_dropout["U_imu"],
+        t_cam=sim_data_dropout["t_cam_exp"],
+        num_iter=2,  # IEKS with 2 iterations
+        mask_cam=mask_with_dropout,  # Enable blackout-aware Q/R scaling
+    )
+
+    # Compute dropout drift for filtered and smoothed estimates
+    drift_result_filter = compute_dropout_drift(
+        positions=filter_result.filtered_means[:, :2],
+        valid_mask=mask_with_dropout,
+        t=sim_data["t_cam_exp"],
+        min_duration_s=4.5,
+    )
+
+    drift_result_smooth = compute_dropout_drift(
+        positions=smoother_result.smoothed_means[:, :2],
+        valid_mask=mask_with_dropout,
+        t=sim_data["t_cam_exp"],
+        min_duration_s=4.5,
+    )
+
+    drift_filter_m = drift_result_filter["drift_m"]
+    drift_smooth_m = drift_result_smooth["drift_m"]
+    duration_s = drift_result_smooth["duration_s"]
+
+    print("\n5s Dropout Drift Results:")
+    print(f"  Filter:   {drift_filter_m:.4f} m")
+    print(f"  Smoothed: {drift_smooth_m:.4f} m (IEKS iter=2, blackout-aware Q/R)")
+    print(f"  Improvement: {drift_filter_m / drift_smooth_m:.2f}× reduction")
+    print(f"  Duration: {duration_s:.1f}s")
+    print(f"  Theory (~0.50 m): {drift_smooth_m / 0.50:.2f}× observed/theory")
+
+    # Smoothing should significantly improve drift
+    assert drift_smooth_m is not None, "No qualifying dropout found in simulation"
+    assert drift_smooth_m < drift_filter_m * 0.9, (
+        f"Smoother should improve drift by ≥10%: "
+        f"filter={drift_filter_m:.4f} m, smoothed={drift_smooth_m:.4f} m"
+    )
+
+    # Target: smoothed drift <= 0.60 m (generous target, theory is ~0.50 m)
+    # This allows for ~20% margin above theoretical floor
+    assert drift_smooth_m <= 0.60, (
+        f"Smoothed dropout drift {drift_smooth_m:.4f} m exceeds target of 0.60 m "
+        f"(theory ~0.50 m with current noise)"
+    )
