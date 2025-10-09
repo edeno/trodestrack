@@ -2,6 +2,69 @@
 
 Development notes and debugging history for trodestrack project.
 
+## 2025-10-09 - RTS Smoother Implementation Complete
+
+### Summary
+Implemented RTS (Rauch-Tung-Striebel) smoother for offline post-processing of EKF and UKF filter outputs. All tests pass, code reviewed and approved.
+
+### Implementation
+- **Files**:
+  - [src/trodestrack/runtime/offline.py](src/trodestrack/runtime/offline.py) (530 lines)
+  - [tests/runtime/test_offline_smoother.py](tests/runtime/test_offline_smoother.py) (340 lines)
+
+### Key Features
+- **RTS Smoother for EKF**: Backward pass using Jacobian accumulation through IMU steps
+- **Sigma-Point Smoother for UKF**: Backward pass using unscented transform for cross-covariance
+- **IMU Pre-Integration**: Handles variable-length IMU sequences between camera frames
+- **Numerical Stability**: PSD solver, symmetrization, Cholesky regularization
+
+### Test Results
+All 7 tests passing (15.51s total):
+- ✓ RTS stationary: Position RMSE ≤ 2.1cm (PRD requirement met)
+- ✓ RTS circular: Improves gyro bias estimates
+- ✓ RTS covariance: Reduces uncertainty (smoother < filter)
+- ✓ RTS deterministic: Reproducible outputs
+- ✓ UKF stationary: Position RMSE ≤ 2.1cm
+- ✓ UKF covariance: Reduces uncertainty
+- ✓ UKF deterministic: Reproducible outputs
+
+### Code Review Findings
+- ✓ Mathematical correctness verified against dynamax and Särkkä (2013)
+- ✓ Jacobian accumulation correct for composed dynamics
+- ✓ Cross-covariance computation correct for UKF
+- ✓ Numerical stability appropriate for production use
+- ✓ Type hints complete (mypy passes)
+- ✓ Documentation excellent (NumPy-style docstrings)
+- **Status**: APPROVED - Ready to merge
+
+### Algorithm Details
+
+**RTS Smoother (Särkkä 2013, Algorithm 8.2):**
+```
+For k = N-1, ..., 0:
+  1. Predict: m_pred[k+1|k], P_pred[k+1|k] via IMU steps
+  2. Gain: G[k] = P[k|k] @ F^T @ P_pred[k+1|k]^{-1}
+  3. Smooth mean: m[k|N] = m[k|k] + G[k] @ (m[k+1|N] - m_pred[k+1|k])
+  4. Smooth cov: P[k|N] = P[k|k] + G[k] @ (P[k+1|N] - P_pred[k+1|k]) @ G[k]^T
+```
+
+**Key Adaptation:**
+- Accumulates Jacobians through multiple IMU steps: F_total = F_n @ ... @ F_1
+- Handles variable-length IMU sequences via padded index arrays
+- Computes cross-covariance for UKF by propagating sigma points through all IMU steps
+
+### Performance
+- Computation: Fast enough for offline processing (15s for 7 test scenarios)
+- Covariance Reduction: Smoother uncertainty < filter uncertainty (verified)
+- RMSE Improvement: Minimal on stationary (excellent measurements), measurable on dynamic scenarios
+
+### Next Steps
+- [Milestone 2] Complete bias observability tests (if needed)
+- [Milestone 3] Add robustness testing (long dropouts, LED swaps)
+- [Milestone 4] Performance benchmarks (30 min session @ 10x realtime)
+
+---
+
 ## 2025-10-09 - UKF Implementation Complete
 
 ### Summary

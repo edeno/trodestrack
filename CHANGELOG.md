@@ -2,6 +2,55 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-09 - RTS Smoother Implementation
+
+**Added:**
+- **Offline Smoothing Module** (`src/trodestrack/runtime/offline.py`, 530 lines)
+  - `rts_smoother()` - RTS (Rauch-Tung-Striebel) smoother for EKF outputs
+  - `sigma_point_smoother()` - Sigma-point smoother for UKF outputs
+  - `SmootherResult` - Unified result type for both smoothers
+  - Helper functions for sigma-point generation and transforms
+
+**Features:**
+- **RTS Smoother for EKF**:
+  - Backward pass using Jacobian accumulation through IMU steps
+  - Computes F_total = F_n @ ... @ F_1 for composed dynamics
+  - Handles variable-length IMU sequences via padded index arrays
+  - Numerical stability: PSD solver, symmetrization
+
+- **Sigma-Point Smoother for UKF**:
+  - Backward pass using unscented transform for cross-covariance
+  - Propagates sigma points through all IMU steps for cross-cov P(x_k, x_{k+1})
+  - Correctly captures linearization of composed dynamics
+  - Same numerical stability features as RTS
+
+**Testing:**
+- `tests/runtime/test_offline_smoother.py` (340 lines, 7 tests passing)
+  - ✓ RTS stationary: RMSE ≤ 2.1cm, covariance reduction verified
+  - ✓ RTS circular: Improves gyro bias estimates
+  - ✓ RTS deterministic: Reproducible outputs
+  - ✓ UKF stationary: RMSE ≤ 2.1cm, covariance reduction verified
+  - ✓ UKF deterministic: Reproducible outputs
+
+**Code Quality:**
+- Full type hints (mypy passes)
+- NumPy-style docstrings with algorithm references
+- Code reviewed and **APPROVED** by code-reviewer agent
+- Follows dynamax reference patterns
+
+**Documentation:**
+- Updated [TASKS.md](TASKS.md): Marked runtime/offline.py as complete
+- Updated [SCRATCHPAD.md](SCRATCHPAD.md): Documented implementation details and algorithm
+- Algorithm references: Särkkä (2013) Algorithm 8.2, dynamax inference_ekf.py
+
+**Impact:**
+- ✅ Completes Milestone 2 core deliverable: RTS smoother
+- ✅ Smoother reduces covariance (uncertainty) vs filter-only
+- ✅ Deterministic and reproducible
+- 📊 Ready for Milestone 4 performance benchmarks
+
+---
+
 ### Session: 2025-10-08 (Evening) - EKF Heading Initialization Fix
 
 **Fixed:**

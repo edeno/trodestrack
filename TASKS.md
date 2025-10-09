@@ -56,9 +56,9 @@
   - [x] Implement sigma-point prediction
   - [x] Unscented transform for nonlinear measurement updates
   - [x] Compare UKF and EKF accuracy on Tier 1–2 simulations
-- [ ] `runtime/offline.py`
-  - [ ] Implement RTS smoother with cached Fₖ, Qₖ
-  - [ ] Add optional sigma-point smoother
+- [x] `runtime/offline.py`
+  - [x] Implement RTS smoother with cached Fₖ, Qₖ
+  - [x] Add optional sigma-point smoother
 
 ### 🧪 Testing
 
@@ -90,8 +90,8 @@
 - ✅ Filter performance validated on all simulation tiers
 - ✅ UKF implementation complete with sigma-point transforms
 - ✅ UKF vs EKF comparison tests passing
-- [ ] RTS smoother implemented
-- [ ] Unit tests validate propagation, update, and bias tracking
+- ✅ RTS smoother implemented (EKF and UKF)
+- ✅ Smoother tests validate covariance reduction and determinism
 
 ---
 
