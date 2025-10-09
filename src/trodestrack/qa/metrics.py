@@ -127,6 +127,42 @@ def compute_heading_error(
     return float(mae_deg)
 
 
+def compute_heading_rmse(
+    headings_true: NDArray[np.float64],
+    headings_est: NDArray[np.float64],
+) -> float:
+    """Compute root mean square heading error with proper angle wrapping.
+
+    Args:
+        headings_true: Ground truth headings, shape (N,) in radians
+        headings_est: Estimated headings, shape (N,) in radians
+
+    Returns:
+        Root mean square error in radians
+
+    Example:
+        >>> true_heading = np.array([0.0, np.pi/2, np.pi])
+        >>> est_heading = np.array([0.1, np.pi/2 + 0.1, np.pi - 0.1])
+        >>> rmse = compute_heading_rmse(true_heading, est_heading)
+        >>> print(f"{rmse:.4f} rad ({np.rad2deg(rmse):.2f} deg)")
+        0.1000 rad (5.73 deg)
+    """
+    if headings_true.shape != headings_est.shape:
+        raise ValueError(f"Shape mismatch: true {headings_true.shape} vs est {headings_est.shape}")
+
+    if headings_true.ndim != 1:
+        raise ValueError(f"Expected 1D headings, got shape {headings_true.shape}")
+
+    # Compute wrapped difference: map to (-π, π]
+    diff = headings_true - headings_est
+    diff_wrapped = np.arctan2(np.sin(diff), np.cos(diff))
+
+    # Root mean square error in radians
+    rmse_rad = np.sqrt(np.mean(diff_wrapped**2))
+
+    return float(rmse_rad)
+
+
 def compute_nees(
     states_true: NDArray[np.float64],
     states_est: NDArray[np.float64],
