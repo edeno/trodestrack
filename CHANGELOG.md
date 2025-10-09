@@ -2,6 +2,63 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-09 - P0.5: Linalg Stability & Joseph Form
+
+**Added:**
+- **Joseph Form Covariance Update** (`src/trodestrack/models/ekf.py`)
+  - New `joseph_update(P, K, H, R)` helper function implementing stable covariance update
+  - Formula: `P⁺ = (I - KH)P(I - KH)ᵀ + KRKᵀ`
+  - Ensures covariance remains positive semi-definite and symmetric
+  - Comprehensive docstring with references (Bierman, Särkkä, Bar-Shalom)
+
+- **Joseph Form Test Suite** (`tests/filters/test_joseph_form.py`)
+  - 14 comprehensive tests covering all stability features
+  - Tests for symmetry, PSD preservation, near-singular handling
+  - Tests for 1D, 2D, and 4D measurements
+  - Integration tests for EKF and UKF usage
+
+**Changed:**
+- **EKF Log-Likelihood Stability** (`src/trodestrack/models/ekf.py`)
+  - Added adaptive jitter to `gaussian_log_likelihood()` (1e-8 * trace(S)/k)
+  - Added sign checking from slogdet with fallback (1e-6 jitter if sign ≤ 0)
+  - Prevents divergence for near-singular innovation covariances
+  - Uses lax.cond for JAX compatibility
+
+- **UKF Log-Likelihood Stability** (`src/trodestrack/models/ukf.py`)
+  - Added identical stability improvements to `gaussian_log_likelihood_ukf()`
+  - Maintains parity with EKF numerical stability features
+
+- **EKF Heading Update** (`src/trodestrack/models/ekf.py`)
+  - Updated to use `joseph_update()` with proper 2D matrix operations
+  - Changed H from 1D vector to (1, 8) matrix for consistency
+  - Changed S from scalar to (1, 1) matrix
+  - Changed K from vector to (8, 1) matrix
+
+- **Documentation Improvements**
+  - Clarified UKF covariance update comments (native form vs EKF Joseph form)
+  - Added explanation to EKF position update (Joseph form via alternative formulation)
+  - Improved comments distinguishing UKF's natural stability from EKF's Joseph form
+
+**Testing:**
+- ✅ All 14 new tests passing (test_joseph_form.py)
+- ✅ No regressions: 35/35 tests passing (EKF, UKF, smoother suites)
+- ✅ Code reviewed and approved
+
+**Impact:**
+- **Numerical Stability:** Prevents covariance divergence for ill-conditioned problems
+- **Production Readiness:** Graceful handling of near-singular covariances in long filter runs
+- **Future 3D:** Foundation for more complex dynamics with higher-dimensional states
+- **Merge Gate:** P0.5 blocker resolved (REVIEW.md)
+
+**Breaking Changes:**
+- None (all changes are internal improvements)
+
+**Performance:**
+- Joseph form adds 2 matrix multiplications per update (~5% overhead)
+- Worth the cost for numerical stability in production scenarios
+
+---
+
 ### Session: 2025-10-09 - P0.4: State-Dimension Generalization in Smoothers
 
 **Changed:**

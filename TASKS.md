@@ -4,8 +4,8 @@
 - ✅ P0.1: SI Unit Standardization (commit 99c70cb)
 - ✅ P0.2: Generalized χ² Envelopes (commit ab0c75d)
 - ✅ P0.3: UKF Heading Measurement (commit cb5fa85)
-- ✅ **P0.4: State-Dimension Generalization in Smoothers (this session)**
-- [ ] P0.5: Linalg Stability & Joseph Form
+- ✅ P0.4: State-Dimension Generalization in Smoothers (commit 51067f0)
+- ✅ **P0.5: Linalg Stability & Joseph Form (this session)**
 - [ ] P0.6: Fix Config Mutation (LED spacing inference)
 - [ ] P0.7: Fix Test Defects & Flakes
 

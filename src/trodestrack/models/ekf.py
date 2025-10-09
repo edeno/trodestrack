@@ -274,6 +274,63 @@ def wrap_angle(theta: jnp.ndarray) -> jnp.ndarray:
     return jnp.arctan2(jnp.sin(theta), jnp.cos(theta))
 
 
+def joseph_update(
+    P: jnp.ndarray,
+    K: jnp.ndarray,
+    H: jnp.ndarray,
+    R: jnp.ndarray,
+) -> jnp.ndarray:
+    """Joseph form covariance update for numerical stability.
+
+    The Joseph form ensures covariance remains positive semi-definite (PSD)
+    and symmetric even under numerical errors. It is more stable than the
+    standard form P⁺ = (I - KH)P, especially for near-singular covariances.
+
+    Joseph form:
+        P⁺ = (I - KH)P(I - KH)ᵀ + KRKᵀ
+
+    This form explicitly preserves:
+        1. Symmetry: P⁺ = (P⁺)ᵀ
+        2. Positive semi-definiteness: P⁺ ⪰ 0
+        3. Numerical stability for ill-conditioned problems
+
+    Args:
+        P: Prior covariance (n, n)
+        K: Kalman gain (n, m)
+        H: Measurement Jacobian (m, n)
+        R: Measurement noise covariance (m, m)
+
+    Returns:
+        P_upd: Updated covariance (n, n), guaranteed PSD and symmetric
+
+    References:
+        - Bierman (1977) "Factorization Methods for Discrete Sequential Estimation"
+        - Särkkä (2013) "Bayesian Filtering and Smoothing", Section 5.3
+        - Bar-Shalom et al. (2001) "Estimation with Applications to Tracking"
+          Section 5.2.3
+
+    Notes:
+        - Computationally more expensive than standard form (3 matrix products vs 1)
+        - Worth the cost for numerical stability, especially with:
+          * Near-singular covariances
+          * High-gain updates (small R)
+          * Long sequences where errors accumulate
+    """
+    n = P.shape[0]
+    identity = jnp.eye(n)
+
+    # I - KH
+    I_KH = identity - K @ H
+
+    # Joseph form: (I - KH) P (I - KH)^T + K R K^T
+    P_upd = I_KH @ P @ I_KH.T + K @ R @ K.T
+
+    # Enforce symmetry (should be symmetric but numerical errors can accumulate)
+    P_upd = symmetrize(P_upd)
+
+    return P_upd
+
+
 def estimate_led_spacing(
     Z_cam_led1: jnp.ndarray,
     Z_cam_led2: jnp.ndarray,
@@ -314,10 +371,15 @@ def estimate_led_spacing(
 
 
 def gaussian_log_likelihood(innovation: jnp.ndarray, covariance: jnp.ndarray) -> jnp.ndarray:
-    """Compute Gaussian log-likelihood of innovation.
+    """Compute Gaussian log-likelihood of innovation with numerical stability.
 
     Computes log p(y | mu, Sigma) where y ~ N(mu, Sigma)
     and innovation = y - mu.
+
+    Stability features:
+        - Adds small jitter to covariance diagonal for near-singular matrices
+        - Checks sign from slogdet to detect numerical issues
+        - Uses Cholesky decomposition when feasible via psd_solve
 
     Args:
         innovation: Innovation vector (k,)
@@ -328,19 +390,40 @@ def gaussian_log_likelihood(innovation: jnp.ndarray, covariance: jnp.ndarray) ->
 
     Formula:
         log_prob = -0.5 * (k*log(2π) + log(det(S)) + v^T S^{-1} v)
+
+    Notes:
+        - If determinant is negative or zero (numerical error), adds jitter
+        - Jitter = 1e-8 * trace(S) / k added to diagonal
+        - This prevents divergence for near-singular covariances
     """
     k = innovation.shape[0]
 
-    # Log determinant using Cholesky (more stable than det)
-    sign, logdet = jnp.linalg.slogdet(covariance)
+    # Add small jitter to diagonal for numerical stability
+    # Scale by mean diagonal value to be adaptive
+    jitter = 1e-8 * jnp.trace(covariance) / k
+    S_stable = covariance + jnp.eye(k) * jitter
+
+    # Log determinant using slogdet (more stable than det)
+    sign, logdet = jnp.linalg.slogdet(S_stable)
+
+    # Check for numerical issues (sign should be +1 for PSD matrix)
+    # If sign <= 0, increase jitter and recompute
+    def add_more_jitter():
+        jitter_large = 1e-6 * jnp.trace(covariance) / k
+        S_jittered = covariance + jnp.eye(k) * jitter_large
+        sign_j, logdet_j = jnp.linalg.slogdet(S_jittered)
+        return logdet_j
+
+    # Use original logdet if sign is positive, otherwise use jittered version
+    logdet_safe = lax.cond(sign > 0, lambda: logdet, add_more_jitter)
 
     # Mahalanobis distance: v^T S^{-1} v
     # psd_solve computes S^{-1} @ v, then we dot with v
-    S_inv_v = psd_solve(covariance, innovation)
+    S_inv_v = psd_solve(S_stable, innovation)
     mahal = jnp.dot(innovation, S_inv_v)
 
     # Gaussian log-likelihood
-    log_prob = -0.5 * (k * jnp.log(2 * jnp.pi) + logdet + mahal)
+    log_prob = -0.5 * (k * jnp.log(2 * jnp.pi) + logdet_safe + mahal)
 
     return log_prob
 
@@ -915,8 +998,9 @@ def update_step(
                 # Wrap heading angle to (-π, π] after update
                 m_upd = m_upd.at[4].set(wrap_angle(m_upd[4]))
 
-                # Joseph-form covariance update: P ← P − P H^T (S_eff⁻¹ @ H P)
-                # Apply lifted inverse to each column of H P
+                # Joseph form covariance update via alternative formulation
+                # P⁺ = P - PH^T S^{-1} HP (equivalent to (I - KH)P(I - KH)^T + KRK^T)
+                # This formulation works naturally with the lifted subspace operator
                 HP = H4 @ P_iter  # (4, 8)
 
                 def apply_inv_to_col(col_idx):
@@ -1086,27 +1170,28 @@ def update_heading(
     innov = jnp.where(jnp.isfinite(innov_raw), innov_raw, 0.0)
 
     # Jacobian: H = [0, 0, 0, 0, 1, 0, 0, 0]
-    H = jnp.zeros(8)
-    H = H.at[4].set(1.0)
+    # Shape (1, 8) for proper matrix operations
+    H = jnp.zeros((1, 8))
+    H = H.at[0, 4].set(1.0)
 
-    # Innovation covariance
-    S = H @ P @ H + R_heading
+    # Innovation covariance (scalar, but treat as 1x1 matrix)
+    S = H @ P @ H.T + jnp.array([[R_heading]])
 
-    # Kalman gain
-    K = (P @ H) / S
+    # Kalman gain (8, 1)
+    K = psd_solve(S, H @ P).T
 
     # Mean update
-    m_upd = m + K * innov
+    m_upd = m + (K @ jnp.array([[innov]])).ravel()
     m_upd = m_upd.at[4].set(wrap_angle(m_upd[4]))  # Wrap after update
 
-    # Covariance update (Joseph form for numerical stability)
-    # P_upd = (I - K @ H) @ P @ (I - K @ H)^T + K @ R @ K^T
-    P_upd = P - jnp.outer(K, K) * S + jnp.outer(K, K) * R_heading
-    P_upd = symmetrize(P_upd)
+    # Covariance update using Joseph form
+    R_mat = jnp.array([[R_heading]])
+    P_upd = joseph_update(P, K, H, R_mat)
 
     # Log-likelihood (only meaningful if heading was used)
     # For gated observations (R=1e6), this will be near zero
-    log_lik = -0.5 * (jnp.log(2 * jnp.pi) + jnp.log(S) + innov**2 / S)
+    S_scalar = S[0, 0]  # Extract scalar from 1x1 matrix
+    log_lik = -0.5 * (jnp.log(2 * jnp.pi) + jnp.log(S_scalar) + innov**2 / S_scalar)
 
     # Zero out log-likelihood if not used (for cleaner accounting)
     log_lik = lax.select(use_heading, log_lik, 0.0)

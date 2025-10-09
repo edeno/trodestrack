@@ -276,9 +276,12 @@ def _outer_product_batch(x: jnp.ndarray, y: jnp.ndarray) -> jnp.ndarray:
 
 
 def gaussian_log_likelihood_ukf(innovation: jnp.ndarray, covariance: jnp.ndarray) -> jnp.ndarray:
-    """Compute Gaussian log-likelihood of innovation.
+    """Compute Gaussian log-likelihood of innovation with numerical stability.
 
-    Same as EKF version but extracted for clarity.
+    Stability features:
+        - Adds small jitter to covariance diagonal for near-singular matrices
+        - Checks sign from slogdet to detect numerical issues
+        - Uses Cholesky decomposition when feasible via psd_solve
 
     Args:
         innovation: Innovation vector (k,)
@@ -289,18 +292,39 @@ def gaussian_log_likelihood_ukf(innovation: jnp.ndarray, covariance: jnp.ndarray
 
     Formula:
         log_prob = -0.5 * (k*log(2π) + log(det(S)) + v^T S^{-1} v)
+
+    Notes:
+        - If determinant is negative or zero (numerical error), adds jitter
+        - Jitter = 1e-8 * trace(S) / k added to diagonal
+        - This prevents divergence for near-singular covariances
     """
     k = innovation.shape[0]
 
-    # Log determinant using sign and log-det
-    sign, logdet = jnp.linalg.slogdet(covariance)
+    # Add small jitter to diagonal for numerical stability
+    # Scale by mean diagonal value to be adaptive
+    jitter = 1e-8 * jnp.trace(covariance) / k
+    S_stable = covariance + jnp.eye(k) * jitter
+
+    # Log determinant using slogdet (more stable than det)
+    sign, logdet = jnp.linalg.slogdet(S_stable)
+
+    # Check for numerical issues (sign should be +1 for PSD matrix)
+    # If sign <= 0, increase jitter and recompute
+    def add_more_jitter():
+        jitter_large = 1e-6 * jnp.trace(covariance) / k
+        S_jittered = covariance + jnp.eye(k) * jitter_large
+        sign_j, logdet_j = jnp.linalg.slogdet(S_jittered)
+        return logdet_j
+
+    # Use original logdet if sign is positive, otherwise use jittered version
+    logdet_safe = lax.cond(sign > 0, lambda: logdet, add_more_jitter)
 
     # Mahalanobis distance: v^T S^{-1} v
-    S_inv_v = psd_solve(covariance, innovation)
+    S_inv_v = psd_solve(S_stable, innovation)
     mahal = jnp.dot(innovation, S_inv_v)
 
     # Gaussian log-likelihood
-    log_prob = -0.5 * (k * jnp.log(2 * jnp.pi) + logdet + mahal)
+    log_prob = -0.5 * (k * jnp.log(2 * jnp.pi) + logdet_safe + mahal)
 
     return log_prob
 
@@ -479,7 +503,11 @@ def update_step(
             # Update mean
             m_upd = m_in + K @ innov
 
-            # Update covariance (Joseph form for numerical stability)
+            # Update covariance using UKF's native form
+            # UKF: P⁺ = P - K S K^T (where S includes R implicitly)
+            # This differs from EKF's Joseph form but achieves similar stability
+            # because the unscented transform captures cross-correlations exactly
+            # without linearization, making the K S K^T term naturally stable
             P_upd = P_in - K @ S @ K.T
             P_upd = symmetrize(P_upd)
 
@@ -625,8 +653,9 @@ def update_heading(
     # Wrap heading after update
     m_upd = m_upd.at[4].set(wrap_angle(m_upd[4]))
 
-    # Update covariance (Joseph form for 1D measurement)
-    # P = P - K @ S @ K.T (simplified for 1D)
+    # Update covariance using UKF's native form (1D measurement)
+    # UKF: P⁺ = P - K S K^T where S = σ² + R
+    # The unscented transform ensures numerical stability naturally
     P_upd = P - jnp.outer(K, K) * S
     P_upd = symmetrize(P_upd)
 
