@@ -2,15 +2,49 @@
 
 Development notes and debugging history for trodestrack project.
 
-## 2025-10-09 - P0 Critical EKF Improvements (Clean Slate Branch)
+## 2025-10-09 - Complete P0-P2 Improvements + Unit Standardization (Clean Slate Branch)
 
 ### Summary
-Implemented three critical P0 improvements to EKF robustness and correctness from PR_FIX_PLAN.md:
+Completed all P0, P1, P2 improvements from PR_FIX_PLAN.md plus comprehensive unit standardization:
+
+**P0 - Critical EKF/UKF Improvements:**
 1. ✅ Angle wrapping in predict/update (commit f8c99c3)
 2. ✅ Lifted subspace operator for exact 2D/4D measurements (commit 8776b5b)
 3. ✅ Confidence-scaled measurement noise (commit a75d16a)
+4. ✅ χ² Mahalanobis gating for outlier rejection (commit ce97aa3)
+5. ✅ Heading pseudo-measurement from LED pairs (commit ce97aa3)
 
-All 27 tests passing. Ready for χ² gating and heading pseudo-measurement next.
+**P1 - Quality and Robustness:**
+- ✅ Metrics enhancements: mask support, chi2_ci95(), compute_dropout_drift()
+- ✅ Simulator robustness: vectorized confidence decay (~30x speedup), exposure clamping
+- ✅ Visualization stability: NEES band fix, eigenvalue clipping, professional logging
+- ✅ Commit: 978d2e2
+
+**P2 - DRY & Performance:**
+- ✅ Created build_G_matrix() shared utility (eliminated 20 lines of duplication)
+- ✅ Commit: 5f71f26
+
+**PRD Acceptance Tests:**
+- ✅ 6/6 tests passing with real EKF filtering (1 skipped: dropout drift)
+- ✅ Replaced truth-vs-truth with actual filter validation
+- ✅ Commit: c91d644
+
+**Robustness & Stability Improvements:**
+- ✅ IMU index padding: exact max instead of heuristic (robust to burst dropouts)
+- ✅ Position damping: added -0.5*λ*v*dt² correction term
+- ✅ NEES/NIS: Cholesky + triangular solves for stability
+- ✅ ACF: return [1.0, NaN, ...] for constant residuals
+- ✅ Test unit standardization: meters internally, cm only for display
+- ✅ Commit: 048f316
+
+**Unit Standardization:**
+- ✅ All documentation uses meters (PRD.md, PR_FIX_PLAN.md)
+- ✅ All code uses SI units (meters, m/s, rad/s)
+- ✅ All tests display meters (0.0203 m instead of 2.03 cm)
+- ✅ compute_dropout_drift() accepts/returns meters
+- ✅ Commit: 1226308
+
+**Status:** All improvements complete, 86/87 tests passing (1 skipped with documented limitation).
 
 ---
 
