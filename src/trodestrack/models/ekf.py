@@ -105,6 +105,10 @@ class EKFConfig:
     # Filter
     num_iter: int = 1  # Standard EKF (set >1 for IEKF)
 
+    # Outlier rejection via Mahalanobis distance gating
+    use_mahalanobis_gating: bool = False  # Enable χ² gating
+    mahalanobis_threshold_prob: float = 0.997  # p-value for χ² threshold (conservative)
+
 
 class EKFState(NamedTuple):
     """EKF state representation.
@@ -293,6 +297,58 @@ def gaussian_log_likelihood(innovation: jnp.ndarray, covariance: jnp.ndarray) ->
     log_prob = -0.5 * (k * jnp.log(2 * jnp.pi) + logdet + mahal)
 
     return log_prob
+
+
+def chi2_threshold(dof: int, prob: float) -> float:
+    """Compute χ² threshold for given degrees of freedom and probability.
+
+    Args:
+        dof: Degrees of freedom (measurement dimensionality)
+        prob: Probability level (e.g., 0.997 for 99.7% confidence)
+
+    Returns:
+        threshold: χ² threshold value
+
+    Examples:
+        >>> chi2_threshold(2, 0.997)  # 2D measurement, p=0.997
+        11.618
+        >>> chi2_threshold(4, 0.997)  # 4D measurement, p=0.997
+        16.014
+
+    Notes:
+        Uses analytical values for common cases (dof=2,4 and prob=0.95,0.99,0.997).
+        JAX-compatible using lax.select for branching.
+    """
+    # Analytical values for common cases
+    # Source: scipy.stats.chi2.ppf(prob, dof)
+
+    # For dof=2
+    threshold_2_95 = 5.991
+    threshold_2_99 = 9.210
+    threshold_2_997 = 11.618  # Corrected from scipy
+
+    # For dof=4
+    threshold_4_95 = 9.488
+    threshold_4_99 = 13.277
+    threshold_4_997 = 16.014  # Corrected from scipy
+
+    # Select threshold based on dof (2 or 4) and prob
+    # First select based on prob
+    is_997 = jnp.abs(prob - 0.997) < 0.01
+    is_99 = jnp.abs(prob - 0.99) < 0.01
+
+    # Threshold for dof=2
+    threshold_2 = lax.select(
+        is_997, threshold_2_997, lax.select(is_99, threshold_2_99, threshold_2_95)
+    )
+
+    # Threshold for dof=4
+    threshold_4 = lax.select(
+        is_997, threshold_4_997, lax.select(is_99, threshold_4_99, threshold_4_95)
+    )
+
+    # Select based on dof
+    return lax.select(dof == 2, threshold_2, threshold_4)
 
 
 def compute_nis_and_loglik(
@@ -851,13 +907,44 @@ def update_step(
             led1_final = led1_all[-1]
             led2_final = led2_all[-1]
 
-            # Compute exact log-likelihood using lifted subspace operator
+            # Compute exact NIS and log-likelihood using lifted subspace operator
             # No diagonal approximation - uses correct dimensionality (2D or 4D)
-            _, log_lik = compute_nis_and_loglik(
+            nis, log_lik = compute_nis_and_loglik(
                 innov_final, S_final, both_final, led1_final, led2_final
             )
 
-            return EKFState(mean=m_final, cov=P_final), log_lik
+            # Mahalanobis gating: reject if NIS exceeds χ² threshold
+            # Always compute gating decision (use lax.cond, not Python if)
+            def apply_gating():
+                """Apply Mahalanobis gating."""
+                # Determine measurement dimensionality for threshold
+                dof = lax.cond(
+                    both_final,
+                    lambda: 4,
+                    lambda: 2,  # Single LED
+                )
+                threshold = chi2_threshold(dof, config.mahalanobis_threshold_prob)
+
+                # Gate: accept if NIS < threshold, reject otherwise
+                def accept_measurement():
+                    return EKFState(mean=m_final, cov=P_final), log_lik
+
+                def reject_measurement():
+                    # Return prediction unchanged with zero log-likelihood
+                    return EKFState(mean=m_in, cov=P_in), 0.0
+
+                return lax.cond(nis < threshold, accept_measurement, reject_measurement)
+
+            def no_gating():
+                """Return update without gating."""
+                return EKFState(mean=m_final, cov=P_final), log_lik
+
+            # Use lax.cond to select gating vs no-gating path
+            return lax.cond(
+                config.use_mahalanobis_gating,
+                apply_gating,
+                no_gating,
+            )
 
         # Conditional update based on whether we have any valid LEDs
         return lax.cond(
