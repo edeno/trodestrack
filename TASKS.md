@@ -78,10 +78,10 @@
   - [x] Stationary, constant velocity, circular scenarios
   - [x] NEES consistency checks
   - [x] Marginal log-likelihood computation
-- [ ] `tests/filters/test_bias_observability.py`
-  - [ ] Stationary bias unobservable
-  - [ ] Circular bias converges
-  - [ ] Straight-line lateral bias unobservable
+- [x] `tests/filters/test_bias_observability.py`
+  - [x] Stationary bias unobservable
+  - [x] Circular bias converges
+  - [x] Straight-line lateral bias unobservable
 
 ### 📊 Deliverables
 

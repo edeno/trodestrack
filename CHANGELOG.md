@@ -2,6 +2,46 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-09 - Bias Observability Tests
+
+**Added:**
+- **Bias Observability Tests** (`tests/filters/test_bias_observability.py`, 278 lines)
+  - `test_stationary_bias_unobservable()` - Verifies biases remain uncertain without motion
+  - `test_circular_bias_converges()` - Verifies gyro bias convergence during rotation
+  - `test_straight_line_lateral_bias_unobservable()` - Verifies lateral bias is unobservable in straight motion
+
+**Features:**
+- **Observability Theory Validation**:
+  - Stationary motion: bias covariance remains >80% of initial (unobservable)
+  - Circular motion: gyro bias variance reduces >50% within 20s (observable via heading)
+  - Straight-line motion: lateral accel bias remains >70% uncertain (null space)
+
+**Testing:**
+- 3 new tests covering fundamental observability properties
+- Defensive checks for positive covariance (edge case handling)
+- Detailed threshold justifications in comments
+- All 60 filter tests passing (59 passed, 1 skipped)
+
+**Code Quality:**
+- Full type hints with `-> None` annotations
+- Black formatted and ruff-checked
+- Removed unused imports (jax.numpy)
+- Code reviewed and approved by code-reviewer agent
+- Informative error messages with expected values
+
+**Documentation:**
+- Updated [TASKS.md](TASKS.md#L81-84): Marked test_bias_observability.py as complete
+- Threshold choices explained inline (0.8, 0.5, 0.7 reduction ratios)
+- Docstrings explain the "why" behind each observability test
+
+**Impact:**
+- ✅ Completes Milestone 2 testing task (line 81-84 in TASKS.md)
+- ✅ Fills gap identified in PLANNING.md: "No systematic tests for bias observability"
+- ✅ Validates filter behavior matches control theory predictions
+- 📊 No regressions in existing test suite
+
+---
+
 ### Session: 2025-10-09 - RTS Smoother Implementation
 
 **Added:**
