@@ -100,7 +100,7 @@ class EKFConfig:
 
     # Dynamics
     damping_coeff: float = 0.5  # 1/s
-    led_distance: float = 0.04  # 4 cm
+    led_distance: float | None = 0.04  # 4 cm (None = auto-detect from data)
 
     # Filter
     num_iter: int = 1  # Standard EKF (set >1 for IEKF)
@@ -108,6 +108,11 @@ class EKFConfig:
     # Outlier rejection via Mahalanobis distance gating
     use_mahalanobis_gating: bool = False  # Enable χ² gating
     mahalanobis_threshold_prob: float = 0.997  # p-value for χ² threshold (conservative)
+
+    # Heading pseudo-measurement from LED pair
+    use_heading_measurement: bool = False  # Enable heading observation from LED vector
+    led_distance_tolerance: float = 0.3  # ±30% tolerance for LED spacing gating
+    adaptive_heading_noise: bool = True  # Scale R_heading by baseline geometry
 
 
 class EKFState(NamedTuple):
@@ -267,6 +272,45 @@ def wrap_angle(theta: jnp.ndarray) -> jnp.ndarray:
     return jnp.arctan2(jnp.sin(theta), jnp.cos(theta))
 
 
+def estimate_led_spacing(
+    Z_cam_led1: jnp.ndarray,
+    Z_cam_led2: jnp.ndarray,
+    mask_cam: jnp.ndarray,
+) -> float:
+    """Estimate LED spacing from camera observations.
+
+    Computes median distance between LED1 and LED2 across all valid
+    dual-LED observations.
+
+    Args:
+        Z_cam_led1: LED1 observations (N_cam, 2) in meters
+        Z_cam_led2: LED2 observations (N_cam, 2) in meters
+        mask_cam: Camera validity mask (N_cam,)
+
+    Returns:
+        Median LED spacing in meters
+
+    Note:
+        Returns 0.04 m (4 cm) as fallback if no valid dual-LED observations.
+    """
+    # Find frames where both LEDs are visible
+    led1_valid = jnp.isfinite(Z_cam_led1).all(axis=1)
+    led2_valid = jnp.isfinite(Z_cam_led2).all(axis=1)
+    both_valid = led1_valid & led2_valid & mask_cam
+
+    # Compute distances for valid frames
+    distances = jnp.linalg.norm(Z_cam_led2 - Z_cam_led1, axis=1)
+
+    # Median of valid distances
+    valid_distances = jnp.where(both_valid, distances, jnp.nan)
+
+    # Use nanmedian, with fallback if all NaN
+    median_spacing = jnp.nanmedian(valid_distances)
+
+    # Fallback to 4 cm if no valid observations
+    return float(jnp.where(jnp.isnan(median_spacing), 0.04, median_spacing))
+
+
 def gaussian_log_likelihood(innovation: jnp.ndarray, covariance: jnp.ndarray) -> jnp.ndarray:
     """Compute Gaussian log-likelihood of innovation.
 
@@ -299,7 +343,7 @@ def gaussian_log_likelihood(innovation: jnp.ndarray, covariance: jnp.ndarray) ->
     return log_prob
 
 
-def chi2_threshold(dof: int, prob: float) -> float:
+def chi2_threshold(dof: int, prob: float) -> jnp.ndarray:
     """Compute χ² threshold for given degrees of freedom and probability.
 
     Args:
@@ -959,6 +1003,121 @@ def update_step(
     return lax.cond(mask, do_update, no_update, m_pred, P_pred)
 
 
+def update_heading(
+    state: EKFState,
+    z_led1: jnp.ndarray,
+    z_led2: jnp.ndarray,
+    config: EKFConfig,
+) -> tuple[EKFState, jnp.ndarray]:
+    """Apply 1D heading pseudo-measurement update from LED pair.
+
+    Sequential update after position update. Uses large-R gating pattern
+    for JAX compatibility (no branching).
+
+    Args:
+        state: Current state (after position update)
+        z_led1: LED1 observation (2,) in meters
+        z_led2: LED2 observation (2,) in meters
+        config: EKF configuration
+
+    Returns:
+        Updated state and heading measurement log-likelihood
+
+    Algorithm:
+        1. Compute heading observation: θ_obs = arctan2(dy, dx)
+        2. Check validity: both LEDs visible + spacing within tolerance
+        3. Gate via large R: R = R_base (valid) or R = 1e6 (invalid)
+        4. Apply 1D Kalman update with Joseph form
+        5. Wrap heading after update
+
+    Note:
+        Always performs update (JAX-friendly). Invalid observations are
+        gated via R=1e6 → K≈0 → no actual update.
+    """
+    m, P = state.mean, state.cov
+
+    # Check LED validity
+    led1_valid = jnp.isfinite(z_led1).all()
+    led2_valid = jnp.isfinite(z_led2).all()
+    both_leds = led1_valid & led2_valid
+
+    # Compute heading observation (always compute, gate via R)
+    dx = z_led2[0] - z_led1[0]
+    dy = z_led2[1] - z_led1[1]
+    heading_obs = jnp.arctan2(dy, dx)
+
+    # Check LED spacing validity
+    obs_spacing = jnp.sqrt(dx**2 + dy**2)
+
+    # Determine expected spacing (use config value, which may be auto-detected)
+    expected_spacing = config.led_distance if config.led_distance is not None else 0.04
+
+    # Spacing ratio and tolerance check (handle NaN safely)
+    spacing_ratio = obs_spacing / expected_spacing
+    spacing_valid = jnp.isfinite(spacing_ratio) & (
+        (spacing_ratio > (1 - config.led_distance_tolerance))
+        & (spacing_ratio < (1 + config.led_distance_tolerance))
+    )
+
+    # Overall validity: both LEDs + spacing OK + feature enabled
+    use_heading = config.use_heading_measurement & both_leds & spacing_valid
+
+    # Base heading measurement noise
+    R_base = config.measurement_noise_heading
+
+    # Adaptive noise scaling (if enabled and spacing is valid)
+    # Clip obs_spacing to avoid division by zero/NaN
+    obs_spacing_safe = jnp.where(
+        jnp.isfinite(obs_spacing) & (obs_spacing > 0.001), obs_spacing, expected_spacing
+    )
+    R_heading_adapted = lax.cond(
+        config.adaptive_heading_noise,
+        lambda: R_base * (expected_spacing / obs_spacing_safe) ** 2,
+        lambda: R_base,
+    )
+
+    # Gate via large R (JAX-friendly: no branching)
+    # Valid: R ≈ 0.05² → strong update
+    # Invalid: R = 1e6 → K ≈ 0 → no update
+    R_heading = lax.select(use_heading, R_heading_adapted, 1e6)
+
+    # 1D heading update
+    # Measurement function: h(x) = x[4] (heading)
+    h_pred = m[4]
+
+    # Innovation with angle wrapping (replace NaN with 0 for gated case)
+    innov_raw = wrap_angle(heading_obs - h_pred)
+    innov = jnp.where(jnp.isfinite(innov_raw), innov_raw, 0.0)
+
+    # Jacobian: H = [0, 0, 0, 0, 1, 0, 0, 0]
+    H = jnp.zeros(8)
+    H = H.at[4].set(1.0)
+
+    # Innovation covariance
+    S = H @ P @ H + R_heading
+
+    # Kalman gain
+    K = (P @ H) / S
+
+    # Mean update
+    m_upd = m + K * innov
+    m_upd = m_upd.at[4].set(wrap_angle(m_upd[4]))  # Wrap after update
+
+    # Covariance update (Joseph form for numerical stability)
+    # P_upd = (I - K @ H) @ P @ (I - K @ H)^T + K @ R @ K^T
+    P_upd = P - jnp.outer(K, K) * S + jnp.outer(K, K) * R_heading
+    P_upd = symmetrize(P_upd)
+
+    # Log-likelihood (only meaningful if heading was used)
+    # For gated observations (R=1e6), this will be near zero
+    log_lik = -0.5 * (jnp.log(2 * jnp.pi) + jnp.log(S) + innov**2 / S)
+
+    # Zero out log-likelihood if not used (for cleaner accounting)
+    log_lik = lax.select(use_heading, log_lik, 0.0)
+
+    return EKFState(m_upd, P_upd), log_lik
+
+
 # =============================================================================
 # Main EKF Filter
 # =============================================================================
@@ -1006,8 +1165,18 @@ def extended_kalman_filter(
     Z_cam_led2_jax = jnp.array(Z_cam_led2)
     mask_cam_jax = jnp.array(mask_cam)
 
+    # Auto-detect LED spacing if not specified
+    if ekf_config.led_distance is None:
+        estimated_spacing = estimate_led_spacing(Z_cam_led1_jax, Z_cam_led2_jax, mask_cam_jax)
+        # Update config with estimated spacing (create new config to avoid mutation)
+        config_dict = {k: v for k, v in ekf_config.__dict__.items()}
+        config_dict["led_distance"] = estimated_spacing
+        ekf_config = EKFConfig(**config_dict)
+
     # Initialize state
     if initial_state is None:
+        # led_distance is guaranteed non-None here after auto-detection
+        assert ekf_config.led_distance is not None
         initial_state = initialize_state(
             Z_cam_led1_jax,
             Z_cam_led2_jax,
@@ -1086,14 +1255,26 @@ def extended_kalman_filter(
         # Use lax.cond to handle first frame
         state_pred = lax.cond(t_idx == 0, no_propagate, propagate_from_prev, state_prev)
 
-        # Measurement update (now returns state and log-likelihood)
-        state_filt, log_lik_k = update_step(
+        # Position measurement update (returns state and log-likelihood)
+        state_after_pos, log_lik_pos = update_step(
             state_pred,
             Z_cam_led1_jax[t_idx],
             Z_cam_led2_jax[t_idx],
             mask_cam_jax[t_idx],
             ekf_config,
         )
+
+        # Heading measurement update (sequential after position)
+        # Only applied if use_heading_measurement=True (gated via large R otherwise)
+        state_filt, log_lik_heading = update_heading(
+            state_after_pos,
+            Z_cam_led1_jax[t_idx],
+            Z_cam_led2_jax[t_idx],
+            ekf_config,
+        )
+
+        # Total log-likelihood for this frame
+        log_lik_k = log_lik_pos + log_lik_heading
 
         # Store outputs
         outputs = {

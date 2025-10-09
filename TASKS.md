@@ -82,6 +82,13 @@
   - [x] Stationary bias unobservable
   - [x] Circular bias converges
   - [x] Straight-line lateral bias unobservable
+- [x] `tests/filters/test_ekf_heading_measurement.py` [CODE_REVIEWED: 2025-10-09]
+  - [x] Heading pseudo-measurement from dual LEDs
+  - [x] Auto-detection of LED spacing
+  - [x] Adaptive noise scaling with baseline geometry
+  - [x] Spacing gating for invalid observations
+  - [x] Single LED graceful degradation
+  - [x] JAX JIT compatibility
 
 ### 📊 Deliverables
 
