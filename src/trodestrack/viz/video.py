@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,8 @@ from trodestrack.viz.components import (
 )
 from trodestrack.viz.styles import COLORS, apply_tufte_style
 from trodestrack.viz.utils import prepare_video_data
+
+log = logging.getLogger(__name__)
 
 
 def create_diagnostic_video(
@@ -91,10 +94,10 @@ def create_diagnostic_video(
     apply_tufte_style()
 
     # Prepare interpolated data at video frame times
-    print(f"Preparing video data (fps={fps}, speedup={speedup:.1f}x)...")
+    log.info(f"Preparing video data (fps={fps}, speedup={speedup:.1f}x)...")
     video_data = prepare_video_data(sim_data, fps=fps, speedup=speedup)
     n_frames = video_data["n_frames"]
-    print(f"  {n_frames} frames to render ({n_frames/fps:.1f}s video)")
+    log.info(f"  {n_frames} frames to render ({n_frames/fps:.1f}s video)")
 
     # Create figure with 16:9 aspect ratio (standard for video)
     # Following Tufte's small multiples: use consistent grid for maximum information density
@@ -265,7 +268,7 @@ def create_diagnostic_video(
     )
 
     # Initialize artists
-    print("Initializing artists...")
+    log.info("Initializing artists...")
     rat = RatArtist(ax_arena)
     led1 = LEDArtist(ax_arena, led_id=1, color=COLORS["blue"], show_residuals=True)
     led2 = LEDArtist(ax_arena, led_id=2, color=COLORS["orange"], show_residuals=True)
@@ -300,7 +303,7 @@ def create_diagnostic_video(
         nees_panel = NEESPanelArtist(ax_nees, window_s=time_window_s, fps=fps, state_dim=2)
 
     # Pre-compute event times for progress bar markers
-    print("Detecting events...")
+    log.info("Detecting events...")
     event_times: dict[str, list[float]] = {"led_swap": [], "long_dropout": []}
 
     for frame_idx in range(n_frames):
@@ -355,7 +358,7 @@ def create_diagnostic_video(
                     debounced.append(t)
             event_times[event_type] = debounced
 
-    print(
+    log.info(
         f"  Found {len(event_times['led_swap'])} LED swaps, "
         f"{len(event_times['long_dropout'])} dropout sequences (debounced)"
     )
@@ -658,7 +661,7 @@ def create_diagnostic_video(
         return []
 
     # Create animation
-    print("Rendering animation...")
+    log.info("Rendering animation...")
     anim = FuncAnimation(
         fig,
         update_frame,
@@ -669,7 +672,7 @@ def create_diagnostic_video(
     )
 
     # Save video with codec fallback chain
-    print(f"Encoding video to {output_path}...")
+    log.info(f"Encoding video to {output_path}...")
     from matplotlib.animation import FFMpegWriter
 
     # Try multiple codecs in order of preference

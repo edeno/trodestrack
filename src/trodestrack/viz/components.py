@@ -936,6 +936,9 @@ class FilterArtist:
         P_pos = P[:2, :2]
         eigenvalues, eigenvectors = np.linalg.eigh(P_pos)
 
+        # Ensure eigenvalues are positive (numerical stability)
+        eigenvalues = np.clip(eigenvalues, 0.0, None)
+
         # Orientation angle from first eigenvector
         angle = np.degrees(np.arctan2(eigenvectors[1, 0], eigenvectors[0, 0]))
 
@@ -1299,13 +1302,14 @@ class NEESPanelArtist:
         ax.axhline(self.chi2_upper, color="red", linewidth=1, linestyle="--", alpha=0.4)
 
         # Fill between bounds (visual emphasis on acceptable range)
-        ax.fill_between(
-            [0, 1],
-            [self.chi2_lower, self.chi2_lower],
-            [self.chi2_upper, self.chi2_upper],
+        # Use axhspan instead of fill_between for horizontal band
+        ax.axhspan(
+            self.chi2_lower,
+            self.chi2_upper,
             color="green",
             alpha=0.05,
             label="Acceptable range",
+            zorder=0,
         )
 
         # Styling

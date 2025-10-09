@@ -568,6 +568,9 @@ def simulate_rat_imu(config: Optional[RatIMUSimConfig] = None, seed: int = 0) ->
     t_cam_exp = t_cam_clean + jitter
     t_cam_obs = t_cam_exp + config.cam_latency_s
 
+    # Clamp exposure times to IMU range (prevent extrapolation errors)
+    t_cam_exp = np.clip(t_cam_exp, t_imu[0], t_imu[-1])
+
     # Interpolate truth at EXPOSURE time (what pixels actually measure)
     px_interp = np.interp(t_cam_exp, t_imu, X_truth[:, 0])
     py_interp = np.interp(t_cam_exp, t_imu, X_truth[:, 1])
@@ -628,27 +631,31 @@ def simulate_rat_imu(config: Optional[RatIMUSimConfig] = None, seed: int = 0) ->
             else np.zeros(T_cam)
         )
 
-        # Reduce confidence near dropouts (per-LED)
-        for i in range(T_cam):
-            # LED1 confidence
-            if not mask_led1[i]:
-                confidence_led1[i] = 0.0
-            else:
-                # Reduce confidence in neighboring frames
-                if i > 0 and not mask_led1[i - 1]:
-                    confidence_led1[i] *= config.confidence_dropout_decay
-                if i < T_cam - 1 and not mask_led1[i + 1]:
-                    confidence_led1[i] *= config.confidence_dropout_decay
+        # Reduce confidence near dropouts (vectorized)
+        # Use convolution to detect neighboring dropouts: [0.5, 1.0, 0.5] kernel
+        # If any neighbor is a dropout, the convolution will be non-zero
 
-            # LED2 confidence (if enabled)
-            if config.use_second_led:
-                if not mask_led2[i]:
-                    confidence_led2[i] = 0.0
-                else:
-                    if i > 0 and not mask_led2[i - 1]:
-                        confidence_led2[i] *= config.confidence_dropout_decay
-                    if i < T_cam - 1 and not mask_led2[i + 1]:
-                        confidence_led2[i] *= config.confidence_dropout_decay
+        # LED1: Zero out dropouts, then apply neighbor decay
+        confidence_led1 = np.where(mask_led1, confidence_led1, 0.0)
+        neighbor_dropout_led1 = np.convolve(~mask_led1.astype(int), [0.5, 1.0, 0.5], mode="same")
+        # Decay confidence where neighbors are dropouts (but current is valid)
+        confidence_led1 *= np.where(
+            mask_led1 & (neighbor_dropout_led1 > 0),
+            config.confidence_dropout_decay,
+            1.0,
+        )
+
+        # LED2: Same logic (if enabled)
+        if config.use_second_led:
+            confidence_led2 = np.where(mask_led2, confidence_led2, 0.0)
+            neighbor_dropout_led2 = np.convolve(
+                ~mask_led2.astype(int), [0.5, 1.0, 0.5], mode="same"
+            )
+            confidence_led2 *= np.where(
+                mask_led2 & (neighbor_dropout_led2 > 0),
+                config.confidence_dropout_decay,
+                1.0,
+            )
 
         # Clip confidence to valid range [0, 1] to prevent numerical issues
         np.clip(confidence_led1, 0.0, 1.0, out=confidence_led1)

@@ -19,12 +19,14 @@ from numpy.typing import NDArray
 def compute_position_rmse(
     positions_true: NDArray[np.float64],
     positions_est: NDArray[np.float64],
+    mask: NDArray[np.bool_] | None = None,
 ) -> float:
     """Compute root mean square error for 2D position estimates.
 
     Args:
         positions_true: Ground truth positions, shape (N, 2) in cm
         positions_est: Estimated positions, shape (N, 2) in cm
+        mask: Optional validity mask, shape (N,). Only valid (True) entries used.
 
     Returns:
         RMSE in cm
@@ -35,6 +37,12 @@ def compute_position_rmse(
         >>> rmse = compute_position_rmse(true_pos, est_pos)
         >>> print(f"{rmse:.2f} cm")
         0.14 cm
+
+        >>> # With mask
+        >>> mask = np.array([True, False])  # Ignore second sample
+        >>> rmse_masked = compute_position_rmse(true_pos, est_pos, mask=mask)
+        >>> print(f"{rmse_masked:.2f} cm")
+        0.14 cm
     """
     if positions_true.shape != positions_est.shape:
         raise ValueError(
@@ -44,7 +52,19 @@ def compute_position_rmse(
     if positions_true.shape[1] != 2:
         raise ValueError(f"Expected 2D positions, got shape {positions_true.shape}")
 
-    errors = positions_true - positions_est
+    # Build validity mask: finite values + optional user mask
+    valid = np.isfinite(positions_true).all(axis=1) & np.isfinite(positions_est).all(axis=1)
+    if mask is not None:
+        if mask.shape[0] != positions_true.shape[0]:
+            raise ValueError(
+                f"Mask shape {mask.shape} incompatible with positions {positions_true.shape}"
+            )
+        valid &= mask
+
+    if not np.any(valid):
+        raise ValueError("No valid samples remaining after masking and NaN filtering")
+
+    errors = positions_true[valid] - positions_est[valid]
     squared_errors = np.sum(errors**2, axis=1)  # Euclidean distance squared per timestep
     mse = np.mean(squared_errors)
     rmse = np.sqrt(mse)
@@ -55,12 +75,14 @@ def compute_position_rmse(
 def compute_velocity_rmse(
     velocities_true: NDArray[np.float64],
     velocities_est: NDArray[np.float64],
+    mask: NDArray[np.bool_] | None = None,
 ) -> float:
     """Compute root mean square error for 2D velocity estimates.
 
     Args:
         velocities_true: Ground truth velocities, shape (N, 2) in cm/s
         velocities_est: Estimated velocities, shape (N, 2) in cm/s
+        mask: Optional validity mask, shape (N,). Only valid (True) entries used.
 
     Returns:
         RMSE in cm/s
@@ -80,7 +102,19 @@ def compute_velocity_rmse(
     if velocities_true.shape[1] != 2:
         raise ValueError(f"Expected 2D velocities, got shape {velocities_true.shape}")
 
-    errors = velocities_true - velocities_est
+    # Build validity mask: finite values + optional user mask
+    valid = np.isfinite(velocities_true).all(axis=1) & np.isfinite(velocities_est).all(axis=1)
+    if mask is not None:
+        if mask.shape[0] != velocities_true.shape[0]:
+            raise ValueError(
+                f"Mask shape {mask.shape} incompatible with velocities {velocities_true.shape}"
+            )
+        valid &= mask
+
+    if not np.any(valid):
+        raise ValueError("No valid samples remaining after masking and NaN filtering")
+
+    errors = velocities_true[valid] - velocities_est[valid]
     squared_errors = np.sum(errors**2, axis=1)
     mse = np.mean(squared_errors)
     rmse = np.sqrt(mse)
@@ -455,4 +489,120 @@ def compute_nees_stats(nees: NDArray[np.float64], state_dim: int) -> dict[str, f
         "chi2_lower_95": float(lower),
         "chi2_upper_95": float(upper),
         "pct_in_bounds": float(pct_in_bounds),
+    }
+
+
+def chi2_ci95(df: int) -> tuple[float, float]:
+    """Compute 95% confidence interval for chi-squared distribution.
+
+    Args:
+        df: Degrees of freedom (measurement/state dimensionality)
+
+    Returns:
+        Tuple of (lower_bound, upper_bound) for 95% CI
+
+    Example:
+        >>> lower, upper = chi2_ci95(df=2)
+        >>> print(f"95% CI for χ²(2): [{lower:.3f}, {upper:.3f}]")
+        95% CI for χ²(2): [0.051, 7.378]
+
+        >>> lower, upper = chi2_ci95(df=4)
+        >>> print(f"95% CI for χ²(4): [{lower:.3f}, {upper:.3f}]")
+        95% CI for χ²(4): [0.484, 11.143]
+
+    Notes:
+        Common use cases:
+        - df=2: Position-only updates (x, y)
+        - df=4: Dual-LED updates (x1, y1, x2, y2)
+        - df=5: Position + velocity (x, y, vx, vy, θ)
+        - df=8: Full state (x, y, vx, vy, θ, b_gz, b_ax, b_ay)
+
+        For NEES/NIS consistency checks, approximately 95% of values should
+        fall within this interval if the filter is well-calibrated.
+    """
+    from scipy.stats import chi2
+
+    lower = float(chi2.ppf(0.025, df=df))
+    upper = float(chi2.ppf(0.975, df=df))
+
+    return lower, upper
+
+
+def compute_dropout_drift(
+    positions_cm: NDArray[np.float64],
+    valid_mask: NDArray[np.bool_],
+    t: NDArray[np.float64],
+    min_duration_s: float = 5.0,
+) -> dict[str, float | None]:
+    """Compute position drift during first contiguous dropout block.
+
+    Measures how far the filter drifts during camera occlusion, which is a
+    critical PRD requirement: drift should be ≤15 cm after 5s dropout.
+
+    Args:
+        positions_cm: Estimated positions over time, shape (N, 2) in cm
+        valid_mask: Camera validity mask, shape (N,). False = dropout
+        t: Timestamps, shape (N,) in seconds
+        min_duration_s: Minimum dropout duration to analyze (default: 5.0s)
+
+    Returns:
+        Dictionary with keys:
+        - drift_cm: Euclidean drift from start to end of dropout (None if no dropout found)
+        - duration_s: Duration of dropout in seconds (None if no dropout found)
+        - start_idx: Index where dropout starts (None if no dropout found)
+        - end_idx: Index where dropout ends (None if no dropout found)
+
+    Example:
+        >>> # Simulate 10s trajectory with 5s dropout at t=3-8s
+        >>> t = np.linspace(0, 10, 100)
+        >>> positions = np.column_stack([t * 10, np.zeros_like(t)])  # Moving at 10 cm/s
+        >>> mask = (t < 3.0) | (t >= 8.0)  # Dropout from 3-8s
+        >>> result = compute_dropout_drift(positions, mask, t, min_duration_s=4.0)
+        >>> # Drift should be ~50 cm (5s * 10 cm/s)
+        >>> 40 < result['drift_cm'] < 60
+        True
+        >>> np.isclose(result['duration_s'], 5.0, atol=0.1)
+        True
+
+    Notes:
+        PRD Acceptance Criteria (§4.2):
+        - After 5s camera dropout, IMU-only drift should be ≤15 cm
+
+        This function identifies the FIRST contiguous dropout block that
+        exceeds min_duration_s and measures drift from block start to end.
+    """
+    if positions_cm.shape[0] != valid_mask.shape[0] or positions_cm.shape[0] != t.shape[0]:
+        raise ValueError(
+            f"Shape mismatch: positions {positions_cm.shape}, "
+            f"mask {valid_mask.shape}, time {t.shape}"
+        )
+
+    # Find contiguous dropout blocks
+    dropout = ~valid_mask
+    diff = np.diff(dropout.astype(int), prepend=0, append=0)
+    starts = np.where(diff == 1)[0]  # Dropout begins
+    ends = np.where(diff == -1)[0]  # Dropout ends
+
+    # Find first block with duration >= min_duration_s
+    for start_idx, end_idx in zip(starts, ends):
+        duration = t[end_idx - 1] - t[start_idx]
+        if duration >= min_duration_s:
+            # Measure drift from start to end
+            pos_start = positions_cm[start_idx]
+            pos_end = positions_cm[end_idx - 1]
+            drift = np.linalg.norm(pos_end - pos_start)
+
+            return {
+                "drift_cm": float(drift),
+                "duration_s": float(duration),
+                "start_idx": int(start_idx),
+                "end_idx": int(end_idx),
+            }
+
+    # No qualifying dropout found
+    return {
+        "drift_cm": None,
+        "duration_s": None,
+        "start_idx": None,
+        "end_idx": None,
     }
