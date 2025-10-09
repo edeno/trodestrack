@@ -2,6 +2,46 @@
 
 Development notes and debugging history for trodestrack project.
 
+## 2025-10-09 - P0.1-P0.3 Completed (REVIEW.md Priority Fixes)
+
+### Summary
+Completed first 3 P0 blockers from REVIEW.md on clean-slate branch:
+
+**P0.1 - SI Unit Standardization (commit 99c70cb):**
+- ✅ Unified all metrics to SI units (m, m/s, rad)
+- ✅ `compute_heading_error()` now returns radians (breaking change)
+- ✅ Updated PRD test constants (PRD_POSITION_RMSE_M = 0.02, etc.)
+- ✅ All 43 QA + PRD tests passing
+- **Impact**: Prevents silent threshold breakage, aligns with PRD reproducibility
+
+**P0.2 - Generalized χ² Envelopes (commit ab0c75d):**
+- ✅ Added `chi2_bounds(df, confidence)` for arbitrary confidence levels
+- ✅ Added `within_envelope(values, df, confidence)` helper function
+- ✅ Updated `compute_nees_stats()` and `compute_nis_stats()` with confidence parameter
+- ✅ Breaking change: dict keys `chi2_lower_95` → `chi2_lower` (dynamic)
+- ✅ 4 new tests + all 47 QA/PRD tests passing
+- **Impact**: Supports arbitrary DoF and confidence levels for future flexibility
+
+**P0.3 - UKF Heading Measurement (commit cb5fa85):**
+- ✅ Implemented `update_heading()` for UKF using unscented transform
+- ✅ Added 3 config parameters: `use_heading_measurement`, `led_distance_tolerance`, `adaptive_heading_noise`
+- ✅ Sequential update architecture (position → heading), same as EKF
+- ✅ 5 new comprehensive tests + no regressions (11 total UKF tests passing)
+- **Impact**: Achieves feature parity with EKF, improves heading uncertainty under dual-LED
+
+**Test Status:**
+- Total: 58 tests passing (47 QA/PRD + 11 UKF)
+- Code quality: black ✓, ruff ✓, mypy warnings pre-existing
+- No regressions in existing tests
+
+**Remaining P0 Blockers (4/7):**
+- P0.4: Generalize state dimension in smoothers (remove hardcoded 8)
+- P0.5: Harden linalg stability with Joseph form
+- P0.6: Fix config mutation (LED spacing inference)
+- P0.7: Fix test defects and flakes
+
+---
+
 ## 2025-10-09 - QA Metrics Test Suite Complete
 
 ### Summary

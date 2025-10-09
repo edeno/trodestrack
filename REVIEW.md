@@ -38,24 +38,30 @@ Below are symbol line maps to help you jump to the right places:
 
 ## P0 — Blockers (merge gate)
 
-1. **Unify Units to SI (m, m/s, rad) in Metrics & Tests**
+1. ✅ **COMPLETED: Unify Units to SI (m, m/s, rad) in Metrics & Tests** (commit 99c70cb)
    - **Why**: Prevent silent threshold breakage and align with PRD reproducibility.
-   - **Touchpoints**:
-     - `src/trodestrack/qa/metrics.py` → normalize returns for `compute_position_rmse`, `compute_velocity_rmse`, `compute_heading_error` (see lines above).
-     - Tests expecting degrees/centimeters: update assertions to SI
+   - **Completed**:
+     - ✅ `src/trodestrack/qa/metrics.py` → normalized returns to SI units
+     - ✅ `compute_heading_error()` now returns radians (breaking change)
+     - ✅ Updated all test constants to SI units (PRD_POSITION_RMSE_M, etc.)
+     - ✅ 43 QA + PRD tests passing
 
-2. **Generalize χ² Envelopes and Apply Everywhere**
+2. ✅ **COMPLETED: Generalize χ² Envelopes and Apply Everywhere** (commit ab0c75d)
    - **Why**: Gating and consistency checks must track measurement DoF (2/4 now; higher later) and arbitrary confidences (90/95/99%).
-   - **Implement**: `chi2_bounds(df:int, confidence:float)` + `within_envelope(values, df, confidence)` in `qa/metrics.py`; add `confidence` parameter to NEES/NIS stats.
-   - **Touchpoints**:
-     - `src/trodestrack/qa/metrics.py: compute_nees`, `compute_nis` (lines referenced above).
-     - `tests/filters/test_ekf_gating.py` — remove `scipy.stats.chi2` import and call the helper instead.
+   - **Completed**:
+     - ✅ `chi2_bounds(df:int, confidence:float)` implemented
+     - ✅ `within_envelope(values, df, confidence)` implemented
+     - ✅ Added `confidence` parameter to `compute_nees_stats()` and `compute_nis_stats()`
+     - ✅ 4 new tests + 47 total QA/PRD tests passing
+     - ⚠️  Breaking change: dict keys changed to `chi2_lower`/`chi2_upper`
 
-3. **UKF Feature Parity: Add Heading Pseudo‑Measurement**
+3. ✅ **COMPLETED: UKF Feature Parity: Add Heading Pseudo‑Measurement** (commit cb5fa85)
    - **Why**: PRD parity and robustness under dual‑LED visibility.
-   - **Touchpoints**:
-     - `src/trodestrack/models/ukf.py: update_step` — add a 1‑D heading update mirroring EKF’s `update_heading` (see EKF line refs).
-     - Reuse a common `joseph_update(P,K,H,R)` helper.
+   - **Completed**:
+     - ✅ Implemented `update_heading()` for UKF using unscented transform
+     - ✅ Added heading config parameters to UKFConfig
+     - ✅ Sequential update architecture (position → heading)
+     - ✅ 5 new tests + 11 total UKF tests passing (no regressions)
 
 4. **State‑Dimension Generalization in Smoothers**
    - **Why**: Future 3D and state changes must not break smoothing.
