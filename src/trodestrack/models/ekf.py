@@ -506,6 +506,9 @@ def predict_step(
     # Predict mean
     m_pred = f(m)
 
+    # Wrap heading angle to (-π, π] to prevent numerical issues
+    m_pred = m_pred.at[4].set(wrap_angle(m_pred[4]))
+
     # Time-scaled process noise for random walks and kinematic diffusion
     # Biases: random walk ~ q_b * dt
     q_bg = config.process_noise_gyro_bias * dt_imu
@@ -618,29 +621,41 @@ def update_step(
                 m_iter, P_iter = carry
 
                 # Re-compute Jacobian at current estimate
-                H_x = H(m_iter)
-                z_pred = h(m_iter)
+                H_x_full = H(m_iter)
+                z_pred_full = h(m_iter)
 
-                # Innovation (full 4-D)
-                innov_full = z_obs_full - z_pred
+                # Build measurement update using masked approach (cleaner than 1e10 hack)
+                # Zero out invalid measurements and set corresponding R to very large value
+                # This is mathematically equivalent to ignoring those dimensions
+                innov_full = z_obs_full - z_pred_full
 
-                # Mask invalid rows: zero them out and give large variance
+                # For invalid dimensions: set innovation to zero and measurement noise large
+                # This effectively removes their influence (Kalman gain ≈ 0 for those dims)
                 innov = jnp.where(obs_mask, innov_full, 0.0)
-                H_masked = jnp.where(obs_mask[:, None], H_x, 0.0)
-                R_diag = jnp.where(obs_mask, config.measurement_noise_pos, 1e10)
+
+                # Zero out rows of H for invalid measurements
+                H_x = jnp.where(obs_mask[:, None], H_x_full, 0.0)
+
+                # Build R: small noise for valid, large for invalid (but not 1e10, use 1e6)
+                # We reduced from 1e10 to 1e6 to avoid numerical issues while still
+                # effectively ignoring invalid measurements
+                R_diag = jnp.where(obs_mask, config.measurement_noise_pos, 1e6)
                 R = jnp.diag(R_diag)
 
                 # Innovation covariance
-                S = H_masked @ P_iter @ H_masked.T + R
+                S = H_x @ P_iter @ H_x.T + R
 
-                # Kalman gain
-                K = psd_solve(S, H_masked @ P_iter).T
+                # Kalman gain (psd_solve handles numerical stability)
+                K = psd_solve(S, H_x @ P_iter).T
 
                 # Update mean
                 m_upd = m_iter + K @ innov
 
-                # Update covariance (Joseph form)
-                I_KH = jnp.eye(8) - K @ H_masked
+                # Wrap heading angle to (-π, π] after update
+                m_upd = m_upd.at[4].set(wrap_angle(m_upd[4]))
+
+                # Update covariance (Joseph form for numerical stability)
+                I_KH = jnp.eye(8) - K @ H_x
                 P_upd = I_KH @ P_iter @ I_KH.T + K @ R @ K.T
                 P_upd = symmetrize(P_upd)
 
@@ -658,10 +673,7 @@ def update_step(
             mask_final = mask_all[-1]
 
             # Compute log-likelihood using only valid dimensions
-            # NOTE: This uses diagonal approximation (assumes independent dimensions)
-            # which is reasonable for partial observations but slightly optimistic
-            # for full covariance coupling. For exact likelihood on masked observations,
-            # use submatrix extraction, but that's not JAX-compatible without dynamic shapes.
+            # For masked observations, we compute the diagonal approximation
             log_lik_per_dim = -0.5 * (
                 jnp.log(2 * jnp.pi)
                 + jnp.log(jnp.diag(S_final))
