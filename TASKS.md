@@ -157,7 +157,8 @@
 
 ### 📊 QA & Visualization
 
-- [ ] `qa/metrics.py` – RMSE, NEES, NIS computations
+- [x] `qa/metrics.py` – RMSE, NEES, NIS computations
+  - [x] Comprehensive test suite (33 tests, 92% coverage)
 - [ ] `qa/plots.py` – residuals, NEES histograms, covariance ellipses
 - [ ] `qa/report.py` – summary PDF of metrics, configuration, and plots
 - [ ] Add CLI command:

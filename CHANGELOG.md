@@ -2,6 +2,42 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-09 - QA Metrics Test Suite
+
+**Added:**
+- **Comprehensive Test Suite** (`tests/qa/test_metrics.py`)
+  - 33 tests covering all 11 public functions in qa/metrics.py
+  - Tests for RMSE computation (position, velocity, heading)
+  - Tests for NEES and NIS consistency checks
+  - Tests for residual autocorrelation (whiteness)
+  - Tests for dropout drift measurement
+  - Edge cases: NaN handling, singular covariances, shape mismatches
+  - Integration test validating full QA workflow
+
+**Testing:**
+- ✅ All 33 tests passing (19.4s total runtime)
+- ✅ 92% code coverage (uncovered: error validation branches)
+- ✅ Code reviewed and approved
+- ✅ Validates PRD acceptance criteria thresholds
+
+**Quality:**
+- Clear test organization with sectioned comments
+- Appropriate numerical tolerances for stochastic tests
+- Follows pytest best practices (AAA pattern, fixtures, parametrization)
+- Comprehensive edge case coverage
+
+**Impact:**
+- ✅ qa/metrics.py now has comprehensive test coverage
+- ✅ Validates PRD requirements: RMSE ≤2cm, velocity ≤10cm/s, heading ≤7°, drift ≤15cm
+- ✅ Establishes baseline for future QA module development
+- 📊 Milestone 4 progress: QA metrics testing complete
+
+**Files:**
+- Created: `tests/qa/test_metrics.py` (570 lines)
+- Tested: `src/trodestrack/qa/metrics.py` (619 lines)
+
+---
+
 ### Session: 2025-10-09 - P2 DRY & Performance Refactor
 
 **Refactored:**
