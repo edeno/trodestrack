@@ -695,10 +695,12 @@ def update_step(
     z_led2: jnp.ndarray,
     mask: bool,
     config: EKFConfig,
+    confidence: jnp.ndarray | None = None,
 ) -> tuple[EKFState, float]:
     """EKF measurement update step using camera observations.
 
     Supports iterated EKF (IEKF) via config.num_iter parameter.
+    Supports confidence-scaled measurement noise (e.g., from DLC).
 
     Args:
         state: Predicted state
@@ -706,11 +708,31 @@ def update_step(
         z_led2: LED2 observation [x, y] in meters
         mask: Observation validity flag
         config: EKF configuration
+        confidence: Confidence scores [led1_x, led1_y, led2_x, led2_y] (4,)
+            Range: [0, 1], where 1.0 = high confidence
+            If None, defaults to 1.0 (high confidence)
+            Measurement noise is scaled as: R_eff = R_base / clip(conf, min, 1.0)
 
     Returns:
         Tuple of (updated_state, log_likelihood)
+
+    Notes:
+        Confidence scaling follows: R_i = R_base / conf_i (clipped to [min, 1.0])
+        - High confidence (→1.0): R ≈ R_base (trust measurement)
+        - Low confidence (→0): R → large (distrust measurement)
+        - Minimum confidence prevents R → ∞
     """
     m_pred, P_pred = state.mean, state.cov
+
+    # Process confidence scores
+    # Default to high confidence if not provided
+    if confidence is None:
+        conf = jnp.ones(4)
+    else:
+        # Clip confidence to [1e-2, 1.0] to prevent numerical issues
+        # - Upper bound: 1.0 (perfect confidence)
+        # - Lower bound: 1e-2 (prevents R → ∞)
+        conf = jnp.clip(confidence, 1e-2, 1.0)
 
     # If no valid observation, return prediction unchanged with zero log-likelihood
     def no_update(m, P):
@@ -768,8 +790,12 @@ def update_step(
                 innov_4_raw = z_obs_full - z_pred_4  # (4,)
                 innov_4 = jnp.where(obs_mask, innov_4_raw, 0.0)  # Zero invalid components
 
-                # Measurement noise (always 4D diagonal)
-                R4 = jnp.eye(4) * config.measurement_noise_pos
+                # Confidence-scaled measurement noise
+                # R_i = R_base / conf_i for each dimension
+                # Higher confidence → smaller R → trust measurement more
+                R_base = config.measurement_noise_pos
+                R_diag = R_base / conf  # Shape (4,)
+                R4 = jnp.diag(R_diag)
 
                 # Innovation covariance (always 4×4)
                 S4 = H4 @ P_iter @ H4.T + R4
