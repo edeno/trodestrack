@@ -54,17 +54,17 @@ Each section includes context, rationale, and **code suggestions** inline for im
 
 **Test Coverage:**
 
-* ✅ Tier 0: Stationary position RMSE ≤ 2 cm (with 5% margin)
-* ✅ Tier 0: Constant velocity RMSE ≤ 10 cm/s
+* ✅ Tier 0: Stationary position RMSE ≤ 0.02 m (with 5% margin)
+* ✅ Tier 0: Constant velocity RMSE ≤ 0.10 m/s
 * ✅ Tier 0: Circular heading RMSE ≤ 7°
-* ✅ Tier 3: Rat IMU position RMSE ≤ 2 cm
-* ✅ Tier 3: Rat IMU velocity RMSE ≤ 10 cm/s
+* ✅ Tier 3: Rat IMU position RMSE ≤ 0.02 m
+* ✅ Tier 3: Rat IMU velocity RMSE ≤ 0.10 m/s
 * ✅ Tier 3: Rat IMU heading RMSE ≤ 7°
-* ⏸️ Dropout drift ≤ 15 cm after 5s (skipped - requires adaptive Q or bias freezing)
+* ⏸️ Dropout drift ≤ 0.15 m after 5s (skipped - requires adaptive Q or bias freezing)
 
 **Known Limitation:**
-Dropout drift test is skipped because 15cm requirement is unrealistic with current sensor specs.
-Accelerometer bias is unobservable during camera dropouts, causing ~370cm drift over 5s.
+Dropout drift test is skipped because 0.15m requirement is unrealistic with current sensor specs.
+Accelerometer bias is unobservable during camera dropouts, causing ~3.7m drift over 5s.
 Requires future enhancement: adaptive Q during dropouts or bias freezing.
 See `tests/filters/test_dropout_diagnostic.py` for analysis.
 

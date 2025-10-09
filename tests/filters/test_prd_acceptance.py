@@ -1,10 +1,10 @@
 """PRD Acceptance Tests with Real EKF Filtering.
 
 This module validates that the EKF meets PRD acceptance criteria on simulation data:
-- Position RMSE <= 2 cm (PRD §4.1)
-- Velocity RMSE <= 10 cm/s (PRD §4.1)
+- Position RMSE <= 0.02 m (PRD §4.1)
+- Velocity RMSE <= 0.10 m/s (PRD §4.1)
 - Heading RMSE <= 7° (PRD §4.1)
-- Dropout drift <= 15 cm after 5s (PRD §4.2)
+- Dropout drift <= 0.15 m after 5s (PRD §4.2)
 
 Unlike test_prd_bounds.py (which tests truth-vs-truth), these tests run actual
 EKF filtering and validate performance against PRD thresholds.
@@ -32,10 +32,10 @@ from trodestrack.sim.simple import (
 # PRD Requirements (from PRD.md Section 4)
 # =============================================================================
 
-PRD_POSITION_RMSE_CM = 2.0  # Position RMSE <= 2 cm
-PRD_VELOCITY_RMSE_CM_S = 10.0  # Velocity RMSE <= 10 cm/s
+PRD_POSITION_RMSE_M = 0.02  # Position RMSE <= 0.02 m (2 cm)
+PRD_VELOCITY_RMSE_M_S = 0.10  # Velocity RMSE <= 0.10 m/s (10 cm/s)
 PRD_HEADING_RMSE_DEG = 7.0  # Heading RMSE <= 7 degrees
-PRD_DROPOUT_DRIFT_CM = 15.0  # Drift <= 15 cm after 5s dropout
+PRD_DROPOUT_DRIFT_M = 0.15  # Drift <= 0.15 m (15 cm) after 5s dropout
 
 
 # =============================================================================
@@ -120,45 +120,40 @@ def run_ekf_on_sim(sim_data: dict, use_heading: bool = False) -> dict:
 
 
 def test_tier0_stationary_ekf_position():
-    """Tier 0: Stationary - EKF position RMSE should meet PRD (<=2cm)."""
+    """Tier 0: Stationary - EKF position RMSE should meet PRD (<=0.02m)."""
     config = SimpleSimConfig(duration_s=30.0, fs_imu=200.0, fs_cam=30.0, cam_dropout_prob=0.0)
     sim_data = simulate_stationary(config=config, seed=42)
 
     result = run_ekf_on_sim(sim_data)
 
-    # Compute position RMSE (convert to cm)
+    # Compute position RMSE (in meters)
     pos_rmse_m = compute_position_rmse(result["pos_truth"], result["pos_est"])
-    pos_rmse_cm = pos_rmse_m * 100
 
-    print(f"\nStationary Position RMSE: {pos_rmse_cm:.3f} cm (PRD: <={PRD_POSITION_RMSE_CM} cm)")
+    print(f"\nStationary Position RMSE: {pos_rmse_m:.4f} m (PRD: <={PRD_POSITION_RMSE_M} m)")
 
     # Allow 5% margin above PRD threshold to account for filter convergence
-    assert pos_rmse_cm <= PRD_POSITION_RMSE_CM * 1.05, (
-        f"Position RMSE {pos_rmse_cm:.3f} cm exceeds PRD requirement "
-        f"of {PRD_POSITION_RMSE_CM} cm (with 5% margin)"
+    assert pos_rmse_m <= PRD_POSITION_RMSE_M * 1.05, (
+        f"Position RMSE {pos_rmse_m:.4f} m exceeds PRD requirement "
+        f"of {PRD_POSITION_RMSE_M} m (with 5% margin)"
     )
 
 
 def test_tier0_constant_velocity_ekf_velocity():
-    """Tier 0: Constant velocity - EKF velocity RMSE should meet PRD (<=10cm/s)."""
+    """Tier 0: Constant velocity - EKF velocity RMSE should meet PRD (<=0.10m/s)."""
     config = SimpleSimConfig(duration_s=30.0, fs_imu=200.0, fs_cam=30.0, cam_dropout_prob=0.0)
-    velocity = np.array([0.10, 0.0])  # 10 cm/s in x-direction
+    velocity = np.array([0.10, 0.0])  # 0.10 m/s in x-direction
     sim_data = simulate_constant_velocity(config=config, velocity=velocity, seed=42)
 
     result = run_ekf_on_sim(sim_data)
 
-    # Compute velocity RMSE (convert to cm/s)
+    # Compute velocity RMSE (in m/s)
     vel_rmse_m_s = compute_velocity_rmse(result["vel_truth"], result["vel_est"])
-    vel_rmse_cm_s = vel_rmse_m_s * 100
 
-    print(
-        f"\nConstant Velocity RMSE: {vel_rmse_cm_s:.3f} cm/s "
-        f"(PRD: <={PRD_VELOCITY_RMSE_CM_S} cm/s)"
-    )
+    print(f"\nConstant Velocity RMSE: {vel_rmse_m_s:.4f} m/s (PRD: <={PRD_VELOCITY_RMSE_M_S} m/s)")
 
-    assert vel_rmse_cm_s <= PRD_VELOCITY_RMSE_CM_S, (
-        f"Velocity RMSE {vel_rmse_cm_s:.3f} cm/s exceeds PRD requirement "
-        f"of {PRD_VELOCITY_RMSE_CM_S} cm/s"
+    assert vel_rmse_m_s <= PRD_VELOCITY_RMSE_M_S, (
+        f"Velocity RMSE {vel_rmse_m_s:.4f} m/s exceeds PRD requirement "
+        f"of {PRD_VELOCITY_RMSE_M_S} m/s"
     )
 
 
@@ -187,7 +182,7 @@ def test_tier0_circular_ekf_heading():
 
 
 def test_tier3_rat_imu_ekf_position():
-    """Tier 3: Rat IMU - EKF position RMSE should meet PRD (<=2cm)."""
+    """Tier 3: Rat IMU - EKF position RMSE should meet PRD (<=0.02m)."""
     config = RatIMUSimConfig(
         duration_s=30.0,
         fs_imu=200.0,
@@ -204,20 +199,18 @@ def test_tier3_rat_imu_ekf_position():
 
     result = run_ekf_on_sim(sim_data, use_heading=True)
 
-    # Compute position RMSE (convert to cm)
+    # Compute position RMSE (in meters)
     pos_rmse_m = compute_position_rmse(result["pos_truth"], result["pos_est"])
-    pos_rmse_cm = pos_rmse_m * 100
 
-    print(f"\nRat IMU Position RMSE: {pos_rmse_cm:.3f} cm (PRD: <={PRD_POSITION_RMSE_CM} cm)")
+    print(f"\nRat IMU Position RMSE: {pos_rmse_m:.4f} m (PRD: <={PRD_POSITION_RMSE_M} m)")
 
-    assert pos_rmse_cm <= PRD_POSITION_RMSE_CM, (
-        f"Position RMSE {pos_rmse_cm:.3f} cm exceeds PRD requirement "
-        f"of {PRD_POSITION_RMSE_CM} cm"
+    assert pos_rmse_m <= PRD_POSITION_RMSE_M, (
+        f"Position RMSE {pos_rmse_m:.4f} m exceeds PRD requirement " f"of {PRD_POSITION_RMSE_M} m"
     )
 
 
 def test_tier3_rat_imu_ekf_velocity():
-    """Tier 3: Rat IMU - EKF velocity RMSE should meet PRD (<=10cm/s)."""
+    """Tier 3: Rat IMU - EKF velocity RMSE should meet PRD (<=0.10m/s)."""
     config = RatIMUSimConfig(
         duration_s=30.0,
         fs_imu=200.0,
@@ -234,17 +227,14 @@ def test_tier3_rat_imu_ekf_velocity():
 
     result = run_ekf_on_sim(sim_data, use_heading=True)
 
-    # Compute velocity RMSE (convert to cm/s)
+    # Compute velocity RMSE (in m/s)
     vel_rmse_m_s = compute_velocity_rmse(result["vel_truth"], result["vel_est"])
-    vel_rmse_cm_s = vel_rmse_m_s * 100
 
-    print(
-        f"\nRat IMU Velocity RMSE: {vel_rmse_cm_s:.3f} cm/s (PRD: <={PRD_VELOCITY_RMSE_CM_S} cm/s)"
-    )
+    print(f"\nRat IMU Velocity RMSE: {vel_rmse_m_s:.4f} m/s (PRD: <={PRD_VELOCITY_RMSE_M_S} m/s)")
 
-    assert vel_rmse_cm_s <= PRD_VELOCITY_RMSE_CM_S, (
-        f"Velocity RMSE {vel_rmse_cm_s:.3f} cm/s exceeds PRD requirement "
-        f"of {PRD_VELOCITY_RMSE_CM_S} cm/s"
+    assert vel_rmse_m_s <= PRD_VELOCITY_RMSE_M_S, (
+        f"Velocity RMSE {vel_rmse_m_s:.4f} m/s exceeds PRD requirement "
+        f"of {PRD_VELOCITY_RMSE_M_S} m/s"
     )
 
 
@@ -285,18 +275,18 @@ def test_tier3_rat_imu_ekf_heading():
 
 
 @pytest.mark.skip(
-    reason="PRD §4.2 requirement (15cm after 5s) is unrealistic with current IMU specs. "
-    "Accelerometer bias is unobservable during camera dropouts, leading to ~370cm drift. "
+    reason="PRD §4.2 requirement (0.15m after 5s) is unrealistic with current IMU specs. "
+    "Accelerometer bias is unobservable during camera dropouts, leading to ~3.7m drift. "
     "This requires adaptive Q during dropouts or bias freezing (not yet implemented)."
 )
 def test_prd_dropout_drift_5s():
-    """PRD §4.2: Dropout drift should be <=15cm after 5s camera blackout.
+    """PRD §4.2: Dropout drift should be <=0.15m after 5s camera blackout.
 
     KNOWN LIMITATION:
     ----------------
-    This test is currently SKIPPED because the 15cm drift requirement is
+    This test is currently SKIPPED because the 0.15m drift requirement is
     unrealistic with current sensor noise specifications. The EKF experiences
-    ~370cm drift during 5s dropouts due to accelerometer bias being unobservable
+    ~3.7m drift during 5s dropouts due to accelerometer bias being unobservable
     without camera measurements.
 
     Root cause: Accelerometer bias drift (~0.006 m/s² over 5s) causes runaway
@@ -340,23 +330,22 @@ def test_prd_dropout_drift_5s():
     # Run EKF with dropout
     result = run_ekf_on_sim(sim_data_dropout, use_heading=True)
 
-    # Compute dropout drift using PRD helper
+    # Compute dropout drift using PRD helper (in meters)
     drift_result = compute_dropout_drift(
-        positions_cm=result["pos_est"] * 100,  # Convert to cm
+        positions=result["pos_est"],  # Positions in meters
         valid_mask=mask_with_dropout,
         t=sim_data["t_cam_exp"],
         min_duration_s=4.5,  # Look for >=4.5s dropouts
     )
 
-    drift_cm = drift_result["drift_cm"]
+    drift_m = drift_result["drift_m"]
     duration_s = drift_result["duration_s"]
 
     print(
-        f"\nDropout drift: {drift_cm:.3f} cm over {duration_s:.1f}s (PRD: <={PRD_DROPOUT_DRIFT_CM} cm)"
+        f"\nDropout drift: {drift_m:.4f} m over {duration_s:.1f}s (PRD: <={PRD_DROPOUT_DRIFT_M} m)"
     )
 
-    assert drift_cm is not None, "No qualifying dropout found in simulation"
-    assert drift_cm <= PRD_DROPOUT_DRIFT_CM, (
-        f"Dropout drift {drift_cm:.3f} cm exceeds PRD requirement "
-        f"of {PRD_DROPOUT_DRIFT_CM} cm after 5s"
-    )
+    assert drift_m is not None, "No qualifying dropout found in simulation"
+    assert (
+        drift_m <= PRD_DROPOUT_DRIFT_M
+    ), f"Dropout drift {drift_m:.4f} m exceeds PRD requirement of {PRD_DROPOUT_DRIFT_M} m after 5s"

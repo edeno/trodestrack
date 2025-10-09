@@ -539,7 +539,7 @@ def chi2_ci95(df: int) -> tuple[float, float]:
 
 
 def compute_dropout_drift(
-    positions_cm: NDArray[np.float64],
+    positions: NDArray[np.float64],
     valid_mask: NDArray[np.bool_],
     t: NDArray[np.float64],
     min_duration_s: float = 5.0,
@@ -547,17 +547,17 @@ def compute_dropout_drift(
     """Compute position drift during first contiguous dropout block.
 
     Measures how far the filter drifts during camera occlusion, which is a
-    critical PRD requirement: drift should be ≤15 cm after 5s dropout.
+    critical PRD requirement: drift should be ≤0.15 m (15 cm) after 5s dropout.
 
     Args:
-        positions_cm: Estimated positions over time, shape (N, 2) in cm
+        positions: Estimated positions over time, shape (N, 2) in meters
         valid_mask: Camera validity mask, shape (N,). False = dropout
         t: Timestamps, shape (N,) in seconds
         min_duration_s: Minimum dropout duration to analyze (default: 5.0s)
 
     Returns:
         Dictionary with keys:
-        - drift_cm: Euclidean drift from start to end of dropout (None if no dropout found)
+        - drift_m: Euclidean drift from start to end of dropout in meters (None if no dropout found)
         - duration_s: Duration of dropout in seconds (None if no dropout found)
         - start_idx: Index where dropout starts (None if no dropout found)
         - end_idx: Index where dropout ends (None if no dropout found)
@@ -565,25 +565,25 @@ def compute_dropout_drift(
     Example:
         >>> # Simulate 10s trajectory with 5s dropout at t=3-8s
         >>> t = np.linspace(0, 10, 100)
-        >>> positions = np.column_stack([t * 10, np.zeros_like(t)])  # Moving at 10 cm/s
+        >>> positions = np.column_stack([t * 0.1, np.zeros_like(t)])  # Moving at 0.1 m/s
         >>> mask = (t < 3.0) | (t >= 8.0)  # Dropout from 3-8s
         >>> result = compute_dropout_drift(positions, mask, t, min_duration_s=4.0)
-        >>> # Drift should be ~50 cm (5s * 10 cm/s)
-        >>> 40 < result['drift_cm'] < 60
+        >>> # Drift should be ~0.5 m (5s * 0.1 m/s)
+        >>> 0.4 < result['drift_m'] < 0.6
         True
         >>> np.isclose(result['duration_s'], 5.0, atol=0.1)
         True
 
     Notes:
         PRD Acceptance Criteria (§4.2):
-        - After 5s camera dropout, IMU-only drift should be ≤15 cm
+        - After 5s camera dropout, IMU-only drift should be ≤0.15 m (15 cm)
 
         This function identifies the FIRST contiguous dropout block that
         exceeds min_duration_s and measures drift from block start to end.
     """
-    if positions_cm.shape[0] != valid_mask.shape[0] or positions_cm.shape[0] != t.shape[0]:
+    if positions.shape[0] != valid_mask.shape[0] or positions.shape[0] != t.shape[0]:
         raise ValueError(
-            f"Shape mismatch: positions {positions_cm.shape}, "
+            f"Shape mismatch: positions {positions.shape}, "
             f"mask {valid_mask.shape}, time {t.shape}"
         )
 
@@ -598,12 +598,12 @@ def compute_dropout_drift(
         duration = t[end_idx - 1] - t[start_idx]
         if duration >= min_duration_s:
             # Measure drift from start to end
-            pos_start = positions_cm[start_idx]
-            pos_end = positions_cm[end_idx - 1]
+            pos_start = positions[start_idx]
+            pos_end = positions[end_idx - 1]
             drift = np.linalg.norm(pos_end - pos_start)
 
             return {
-                "drift_cm": float(drift),
+                "drift_m": float(drift),
                 "duration_s": float(duration),
                 "start_idx": int(start_idx),
                 "end_idx": int(end_idx),
@@ -611,7 +611,7 @@ def compute_dropout_drift(
 
     # No qualifying dropout found
     return {
-        "drift_cm": None,
+        "drift_m": None,
         "duration_s": None,
         "start_idx": None,
         "end_idx": None,

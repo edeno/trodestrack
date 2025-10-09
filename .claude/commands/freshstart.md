@@ -25,3 +25,5 @@ Your workflow MUST be:
 5. Update SCRATCHPAD.md with notes and CHANGELOG.md with changes.
 
 6. Commit frequently with messages like "feat(F24): implement error handling"
+
+Do not change tests or skip tests to match broken code. Ask permission to change requirements if needed.

@@ -45,8 +45,8 @@ Estimate a rat’s position, velocity, and heading on a maze using:
 
 ## 4. Core Outcomes (Acceptance Criteria)
 
-- **Accuracy:** Synthetic benchmarks ≤2 cm RMSE position, ≤10 cm/s velocity, ≤7° heading.
-- **Robustness:** ≥5 s vision dropout → ≤15 cm drift (maze ~2 m).
+- **Accuracy:** Synthetic benchmarks ≤0.02 m RMSE position, ≤0.10 m/s velocity, ≤7° heading.
+- **Robustness:** ≥5 s vision dropout → ≤0.15 m drift (maze ~2 m).
 - **Throughput:** Offline smoothing ≥10× realtime on 30 min session (CPU); ≥50× realtime on GPU.
 - **Online:** End-to-end latency ≤33 ms per frame (EKF on CPU).
 - **Reproducibility:** Deterministic runs with fixed seeds; CI green.
@@ -70,9 +70,9 @@ Estimate a rat’s position, velocity, and heading on a maze using:
 
 **Conversions**
 
-- Accelerometer: `a_g = raw * 0.000061 (g)`, `a_ms2 = a_g * 9.80665`.
-- Gyroscope: `ω_deg_s = raw * 0.061`, convert to rad/s.
-- Pixel→cm: ruler scale or 2D homography (preferred).
+- Accelerometer: `a_g = raw * 0.000061 (g)`, `a_m_s2 = a_g * 9.80665` (m/s²).
+- Gyroscope: `ω_deg_s = raw * 0.061`, `ω_rad_s = ω_deg_s * π/180` (rad/s).
+- Pixel→meters: ruler scale or 2D homography (preferred).
 
 **IMU Rate for Offline Processing**
 
@@ -81,9 +81,13 @@ Estimate a rat’s position, velocity, and heading on a maze using:
 
 **Outputs**
 
-- Time-aligned series of: `x, y (cm), vx, vy (cm/s), θ (rad)` + covariance.
+- Time-aligned series of: `x, y (m), vx, vy (m/s), θ (rad)` + covariance.
 - Optional high-rate state at IMU steps (downsampled).
 - Diagnostics: residuals, gates, bias estimates, QA plots.
+
+**Note on Units:**
+All internal computations use SI units (meters, m/s, rad/s, rad). Display and
+visualization may optionally show human-readable units (cm, degrees) for convenience.
 
 ---
 
