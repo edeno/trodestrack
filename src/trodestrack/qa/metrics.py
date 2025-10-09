@@ -191,6 +191,188 @@ def compute_nees(
     return nees
 
 
+def compute_nis(
+    innovations: NDArray[np.float64],
+    innovation_covariances: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """Compute Normalized Innovation Squared (NIS) for measurement consistency check.
+
+    NIS measures whether measurement innovations (residuals) are consistent with
+    predicted innovation covariances. For a consistent filter, NIS should follow
+    a chi-squared distribution with degrees of freedom equal to measurement dimension.
+
+    Args:
+        innovations: Measurement innovations (residuals), shape (N, M)
+        innovation_covariances: Innovation covariances, shape (N, M, M)
+
+    Returns:
+        NIS values per timestep, shape (N,)
+
+    Example:
+        >>> innovations = np.array([[0.1, 0.1], [0.2, -0.1]])
+        >>> cov = np.stack([np.eye(2) * 0.1, np.eye(2) * 0.1])
+        >>> nis = compute_nis(innovations, cov)
+        >>> print(f"NIS: {nis}")
+        NIS: [0.2 0.5]
+
+    Notes:
+        For an M-dimensional measurement, NIS ~ chi^2(M) if filter is consistent.
+        - 95% confidence interval for M=2: [0.051, 7.378]
+        - 95% confidence interval for M=4: [0.484, 11.143]
+
+        If NIS is consistently outside this range, the filter is either:
+        - Over-confident (NIS too high): measurement noise R underestimated
+        - Under-confident (NIS too low): measurement noise R overestimated
+    """
+    if innovations.shape[0] != innovation_covariances.shape[0]:
+        raise ValueError(
+            f"Shape mismatch: innovations {innovations.shape} vs "
+            f"covariances {innovation_covariances.shape}"
+        )
+
+    N, M = innovations.shape
+
+    if innovation_covariances.shape != (N, M, M):
+        raise ValueError(
+            f"Innovation covariance shape mismatch: expected ({N}, {M}, {M}), "
+            f"got {innovation_covariances.shape}"
+        )
+
+    nis = np.zeros(N)
+
+    for i in range(N):
+        innov = innovations[i]
+        cov = innovation_covariances[i]
+
+        # NIS = r^T * S^{-1} * r
+        # Use solve instead of inv for numerical stability
+        try:
+            cov_inv_innov = np.linalg.solve(cov, innov)
+            nis[i] = innov @ cov_inv_innov
+        except np.linalg.LinAlgError:
+            # Singular covariance - filter is broken
+            nis[i] = np.inf
+
+    return nis
+
+
+def compute_nis_stats(nis: NDArray[np.float64], measurement_dim: int) -> dict[str, float]:
+    """Compute summary statistics for NIS consistency check.
+
+    Args:
+        nis: NIS values per timestep, shape (N,)
+        measurement_dim: Dimension of measurement (degrees of freedom for chi-squared)
+
+    Returns:
+        Dictionary with keys:
+        - mean: Mean NIS (should be ~measurement_dim for consistent filter)
+        - std: Standard deviation
+        - min: Minimum NIS
+        - max: Maximum NIS
+        - chi2_lower_95: Lower 95% confidence bound for chi^2(measurement_dim)
+        - chi2_upper_95: Upper 95% confidence bound for chi^2(measurement_dim)
+        - pct_in_bounds: Percentage of NIS values within 95% CI
+
+    Example:
+        >>> import numpy as np
+        >>> np.random.seed(42)
+        >>> nis = np.random.chisquare(df=4, size=100)
+        >>> stats = compute_nis_stats(nis, measurement_dim=4)
+        >>> # Mean should be approximately measurement_dim for consistent filter
+        >>> 3.0 < stats['mean'] < 5.0
+        True
+        >>> # Most samples should be within 95% confidence bounds
+        >>> stats['pct_in_bounds'] > 90.0
+        True
+    """
+    from scipy.stats import chi2
+
+    # Chi-squared 95% confidence interval
+    lower = chi2.ppf(0.025, df=measurement_dim)
+    upper = chi2.ppf(0.975, df=measurement_dim)
+
+    in_bounds = np.sum((nis >= lower) & (nis <= upper))
+    pct_in_bounds = 100.0 * in_bounds / len(nis)
+
+    return {
+        "mean": float(np.mean(nis)),
+        "std": float(np.std(nis)),
+        "min": float(np.min(nis)),
+        "max": float(np.max(nis)),
+        "chi2_lower_95": float(lower),
+        "chi2_upper_95": float(upper),
+        "pct_in_bounds": float(pct_in_bounds),
+    }
+
+
+def compute_residual_autocorrelation(
+    residuals: NDArray[np.float64],
+    max_lag: int = 10,
+) -> NDArray[np.float64]:
+    """Compute autocorrelation function (ACF) of residuals to check whiteness.
+
+    For a well-tuned filter, residuals should be white noise (uncorrelated over time).
+    Non-zero autocorrelation indicates:
+    - Process noise Q too small (under-modeling dynamics)
+    - Timing offset between sensors
+    - Unmodeled dynamics or correlations
+
+    Args:
+        residuals: Residual time series, shape (N,) or (N, M) for multivariate
+        max_lag: Maximum lag to compute (default: 10)
+
+    Returns:
+        Autocorrelation values for lags 0 to max_lag, shape (max_lag+1,) or (M, max_lag+1)
+
+    Example:
+        >>> import numpy as np
+        >>> np.random.seed(42)
+        >>> white_noise = np.random.randn(100)
+        >>> acf = compute_residual_autocorrelation(white_noise, max_lag=5)
+        >>> # Lag 0 should be 1.0 (perfect correlation with self)
+        >>> np.isclose(acf[0], 1.0)
+        True
+        >>> # Higher lags should be near zero for white noise
+        >>> np.all(np.abs(acf[1:]) < 0.3)  # Loose bound for small sample
+        True
+
+    Notes:
+        Interpretation:
+        - ACF[0] = 1.0 always (correlation with self)
+        - ACF[k] ≈ 0 for k > 0 indicates whiteness
+        - Significant ACF[1] indicates lag-1 correlation (most common issue)
+        - 95% confidence bounds: ± 1.96 / sqrt(N) for large N
+    """
+    if residuals.ndim == 1:
+        # Univariate residuals
+        N = len(residuals)
+        mean = np.mean(residuals)
+        var = np.var(residuals, ddof=1)
+
+        if var == 0:
+            # Constant residuals (degenerate case)
+            return np.zeros(max_lag + 1)
+
+        acf = np.zeros(max_lag + 1)
+        for lag in range(max_lag + 1):
+            if lag == 0:
+                acf[lag] = 1.0
+            else:
+                # Autocorrelation at lag k: E[(X_t - μ)(X_{t+k} - μ)] / σ²
+                cov = np.mean((residuals[: N - lag] - mean) * (residuals[lag:] - mean))
+                acf[lag] = cov / var
+
+        return acf
+
+    else:
+        # Multivariate residuals: compute ACF for each dimension
+        M = residuals.shape[1]
+        acf_all = np.zeros((M, max_lag + 1))
+        for m in range(M):
+            acf_all[m] = compute_residual_autocorrelation(residuals[:, m], max_lag)
+        return acf_all
+
+
 def compute_nees_stats(nees: NDArray[np.float64], state_dim: int) -> dict[str, float]:
     """Compute summary statistics for NEES consistency check.
 

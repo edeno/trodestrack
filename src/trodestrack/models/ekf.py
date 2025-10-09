@@ -46,16 +46,22 @@ from jax import jacfwd, lax
 class EKFConfig:
     """Extended Kalman Filter configuration.
 
-    Process noise rates (Q matrix diagonal, variance per unit time):
-        process_noise_pos: Position process noise rate (m²/s)
-        process_noise_vel: Velocity process noise rate (m/s)²/s
-        process_noise_heading: Heading process noise rate (rad²/s)
-        process_noise_gyro_bias: Gyro bias random walk rate (rad/s)²/s
-        process_noise_accel_bias: Accel bias random walk rate (m/s²)²/s
+    Process noise RATES (Q matrix diagonal, variance per unit time):
+        These are RATES (variance/second), NOT per-step variances.
+        They are multiplied by dt in predict_step to produce step variances.
 
-        Note: These rates are multiplied by dt in predict_step to produce variances.
-              For a desired per-step variance q_var at dt_typical, set:
-              q_rate = q_var / dt_typical
+        For typical IMU dt = 0.005s (200 Hz), the defaults produce:
+            - position: 0.02 m²/s × 0.005s = 1e-4 m² per step (1 cm std)
+            - velocity: 2.0 (m/s)²/s × 0.005s = 0.01 (m/s)² per step (10 cm/s std)
+            - heading: 0.02 rad²/s × 0.005s = 1e-4 rad² per step (0.01 rad std)
+
+        To convert from desired per-step variance q_step at dt_typical:
+            q_rate = q_step / dt_typical
+
+        Example: For 1 cm std position at 200 Hz:
+            q_step = (0.01 m)² = 1e-4 m²
+            dt = 0.005s
+            q_rate = 1e-4 / 0.005 = 0.02 m²/s
 
     Measurement noise (R matrix diagonal):
         measurement_noise_pos: Camera position noise (m²)
@@ -73,12 +79,13 @@ class EKFConfig:
         num_iter: Number of IEKF iterations (1=standard EKF, >1=iterated EKF)
     """
 
-    # Process noise
-    process_noise_pos: float = 0.01**2  # (1 cm)²
-    process_noise_vel: float = 0.1**2  # (10 cm/s)²
-    process_noise_heading: float = 0.01**2  # (0.01 rad)²
-    process_noise_gyro_bias: float = 1e-6  # Very slow drift
-    process_noise_accel_bias: float = 1e-4  # Slow drift
+    # Process noise RATES (variance/second, will be scaled by dt in filter)
+    # Defaults produce reasonable step variances @ 200 Hz IMU
+    process_noise_pos: float = 0.02  # m²/s → 1cm std @ 200Hz
+    process_noise_vel: float = 2.0  # (m/s)²/s → 10cm/s std @ 200Hz
+    process_noise_heading: float = 0.02  # rad²/s → 0.01rad std @ 200Hz
+    process_noise_gyro_bias: float = 2e-4  # (rad/s)²/s
+    process_noise_accel_bias: float = 0.02  # (m/s²)²/s
 
     # Measurement noise
     measurement_noise_pos: float = 0.005**2  # (0.5 cm)²

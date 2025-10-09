@@ -130,4 +130,34 @@
 - UKF implementation pending
 - RTS smoother pending
 
+### Session: 2025-10-08 (EKF Code Review & Diagnostic Enhancements)
+
+**Code Review Performed:**
+- Comprehensive review of EKF implementation by code-reviewer agent
+- **Overall Rating:** APPROVE - Production-ready code (5/5 quality)
+- **Algorithm Correctness:** All EKF math verified (prediction, update, IEKF, Jacobians)
+- **JAX Best Practices:** Functional purity, efficient lax.scan usage, JIT-compatible
+- **PRD Compliance:** 4/5 - Minor diagnostic gaps identified
+
+**Findings:**
+- ✅ Recent critical fixes (commit 4169366) properly implemented
+- ✅ Numerical stability excellent (Cholesky, symmetrization, Joseph form)
+- ✅ Test coverage comprehensive (7 scenarios passing)
+- 🟡 Missing: NIS computation, residual ACF, 5-second dropout test
+- 🟡 Process noise config units need clarification (rates vs variances)
+
+**PRD Go/No-Go Gates Status:**
+- **Accuracy:** ✅ Position ≤2cm, Velocity ≤10cm/s, Heading passing
+- **NEES Consistency:** ✅ Implemented, needs tightening ([0.5,20] → [1,5])
+- **Innovation Stats:** ✅ Computed in examples (mean≈0, std≈0.5cm)
+- **NIS / χ² Gating:** 🟡 S computed but not extracted/validated
+- **Residual Whiteness:** ❌ ACF not implemented
+- **5s Dropout Drift:** 🟡 Not explicitly tested (PRD: ≤15cm)
+
+**Next: Option A - Complete diagnostic gaps (2 hours)**
+1. Add NIS computation to qa/metrics.py
+2. Add 5-second dropout test
+3. Add residual autocorrelation check
+4. Fix process noise configuration clarity
+
 ---
