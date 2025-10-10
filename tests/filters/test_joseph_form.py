@@ -174,7 +174,7 @@ class TestGaussianLogLikelihoodStability:
 
     def test_gaussian_log_likelihood_wellconditioned(self):
         """Standard case should work with jitter added for stability."""
-        from trodestrack.models.ekf import gaussian_log_likelihood
+        from trodestrack.models.filter_common import gaussian_log_likelihood
 
         innovation = jnp.array([0.1, -0.05])
         covariance = jnp.array([[0.01, 0.0], [0.0, 0.01]])
@@ -192,7 +192,7 @@ class TestGaussianLogLikelihoodStability:
 
     def test_gaussian_log_likelihood_near_singular(self):
         """Should handle near-singular covariances with jitter."""
-        from trodestrack.models.ekf import gaussian_log_likelihood
+        from trodestrack.models.filter_common import gaussian_log_likelihood
 
         # Nearly singular covariance (one eigenvalue ≈ 0)
         innovation = jnp.array([0.1, -0.05])
@@ -206,7 +206,7 @@ class TestGaussianLogLikelihoodStability:
 
     def test_gaussian_log_likelihood_negative_determinant_detection(self):
         """Should detect and handle negative determinants from numerical errors."""
-        from trodestrack.models.ekf import gaussian_log_likelihood
+        from trodestrack.models.filter_common import gaussian_log_likelihood
 
         # Construct a matrix that might have numerical issues
         # This is edge case testing - in practice this shouldn't happen
@@ -221,8 +221,8 @@ class TestGaussianLogLikelihoodStability:
         assert jnp.isfinite(log_lik) or jnp.isnan(log_lik)
 
     def test_gaussian_log_likelihood_ukf_stability(self):
-        """UKF version should have same stability improvements."""
-        from trodestrack.models.ukf import gaussian_log_likelihood_ukf
+        """Shared function should have same stability improvements for both EKF and UKF."""
+        from trodestrack.models.filter_common import gaussian_log_likelihood
 
         # Near-singular case
         innovation = jnp.array([0.01, 0.01, -0.01])
@@ -230,7 +230,7 @@ class TestGaussianLogLikelihoodStability:
             [[1.0, 0.9, 0.8], [0.9, 1.0, 0.9], [0.8, 0.9, 1.0]]
         )  # High correlation
 
-        log_lik = gaussian_log_likelihood_ukf(innovation, covariance)
+        log_lik = gaussian_log_likelihood(innovation, covariance)
 
         # Should return finite value
         assert jnp.isfinite(log_lik)

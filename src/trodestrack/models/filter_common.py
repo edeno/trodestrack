@@ -459,3 +459,119 @@ def confidence_to_R_diagonal(
         return jnp.full(size, base)
     conf = jnp.clip(confidence, clip_min, 1.0)
     return base / conf
+
+
+def gaussian_log_likelihood(innovation: jnp.ndarray, covariance: jnp.ndarray) -> jnp.ndarray:
+    """Compute Gaussian log-likelihood of innovation with numerical stability.
+
+    Computes log p(y | mu, Sigma) where y ~ N(mu, Sigma)
+    and innovation = y - mu.
+
+    Stability features:
+        - Adds small jitter to covariance diagonal for near-singular matrices
+        - Checks sign from slogdet to detect numerical issues
+        - Uses Cholesky decomposition when feasible via psd_solve
+
+    Args:
+        innovation: Innovation vector (k,)
+        covariance: Innovation covariance (k, k)
+
+    Returns:
+        Log-likelihood (scalar)
+
+    Formula:
+        log_prob = -0.5 * (k*log(2π) + log(det(S)) + v^T S^{-1} v)
+
+    Notes:
+        - If determinant is negative or zero (numerical error), adds jitter
+        - Jitter = 1e-8 * trace(S) / k added to diagonal
+        - This prevents divergence for near-singular covariances
+    """
+    k = innovation.shape[0]
+
+    # Add small jitter to diagonal for numerical stability
+    # Scale by mean diagonal value to be adaptive
+    jitter = 1e-8 * jnp.trace(covariance) / k
+    S_stable = covariance + jnp.eye(k) * jitter
+
+    # Log determinant using slogdet (more stable than det)
+    sign, logdet = jnp.linalg.slogdet(S_stable)
+
+    # Check for numerical issues (sign should be +1 for PSD matrix)
+    # If sign <= 0, increase jitter and recompute
+    def add_more_jitter():
+        jitter_large = 1e-6 * jnp.trace(covariance) / k
+        S_jittered = covariance + jnp.eye(k) * jitter_large
+        sign_j, logdet_j = jnp.linalg.slogdet(S_jittered)
+        return logdet_j
+
+    # Use original logdet if sign is positive, otherwise use jittered version
+    logdet_safe = lax.cond(sign > 0, lambda: logdet, add_more_jitter)
+
+    # Mahalanobis distance: v^T S^{-1} v
+    # psd_solve computes S^{-1} @ v, then we dot with v
+    S_inv_v = psd_solve(S_stable, innovation)
+    mahal = jnp.dot(innovation, S_inv_v)
+
+    # Gaussian log-likelihood
+    log_prob = -0.5 * (k * jnp.log(2 * jnp.pi) + logdet_safe + mahal)
+
+    return log_prob
+
+
+def compute_nis_and_loglik(
+    innov4: jnp.ndarray,
+    S4: jnp.ndarray,
+    both_leds: bool,
+    only_led1: bool,
+    only_led2: bool,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Compute exact NIS and log-likelihood for 2D or 4D measurement.
+
+    Uses Cholesky decomposition for numerical stability and computes
+    statistics in the active measurement subspace (2D or 4D).
+
+    Args:
+        innov4: Innovation vector (4,) in full measurement space
+        S4: Innovation covariance (4, 4)
+        both_leds: True if both LEDs valid (4D measurement)
+        only_led1: True if only LED1 valid (2D measurement)
+        only_led2: True if only LED2 valid (2D measurement)
+
+    Returns:
+        Tuple of (nis, log_likelihood):
+            - nis: Normalized Innovation Squared (scalar)
+            - log_likelihood: Gaussian log-likelihood (scalar)
+
+    Notes:
+        - 4D case: Uses full innovation covariance
+        - 2D case: Projects to active subspace via selector matrix
+        - Both return exact statistics (no diagonal approximation)
+        - NIS follows χ²(k) where k=2 or 4 depending on measurement dim
+    """
+    from jax.scipy.linalg import cho_solve
+
+    # 4D branch: both LEDs valid
+    def compute_4d():
+        L4 = jnp.linalg.cholesky(S4 + 1e-9 * jnp.eye(4))
+        x4 = cho_solve((L4, True), innov4)
+        nis = jnp.dot(innov4, x4)
+        logdet = 2.0 * jnp.sum(jnp.log(jnp.diag(L4)))
+        loglik = -0.5 * (logdet + nis + 4 * jnp.log(2 * jnp.pi))
+        return nis, loglik
+
+    # 2D branch: single LED valid
+    def compute_2d():
+        M2 = make_led_selector(only_led1, only_led2)  # (2, 4)
+        S2 = M2 @ S4 @ M2.T  # (2, 2)
+        innov2 = M2 @ innov4  # (2,)
+
+        L2 = jnp.linalg.cholesky(S2 + 1e-9 * jnp.eye(2))
+        x2 = cho_solve((L2, True), innov2)
+        nis = jnp.dot(innov2, x2)
+        logdet = 2.0 * jnp.sum(jnp.log(jnp.diag(L2)))
+        loglik = -0.5 * (logdet + nis + 2 * jnp.log(2 * jnp.pi))
+        return nis, loglik
+
+    # Select based on LED validity
+    return lax.cond(both_leds, compute_4d, compute_2d)
