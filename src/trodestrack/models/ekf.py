@@ -310,6 +310,11 @@ def update_step(
     mask: bool,
     config: EKFConfig,
     confidence: jnp.ndarray | None = None,
+    *,
+    pre_z_obs_full: jnp.ndarray | None = None,
+    pre_conf: jnp.ndarray | None = None,
+    pre_led1_valid: bool | None = None,
+    pre_led2_valid: bool | None = None,
 ) -> tuple[EKFState, float]:
     """EKF measurement update step using camera observations.
 
@@ -347,13 +352,14 @@ def update_step(
 
     # If valid observation, perform update
     def do_update(m, P):
-        # Check which LEDs are valid
-        led1_valid = jnp.isfinite(z_led1[0])
-        led2_valid = jnp.isfinite(z_led2[0])
+        # Check which LEDs are valid (use precomputed if provided)
+        led1_valid = pre_led1_valid if pre_led1_valid is not None else jnp.isfinite(z_led1[0])
+        led2_valid = pre_led2_valid if pre_led2_valid is not None else jnp.isfinite(z_led2[0])
 
-        # Build observation vector and mask
-        # Only include valid measurements
-        z_obs_full = jnp.concatenate([z_led1, z_led2])
+        # Build observation vector and mask (use precomputed if provided)
+        z_obs_full = (
+            pre_z_obs_full if pre_z_obs_full is not None else jnp.concatenate([z_led1, z_led2])
+        )
         obs_mask = jnp.array(
             [
                 led1_valid,
@@ -399,8 +405,9 @@ def update_step(
 
                 # Confidence-scaled measurement noise
                 # R_i = R_base / conf_i for each dimension (shared helper)
+                conf_arg = pre_conf if pre_conf is not None else confidence
                 R_diag = confidence_to_R_diagonal(
-                    confidence, base=config.measurement_noise_pos, size=4
+                    conf_arg, base=config.measurement_noise_pos, size=4
                 )
                 R4 = jnp.diag(R_diag)
 
@@ -779,6 +786,12 @@ def extended_kalman_filter(
 
     imu_index_arrays = compute_imu_index_arrays()
 
+    # Precompute device-friendly measurement inputs per frame
+    led1_valid_arr = jnp.isfinite(Z_cam_led1_jax[:, 0])
+    led2_valid_arr = jnp.isfinite(Z_cam_led2_jax[:, 0])
+    z_obs_full_arr = jnp.concatenate([Z_cam_led1_jax, Z_cam_led2_jax], axis=1)  # (N_cam, 4)
+    conf4_arr = None if conf_cam_jax is None else conf_cam_jax  # already clipped if provided
+
     def filter_step(carry, t_idx):
         """Single filtering step at camera frame t_idx."""
         state_prev, log_lik_accum = carry
@@ -832,6 +845,10 @@ def extended_kalman_filter(
             mask_cam_jax[t_idx],
             config_for_filter,
             None if conf_cam_jax is None else conf_cam_jax[t_idx],
+            pre_z_obs_full=z_obs_full_arr[t_idx],
+            pre_conf=None if conf4_arr is None else conf4_arr[t_idx],
+            pre_led1_valid=led1_valid_arr[t_idx],
+            pre_led2_valid=led2_valid_arr[t_idx],
         )
 
         # Heading measurement update (sequential after position)

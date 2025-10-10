@@ -39,8 +39,6 @@ import jax.numpy as jnp
 import numpy as np
 from jax import lax, vmap
 
-from trodestrack.models.process_noise import assemble_Q
-
 from trodestrack.models.filter_common import (
     FilterCoreConfig,
     FilterState,
@@ -54,6 +52,7 @@ from trodestrack.models.filter_common import (
     update_zupt,
     wrap_angle,
 )
+from trodestrack.models.process_noise import assemble_Q
 
 # =============================================================================
 # Configuration & State
@@ -462,6 +461,11 @@ def update_step(
     mask: bool,
     config: UKFConfig,
     confidence: jnp.ndarray | None = None,
+    *,
+    pre_z_obs_full: jnp.ndarray | None = None,
+    pre_conf: jnp.ndarray | None = None,
+    pre_led1_valid: bool | None = None,
+    pre_led2_valid: bool | None = None,
 ) -> tuple[UKFState, float]:
     """UKF measurement update step using camera observations via unscented transform.
 
@@ -498,14 +502,17 @@ def update_step(
 
     # If valid observation, perform update
     def do_update(m, P):
-        # Check which LEDs are valid
-        led1_valid = jnp.isfinite(z_led1[0])
-        led2_valid = jnp.isfinite(z_led2[0])
+        # Check which LEDs are valid (use precomputed if provided)
+        led1_valid = pre_led1_valid if pre_led1_valid is not None else jnp.isfinite(z_led1[0])
+        led2_valid = pre_led2_valid if pre_led2_valid is not None else jnp.isfinite(z_led2[0])
 
         # Build observation vector (replace NaN with 0 to avoid propagation)
-        z_led1_clean = jnp.where(jnp.isfinite(z_led1), z_led1, 0.0)
-        z_led2_clean = jnp.where(jnp.isfinite(z_led2), z_led2, 0.0)
-        z_obs_full = jnp.concatenate([z_led1_clean, z_led2_clean])
+        if pre_z_obs_full is not None:
+            z_obs_full = pre_z_obs_full
+        else:
+            z_led1_clean = jnp.where(jnp.isfinite(z_led1), z_led1, 0.0)
+            z_led2_clean = jnp.where(jnp.isfinite(z_led2), z_led2, 0.0)
+            z_obs_full = jnp.concatenate([z_led1_clean, z_led2_clean])
 
         # If no valid LEDs, skip update
         def no_leds_update(m_in, P_in):
@@ -536,7 +543,8 @@ def update_step(
             S = jnp.tensordot(w_cov, _outer_product_batch(meas_deviations, meas_deviations), axes=1)
 
             # Add measurement noise R with confidence scaling (shared helper)
-            R_diag = confidence_to_R_diagonal(confidence, base=config.measurement_noise_pos, size=4)
+            conf_arg = pre_conf if pre_conf is not None else confidence
+            R_diag = confidence_to_R_diagonal(conf_arg, base=config.measurement_noise_pos, size=4)
             R = jnp.diag(R_diag)  # Full 4×4 matrix (no huge-R masking)
             S = S + R
 
@@ -935,6 +943,15 @@ def unscented_kalman_filter(
 
     imu_index_arrays = compute_imu_index_arrays()
 
+    # Precompute device-friendly measurement inputs per frame
+    led1_valid_arr = jnp.isfinite(Z_cam_led1_jax[:, 0])
+    led2_valid_arr = jnp.isfinite(Z_cam_led2_jax[:, 0])
+    # Clean per-dim NaNs to zeros for measurement vector
+    z_led1_clean = jnp.where(jnp.isfinite(Z_cam_led1_jax), Z_cam_led1_jax, 0.0)
+    z_led2_clean = jnp.where(jnp.isfinite(Z_cam_led2_jax), Z_cam_led2_jax, 0.0)
+    z_obs_full_arr = jnp.concatenate([z_led1_clean, z_led2_clean], axis=1)
+    conf4_arr = None if conf_cam_jax is None else conf_cam_jax
+
     def filter_step(carry, t_idx):
         """Single filtering step at camera frame t_idx."""
         state_prev, log_lik_accum = carry
@@ -988,6 +1005,10 @@ def unscented_kalman_filter(
             mask_cam_jax[t_idx],
             config_for_filter,
             None if conf_cam_jax is None else conf_cam_jax[t_idx],
+            pre_z_obs_full=z_obs_full_arr[t_idx],
+            pre_conf=None if conf4_arr is None else conf4_arr[t_idx],
+            pre_led1_valid=led1_valid_arr[t_idx],
+            pre_led2_valid=led2_valid_arr[t_idx],
         )
 
         # Heading measurement update (sequential after position)
