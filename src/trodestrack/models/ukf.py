@@ -62,11 +62,72 @@ from trodestrack.models.filter_common import (
 
 @dataclass
 class UKFConfig(FilterCoreConfig):
-    """Unscented Kalman filter configuration extending FilterCoreConfig."""
+    """Unscented Kalman filter configuration extending FilterCoreConfig.
+
+    The default configuration uses alpha=sqrt(3) (aggressive spread) which was
+    empirically tuned for the trodestrack use case. For more conservative behavior
+    or better numerical stability, use UKFConfig.conservative() preset.
+
+    Sigma-point parameters:
+        alpha: Controls sigma-point spread. Typical values:
+            - 1e-3 (conservative): sigma points very close to mean, numerically safe
+            - sqrt(3) ≈ 1.732 (aggressive): wider spread, can capture more nonlinearity
+        beta: Prior knowledge parameter (2 = Gaussian optimal)
+        kappa: Secondary scaling parameter (often 0 or 1)
+
+    References:
+        - Julier & Uhlmann (2004): "Unscented Filtering and Nonlinear Estimation"
+        - Särkkä (2013): "Bayesian Filtering and Smoothing", Chapter 5
+    """
 
     alpha: float = 1.732  # sqrt(3), Sigma-point spread
     beta: float = 2.0  # Prior knowledge (2 = Gaussian optimal)
     kappa: float = 1.0  # Secondary scaling
+
+    @classmethod
+    def conservative(cls, **kwargs) -> "UKFConfig":
+        """Conservative UKF preset with small alpha for numerical stability.
+
+        Uses alpha=1e-3 so sigma points stay very close to the mean, minimizing
+        risk of numerical issues with non-PSD covariances or extreme nonlinearities.
+        Recommended for:
+            - High-rate IMU (>200 Hz) with small dt
+            - Initial development/debugging
+            - When encountering numerical instabilities
+
+        Args:
+            **kwargs: Override any default parameters
+
+        Returns:
+            UKFConfig with alpha=1e-3, beta=2.0, kappa=0.0
+
+        Example:
+            >>> cfg = UKFConfig.conservative(use_mahalanobis_gating=True)
+        """
+        return cls(alpha=1e-3, beta=2.0, kappa=0.0, **kwargs)
+
+    @classmethod
+    def aggressive(cls, **kwargs) -> "UKFConfig":
+        """Aggressive UKF preset with large alpha for capturing nonlinearity.
+
+        Uses alpha=sqrt(3) to spread sigma points widely, better approximating
+        the distribution after nonlinear transformations. May induce numerical
+        strain for poorly-conditioned covariances.
+        Recommended for:
+            - Low-rate IMU or long dt
+            - Strong nonlinearities (fast rotations)
+            - Well-tuned noise parameters
+
+        Args:
+            **kwargs: Override any default parameters
+
+        Returns:
+            UKFConfig with alpha=sqrt(3), beta=2.0, kappa=1.0
+
+        Example:
+            >>> cfg = UKFConfig.aggressive(use_heading_measurement=True)
+        """
+        return cls(alpha=1.732, beta=2.0, kappa=1.0, **kwargs)
 
 
 UKFState = FilterState
@@ -912,7 +973,16 @@ def unscented_kalman_filter(
     dt_imu_mean = jnp.mean(jnp.diff(t_imu_jax))  # Keep as JAX scalar for JIT compatibility
 
     def compute_imu_index_arrays():
-        """Build padded index arrays for IMU samples between camera frames."""
+        """Build padded index arrays for IMU samples between camera frames.
+
+        IMPORTANT: This is a HOST-SIDE precomputation, NOT JIT-traced.
+        The Python loop over n_cam runs on CPU/host before filter execution,
+        producing static index arrays that are baked into the JIT-compiled filter.
+
+        Returns:
+            jnp.ndarray: (n_cam, max_imu_per_frame) array of IMU indices
+                where -1 indicates padding (invalid index)
+        """
         all_indices = []
         for i in range(n_cam):
             if i == 0:

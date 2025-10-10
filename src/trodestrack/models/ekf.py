@@ -820,7 +820,25 @@ def extended_kalman_filter(
     dt_imu_mean = jnp.mean(jnp.diff(t_imu_jax))  # Keep as JAX scalar for JIT compatibility
 
     def compute_imu_index_arrays():
-        """Build padded index arrays for IMU samples between camera frames."""
+        """Build padded index arrays for IMU samples between camera frames.
+
+        IMPORTANT: This is a HOST-SIDE precomputation, NOT JIT-traced.
+        The Python loop over n_cam runs on CPU/host before filter execution,
+        producing static index arrays that are baked into the JIT-compiled filter.
+
+        This approach is intentional:
+        - Avoids dynamic loop unrolling inside JIT (which would lock in n_cam)
+        - Precomputes index arrays once rather than recomputing per filter call
+        - Results in cleaner, more maintainable JIT-compiled code
+
+        If you JIT an outer function that calls this, the loop will be unrolled
+        at trace-time, not runtime. Use numpy arrays in the loop if you want to
+        avoid JAX tracing surprises (currently uses JAX arrays, which is fine).
+
+        Returns:
+            jnp.ndarray: (n_cam, max_imu_per_frame) array of IMU indices
+                where -1 indicates padding (invalid index)
+        """
         all_indices = []
         for i in range(n_cam):
             if i == 0:

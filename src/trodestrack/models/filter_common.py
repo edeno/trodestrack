@@ -29,8 +29,8 @@ class FilterCoreConfig:
     damping_coeff: float = 0.5
     led_distance: float | None = 0.04
 
-    use_mahalanobis_gating: bool = False
-    mahalanobis_threshold_prob: float = 0.997
+    use_mahalanobis_gating: bool = False  # Disable by default, enable in production
+    mahalanobis_threshold_prob: float = 0.997  # Reject ~0.3% of measurements (3σ)
 
     use_heading_measurement: bool = False
     led_distance_tolerance: float = 0.3
@@ -91,18 +91,59 @@ def wrap_angle(theta: jnp.ndarray) -> jnp.ndarray:
 
 
 def chi2_threshold(dof: int, prob: float) -> jnp.ndarray:
-    """Closed-form χ² thresholds for common degrees of freedom."""
+    """Closed-form χ² thresholds for common degrees of freedom and probabilities.
 
+    Supports dof ∈ {2, 4} (single-LED and dual-LED measurements) and
+    prob ∈ {0.95, 0.975, 0.99, 0.997} (common gating thresholds).
+
+    Args:
+        dof: Degrees of freedom (2 or 4)
+        prob: Probability threshold (0.95, 0.975, 0.99, or 0.997)
+
+    Returns:
+        χ² threshold value for the given (dof, prob) pair
+
+    Reference:
+        Chi-squared distribution quantiles from scipy.stats.chi2.ppf()
+        - dof=2: Mahalanobis distance² for single LED (x, y)
+        - dof=4: Mahalanobis distance² for dual LEDs (x1, y1, x2, y2)
+
+    Example:
+        >>> chi2_threshold(2, 0.997)  # ~3σ for single LED
+        11.618
+        >>> chi2_threshold(4, 0.95)   # 95% CI for dual LEDs
+        9.488
+    """
+    # Thresholds for dof=2 (single LED)
     threshold_2 = lax.select(
-        jnp.abs(prob - 0.997) < 0.01,
-        11.618,
-        lax.select(jnp.abs(prob - 0.99) < 0.01, 9.210, 5.991),
+        jnp.abs(prob - 0.997) < 0.001,
+        11.618,  # 99.7% (3σ) - very tight gate
+        lax.select(
+            jnp.abs(prob - 0.99) < 0.001,
+            9.210,  # 99% - tight gate
+            lax.select(
+                jnp.abs(prob - 0.975) < 0.001,
+                7.378,  # 97.5% (2.5σ) - moderate gate
+                5.991,  # 95% (2σ) - loose gate (default fallback)
+            ),
+        ),
     )
+
+    # Thresholds for dof=4 (dual LEDs)
     threshold_4 = lax.select(
-        jnp.abs(prob - 0.997) < 0.01,
-        16.014,
-        lax.select(jnp.abs(prob - 0.99) < 0.01, 13.277, 9.488),
+        jnp.abs(prob - 0.997) < 0.001,
+        16.014,  # 99.7% (3σ) - very tight gate
+        lax.select(
+            jnp.abs(prob - 0.99) < 0.001,
+            13.277,  # 99% - tight gate
+            lax.select(
+                jnp.abs(prob - 0.975) < 0.001,
+                11.143,  # 97.5% (2.5σ) - moderate gate
+                9.488,  # 95% (2σ) - loose gate (default fallback)
+            ),
+        ),
     )
+
     return lax.select(dof == 2, threshold_2, threshold_4)
 
 

@@ -183,7 +183,16 @@ def rts_smoother(
     max_imu_per_frame = int(counts.max())
 
     def compute_imu_index_arrays():
-        """Build padded index arrays for IMU samples between camera frames."""
+        """Build padded index arrays for IMU samples between camera frames.
+
+        IMPORTANT: This is a HOST-SIDE precomputation, NOT JIT-traced.
+        The Python loop runs on CPU before smoother execution, producing static
+        index arrays baked into the JIT-compiled smoother.
+
+        Returns:
+            jnp.ndarray: (n_cam, max_imu_per_frame) array of IMU indices
+                where -1 indicates padding (invalid index)
+        """
         all_indices = []
         for i in range(n_cam):
             if i == 0:
@@ -580,7 +589,16 @@ def sigma_point_smoother(
     max_imu_per_frame = int(counts.max())
 
     def compute_imu_index_arrays():
-        """Build padded index arrays for IMU samples between camera frames."""
+        """Build padded index arrays for IMU samples between camera frames.
+
+        IMPORTANT: This is a HOST-SIDE precomputation, NOT JIT-traced.
+        The Python loop runs on CPU before smoother execution, producing static
+        index arrays baked into the JIT-compiled smoother.
+
+        Returns:
+            jnp.ndarray: (n_cam, max_imu_per_frame) array of IMU indices
+                where -1 indicates padding (invalid index)
+        """
         all_indices = []
         for i in range(n_cam):
             if i == 0:
