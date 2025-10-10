@@ -31,7 +31,7 @@ from trodestrack.models.filter_common import (
 from jax import vmap
 
 from trodestrack.models.ukf import UKFConfig, UKFResult
-from trodestrack.models.utils import build_G_matrix
+from trodestrack.models.process_noise import assemble_Q
 
 # =============================================================================
 # Smoother Result Types
@@ -348,18 +348,14 @@ def rts_smoother(
                         Q_u = Q_u * imu_scale
 
                     theta = x_s[4]
-                    G = build_G_matrix(theta, dt)
-                    Q_total = Q_k + G @ Q_u @ G.T
-
-                    if ekf_config.freeze_bias_during_blackout:
-                        bias_scale = lax.cond(
-                            in_blackout,
-                            lambda: jnp.asarray(0.0, dtype=dtype),
-                            lambda: jnp.asarray(1.0, dtype=dtype),
-                        )
-                        Q_total = Q_total.at[5, 5].set(Q_total[5, 5] * bias_scale)
-                        Q_total = Q_total.at[6, 6].set(Q_total[6, 6] * bias_scale)
-                        Q_total = Q_total.at[7, 7].set(Q_total[7, 7] * bias_scale)
+                    Q_total = assemble_Q(
+                        ekf_config,
+                        theta=theta,
+                        dt=dt,
+                        n=n,
+                        has_vision=~in_blackout,
+                        dtype=dtype,
+                    )
                 else:
                     Q_total = Q_k
 
@@ -731,19 +727,14 @@ def sigma_point_smoother(
                         Q_u = Q_u * imu_scale
 
                     theta = x_s[4]
-                    G = build_G_matrix(theta, dt)
-                    Q_total = Q_k + G @ Q_u @ G.T
-
-                    # Knob 3: Freeze bias during blackout
-                    if ukf_config.freeze_bias_during_blackout:
-                        bias_scale = lax.cond(
-                            in_blackout,
-                            lambda: jnp.asarray(0.0, dtype=dtype),
-                            lambda: jnp.asarray(1.0, dtype=dtype),
-                        )
-                        Q_total = Q_total.at[5, 5].set(Q_total[5, 5] * bias_scale)  # gyro bias
-                        Q_total = Q_total.at[6, 6].set(Q_total[6, 6] * bias_scale)  # accel x bias
-                        Q_total = Q_total.at[7, 7].set(Q_total[7, 7] * bias_scale)  # accel y bias
+                    Q_total = assemble_Q(
+                        ukf_config,
+                        theta=theta,
+                        dt=dt,
+                        n=n,
+                        has_vision=~in_blackout,
+                        dtype=dtype,
+                    )
                 else:
                     Q_total = Q_k
 

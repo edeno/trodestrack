@@ -51,7 +51,7 @@ from trodestrack.models.filter_common import (
     update_zupt,
     wrap_angle,
 )
-from trodestrack.models.utils import build_G_matrix
+from trodestrack.models.process_noise import assemble_Q
 
 
 # =============================================================================
@@ -286,86 +286,15 @@ def predict_step(
     # Wrap heading angle to (-π, π] to prevent numerical issues
     m_pred = m_pred.at[4].set(wrap_angle(m_pred[4]))
 
-    # Time-scaled process noise for random walks and kinematic diffusion
-    # Biases: random walk ~ q_b * dt
-    dtype = m.dtype
-    q_bg = jnp.asarray(config.process_noise_gyro_bias * dt_imu, dtype=dtype)
-    q_bax = jnp.asarray(config.process_noise_accel_bias * dt_imu, dtype=dtype)
-    q_bay = jnp.asarray(config.process_noise_accel_bias * dt_imu, dtype=dtype)
-
-    # Kinematics: simple dt scaling (could use dt² for position if needed)
-    q_px = jnp.asarray(config.process_noise_pos * dt_imu, dtype=dtype)
-    q_py = jnp.asarray(config.process_noise_pos * dt_imu, dtype=dtype)
-    q_vx = jnp.asarray(config.process_noise_vel * dt_imu, dtype=dtype)
-    q_vy = jnp.asarray(config.process_noise_vel * dt_imu, dtype=dtype)
-    q_th = jnp.asarray(config.process_noise_heading * dt_imu, dtype=dtype)
-
-    if config.adaptive_q_during_dropout:
-        pos_scale = lax.cond(
-            has_vision,
-            lambda: jnp.asarray(1.0, dtype=dtype),
-            lambda: jnp.asarray(config.dropout_q_pos_multiplier, dtype=dtype),
-        )
-        vel_scale = lax.cond(
-            has_vision,
-            lambda: jnp.asarray(1.0, dtype=dtype),
-            lambda: jnp.asarray(config.dropout_q_vel_multiplier, dtype=dtype),
-        )
-        bias_scale_adaptive = lax.cond(
-            has_vision,
-            lambda: jnp.asarray(1.0, dtype=dtype),
-            lambda: jnp.asarray(config.dropout_q_bias_multiplier, dtype=dtype),
-        )
-    else:
-        pos_scale = jnp.asarray(1.0, dtype=dtype)
-        vel_scale = jnp.asarray(1.0, dtype=dtype)
-        bias_scale_adaptive = jnp.asarray(1.0, dtype=dtype)
-
-    q_px = q_px * pos_scale
-    q_py = q_py * pos_scale
-    q_vx = q_vx * vel_scale
-    q_vy = q_vy * vel_scale
-    q_bg = q_bg * bias_scale_adaptive
-    q_bax = q_bax * bias_scale_adaptive
-    q_bay = q_bay * bias_scale_adaptive
-
-    Q_proc = jnp.diag(jnp.array([q_px, q_py, q_vx, q_vy, q_th, q_bg, q_bax, q_bay]))
-
-    # IMU input noise mapped into state via linearization
-    # Input noise standard deviations from densities
-    std_w = config.imu_gyro_noise_density * jnp.sqrt(dt_imu)
-    std_f = config.imu_accel_noise_density * jnp.sqrt(dt_imu)
-    Q_u = jnp.diag(jnp.array([std_w**2, std_f**2, std_f**2]))
-
-    # Blackout-aware process noise: reduce IMU input noise when no vision
-    # (P0 mitigation - reduces t^3/2 white noise growth during dropouts)
-    # Use lax.cond instead of Python if to ensure both branches are traced
-    imu_noise_scale = lax.cond(
-        config.reduce_imu_noise_during_blackout,
-        lambda: lax.select(has_vision, 1.0, config.blackout_imu_noise_scale),
-        lambda: 1.0,
+    # Assemble process noise using shared helper
+    Q = assemble_Q(
+        config,
+        theta=m[4],
+        dt=dt_imu,
+        n=m.shape[0],
+        has_vision=has_vision,
+        dtype=m.dtype,
     )
-    Q_u = Q_u * imu_noise_scale
-
-    # G is ∂f/∂u: IMU input noise propagation matrix
-    # Maps IMU measurement noise [ω_z, f_x, f_y] into state space
-    theta = m[4]
-    G = build_G_matrix(theta, dt_imu)
-
-    # Total process noise: kinematic diffusion + IMU input noise
-    Q = Q_proc + G @ Q_u @ G.T
-
-    # Blackout-aware process noise: freeze bias Q when no vision
-    # (P0 mitigation - prevents unobservable bias from random walking)
-    # Use lax.cond to ensure both branches are traced
-    bias_scale = lax.cond(
-        config.freeze_bias_during_blackout,
-        lambda: lax.select(has_vision, 1.0, 0.0),
-        lambda: 1.0,
-    )
-    Q = Q.at[5, 5].set(Q[5, 5] * bias_scale)  # gyro bias
-    Q = Q.at[6, 6].set(Q[6, 6] * bias_scale)  # accel_x bias
-    Q = Q.at[7, 7].set(Q[7, 7] * bias_scale)  # accel_y bias
 
     # Predict covariance
     P_pred = F_x @ P @ F_x.T + Q
