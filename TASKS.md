@@ -142,7 +142,11 @@
   - **NOTE**: Already implemented in EKF/UKF (P0 improvements from REVIEW.md)
 - [x] Add adaptive measurement noise scaling based on confidence
   - **NOTE**: Already implemented in EKF/UKF (P0 improvements from REVIEW.md)
-- [ ] Implement zero-velocity update (stationary detection)
+- [x] Implement zero-velocity update (stationary detection)
+  - [x] ZUPT configuration parameters (enable_zupt, velocity_threshold, measurement_noise)
+  - [x] Sequential update after heading measurement (JAX-friendly large-R gating)
+  - [x] Test suite with 9 tests (stationary, moving, dropout, JAX compatibility)
+  - [x] Code reviewed and approved (formatting, docs enhanced)
 - [x] Add covariance regularization (ensure PD matrix)
   - **NOTE**: Joseph form covariance updates implemented (P0.5 from REVIEW.md)
 

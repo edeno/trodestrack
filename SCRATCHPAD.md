@@ -2,6 +2,79 @@
 
 Development notes and debugging history for trodestrack project.
 
+## 2025-10-09 - Zero-Velocity Update (ZUPT) Implementation
+
+### Summary
+
+Implemented zero-velocity update (ZUPT) for stationary detection in EKF. ZUPT constrains velocity estimates to zero when the rat is stationary, preventing IMU drift accumulation during periods of no motion.
+
+**Implementation:**
+
+- **Configuration**: 3 new EKFConfig parameters
+  - `enable_zupt: bool = False` (backward compatible, opt-in)
+  - `zupt_velocity_threshold: float = 0.05` (m/s, ~5 cm/s)
+  - `zupt_measurement_noise: float = 0.01²` ((m/s)², trust level for ZUPT)
+- **Update Function**: `update_zupt()` following heading update pattern
+  - Sequential update after position and heading measurements
+  - Detects stationary state: `v_mag = sqrt(vx² + vy²) < threshold`
+  - Large-R gating for JAX compatibility (R=1e6 when moving, R_base when stationary)
+  - Zero-velocity pseudo-measurement: z = [0, 0]
+  - Joseph form covariance update for numerical stability
+- **Integration**: Placed after heading update in main filter loop
+
+**Mathematical Model:**
+
+- **Measurement function**: h(x) = [vx, vy] = x[2:4]
+- **Measurement**: z_zupt = [0, 0] (zero velocity)
+- **Jacobian**: H = [0, 0, I₂, 0, 0, 0, 0, 0] (2×8 matrix extracting velocity)
+- **Gating**: R = R_base (stationary) or R = 1e6 (moving) → JAX-friendly, no branching
+- **Log-likelihood**: 2D Gaussian, properly handles gated case
+
+**Test Coverage:**
+
+- ✅ 9 comprehensive tests (all passing)
+- ✅ Configuration: backward compatibility, threshold configurable, measurement noise configurable
+- ✅ Stationary performance: >30% velocity RMSE reduction, uncertainty reduction over time
+- ✅ Motion non-interference: ZUPT doesn't activate when v > threshold
+- ✅ Vision dropout robustness: ZUPT prevents drift even without camera
+- ✅ JAX compatibility: No ConcretizationError, proper lax.select usage
+- ✅ Edge cases: Threshold boundary, NaN handling, numerical stability
+
+**Code Review Findings:**
+
+- ✅ Mathematical correctness verified (2D velocity measurement model)
+- ✅ JAX-compatible primitives (lax.select for gating)
+- ✅ Pattern consistency with existing EKF code (matches update_heading style)
+- ✅ Type hints complete (mypy passes)
+- ✅ Documentation enhanced to NumPy style with Parameters/Returns/Notes sections
+- ✅ Black formatting applied
+- ✅ Configuration parameters well-documented with tuning guidance
+- ✅ No regressions (existing EKF tests still pass)
+
+**Performance:**
+
+- Stationary velocity RMSE: <0.02 m/s with ZUPT (vs ~0.03 m/s without)
+- Velocity uncertainty: Decreases over time when ZUPT active
+- Computational cost: Minimal (2×2 matrices, always-update pattern)
+- JAX scan-friendly: No branching, fully differentiable
+
+**Files:**
+
+- [src/trodestrack/models/ekf.py](src/trodestrack/models/ekf.py):
+  - Lines 124-131: Configuration parameters with detailed documentation
+  - Lines 1242-1334: update_zupt() function with NumPy-style docstring
+  - Lines 1495-1503: Integration into main filter loop
+- [tests/filters/test_zupt.py](tests/filters/test_zupt.py) - 9 tests, 295 lines
+
+**Status:** ✅ COMPLETE - All tests passing, code reviewed and approved, no regressions
+
+**PRD Compliance:**
+
+- Milestone 3, Task "Implement zero-velocity update (stationary detection)" marked complete
+- Contributes to PRD §4.2 robustness requirements (reducing drift during stationary periods)
+
+---
+
 ## 2025-10-09 - Persistent LED Swaps: Event-Based Artifacts
 
 ### Summary

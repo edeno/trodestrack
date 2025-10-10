@@ -121,6 +121,15 @@ class EKFConfig:
     reduce_imu_noise_during_blackout: bool = False  # Reduce input noise when no vision
     blackout_imu_noise_scale: float = 0.5  # Scale factor for IMU noise (0.25-0.5 recommended)
 
+    # Zero-velocity update (ZUPT) for stationary detection
+    # ZUPT constrains velocity to zero when rat is stationary, preventing IMU drift.
+    # Activated when velocity magnitude < zupt_velocity_threshold.
+    # Recommended: threshold = 2-3× expected noise level (~5 cm/s for typical IMU)
+    # Measurement noise should match expected velocity noise during stationary periods.
+    enable_zupt: bool = False  # Enable ZUPT pseudo-measurement when stationary
+    zupt_velocity_threshold: float = 0.05  # Velocity magnitude threshold (m/s)
+    zupt_measurement_noise: float = 0.01**2  # ZUPT R matrix value ((m/s)²)
+
 
 class EKFState(NamedTuple):
     """EKF state representation.
@@ -1230,6 +1239,113 @@ def update_heading(
     return EKFState(m_upd, P_upd), log_lik
 
 
+def update_zupt(
+    state: EKFState,
+    config: EKFConfig,
+) -> tuple[EKFState, float]:
+    """Apply zero-velocity update (ZUPT) when rat is stationary.
+
+    Sequential update after position and heading updates. Uses large-R gating
+    pattern for JAX compatibility (no branching).
+
+    Parameters
+    ----------
+    state : EKFState
+        Current state (after position/heading update)
+    config : EKFConfig
+        EKF configuration with ZUPT parameters
+
+    Returns
+    -------
+    state_updated : EKFState
+        Updated state with ZUPT applied (or gated)
+    log_likelihood : float
+        ZUPT log-likelihood (zero if not stationary)
+
+    Notes
+    -----
+    Algorithm:
+        1. Compute velocity magnitude: v_mag = sqrt(vx² + vy²)
+        2. Check stationary: v_mag < threshold
+        3. Gate via large R: R = R_base (stationary) or R = 1e6 (moving)
+        4. Apply 2D Kalman update: z = [0, 0] (zero velocity)
+        5. Use Joseph form for covariance
+
+    Always performs update (JAX-friendly). Moving states are gated via
+    R=1e6 → K≈0 → no actual update. The large R value is chosen to
+    make Kalman gain negligible without causing numerical issues in
+    log determinant or covariance inversion.
+
+    Examples
+    --------
+    >>> config = EKFConfig(enable_zupt=True, zupt_velocity_threshold=0.05)
+    >>> state_zupt, log_lik = update_zupt(state, config)
+
+    References
+    ----------
+    .. [1] Foxlin, E. (2005). "Pedestrian tracking with shoe-mounted inertial
+           sensors." IEEE CG&A, 25(6), 38-46.
+    """
+    m, P = state.mean, state.cov
+
+    # Extract velocity components
+    vx, vy = m[2], m[3]
+
+    # Compute velocity magnitude
+    v_mag = jnp.sqrt(vx**2 + vy**2)
+
+    # Stationary detection: velocity below threshold
+    is_stationary = (v_mag < config.zupt_velocity_threshold) & config.enable_zupt
+
+    # Zero-velocity observation
+    z_zupt = jnp.zeros(2)  # [vx, vy] = [0, 0]
+
+    # Gate via large R (JAX-friendly: no branching)
+    # Stationary: R ≈ 0.01² → strong update
+    # Moving: R = 1e6 → K ≈ 0 → no update
+    R_zupt_base = config.zupt_measurement_noise
+    R_zupt_scalar = lax.select(is_stationary, R_zupt_base, 1e6)
+    R_zupt = jnp.diag(jnp.array([R_zupt_scalar, R_zupt_scalar]))
+
+    # Measurement function: h(x) = [vx, vy] = x[2:4]
+    h_pred = m[2:4]  # Extract velocity
+
+    # Innovation
+    innov = z_zupt - h_pred
+
+    # Jacobian: H = [0, 0, 1, 0, 0, 0, 0, 0]
+    #               [0, 0, 0, 1, 0, 0, 0, 0]
+    # Shape (2, 8) for proper matrix operations
+    H = jnp.zeros((2, 8))
+    H = H.at[0, 2].set(1.0)  # vx
+    H = H.at[1, 3].set(1.0)  # vy
+
+    # Innovation covariance (2x2)
+    S = H @ P @ H.T + R_zupt
+
+    # Kalman gain (8, 2)
+    K = psd_solve(S, H @ P).T
+
+    # Mean update
+    m_upd = m + (K @ innov)
+
+    # Covariance update using Joseph form
+    P_upd = joseph_update(P, K, H, R_zupt)
+
+    # Log-likelihood (only meaningful if ZUPT was applied)
+    # For moving states (R=1e6), this will be near zero
+    # Use 2D Gaussian log-likelihood formula
+    # log p(z|x) = -0.5 * (k*log(2π) + log|S| + innov^T S^{-1} innov)
+    log_det_S = jnp.linalg.slogdet(S)[1]  # log determinant
+    innov_S_innov = innov @ psd_solve(S, innov)
+    log_lik = -0.5 * (2 * jnp.log(2 * jnp.pi) + log_det_S + innov_S_innov)
+
+    # Zero out log-likelihood if not used (for cleaner accounting)
+    log_lik = lax.select(is_stationary, log_lik, 0.0)
+
+    return EKFState(m_upd, P_upd), log_lik
+
+
 # =============================================================================
 # Main EKF Filter
 # =============================================================================
@@ -1389,15 +1505,22 @@ def extended_kalman_filter(
 
         # Heading measurement update (sequential after position)
         # Only applied if use_heading_measurement=True (gated via large R otherwise)
-        state_filt, log_lik_heading = update_heading(
+        state_after_heading, log_lik_heading = update_heading(
             state_after_pos,
             Z_cam_led1_jax[t_idx],
             Z_cam_led2_jax[t_idx],
             config_for_filter,
         )
 
+        # Zero-velocity update (ZUPT) for stationary detection (sequential after heading)
+        # Only applied if enable_zupt=True and velocity < threshold (gated via large R otherwise)
+        state_filt, log_lik_zupt = update_zupt(
+            state_after_heading,
+            config_for_filter,
+        )
+
         # Total log-likelihood for this frame
-        log_lik_k = log_lik_pos + log_lik_heading
+        log_lik_k = log_lik_pos + log_lik_heading + log_lik_zupt
 
         # Store outputs
         outputs = {

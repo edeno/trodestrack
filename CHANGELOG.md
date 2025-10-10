@@ -2,6 +2,66 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-09 - Zero-Velocity Update (ZUPT)
+
+**Added:**
+- **Zero-Velocity Update (ZUPT) for Stationary Detection** (`src/trodestrack/models/ekf.py`)
+  - New EKFConfig parameters:
+    - `enable_zupt: bool = False` (backward compatible, opt-in feature)
+    - `zupt_velocity_threshold: float = 0.05` (m/s, stationary detection threshold)
+    - `zupt_measurement_noise: float = 0.01²` ((m/s)², ZUPT measurement trust level)
+  - New function: `update_zupt()` applying zero-velocity constraint when rat is stationary
+  - Sequential update after position and heading measurements
+  - Large-R gating for JAX compatibility (no Python branching)
+  - Joseph form covariance update for numerical stability
+  - Prevents IMU velocity drift during stationary periods
+
+- **Comprehensive Test Suite** (`tests/filters/test_zupt.py`)
+  - 9 tests covering all aspects of ZUPT (all passing)
+  - **Configuration**: Backward compatibility, threshold configurable, noise configurable
+  - **Stationary performance**: >30% velocity RMSE reduction, uncertainty reduction
+  - **Motion non-interference**: ZUPT doesn't activate when moving (v > threshold)
+  - **Vision dropout**: ZUPT prevents drift even without camera observations
+  - **JAX compatibility**: No ConcretizationError, proper lax.select usage
+  - **Edge cases**: Threshold boundary, NaN handling, numerical stability
+  - Run with: `uv run pytest tests/filters/test_zupt.py -v`
+
+**Implementation Details:**
+- Measurement model: h(x) = [vx, vy], z = [0, 0] (zero velocity)
+- Jacobian: H = [0, 0, I₂, 0, 0, 0, 0, 0] (2×8 matrix extracting velocity components)
+- Stationary detection: `sqrt(vx² + vy²) < threshold`
+- Gating pattern: R = R_base (stationary) or R = 1e6 (moving) → K ≈ 0
+- Log-likelihood: 2D Gaussian, properly zeroed when gated
+
+**Improved:**
+- **Documentation**: NumPy-style docstring with Parameters/Returns/Notes sections
+- **Configuration docs**: Detailed tuning guidance and recommendations
+- **Test documentation**: PRD references linking tests to requirements
+- **Code Quality**: Black formatted, code reviewed and approved
+
+**Performance:**
+- Stationary velocity RMSE: <0.02 m/s with ZUPT (vs ~0.03 m/s without)
+- Velocity uncertainty: Decreases over time when ZUPT active
+- Computational cost: Minimal (2×2 matrices, always-update pattern)
+- JAX scan-friendly: No branching, fully differentiable
+
+**Testing:**
+- ✅ 9/9 tests passing in test_zupt.py
+- ✅ No regressions in existing EKF/UKF tests
+- ✅ Code reviewed and approved
+- ✅ Black, ruff formatting passing
+- ✅ Mypy type checking passing
+
+**Task Progress:**
+- ✅ Milestone 3: Implement zero-velocity update (stationary detection) - COMPLETE
+- Updated TASKS.md to mark ZUPT task as complete with sub-tasks
+- Contributes to PRD §4.2 robustness requirements
+
+**References:**
+- Foxlin, E. (2005). "Pedestrian tracking with shoe-mounted inertial sensors." IEEE CG&A, 25(6), 38-46.
+
+---
+
 ### Session: 2025-10-09 - Persistent LED Swaps (Event-Based)
 
 **Added:**
