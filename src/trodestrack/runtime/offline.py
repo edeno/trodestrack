@@ -507,6 +507,7 @@ def sigma_point_smoother(
     t_imu: np.ndarray,
     U_imu: np.ndarray,
     t_cam: np.ndarray,
+    mask_cam: np.ndarray | None = None,
 ) -> SmootherResult:
     """Run sigma-point (RTS-like) smoother on UKF filter output.
 
@@ -527,6 +528,7 @@ def sigma_point_smoother(
         t_imu: IMU timestamps (N_imu,)
         U_imu: IMU measurements [ω_z, f_x, f_y] (N_imu, 3)
         t_cam: Camera timestamps (N_cam,)
+        mask_cam: Camera mask (N_cam,) - if provided, applies blackout-aware noise scaling
 
     Returns:
         SmootherResult with smoothed means and covariances
@@ -535,11 +537,19 @@ def sigma_point_smoother(
         Uses unscented transform for prediction to compute cross-covariance
         between filtered[k] and predicted[k+1], which is needed for the gain.
         State dimension is derived from filter_result.filtered_means.shape[1].
+
+        Blackout-aware Q/R scaling (when mask_cam is provided):
+        - During vision blackouts, reduces accel bias RW noise and IMU input noise
+        - Helps tighten how hard post-gap vision "pulls" backward through gaps
+        - Mirrors EKF RTS smoother behavior for consistency
     """
     # Convert to JAX arrays
     t_imu_jax = jnp.array(t_imu)
     U_imu_jax = jnp.array(U_imu)
     t_cam_jax = jnp.array(t_cam)
+
+    # Convert mask_cam to JAX if provided
+    mask_cam_jax = jnp.array(mask_cam) if mask_cam is not None else None
 
     # Extract filter outputs and derive state dimension from data
     filtered_means = filter_result.filtered_means  # (N_cam, n)
@@ -604,6 +614,12 @@ def sigma_point_smoother(
         """
         imu_indices = imu_index_arrays[t_idx + 1]
 
+        # Blackout-aware noise scaling (mirrors EKF RTS smoother)
+        # Check if either frame k or k+1 is in blackout
+        in_blackout = (mask_cam_jax is not None) and (
+            (~mask_cam_jax[t_idx]) | (~mask_cam_jax[t_idx + 1])
+        )
+
         # Compute cross-covariance between filtered[k] and predicted[k+1]
         # by propagating sigma points through all IMU steps.
         # This correctly captures the linearization of the composed dynamics.
@@ -622,10 +638,62 @@ def sigma_point_smoother(
                 )
 
                 dtype = x_s.dtype
-                Q_k = Q_rate * dt
+
+                # Build Q_k with adaptive dropout scaling (Knob 1)
+                if n == 8:
+                    q_px = jnp.asarray(ukf_config.process_noise_pos * dt, dtype=dtype)
+                    q_py = jnp.asarray(ukf_config.process_noise_pos * dt, dtype=dtype)
+                    q_vx = jnp.asarray(ukf_config.process_noise_vel * dt, dtype=dtype)
+                    q_vy = jnp.asarray(ukf_config.process_noise_vel * dt, dtype=dtype)
+                    q_th = jnp.asarray(ukf_config.process_noise_heading * dt, dtype=dtype)
+                    q_bg = jnp.asarray(ukf_config.process_noise_gyro_bias * dt, dtype=dtype)
+                    q_bax = jnp.asarray(ukf_config.process_noise_accel_bias * dt, dtype=dtype)
+                    q_bay = jnp.asarray(ukf_config.process_noise_accel_bias * dt, dtype=dtype)
+
+                    # Knob 1: Adaptive Q during dropout (scales process noise)
+                    if ukf_config.adaptive_q_during_dropout:
+                        pos_scale = lax.cond(
+                            in_blackout,
+                            lambda: jnp.asarray(ukf_config.dropout_q_pos_multiplier, dtype=dtype),
+                            lambda: jnp.asarray(1.0, dtype=dtype),
+                        )
+                        vel_scale = lax.cond(
+                            in_blackout,
+                            lambda: jnp.asarray(ukf_config.dropout_q_vel_multiplier, dtype=dtype),
+                            lambda: jnp.asarray(1.0, dtype=dtype),
+                        )
+                        bias_scale_adaptive = lax.cond(
+                            in_blackout,
+                            lambda: jnp.asarray(ukf_config.dropout_q_bias_multiplier, dtype=dtype),
+                            lambda: jnp.asarray(1.0, dtype=dtype),
+                        )
+                    else:
+                        pos_scale = jnp.asarray(1.0, dtype=dtype)
+                        vel_scale = jnp.asarray(1.0, dtype=dtype)
+                        bias_scale_adaptive = jnp.asarray(1.0, dtype=dtype)
+
+                    q_px = q_px * pos_scale
+                    q_py = q_py * pos_scale
+                    q_vx = q_vx * vel_scale
+                    q_vy = q_vy * vel_scale
+                    q_bg = q_bg * bias_scale_adaptive
+                    q_bax = q_bax * bias_scale_adaptive
+                    q_bay = q_bay * bias_scale_adaptive
+
+                    Q_k = jnp.diag(
+                        jnp.array([q_px, q_py, q_vx, q_vy, q_th, q_bg, q_bax, q_bay], dtype=dtype)
+                    )
+                else:
+                    Q_k = Q_rate * dt
+                    if ukf_config.adaptive_q_during_dropout:
+                        scale = lax.cond(
+                            in_blackout,
+                            lambda: jnp.asarray(ukf_config.dropout_q_pos_multiplier, dtype=dtype),
+                            lambda: jnp.asarray(1.0, dtype=dtype),
+                        )
+                        Q_k = Q_k * scale
 
                 # IMU input noise mapping (matches EKF RTS smoother)
-                # Only apply for 8D state (standard 2D tracking)
                 if n == 8:
                     std_w = jnp.asarray(
                         ukf_config.imu_gyro_noise_density * jnp.sqrt(dt), dtype=dtype
@@ -635,9 +703,29 @@ def sigma_point_smoother(
                     )
                     Q_u = jnp.diag(jnp.array([std_w**2, std_f**2, std_f**2], dtype=dtype))
 
+                    # Knob 2: Reduce IMU noise during blackout
+                    if ukf_config.reduce_imu_noise_during_blackout:
+                        imu_scale = lax.cond(
+                            in_blackout,
+                            lambda: jnp.asarray(ukf_config.blackout_imu_noise_scale, dtype=dtype),
+                            lambda: jnp.asarray(1.0, dtype=dtype),
+                        )
+                        Q_u = Q_u * imu_scale
+
                     theta = x_s[4]
                     G = build_G_matrix(theta, dt)
                     Q_total = Q_k + G @ Q_u @ G.T
+
+                    # Knob 3: Freeze bias during blackout
+                    if ukf_config.freeze_bias_during_blackout:
+                        bias_scale = lax.cond(
+                            in_blackout,
+                            lambda: jnp.asarray(0.0, dtype=dtype),
+                            lambda: jnp.asarray(1.0, dtype=dtype),
+                        )
+                        Q_total = Q_total.at[5, 5].set(Q_total[5, 5] * bias_scale)  # gyro bias
+                        Q_total = Q_total.at[6, 6].set(Q_total[6, 6] * bias_scale)  # accel x bias
+                        Q_total = Q_total.at[7, 7].set(Q_total[7, 7] * bias_scale)  # accel y bias
                 else:
                     Q_total = Q_k
 
