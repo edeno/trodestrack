@@ -2,6 +2,84 @@
 
 Development notes and debugging history for trodestrack project.
 
+## 2025-10-10 - SimOut Contract Violation Fixed in Simple Simulators
+
+### Summary
+
+Fixed critical type contract violation where simple simulators (`simulate_stationary`, `simulate_constant_velocity`, `simulate_circular`) were missing required fields from the `SimOut` TypedDict.
+
+### Missing Fields
+
+The SimOut contract (defined in `sim/utils.py`) requires these fields:
+- `led1_truth_cam`: Ground truth LED1 positions before noise/swaps/reflections
+- `led2_truth_cam`: Ground truth LED2 positions before noise/swaps/reflections
+- `swap_applied`: Boolean mask indicating which frames had swaps applied
+- `led_reflection_applied`: Boolean mask indicating which frames had reflections applied
+
+Simple simulators were only returning a subset of SimOut keys, causing:
+1. Type violations (TypedDict contract broken)
+2. Downstream code expecting these fields would fail at runtime
+3. Special-case handling needed throughout the codebase
+
+### Fix Implementation
+
+**simulate_stationary:**
+```python
+led1_truth_cam = np.column_stack([position[0] * np.ones(T_cam), position[1] * np.ones(T_cam)])
+led2_truth_cam = np.full((T_cam, 2), np.nan)  # No LED2 in stationary
+swap_applied = np.zeros(T_cam, dtype=bool)
+led_reflection_applied = np.zeros(T_cam, dtype=bool)
+```
+
+**simulate_constant_velocity:**
+```python
+led1_truth_cam = np.column_stack([x_cam, y_cam])  # Moving LED1
+led2_truth_cam = np.full((T_cam, 2), np.nan)  # No LED2 in const velocity
+swap_applied = np.zeros(T_cam, dtype=bool)
+led_reflection_applied = np.zeros(T_cam, dtype=bool)
+```
+
+**simulate_circular (DUAL LEDS):**
+```python
+led1_truth_cam = np.column_stack([x_cam - dx, y_cam - dy])  # Back LED
+led2_truth_cam = np.column_stack([x_cam + dx, y_cam + dy])  # Front LED
+swap_applied = np.zeros(T_cam, dtype=bool)
+led_reflection_applied = np.zeros(T_cam, dtype=bool)
+```
+
+**Additional Fix:** Changed `confidence_led2` in circular from `0.0` to `1.0` - both LEDs are visible!
+
+### Why This Matters
+
+**Type Safety:**
+- SimOut is a TypedDict contract that all simulators must fulfill
+- Missing keys cause runtime errors when accessed
+- Type checkers (mypy) can't catch this at compile time (duck typing)
+
+**Downstream Assumptions:**
+- Filter tests may compute differences: `Z_cam - led*_truth_cam`
+- Artifact analysis relies on `swap_applied` and `led_reflection_applied` masks
+- Without these fields, downstream code needs special-case handling
+
+**Contract Compliance:**
+- Simple sims are "minimal" but must still comply with the full SimOut contract
+- Artifact masks are all `False` (no artifacts applied) - this is correct behavior
+- Enables consistent processing without checking simulator type
+
+### Testing Results
+
+**All Tests Passing:**
+- ✅ 36/36 simple sim tests
+- ✅ 170/170 broader tests (sim + ekf + smoother)
+- ✅ Test expectations updated to check for new fields
+
+**Key Verification:**
+- All simple simulators now return complete SimOut dicts
+- No special-case handling needed downstream
+- Type contract fully satisfied
+
+---
+
 ## 2025-10-10 - Critical Runtime Bugs Fixed in Smoother Module
 
 ### Summary

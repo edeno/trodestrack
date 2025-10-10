@@ -2,6 +2,31 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-10 - SimOut Contract Fix
+
+**Fixed:**
+- **SimOut Type Contract Violation** (CRITICAL)
+  - Added missing required fields to all simple simulators:
+    - `led1_truth_cam`: Ground truth LED1 positions before noise/swaps/reflections
+    - `led2_truth_cam`: Ground truth LED2 positions before noise/swaps/reflections
+    - `swap_applied`: Boolean mask for swap artifacts (all False in simple sims)
+    - `led_reflection_applied`: Boolean mask for reflection artifacts (all False in simple sims)
+  - `simulate_stationary`: Single LED (LED1), LED2 is NaN
+  - `simulate_constant_velocity`: Single LED (LED1), LED2 is NaN
+  - `simulate_circular`: Dual LEDs with proper back/front geometry
+  - Fixed `confidence_led2` in circular from 0.0 to 1.0 (both LEDs visible)
+
+**Impact:**
+- Prevents runtime errors from missing dict keys
+- Enables consistent downstream processing without special cases
+- All simulators now comply with SimOut TypedDict contract
+
+**Verification:**
+- `uv run pytest tests/sim/test_simple.py` (36/36 passing)
+- `uv run pytest tests/sim/ tests/filters/test_ekf_analytic.py tests/runtime/test_offline_smoother.py` (170/170 passing)
+
+---
+
 ### Session: 2025-10-10 - Critical Runtime Bugs Fixed
 
 **Fixed:**
