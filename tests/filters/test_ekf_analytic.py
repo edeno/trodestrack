@@ -561,6 +561,8 @@ def test_ekf_long_dropout_drift(ekf_config):
     testing in diagnostics/prove_root_cause.py.
 
     Marked as @pytest.mark.slow due to 305s simulation duration.
+
+    Runtime (observed locally): ~81 s
     """
     # Create simulation with gentle circular motion
     # 305s total: 300s bias learning + 5s dropout

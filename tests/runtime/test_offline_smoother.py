@@ -25,11 +25,18 @@ from trodestrack.runtime.offline import rts_smoother, sigma_point_smoother
 from trodestrack.sim.simple import SimOut, simulate_circular, simulate_stationary
 
 
+import pytest
+
+
 class TestRTSSmoother:
     """Test RTS smoother for EKF."""
 
+    @pytest.mark.slow
     def test_rts_smoother_stationary_improves_estimates(self):
-        """RTS smoother should improve position estimates on stationary scenario."""
+        """RTS smoother should improve position estimates on stationary scenario.
+
+        Runtime (observed locally): ~5.1 s
+        """
         # Generate stationary simulation
         sim: SimOut = simulate_stationary(seed=42)
 
@@ -78,8 +85,12 @@ class TestRTSSmoother:
         assert rmse_filter < 0.021, f"Filter RMSE {rmse_filter:.4f} exceeds 2 cm"
         assert rmse_smoother < 0.021, f"Smoother RMSE {rmse_smoother:.4f} exceeds 2 cm"
 
+    @pytest.mark.slow
     def test_rts_smoother_circular_improves_bias_estimates(self):
-        """RTS smoother should improve gyro bias estimates on circular motion."""
+        """RTS smoother should improve gyro bias estimates on circular motion.
+
+        Runtime (observed locally): ~5.2 s
+        """
         # Generate circular motion
         sim: SimOut = simulate_circular(seed=42)
 
@@ -117,8 +128,12 @@ class TestRTSSmoother:
             bias_error_smoother <= bias_error_filter
         ), f"Smoother bias error {bias_error_smoother:.6f} should be <= filter {bias_error_filter:.6f}"
 
+    @pytest.mark.slow
     def test_rts_smoother_reduces_covariance(self):
-        """RTS smoother should produce smaller covariances than filter."""
+        """RTS smoother should produce smaller covariances than filter.
+
+        Runtime (observed locally): ~5.0 s
+        """
         # Generate simple stationary scenario
         sim: SimOut = simulate_stationary(seed=42)
 
@@ -155,8 +170,12 @@ class TestRTSSmoother:
             mean_smoother_trace < mean_filter_trace
         ), f"Smoother cov trace {mean_smoother_trace:.6f} should be < filter {mean_filter_trace:.6f}"
 
+    @pytest.mark.slow
     def test_rts_smoother_deterministic(self):
-        """RTS smoother should be deterministic (same inputs → same outputs)."""
+        """RTS smoother should be deterministic (same inputs → same outputs).
+
+        Runtime (observed locally): ~5.4 s
+        """
         # Generate simulation
         sim: SimOut = simulate_stationary(seed=42)
 
@@ -206,8 +225,12 @@ class TestRTSSmoother:
 class TestSigmaPointSmoother:
     """Test sigma-point smoother for UKF."""
 
+    @pytest.mark.slow
     def test_sigma_point_smoother_stationary_improves_estimates(self):
-        """Sigma-point smoother should improve position estimates."""
+        """Sigma-point smoother should improve position estimates.
+
+        Runtime (observed locally): ~5.2 s
+        """
         # Generate stationary simulation
         sim: SimOut = simulate_stationary(seed=42)
 
@@ -257,8 +280,12 @@ class TestSigmaPointSmoother:
         assert rmse_filter < 0.021, f"Filter RMSE {rmse_filter:.4f} exceeds 2 cm"
         assert rmse_smoother < 0.021, f"Smoother RMSE {rmse_smoother:.4f} exceeds 2 cm"
 
+    @pytest.mark.slow
     def test_sigma_point_smoother_reduces_covariance(self):
-        """Sigma-point smoother should produce smaller covariances."""
+        """Sigma-point smoother should produce smaller covariances.
+
+        Runtime (observed locally): ~5.0 s
+        """
         # Generate simple stationary scenario
         sim: SimOut = simulate_stationary(seed=42)
 
@@ -294,8 +321,12 @@ class TestSigmaPointSmoother:
             mean_smoother_trace < mean_filter_trace
         ), f"Smoother cov trace {mean_smoother_trace:.6f} should be < filter {mean_filter_trace:.6f}"
 
+    @pytest.mark.slow
     def test_sigma_point_smoother_deterministic(self):
-        """Sigma-point smoother should be deterministic."""
+        """Sigma-point smoother should be deterministic.
+
+        Runtime (observed locally): ~5.4 s
+        """
         # Generate simulation
         sim: SimOut = simulate_stationary(seed=42)
 

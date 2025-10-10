@@ -126,8 +126,12 @@ def run_ekf_on_sim(
 # =============================================================================
 
 
+@pytest.mark.slow
 def test_tier0_stationary_ekf_position():
-    """Tier 0: Stationary - EKF position RMSE should meet PRD (<=0.02m)."""
+    """Tier 0: Stationary - EKF position RMSE should meet PRD (<=0.02m).
+
+    Runtime (observed locally): ~4.7 s
+    """
     config = SimpleSimConfig(duration_s=30.0, fs_imu=200.0, fs_cam=30.0, cam_dropout_prob=0.0)
     sim_data = simulate_stationary(config=config, seed=42)
 
@@ -145,8 +149,12 @@ def test_tier0_stationary_ekf_position():
     )
 
 
+@pytest.mark.slow
 def test_tier0_constant_velocity_ekf_velocity():
-    """Tier 0: Constant velocity - EKF velocity RMSE should meet PRD (<=0.10m/s)."""
+    """Tier 0: Constant velocity - EKF velocity RMSE should meet PRD (<=0.10m/s).
+
+    Runtime (observed locally): ~4.7 s
+    """
     config = SimpleSimConfig(duration_s=30.0, fs_imu=200.0, fs_cam=30.0, cam_dropout_prob=0.0)
     velocity = np.array([0.10, 0.0])  # 0.10 m/s in x-direction
     sim_data = simulate_constant_velocity(config=config, velocity=velocity, seed=42)
@@ -164,8 +172,12 @@ def test_tier0_constant_velocity_ekf_velocity():
     )
 
 
+@pytest.mark.slow
 def test_tier0_circular_ekf_heading():
-    """Tier 0: Circular motion - EKF heading RMSE should meet PRD (<=7°)."""
+    """Tier 0: Circular motion - EKF heading RMSE should meet PRD (<=7°).
+
+    Runtime (observed locally): ~4.6 s
+    """
     config = SimpleSimConfig(duration_s=30.0, fs_imu=200.0, fs_cam=30.0, cam_dropout_prob=0.0)
     sim_data = simulate_circular(config=config, radius=0.50, seed=42)
 
@@ -188,8 +200,12 @@ def test_tier0_circular_ekf_heading():
 # =============================================================================
 
 
+@pytest.mark.slow
 def test_tier3_rat_imu_ekf_position():
-    """Tier 3: Rat IMU - EKF position RMSE should meet PRD (<=0.02m)."""
+    """Tier 3: Rat IMU - EKF position RMSE should meet PRD (<=0.02m).
+
+    Runtime (observed locally): ~23.0 s
+    """
     config = RatIMUSimConfig(
         duration_s=30.0,
         fs_imu=200.0,
@@ -216,8 +232,12 @@ def test_tier3_rat_imu_ekf_position():
     )
 
 
+@pytest.mark.slow
 def test_tier3_rat_imu_ekf_velocity():
-    """Tier 3: Rat IMU - EKF velocity RMSE should meet PRD (<=0.10m/s)."""
+    """Tier 3: Rat IMU - EKF velocity RMSE should meet PRD (<=0.10m/s).
+
+    Runtime (observed locally): ~5.6 s
+    """
     config = RatIMUSimConfig(
         duration_s=30.0,
         fs_imu=200.0,
@@ -245,8 +265,12 @@ def test_tier3_rat_imu_ekf_velocity():
     )
 
 
+@pytest.mark.slow
 def test_tier3_rat_imu_ekf_heading():
-    """Tier 3: Rat IMU - EKF heading RMSE should meet PRD (<=7°)."""
+    """Tier 3: Rat IMU - EKF heading RMSE should meet PRD (<=7°).
+
+    Runtime (observed locally): ~5.0 s
+    """
     config = RatIMUSimConfig(
         duration_s=30.0,
         fs_imu=200.0,
@@ -288,6 +312,7 @@ def test_tier3_rat_imu_ekf_heading():
     "Requires bias Q freeze, reduced accel noise, or ZUPT during dropouts. "
     "See: diagnostics/noise_scaling_check.py",
 )
+@pytest.mark.slow
 def test_prd_dropout_drift_5s():
     """PRD §4.2: Dropout drift should be <=0.15m after 5s camera blackout.
 
@@ -324,6 +349,8 @@ def test_prd_dropout_drift_5s():
     See diagnostic scripts:
     - diagnostics/noise_scaling_check.py - Theoretical drift analysis
     - tests/filters/test_dropout_diagnostic.py - Experimental diagnostics
+
+    Runtime (observed locally): ~4.5 s
     """
     config = RatIMUSimConfig(
         duration_s=15.0,
@@ -404,6 +431,7 @@ def test_prd_dropout_drift_5s():
     ), f"Dropout drift {drift_m:.4f} m exceeds PRD requirement of {PRD_DROPOUT_DRIFT_M} m after 5s"
 
 
+@pytest.mark.slow
 def test_prd_dropout_drift_5s_smoothed():
     """PRD §4.2: Smoothed dropout drift with IEKS and blackout-aware Q/R.
 
@@ -418,6 +446,8 @@ def test_prd_dropout_drift_5s_smoothed():
     - Filter drift: ~1.67 m
     - Smoothed drift (1 iteration): ~0.71 m (2.4× improvement)
     - With IEKS + blackout-aware: targeting ~0.55 m (3× improvement)
+
+    Runtime (observed locally): ~22.5 s
     """
     config = RatIMUSimConfig(
         duration_s=15.0,

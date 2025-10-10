@@ -48,8 +48,13 @@ def reference_Q(cfg, theta: float, dt: float, has_vision: bool) -> jnp.ndarray:
     return 0.5 * (Q + Q.T)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("dropout_prob", [0.0, 0.4])
 def test_rts_smoother_parity(monkeypatch, dropout_prob):
+    """Parity check between new assemble_Q smoother and reference Q for EKF RTS.
+
+    Runtime (observed locally): ~6.2 s
+    """
     # Simulate circular motion to exercise heading and bias dynamics
     sim_cfg = SimpleSimConfig(
         duration_s=3.0, fs_imu=200.0, fs_cam=30.0, cam_dropout_prob=dropout_prob
@@ -107,8 +112,13 @@ def test_rts_smoother_parity(monkeypatch, dropout_prob):
     )
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("dropout_prob", [0.0, 0.4])
 def test_sigma_point_smoother_parity(monkeypatch, dropout_prob):
+    """Parity check between new assemble_Q smoother and reference Q for UKF sigma-point smoother.
+
+    Runtime (observed locally): ~6.3 s
+    """
     sim_cfg = SimpleSimConfig(
         duration_s=3.0, fs_imu=200.0, fs_cam=30.0, cam_dropout_prob=dropout_prob
     )
