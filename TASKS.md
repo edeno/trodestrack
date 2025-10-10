@@ -173,6 +173,99 @@
 
 ---
 
+## 🔧 Milestone 3.5 — Missing/Partial PRD Features
+
+**Goal:** Complete missing or partially-implemented PRD requirements before integration testing.
+
+### 🚨 High Priority (PRD Blockers)
+
+- [ ] **Mahalanobis Gating (Outlier Rejection)** - `models/ekf.py`, `models/ukf.py`
+  - [ ] Implement proper k-DOF χ² test (k=2 or 4 depending on LED availability)
+  - [ ] Add NIS threshold computation (χ²(k, 0.95))
+  - [ ] Add JIT-safe reject branch (`lax.cond` to skip update when NIS > threshold)
+  - [ ] Proper 2D/4D subspace gating (use lifted operator)
+  - [ ] **Impact:** Currently outliers (reflections, swaps) can leak into state
+  - [ ] **PRD Ref:** Section 13 - "Mahalanobis gating for outlier rejection"
+  - [ ] **Tests:** Add to `tests/filters/test_robustness.py`
+
+- [ ] **ZUPT (Zero-Velocity Update)** - `models/ekf.py`, `models/ukf.py`
+  - [ ] Implement stationary detection (velocity threshold check)
+  - [ ] Add velocity pseudo-measurement (zero-velocity constraint)
+  - [ ] Add config parameters:
+    - [ ] `enable_zupt: bool = False`
+    - [ ] `zupt_velocity_threshold: float = 0.05`  # m/s
+    - [ ] `zupt_measurement_noise: float = 0.001**2`  # (1mm)²
+  - [ ] Sequential update after heading measurement
+  - [ ] **Impact:** Worse stabilization during stops, drift accumulation at stationary periods
+  - [ ] **PRD Ref:** Section 9 - "Zero-velocity constraints during stationary periods"
+  - [ ] **Tests:** Add `tests/filters/test_zupt.py` (stationary, moving, dropout scenarios)
+
+- [ ] **Blackout-Aware Process Noise Adaptation** - `models/ekf.py`, `models/ukf.py`
+  - [ ] Detect vision dropout (`mask_cam=False`)
+  - [ ] Increase Q on position/velocity during dropout (e.g., 10x multiplier)
+  - [ ] Freeze or slow bias random walk during dropout (e.g., 0.1x multiplier)
+  - [ ] Add config parameters:
+    - [ ] `adaptive_q_during_dropout: bool = True`
+    - [ ] `dropout_q_pos_multiplier: float = 10.0`
+    - [ ] `dropout_q_vel_multiplier: float = 10.0`
+    - [ ] `dropout_q_bias_multiplier: float = 0.1`
+  - [ ] **Impact:** Over-confident or over-diffusive drift through dropouts, harder to meet PRD 5s blackout bound
+  - [ ] **PRD Ref:** Section 12 - "Adaptive Q during vision loss"
+  - [ ] **Tests:** Add to `tests/filters/test_ekf_analytic.py::test_ekf_handles_vision_dropout`
+
+### ⚙️ Medium Priority (Robustness Polish)
+
+- [ ] **Heading Measurement Robustness** - `models/ekf.py`
+  - [ ] Add LED spacing tolerance gating
+    - [ ] Reject heading update when spacing deviates too much from expected
+    - [ ] Use `led_distance_tolerance` parameter (already exists in config)
+  - [ ] Implement adaptive heading noise
+    - [ ] Increase R when observed LED spacing is short/poor
+    - [ ] Scale based on geometry quality metric
+  - [ ] **Impact:** Over-trusted heading during near-collinear LED geometry or partial occlusions
+  - [ ] **PRD Ref:** Section 8 - "Heading constraints with LED spacing validation"
+  - [ ] **Status:** Basic heading update exists in EKF, needs robustness features
+  - [ ] **Tests:** Enhance `tests/filters/test_ekf_heading_measurement.py`
+
+- [ ] **UKF Heading Pseudo-Measurement** - `models/ukf.py`
+  - [ ] Port EKF's `update_heading()` to UKF
+  - [ ] Add `use_heading_measurement` config parameter
+  - [ ] Ensure parity with EKF heading update logic
+  - [ ] **Impact:** UKF doesn't benefit from heading constraints
+  - [ ] **Status:** EKF has this, UKF missing
+  - [ ] **Tests:** Add to `tests/filters/test_ukf_accuracy.py`
+
+### ✅ Recently Completed (This Session)
+
+- [x] **Camera Confidence Integration** (Commit `f9757c3`)
+  - [x] EKF: Added `conf_cam` parameter to `extended_kalman_filter()`
+  - [x] UKF: Added `conf_cam` parameter to `unscented_kalman_filter()`
+  - [x] Both: Wired through to `update_step()` with R scaling
+  - [x] 5 comprehensive tests in `tests/filters/test_ekf_confidence_integration.py`
+  - [x] **PRD Ref:** Section 13 - "DLC confidence → measurement noise scaling"
+
+- [x] **UKF Log-Likelihood Fix** (Commit `21ad555`)
+  - [x] Replaced diagonal S approximation with exact multivariate form
+  - [x] Added lifted subspace operator (`make_led_selector`, `compute_nis_and_loglik`)
+  - [x] Removed huge-R masking (1e10) in favor of 2D/4D subspace projection
+  - [x] NaN handling to prevent propagation
+  - [x] Marginal log-likelihood now finite and mathematically correct
+
+### 📊 Summary
+
+**Blockers for M4:**
+
+- Mahalanobis gating (required for robustness tests)
+- ZUPT (required for stationary drift bound)
+- Blackout-aware Q (required for 5s dropout bound)
+
+**Polish for Production:**
+
+- Heading robustness enhancements
+- UKF heading measurement parity
+
+---
+
 ## ⚙️ Milestone 4 — Integration & QA (Week 8)
 
 **Goal:** Achieve all PRD acceptance criteria with full-session tests.
