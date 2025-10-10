@@ -12,6 +12,7 @@ import pytest
 from scipy.stats import chi2
 
 from trodestrack.models.ekf import EKFConfig, EKFState, update_step
+from trodestrack.models.state_layout import LAYOUT_2D_FULL
 
 
 @pytest.fixture
@@ -44,7 +45,9 @@ def test_gating_accepts_good_measurement(ekf_config_with_gating, initial_state):
     z_led1 = jnp.array([1.0, 1.0])
     z_led2 = jnp.array([1.04, 1.0])  # Expected LED2 given 4cm spacing
 
-    state_upd, log_lik = update_step(initial_state, z_led1, z_led2, True, ekf_config_with_gating)
+    state_upd, log_lik = update_step(
+        initial_state, z_led1, z_led2, True, ekf_config_with_gating, layout=LAYOUT_2D_FULL
+    )
 
     # State should be updated (measurement accepted)
     # Allow some tolerance since update might be small if observation = prediction
@@ -63,7 +66,9 @@ def test_gating_rejects_outlier_measurement(ekf_config_with_gating, initial_stat
     z_led1 = jnp.array([4.98, 4.98])
     z_led2 = jnp.array([5.02, 5.02])
 
-    state_upd, log_lik = update_step(initial_state, z_led1, z_led2, True, ekf_config_with_gating)
+    state_upd, log_lik = update_step(
+        initial_state, z_led1, z_led2, True, ekf_config_with_gating, layout=LAYOUT_2D_FULL
+    )
 
     # State should remain unchanged (measurement rejected)
     assert jnp.allclose(
@@ -97,7 +102,9 @@ def test_gating_disabled_accepts_outlier(ekf_config, initial_state):
     z_led1 = jnp.array([4.98, 4.98])
     z_led2 = jnp.array([5.02, 5.02])
 
-    state_upd, log_lik = update_step(initial_state, z_led1, z_led2, True, ekf_config)
+    state_upd, log_lik = update_step(
+        initial_state, z_led1, z_led2, True, ekf_config, layout=LAYOUT_2D_FULL
+    )
 
     # State should be updated (no gating, outlier accepted)
     assert not jnp.allclose(
@@ -122,7 +129,7 @@ def test_gating_moderate_outlier():
     z_led1 = jnp.array([0.1, 0.1])
     z_led2 = jnp.array([0.14, 0.1])
 
-    state_upd, _ = update_step(state, z_led1, z_led2, True, config)
+    state_upd, _ = update_step(state, z_led1, z_led2, True, config, layout=LAYOUT_2D_FULL)
 
     # This test just verifies no crashes - acceptance depends on exact NIS computation
     # The key is that gating logic executes without errors
@@ -143,7 +150,7 @@ def test_gating_with_partial_observations():
     z_led1 = jnp.array([0.98, 0.98])
     z_led2 = jnp.array([jnp.nan, jnp.nan])
 
-    state_upd, _ = update_step(state, z_led1, z_led2, True, config)
+    state_upd, _ = update_step(state, z_led1, z_led2, True, config, layout=LAYOUT_2D_FULL)
 
     # LED1 should be accepted (2D measurement, lower threshold)
     assert not jnp.allclose(state_upd.mean[:2], state.mean[:2], atol=1e-6)
@@ -163,11 +170,13 @@ def test_gating_with_confidence_scaling():
 
     # High confidence: tighter gate (might reject)
     conf_high = jnp.array([0.99, 0.99, 0.99, 0.99])
-    state_high, _ = update_step(state, z_led1, z_led2, True, config, conf_high)
+    state_high, _ = update_step(
+        state, z_led1, z_led2, True, config, conf_high, layout=LAYOUT_2D_FULL
+    )
 
     # Low confidence: looser gate (should accept)
     conf_low = jnp.array([0.01, 0.01, 0.01, 0.01])
-    state_low, _ = update_step(state, z_led1, z_led2, True, config, conf_low)
+    state_low, _ = update_step(state, z_led1, z_led2, True, config, conf_low, layout=LAYOUT_2D_FULL)
 
     # With low confidence (large R), innovation is less surprising
     # Both might accept, but low confidence should be more lenient
@@ -191,8 +200,8 @@ def test_gating_consistency():
     z_led1 = jnp.array([0.05, 0.05])
     z_led2 = jnp.array([0.09, 0.05])
 
-    state1, ll1 = update_step(state, z_led1, z_led2, True, config)
-    state2, ll2 = update_step(state, z_led1, z_led2, True, config)
+    state1, ll1 = update_step(state, z_led1, z_led2, True, config, layout=LAYOUT_2D_FULL)
+    state2, ll2 = update_step(state, z_led1, z_led2, True, config, layout=LAYOUT_2D_FULL)
 
     # Results should be identical
     assert jnp.allclose(state1.mean, state2.mean)

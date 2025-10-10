@@ -20,6 +20,7 @@ from trodestrack.models.ekf import (
     EKFState,
     update_step,
 )
+from trodestrack.models.state_layout import LAYOUT_2D_FULL
 
 
 @pytest.fixture
@@ -43,7 +44,9 @@ def test_update_both_leds_valid(ekf_config, initial_state):
     z_led2 = jnp.array([1.02, 1.0])
     mask = True
 
-    state_upd, log_lik = update_step(initial_state, z_led1, z_led2, mask, ekf_config)
+    state_upd, log_lik = update_step(
+        initial_state, z_led1, z_led2, mask, ekf_config, layout=LAYOUT_2D_FULL
+    )
 
     # Position should be updated toward observation
     assert jnp.allclose(state_upd.mean[0], 1.0, atol=0.05)
@@ -65,7 +68,9 @@ def test_update_only_led1_valid(ekf_config, initial_state):
     z_led2 = jnp.array([jnp.nan, jnp.nan])
     mask = True
 
-    state_upd, log_lik = update_step(initial_state, z_led1, z_led2, mask, ekf_config)
+    state_upd, log_lik = update_step(
+        initial_state, z_led1, z_led2, mask, ekf_config, layout=LAYOUT_2D_FULL
+    )
 
     # Position should be updated toward LED1
     # But less confident than dual-LED case
@@ -86,7 +91,9 @@ def test_update_only_led2_valid(ekf_config, initial_state):
     z_led2 = jnp.array([1.02, 1.0])
     mask = True
 
-    state_upd, log_lik = update_step(initial_state, z_led1, z_led2, mask, ekf_config)
+    state_upd, log_lik = update_step(
+        initial_state, z_led1, z_led2, mask, ekf_config, layout=LAYOUT_2D_FULL
+    )
 
     # Position should be updated toward LED2
     assert jnp.allclose(state_upd.mean[0], 1.02, atol=0.05)
@@ -106,7 +113,9 @@ def test_update_no_leds_valid(ekf_config, initial_state):
     z_led2 = jnp.array([jnp.nan, jnp.nan])
     mask = True
 
-    state_upd, log_lik = update_step(initial_state, z_led1, z_led2, mask, ekf_config)
+    state_upd, log_lik = update_step(
+        initial_state, z_led1, z_led2, mask, ekf_config, layout=LAYOUT_2D_FULL
+    )
 
     # State should remain unchanged
     assert jnp.allclose(state_upd.mean, initial_state.mean)
@@ -123,7 +132,9 @@ def test_update_mask_false(ekf_config, initial_state):
     z_led2 = jnp.array([1.02, 1.0])
     mask = False
 
-    state_upd, log_lik = update_step(initial_state, z_led1, z_led2, mask, ekf_config)
+    state_upd, log_lik = update_step(
+        initial_state, z_led1, z_led2, mask, ekf_config, layout=LAYOUT_2D_FULL
+    )
 
     # State should remain unchanged
     assert jnp.allclose(state_upd.mean, initial_state.mean)
@@ -143,12 +154,16 @@ def test_update_covariance_reduction_dual_vs_single():
     # Dual-LED observation
     z_led1_dual = jnp.array([0.98, 1.0])
     z_led2_dual = jnp.array([1.02, 1.0])
-    state_dual, _ = update_step(state, z_led1_dual, z_led2_dual, True, config)
+    state_dual, _ = update_step(
+        state, z_led1_dual, z_led2_dual, True, config, layout=LAYOUT_2D_FULL
+    )
 
     # Single-LED observation (LED1 only)
     z_led1_single = jnp.array([1.0, 1.0])
     z_led2_single = jnp.array([jnp.nan, jnp.nan])
-    state_single, _ = update_step(state, z_led1_single, z_led2_single, True, config)
+    state_single, _ = update_step(
+        state, z_led1_single, z_led2_single, True, config, layout=LAYOUT_2D_FULL
+    )
 
     # Dual-LED should reduce position covariance more
     dual_pos_var = jnp.trace(state_dual.cov[:2, :2])
@@ -171,7 +186,9 @@ def test_update_no_extreme_artifacts(ekf_config, initial_state):
     z_led2 = jnp.array([jnp.nan, jnp.nan])
     mask = True
 
-    state_upd, _ = update_step(initial_state, z_led1, z_led2, mask, ekf_config)
+    state_upd, _ = update_step(
+        initial_state, z_led1, z_led2, mask, ekf_config, layout=LAYOUT_2D_FULL
+    )
 
     # Check that no covariance element is unreasonably large (< 1000, not 1e10)
     max_cov = jnp.max(jnp.abs(state_upd.cov))

@@ -85,6 +85,19 @@ class StateLayout:
         return isinstance(self.heading_idx, tuple) and len(self.heading_idx) > 1
 
 
+def get_heading_index(layout: "StateLayout") -> int:
+    """Return the 2D heading index, raising for non-2D layouts.
+
+    This helper centralizes the assumption that EKF/UKF in this repository
+    currently operate on 2D heading states for measurement and wrapping.
+    """
+    if isinstance(layout.heading_idx, int):
+        return layout.heading_idx
+    raise NotImplementedError(
+        "Heading index is not a single scalar; 3D orientation not yet supported here."
+    )
+
+
 # =============================================================================
 # Standard Layouts
 # =============================================================================

@@ -55,6 +55,7 @@ from trodestrack.models.filter_common import (
     wrap_angle,
 )
 from trodestrack.models.process_noise import assemble_Q
+from trodestrack.models.state_layout import get_layout, get_heading_index, StateLayout
 
 # =============================================================================
 # Configuration & State
@@ -146,10 +147,10 @@ class UKFResult(NamedTuple):
         estimated_led_distance: Auto-detected LED spacing (m), None if explicit
     """
 
-    filtered_means: jnp.ndarray  # (N_cam, 8)
-    filtered_covariances: jnp.ndarray  # (N_cam, 8, 8)
-    predicted_means: jnp.ndarray  # (N_cam, 8)
-    predicted_covariances: jnp.ndarray  # (N_cam, 8, 8)
+    filtered_means: jnp.ndarray  # (N_cam, n)
+    filtered_covariances: jnp.ndarray  # (N_cam, n, n)
+    predicted_means: jnp.ndarray  # (N_cam, n)
+    predicted_covariances: jnp.ndarray  # (N_cam, n, n)
     marginal_loglik: float
     estimated_led_distance: float | None
 
@@ -282,6 +283,8 @@ def predict_step(
     dt_imu: float,
     config: UKFConfig,
     has_vision: bool = True,
+    *,
+    layout: StateLayout,
 ) -> UKFState:
     """UKF prediction step using IMU measurement via unscented transform.
 
@@ -313,7 +316,7 @@ def predict_step(
 
     # Propagate sigma points through dynamics
     def f(x):
-        return dynamics_function(x, u_imu, dt_imu, config.damping_coeff)
+        return dynamics_function(x, u_imu, dt_imu, config.damping_coeff, layout)
 
     sigmas_prop = vmap(f)(sigmas)  # (17, 8)
 
@@ -327,9 +330,10 @@ def predict_step(
 
     # Add process noise Q using shared assembly for parity with EKF/smoothers
     dtype = m.dtype
+    h_idx = get_heading_index(layout)
     Q = assemble_Q(
         config,
-        theta=m[4],
+        theta=m[h_idx],
         dt=dt_imu,
         n=n,
         has_vision=has_vision,
@@ -420,8 +424,10 @@ def update_step(
             sigmas = compute_sigma_points(m_in, P_in, n, lamb)
 
             # Transform sigma points through measurement function
+            layout = get_layout(config.state_mode)
+
             def h(x):
-                return measurement_function(x, config.led_distance)
+                return measurement_function(x, config.led_distance, layout)
 
             sigmas_meas = vmap(h)(sigmas)  # (17, 4)
 
@@ -607,8 +613,9 @@ def update_heading(
         sigmas = compute_sigma_points(m, P, n, lamb)
 
         # Transform sigma points through 1D heading measurement function
-        # h(x) = x[4] (heading component)
-        sigmas_heading = sigmas[:, 4]  # (2n+1,)
+        # h(x) = x[h_idx] (heading component)
+        h_idx = get_heading_index(get_layout(config.state_mode))
+        sigmas_heading = sigmas[:, h_idx]  # (2n+1,)
 
         # Predicted heading
         h_pred = jnp.dot(w_mean, sigmas_heading)
@@ -635,7 +642,7 @@ def update_heading(
         m_upd = m + K * innov
 
         # Wrap heading after update
-        m_upd = m_upd.at[4].set(wrap_angle(m_upd[4]))
+        m_upd = m_upd.at[h_idx].set(wrap_angle(m_upd[h_idx]))
 
         # Update covariance using UKF's native form (1D measurement)
         # UKF: P⁺ = P - K S K^T where S = σ² + R
@@ -737,10 +744,14 @@ def unscented_kalman_filter(
             mask_cam_jax,
             dt_cam=jnp.mean(jnp.diff(t_cam_jax)),  # Keep as JAX scalar for JIT compatibility
             led_distance=config_for_filter.led_distance,  # type: ignore[arg-type]
+            layout=get_layout(config_for_filter.state_mode),
         )
         initial_state = UKFState(mean=ekf_init.mean, cov=ekf_init.cov)
 
     n_cam = len(t_cam)
+
+    # Resolve state layout once for this run
+    layout = get_layout(config_for_filter.state_mode)
 
     # Precompute IMU indices for each camera interval
     # Compute exact maximum per-frame count once (on CPU/NumPy) for robust padding
@@ -816,7 +827,7 @@ def unscented_kalman_filter(
                         lambda: t_imu_jax[imu_idx] - t_imu_jax[imu_idx - 1],
                         lambda: jnp.array(dt_imu_mean),
                     )
-                    return predict_step(s, u, dt, config_for_filter, has_vision_t)
+                    return predict_step(s, u, dt, config_for_filter, has_vision_t, layout=layout)
 
                 def no_propagate(s):
                     return s

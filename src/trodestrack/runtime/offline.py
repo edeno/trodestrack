@@ -157,9 +157,14 @@ def rts_smoother(
     # Convert mask_cam to JAX if provided
     mask_cam_jax = jnp.array(mask_cam) if mask_cam is not None else None
 
+    # Resolve state layout once for this smoother run
+    from trodestrack.models.state_layout import get_layout, get_heading_index
+
+    layout = get_layout(ekf_config.state_mode)
+
     # Compute Jacobian of dynamics
     def f(x, u, dt):
-        return dynamics_function(x, u, dt, ekf_config.damping_coeff)
+        return dynamics_function(x, u, dt, ekf_config.damping_coeff, layout)
 
     F_jac = jacfwd(f, argnums=0)
 
@@ -214,7 +219,8 @@ def rts_smoother(
                 F_k = F_jac(x_lin_s, u, dt)
 
                 dtype = x_s.dtype
-                theta = x_s[4] if n > 4 else jnp.asarray(0.0, dtype=dtype)
+                h_idx = get_heading_index(layout)
+                theta = x_s[h_idx] if n > h_idx else jnp.asarray(0.0, dtype=dtype)
                 Q_total = assemble_Q(
                     ekf_config,
                     theta=theta,
@@ -475,8 +481,13 @@ def sigma_point_smoother(
 
     imu_index_arrays = compute_imu_index_arrays()
 
+    # Resolve state layout once for this smoother run
+    from trodestrack.models.state_layout import get_layout, get_heading_index
+
+    layout = get_layout(ukf_config.state_mode)
+
     def f(x, u, dt):
-        return dynamics_function(x, u, dt, ukf_config.damping_coeff)
+        return dynamics_function(x, u, dt, ukf_config.damping_coeff, layout)
 
     # Process noise assembly handled via assemble_Q per step
 
@@ -516,10 +527,9 @@ def sigma_point_smoother(
                 )
 
                 dtype = x_s.dtype
-
                 # Predict covariance using shared assemble_Q
-                dtype = x_s.dtype
-                theta = x_s[4] if n > 4 else jnp.asarray(0.0, dtype=dtype)
+                h_idx = get_heading_index(layout)
+                theta = x_s[h_idx] if n > h_idx else jnp.asarray(0.0, dtype=dtype)
                 Q_total = assemble_Q(
                     ukf_config,
                     theta=theta,

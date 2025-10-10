@@ -11,6 +11,7 @@ import jax.numpy as jnp
 import pytest
 
 from trodestrack.models.ekf import EKFConfig, EKFState, update_step
+from trodestrack.models.state_layout import LAYOUT_2D_FULL
 
 
 @pytest.fixture
@@ -36,12 +37,14 @@ def test_high_confidence_reduces_covariance_more(ekf_config, initial_state):
     # High confidence update
     conf_high = jnp.array([0.99, 0.99, 0.99, 0.99])
     state_high, _ = update_step(
-        initial_state, z_led1, z_led2, True, ekf_config, confidence=conf_high
+        initial_state, z_led1, z_led2, True, ekf_config, confidence=conf_high, layout=LAYOUT_2D_FULL
     )
 
     # Low confidence update
     conf_low = jnp.array([0.1, 0.1, 0.1, 0.1])
-    state_low, _ = update_step(initial_state, z_led1, z_led2, True, ekf_config, confidence=conf_low)
+    state_low, _ = update_step(
+        initial_state, z_led1, z_led2, True, ekf_config, confidence=conf_low, layout=LAYOUT_2D_FULL
+    )
 
     # High confidence should reduce position covariance more
     cov_high = jnp.trace(state_high.cov[:2, :2])
@@ -62,12 +65,14 @@ def test_high_confidence_pulls_mean_more(ekf_config, initial_state):
     # High confidence update
     conf_high = jnp.array([0.99, 0.99, 0.99, 0.99])
     state_high, _ = update_step(
-        initial_state, z_led1, z_led2, True, ekf_config, confidence=conf_high
+        initial_state, z_led1, z_led2, True, ekf_config, confidence=conf_high, layout=LAYOUT_2D_FULL
     )
 
     # Low confidence update
     conf_low = jnp.array([0.1, 0.1, 0.1, 0.1])
-    state_low, _ = update_step(initial_state, z_led1, z_led2, True, ekf_config, confidence=conf_low)
+    state_low, _ = update_step(
+        initial_state, z_led1, z_led2, True, ekf_config, confidence=conf_low, layout=LAYOUT_2D_FULL
+    )
 
     # High confidence should move mean closer to observation
     # Target midpoint: (0.52, 0.5)
@@ -87,13 +92,13 @@ def test_zero_confidence_smaller_update_than_high(ekf_config, initial_state):
     # Zero confidence (will be clipped to minimum 1e-2)
     conf_zero = jnp.array([0.0, 0.0, 0.0, 0.0])
     state_zero, _ = update_step(
-        initial_state, z_led1, z_led2, True, ekf_config, confidence=conf_zero
+        initial_state, z_led1, z_led2, True, ekf_config, confidence=conf_zero, layout=LAYOUT_2D_FULL
     )
 
     # High confidence
     conf_high = jnp.array([0.99, 0.99, 0.99, 0.99])
     state_high, _ = update_step(
-        initial_state, z_led1, z_led2, True, ekf_config, confidence=conf_high
+        initial_state, z_led1, z_led2, True, ekf_config, confidence=conf_high, layout=LAYOUT_2D_FULL
     )
 
     # Zero confidence update should be smaller than high confidence
@@ -115,13 +120,25 @@ def test_confidence_per_led_covariance(ekf_config, initial_state):
     # Both LEDs high confidence
     conf_both_high = jnp.array([0.99, 0.99, 0.99, 0.99])
     state_both, _ = update_step(
-        initial_state, z_led1, z_led2, True, ekf_config, confidence=conf_both_high
+        initial_state,
+        z_led1,
+        z_led2,
+        True,
+        ekf_config,
+        confidence=conf_both_high,
+        layout=LAYOUT_2D_FULL,
     )
 
     # LED1 high, LED2 low
     conf_led1_high = jnp.array([0.99, 0.99, 0.01, 0.01])
     state_led1, _ = update_step(
-        initial_state, z_led1, z_led2, True, ekf_config, confidence=conf_led1_high
+        initial_state,
+        z_led1,
+        z_led2,
+        True,
+        ekf_config,
+        confidence=conf_led1_high,
+        layout=LAYOUT_2D_FULL,
     )
 
     # Both high confidence should reduce covariance more than one high
@@ -139,12 +156,14 @@ def test_default_confidence_is_high(ekf_config, initial_state):
     z_led2 = jnp.array([0.54, 0.5])
 
     # Update without confidence parameter (should default to 1.0)
-    state_default, _ = update_step(initial_state, z_led1, z_led2, True, ekf_config)
+    state_default, _ = update_step(
+        initial_state, z_led1, z_led2, True, ekf_config, layout=LAYOUT_2D_FULL
+    )
 
     # Update with explicit high confidence
     conf_high = jnp.array([1.0, 1.0, 1.0, 1.0])
     state_explicit, _ = update_step(
-        initial_state, z_led1, z_led2, True, ekf_config, confidence=conf_high
+        initial_state, z_led1, z_led2, True, ekf_config, confidence=conf_high, layout=LAYOUT_2D_FULL
     )
 
     # Should be identical
@@ -164,11 +183,15 @@ def test_confidence_clipping():
 
     # Test very small confidence (should be clipped)
     conf_tiny = jnp.array([1e-10, 1e-10, 1e-10, 1e-10])
-    state_tiny, _ = update_step(state, z_led1, z_led2, True, config, confidence=conf_tiny)
+    state_tiny, _ = update_step(
+        state, z_led1, z_led2, True, config, confidence=conf_tiny, layout=LAYOUT_2D_FULL
+    )
 
     # Test slightly negative confidence (invalid but should be clipped)
     conf_neg = jnp.array([-0.1, -0.1, -0.1, -0.1])
-    state_neg, _ = update_step(state, z_led1, z_led2, True, config, confidence=conf_neg)
+    state_neg, _ = update_step(
+        state, z_led1, z_led2, True, config, confidence=conf_neg, layout=LAYOUT_2D_FULL
+    )
 
     # Both should produce valid states (no NaN, no extreme values)
     assert jnp.all(jnp.isfinite(state_tiny.mean))
@@ -187,11 +210,15 @@ def test_confidence_affects_log_likelihood(ekf_config, initial_state):
 
     # High confidence: small R → higher likelihood for good match
     conf_high = jnp.array([0.99, 0.99, 0.99, 0.99])
-    _, ll_high = update_step(initial_state, z_led1, z_led2, True, ekf_config, confidence=conf_high)
+    _, ll_high = update_step(
+        initial_state, z_led1, z_led2, True, ekf_config, confidence=conf_high, layout=LAYOUT_2D_FULL
+    )
 
     # Low confidence: large R → lower likelihood sensitivity
     conf_low = jnp.array([0.1, 0.1, 0.1, 0.1])
-    _, ll_low = update_step(initial_state, z_led1, z_led2, True, ekf_config, confidence=conf_low)
+    _, ll_low = update_step(
+        initial_state, z_led1, z_led2, True, ekf_config, confidence=conf_low, layout=LAYOUT_2D_FULL
+    )
 
     # Log-likelihoods should differ
     assert not jnp.allclose(

@@ -9,6 +9,8 @@ import jax.numpy as jnp
 from jax import lax
 from jax.scipy.linalg import cho_factor, cho_solve
 
+from trodestrack.models.state_layout import StateLayout, get_heading_index, get_layout
+
 
 @dataclass
 class FilterCoreConfig:
@@ -47,6 +49,10 @@ class FilterCoreConfig:
     enable_zupt: bool = False
     zupt_velocity_threshold: float = 0.05
     zupt_measurement_noise: float = 0.01**2
+
+    # State layout mode (controls state dimension and index mapping)
+    # Supported for 2D paths: "2d_full" (8D), "vision_only" (5D), "2d_cam_3d_imu" (10D)
+    state_mode: str = "2d_full"
 
 
 class FilterState(NamedTuple):
@@ -148,21 +154,44 @@ def chi2_threshold(dof: int, prob: float) -> jnp.ndarray:
 
 
 def dynamics_function(
-    state: jnp.ndarray, imu: jnp.ndarray, dt: float, damping: float
+    state: jnp.ndarray,
+    imu: jnp.ndarray,
+    dt: float,
+    damping: float,
+    layout: StateLayout,
 ) -> jnp.ndarray:
-    """Integrate constant-acceleration dynamics with linear damping."""
+    """Integrate constant-acceleration dynamics with linear damping (layout-aware).
 
-    px, py, vx, vy, theta, b_gz, b_ax, b_ay = state
+    Supports 2D heading layouts. For layouts with additional dimensions
+    (e.g., 10D with vz, b_az), those extra components are propagated as identity.
+    """
+
+    # Extract indices (2D heading only)
+    h_idx = get_heading_index(layout)
+    px_i, py_i = layout.pos_idx[0], layout.pos_idx[1]
+    vx_i, vy_i = layout.vel_idx[0], layout.vel_idx[1]
+
+    # Bias indices (may be empty for vision-only)
+    b_gz = state[layout.bias_gyro_idx[0]] if len(layout.bias_gyro_idx) >= 1 else 0.0
+    b_ax = state[layout.bias_accel_idx[0]] if len(layout.bias_accel_idx) >= 1 else 0.0
+    b_ay = state[layout.bias_accel_idx[1]] if len(layout.bias_accel_idx) >= 2 else 0.0
+
+    # Current values
+    px, py = state[px_i], state[py_i]
+    vx, vy = state[vx_i], state[vy_i]
+    theta = state[h_idx]
+
+    # IMU inputs (2D): [omega_z, f_x, f_y]
     omega_z, fx, fy = imu
 
     omega_z_unbiased = omega_z - b_gz
     accel_body = jnp.array([fx - b_ax, fy - b_ay])
 
     theta_next = theta + omega_z_unbiased * dt
-    cos_theta = jnp.cos(theta)
-    sin_theta = jnp.sin(theta)
-    rotation = jnp.array([[cos_theta, -sin_theta], [sin_theta, cos_theta]])
-    accel_world = rotation @ accel_body
+    cos_t = jnp.cos(theta)
+    sin_t = jnp.sin(theta)
+    R = jnp.array([[cos_t, -sin_t], [sin_t, cos_t]])
+    accel_world = R @ accel_body
 
     vel = jnp.array([vx, vy])
     vel_next = vel + accel_world * dt - damping * vel * dt
@@ -170,26 +199,26 @@ def dynamics_function(
     pos = jnp.array([px, py])
     pos_next = pos + vel * dt + 0.5 * accel_world * dt**2 - 0.5 * damping * vel * dt**2
 
-    return jnp.array(
-        [
-            pos_next[0],
-            pos_next[1],
-            vel_next[0],
-            vel_next[1],
-            theta_next,
-            b_gz,
-            b_ax,
-            b_ay,
-        ]
-    )
+    # Start with identity propagation
+    next_state = state
+    next_state = next_state.at[px_i].set(pos_next[0])
+    next_state = next_state.at[py_i].set(pos_next[1])
+    next_state = next_state.at[vx_i].set(vel_next[0])
+    next_state = next_state.at[vy_i].set(vel_next[1])
+    next_state = next_state.at[h_idx].set(theta_next)
+
+    return next_state
 
 
-def measurement_function(state: jnp.ndarray, led_distance: float) -> jnp.ndarray:
-    """Project state into dual-LED measurement space."""
+def measurement_function(
+    state: jnp.ndarray, led_distance: float, layout: StateLayout
+) -> jnp.ndarray:
+    """Project state into dual-LED measurement space (layout-aware)."""
 
-    px = state[0]
-    py = state[1]
-    theta = state[4]
+    h_idx = get_heading_index(layout)
+    px = state[layout.pos_idx[0]]
+    py = state[layout.pos_idx[1]]
+    theta = state[h_idx]
     dx = 0.5 * led_distance * jnp.cos(theta)
     dy = 0.5 * led_distance * jnp.sin(theta)
     return jnp.array([px - dx, py - dy, px + dx, py + dy])
@@ -288,6 +317,8 @@ def initialize_state(
     mask: jnp.ndarray,
     dt_cam: float | jnp.ndarray,
     led_distance: float = 0.04,
+    *,
+    layout: StateLayout | None = None,
 ) -> FilterState:
     """Bootstrap filter state from early LED observations.
 
@@ -371,7 +402,10 @@ def initialize_state(
     heading_from_leds = jnp.arctan2(led_vec[1], led_vec[0])
     heading_init = jnp.where(led1_valid & led2_valid, heading_from_leds, 0.0)
 
-    mean_init = jnp.array(
+    # Build 8D default mean/cov, then adapt to layout based on desired state_mode
+    heading_std = jnp.where(led1_valid & led2_valid, jnp.pi / 4, jnp.pi / 2)
+
+    mean8 = jnp.array(
         [
             pos_init[0],
             pos_init[1],
@@ -383,14 +417,7 @@ def initialize_state(
             0.0,
         ]
     )
-
-    heading_std = jnp.where(
-        led1_valid & led2_valid,
-        jnp.pi / 4,
-        jnp.pi / 2,
-    )
-
-    cov_init = jnp.diag(
+    cov8 = jnp.diag(
         jnp.array(
             [
                 0.01**2,
@@ -405,7 +432,34 @@ def initialize_state(
         )
     )
 
-    return FilterState(mean=mean_init, cov=cov_init)
+    # Determine layout (defaults to 2D full if not provided)
+    layout = get_layout("2d_full") if layout is None else layout
+    n = layout.n
+    mean = jnp.zeros(n)
+    cov = jnp.eye(n) * 1.0
+
+    # Map 2D pos/vel/heading
+    mean = mean.at[layout.pos_idx[0]].set(mean8[0])
+    mean = mean.at[layout.pos_idx[1]].set(mean8[1])
+    mean = mean.at[layout.vel_idx[0]].set(mean8[2])
+    mean = mean.at[layout.vel_idx[1]].set(mean8[3])
+    mean = mean.at[get_heading_index(layout)].set(mean8[4])
+
+    cov = cov.at[layout.pos_idx[0], layout.pos_idx[0]].set(cov8[0, 0])
+    cov = cov.at[layout.pos_idx[1], layout.pos_idx[1]].set(cov8[1, 1])
+    cov = cov.at[layout.vel_idx[0], layout.vel_idx[0]].set(cov8[2, 2])
+    cov = cov.at[layout.vel_idx[1], layout.vel_idx[1]].set(cov8[3, 3])
+    cov = cov.at[get_heading_index(layout), get_heading_index(layout)].set(cov8[4, 4])
+
+    # Bias variances if present
+    if len(layout.bias_gyro_idx) >= 1:
+        cov = cov.at[layout.bias_gyro_idx[0], layout.bias_gyro_idx[0]].set(cov8[5, 5])
+    if len(layout.bias_accel_idx) >= 1:
+        cov = cov.at[layout.bias_accel_idx[0], layout.bias_accel_idx[0]].set(cov8[6, 6])
+    if len(layout.bias_accel_idx) >= 2:
+        cov = cov.at[layout.bias_accel_idx[1], layout.bias_accel_idx[1]].set(cov8[7, 7])
+
+    return FilterState(mean=mean, cov=cov)
 
 
 def update_zupt(
@@ -672,4 +726,5 @@ def prepare_heading_measurement(
     # Invalid: R = 1e6 → K ≈ 0 → no update
     R_heading = lax.select(use_heading, R_heading_adapted, 1e6)
 
+    return heading_obs, R_heading, use_heading
     return heading_obs, R_heading, use_heading

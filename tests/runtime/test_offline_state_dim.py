@@ -43,7 +43,7 @@ from trodestrack.runtime.offline import rts_smoother, sigma_point_smoother
 
 
 def mock_dynamics_function(
-    x: jnp.ndarray, u: jnp.ndarray, dt: float, damping: float
+    x: jnp.ndarray, u: jnp.ndarray, dt: float, damping: float, layout=None
 ) -> jnp.ndarray:
     """Mock dynamics that work with any state dimension.
 

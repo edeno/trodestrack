@@ -16,6 +16,7 @@ from trodestrack.models.ekf import (
     update_step,
     wrap_angle,
 )
+from trodestrack.models.state_layout import LAYOUT_2D_FULL
 
 
 def test_wrap_angle_function():
@@ -55,7 +56,7 @@ def test_predict_step_wraps_heading():
     u_imu = jnp.array([omega_z, 0.0, 0.0])
 
     # Predict
-    state_pred = predict_step(state, u_imu, dt, config)
+    state_pred = predict_step(state, u_imu, dt, config, layout=LAYOUT_2D_FULL)
 
     # Heading should be wrapped to negative side
     theta_pred = state_pred.mean[4]
@@ -85,7 +86,7 @@ def test_predict_step_wraps_heading_negative():
     u_imu = jnp.array([omega_z, 0.0, 0.0])
 
     # Predict
-    state_pred = predict_step(state, u_imu, dt, config)
+    state_pred = predict_step(state, u_imu, dt, config, layout=LAYOUT_2D_FULL)
 
     # Heading should be wrapped to positive side
     theta_pred = state_pred.mean[4]
@@ -114,7 +115,9 @@ def test_update_step_wraps_heading():
     mask = True
 
     # Update
-    state_upd, log_lik = update_step(state_pred, z_led1, z_led2, mask, config)
+    state_upd, log_lik = update_step(
+        state_pred, z_led1, z_led2, mask, config, layout=LAYOUT_2D_FULL
+    )
 
     # Heading should be wrapped to (-π, π]
     theta_upd = state_upd.mean[4]
@@ -145,7 +148,7 @@ def test_heading_continuity_across_2pi():
     omega_z = 10.0  # will add 0.1 rad -> cross π boundary
     u_imu = jnp.array([omega_z, 0.0, 0.0])
 
-    state_pred = predict_step(state, u_imu, dt, config)
+    state_pred = predict_step(state, u_imu, dt, config, layout=LAYOUT_2D_FULL)
     theta_pred = state_pred.mean[4]
 
     # Should wrap to negative side: (π - 0.05) + 0.1 = π + 0.05 -> wraps to -(π - 0.05)

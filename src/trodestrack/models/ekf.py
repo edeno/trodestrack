@@ -53,6 +53,7 @@ from trodestrack.models.filter_common import (
     wrap_angle,
 )
 from trodestrack.models.process_noise import assemble_Q
+from trodestrack.models.state_layout import get_layout, get_heading_index, StateLayout
 
 
 # =============================================================================
@@ -82,10 +83,10 @@ class EKFResult(NamedTuple):
         estimated_led_distance: Auto-detected LED spacing (m), None if explicit
     """
 
-    filtered_means: jnp.ndarray  # (N_cam, 8)
-    filtered_covariances: jnp.ndarray  # (N_cam, 8, 8)
-    predicted_means: jnp.ndarray  # (N_cam, 8)
-    predicted_covariances: jnp.ndarray  # (N_cam, 8, 8)
+    filtered_means: jnp.ndarray  # (N_cam, n)
+    filtered_covariances: jnp.ndarray  # (N_cam, n, n)
+    predicted_means: jnp.ndarray  # (N_cam, n)
+    predicted_covariances: jnp.ndarray  # (N_cam, n, n)
     marginal_loglik: float
     estimated_led_distance: float | None
 
@@ -142,6 +143,8 @@ def predict_step(
     dt_imu: float,
     config: EKFConfig,
     has_vision: bool = True,
+    *,
+    layout: StateLayout,
 ) -> EKFState:
     """EKF prediction step using IMU measurement.
 
@@ -159,7 +162,7 @@ def predict_step(
 
     # Dynamics function with fixed parameters
     def f(x):
-        return dynamics_function(x, u_imu, dt_imu, config.damping_coeff)
+        return dynamics_function(x, u_imu, dt_imu, config.damping_coeff, layout)
 
     # Jacobian
     F = jacfwd(f)
@@ -169,12 +172,13 @@ def predict_step(
     m_pred = f(m)
 
     # Wrap heading angle to (-π, π] to prevent numerical issues
-    m_pred = m_pred.at[4].set(wrap_angle(m_pred[4]))
+    h_idx = get_heading_index(layout)
+    m_pred = m_pred.at[h_idx].set(wrap_angle(m_pred[h_idx]))
 
     # Assemble process noise using shared helper
     Q = assemble_Q(
         config,
-        theta=m[4],
+        theta=m[h_idx],
         dt=dt_imu,
         n=m.shape[0],
         has_vision=has_vision,
@@ -200,6 +204,7 @@ def update_step(
     pre_conf: jnp.ndarray | None = None,
     pre_led1_valid: bool | None = None,
     pre_led2_valid: bool | None = None,
+    layout: StateLayout,
 ) -> tuple[EKFState, float]:
     """EKF measurement update step using camera observations.
 
@@ -262,7 +267,7 @@ def update_step(
         def do_leds_update(m_in, P_in):
             # Measurement function
             def h(x):
-                return measurement_function(x, config.led_distance)
+                return measurement_function(x, config.led_distance, layout)
 
             # Jacobian
             H = jacfwd(h)
@@ -280,7 +285,7 @@ def update_step(
                 m_iter, P_iter = carry
 
                 # Re-compute Jacobian at current estimate
-                H4 = H(m_iter)  # (4, 8)
+                H4 = H(m_iter)  # (4, n)
                 z_pred_4 = h(m_iter)  # (4,)
 
                 # Innovation in full 4D space
@@ -309,19 +314,21 @@ def update_step(
 
                 # Kalman update without forming K explicitly
                 # δx = (P H^T) @ v
-                PH_t = P_iter @ H4.T  # (8, 4)
+                n = m_iter.shape[0]
+                PH_t = P_iter @ H4.T  # (n, 4)
                 delta_x = PH_t @ v  # (8,)
 
                 # Update mean
                 m_upd = m_iter + delta_x
 
                 # Wrap heading angle to (-π, π] after update
-                m_upd = m_upd.at[4].set(wrap_angle(m_upd[4]))
+                h_idx_local = get_heading_index(get_layout(config.state_mode))
+                m_upd = m_upd.at[h_idx_local].set(wrap_angle(m_upd[h_idx_local]))
 
                 # Joseph form covariance update via alternative formulation
                 # P⁺ = P - PH^T S^{-1} HP (equivalent to (I - KH)P(I - KH)^T + KRK^T)
                 # This formulation works naturally with the lifted subspace operator
-                HP = H4 @ P_iter  # (4, 8)
+                HP = H4 @ P_iter  # (4, n)
 
                 def apply_inv_to_col(col_idx):
                     """Apply S_eff⁻¹ to column of HP."""
@@ -329,10 +336,10 @@ def update_step(
                     return apply_lifted_inverse(S4, col, both_leds, only_led1, only_led2)
 
                 # Stack inverse-transformed columns
-                inv_S_HP = jnp.stack([apply_inv_to_col(i) for i in range(8)], axis=1)  # (4, 8)
+                inv_S_HP = jnp.stack([apply_inv_to_col(i) for i in range(n)], axis=1)  # (4, n)
 
                 # Complete Joseph form
-                PH_t_inv_S_HP = PH_t @ inv_S_HP  # (8, 8)
+                PH_t_inv_S_HP = PH_t @ inv_S_HP  # (n, n)
                 P_upd = P_iter - PH_t_inv_S_HP
                 P_upd = symmetrize(P_upd)
 
@@ -449,27 +456,28 @@ def update_heading(
         heading_obs, R_heading, use_heading = prepare_heading_measurement(z_led1, z_led2, config)
 
         # 1D heading update
-        # Measurement function: h(x) = x[4] (heading)
-        h_pred = m[4]
+        # Measurement function: h(x) = x[h_idx] (heading)
+        h_idx = get_heading_index(get_layout(config.state_mode))
+        h_pred = m[h_idx]
 
         # Innovation with angle wrapping (replace NaN with 0 for gated case)
         innov_raw = wrap_angle(heading_obs - h_pred)
         innov = jnp.where(jnp.isfinite(innov_raw), innov_raw, 0.0)
 
-        # Jacobian: H = [0, 0, 0, 0, 1, 0, 0, 0]
-        # Shape (1, 8) for proper matrix operations
-        H = jnp.zeros((1, 8))
-        H = H.at[0, 4].set(1.0)
+        # Jacobian row for heading index
+        n = m.shape[0]
+        H = jnp.zeros((1, n))
+        H = H.at[0, h_idx].set(1.0)
 
         # Innovation covariance (scalar, but treat as 1x1 matrix)
         S = H @ P @ H.T + jnp.array([[R_heading]])
 
-        # Kalman gain (8, 1)
+        # Kalman gain (n, 1)
         K = psd_solve(S, H @ P).T
 
         # Mean update
         m_upd = m + (K @ jnp.array([[innov]])).ravel()
-        m_upd = m_upd.at[4].set(wrap_angle(m_upd[4]))  # Wrap after update
+        m_upd = m_upd.at[h_idx].set(wrap_angle(m_upd[h_idx]))  # Wrap after update
 
         # Covariance update using Joseph form
         R_mat = jnp.array([[R_heading]])
@@ -566,9 +574,13 @@ def extended_kalman_filter(
             mask_cam_jax,
             dt_cam=jnp.mean(jnp.diff(t_cam_jax)),  # Keep as JAX scalar for JIT compatibility
             led_distance=config_for_filter.led_distance,  # type: ignore[arg-type]
+            layout=get_layout(config_for_filter.state_mode),
         )
 
     n_cam = len(t_cam)
+
+    # Resolve state layout once for this run
+    layout = get_layout(config_for_filter.state_mode)
 
     # Precompute IMU indices for each camera interval
     # For efficient scanning, we create a fixed-size index array with padding
@@ -651,7 +663,7 @@ def extended_kalman_filter(
                         lambda: t_imu_jax[imu_idx] - t_imu_jax[imu_idx - 1],
                         lambda: jnp.array(dt_imu_mean),
                     )
-                    return predict_step(s, u, dt, config_for_filter, has_vision_t)
+                    return predict_step(s, u, dt, config_for_filter, has_vision_t, layout=layout)
 
                 def no_propagate(s):
                     return s
@@ -680,6 +692,7 @@ def extended_kalman_filter(
             pre_conf=None if conf4_arr is None else conf4_arr[t_idx],
             pre_led1_valid=led1_valid_arr[t_idx],
             pre_led2_valid=led2_valid_arr[t_idx],
+            layout=layout,
         )
 
         # Heading measurement update (sequential after position)
