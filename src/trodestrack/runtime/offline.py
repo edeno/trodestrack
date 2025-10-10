@@ -321,32 +321,39 @@ def rts_smoother(
                     Q_k = jnp.diag(q_diag.astype(dtype))
 
                 # Predict covariance
-                # IMU input noise mapping (reuse EKF logic for blackout-aware scaling)
-                std_w = jnp.asarray(ekf_config.imu_gyro_noise_density * jnp.sqrt(dt), dtype=dtype)
-                std_f = jnp.asarray(ekf_config.imu_accel_noise_density * jnp.sqrt(dt), dtype=dtype)
-                Q_u = jnp.diag(jnp.array([std_w**2, std_f**2, std_f**2], dtype=dtype))
-
-                if ekf_config.reduce_imu_noise_during_blackout:
-                    imu_scale = lax.cond(
-                        in_blackout,
-                        lambda: jnp.asarray(ekf_config.blackout_imu_noise_scale, dtype=dtype),
-                        lambda: jnp.asarray(1.0, dtype=dtype),
+                if n == 8:
+                    # IMU input noise mapping (reuse EKF logic for blackout-aware scaling)
+                    std_w = jnp.asarray(
+                        ekf_config.imu_gyro_noise_density * jnp.sqrt(dt), dtype=dtype
                     )
-                    Q_u = Q_u * imu_scale
-
-                theta = x_s[4]
-                G = build_G_matrix(theta, dt)
-                Q_total = Q_k + G @ Q_u @ G.T
-
-                if ekf_config.freeze_bias_during_blackout:
-                    bias_scale = lax.cond(
-                        in_blackout,
-                        lambda: jnp.asarray(0.0, dtype=dtype),
-                        lambda: jnp.asarray(1.0, dtype=dtype),
+                    std_f = jnp.asarray(
+                        ekf_config.imu_accel_noise_density * jnp.sqrt(dt), dtype=dtype
                     )
-                    Q_total = Q_total.at[5, 5].set(Q_total[5, 5] * bias_scale)
-                    Q_total = Q_total.at[6, 6].set(Q_total[6, 6] * bias_scale)
-                    Q_total = Q_total.at[7, 7].set(Q_total[7, 7] * bias_scale)
+                    Q_u = jnp.diag(jnp.array([std_w**2, std_f**2, std_f**2], dtype=dtype))
+
+                    if ekf_config.reduce_imu_noise_during_blackout:
+                        imu_scale = lax.cond(
+                            in_blackout,
+                            lambda: jnp.asarray(ekf_config.blackout_imu_noise_scale, dtype=dtype),
+                            lambda: jnp.asarray(1.0, dtype=dtype),
+                        )
+                        Q_u = Q_u * imu_scale
+
+                    theta = x_s[4]
+                    G = build_G_matrix(theta, dt)
+                    Q_total = Q_k + G @ Q_u @ G.T
+
+                    if ekf_config.freeze_bias_during_blackout:
+                        bias_scale = lax.cond(
+                            in_blackout,
+                            lambda: jnp.asarray(0.0, dtype=dtype),
+                            lambda: jnp.asarray(1.0, dtype=dtype),
+                        )
+                        Q_total = Q_total.at[5, 5].set(Q_total[5, 5] * bias_scale)
+                        Q_total = Q_total.at[6, 6].set(Q_total[6, 6] * bias_scale)
+                        Q_total = Q_total.at[7, 7].set(Q_total[7, 7] * bias_scale)
+                else:
+                    Q_total = Q_k
 
                 P_pred = F_k @ P_s @ F_k.T + Q_total
                 P_pred = symmetrize(P_pred)

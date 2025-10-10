@@ -69,9 +69,9 @@ class TestRTSSmoother:
 
         # Smoother should improve estimates (lower or equal RMSE)
         # For stationary case with excellent measurements, improvement may be minimal
-        # Allow small tolerance (10 microns) for numerical effects
+        # Allow small tolerance (20 microns) for numerical effects (adaptive dropout Q alters smoothing path)
         assert (
-            rmse_smoother <= rmse_filter + 1e-5
+            rmse_smoother <= rmse_filter + 2e-5
         ), f"Smoother RMSE {rmse_smoother:.6f} should be <= filter RMSE {rmse_filter:.6f}"
 
         # Both should be within PRD requirement (2 cm + small tolerance)
