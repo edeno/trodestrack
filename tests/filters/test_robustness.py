@@ -45,7 +45,49 @@ class TestOutOfBoundsMeasurements:
     """
 
     def test_filter_rejects_extreme_outliers_via_gating(self) -> None:
-        """Test that Mahalanobis gating rejects extreme outliers."""
+        """Test that Mahalanobis gating rejects extreme outliers.
+
+        This test verifies PRD §13 robustness requirement: the filter must
+        reject physically impossible measurements without divergence.
+
+        Test Scenario
+        -------------
+        - Duration: 10.0 seconds (stationary rat at position [0.5, 0.5] m)
+        - Sensor noise: 5 mm (cam_noise_std = 0.005 m)
+        - Outlier injection: 5.0 m error at t=5.0s (frame 150 at 30 Hz)
+        - Gating: Mahalanobis threshold p=0.997 (χ² conservative)
+
+        Expected Behavior
+        -----------------
+        WITH gating enabled:
+        - Filter rejects outlier via Mahalanobis distance test
+        - Position RMSE remains < 5 cm despite 5 m outlier
+        - No divergence in state estimates or covariance
+
+        WITHOUT gating (comparison baseline):
+        - Filter accepts outlier, RMSE > 50 cm
+        - Demonstrates necessity of gating for robustness
+
+        Assertions
+        ----------
+        - Position RMSE < MAX_POSITION_RMSE_WITH_GATING_M (5 cm)
+        - No NaN/Inf in filtered state estimates
+        - Filter remains near true position [0.5, 0.5] m
+
+        Notes
+        -----
+        This test uses a stationary scenario for simplicity. In practice,
+        outliers can occur during motion and should still be rejected.
+
+        The 5.0 m outlier represents an extreme case (e.g., reflection
+        artifact, tracker confusion). Typical outliers are smaller but
+        still need rejection.
+
+        References
+        ----------
+        .. [PRD] §13: Robustness & Data Quality
+        .. [PRD] §6: Mathematical Model (Mahalanobis gating)
+        """
         # Create a simple stationary scenario
         config_sim = SimpleSimConfig(
             duration_s=10.0,
@@ -98,10 +140,41 @@ class TestOutOfBoundsMeasurements:
         # WITHOUT gating, RMSE would be > 50cm
         assert pos_rmse < 0.05, f"Filter diverged with outlier: RMSE = {pos_rmse:.3f} m"
 
-    def test_filter_handles_physically_impossible_measurements(self):
+    def test_filter_handles_physically_impossible_measurements(self) -> None:
         """Test that filter handles measurements with unrealistic speeds.
 
-        Unrealistic speed between consecutive frames should be rejected.
+        This test verifies that the filter rejects measurements implying
+        physically impossible motion (e.g., teleportation artifacts).
+
+        Test Scenario
+        -------------
+        - Duration: 10.0 seconds (constant velocity 0.2 m/s rightward)
+        - Sensor noise: 2 mm (cam_noise_std = 0.002 m)
+        - Outlier: 1.0 m instantaneous jump at t=3.33s (frame 100 at 30 Hz)
+        - Implied speed: 1.0 m / (1/30 s) = 30 m/s (impossible for rat)
+
+        Expected Behavior
+        -----------------
+        - Filter rejects measurement via Mahalanobis gating
+        - Velocity estimates remain bounded < MAX_RAT_VELOCITY_MPS (2.0 m/s)
+        - No unrealistic velocity spikes in filtered trajectory
+
+        Assertions
+        ----------
+        - max(|v|) < MAX_RAT_VELOCITY_MPS (2.0 m/s)
+        - Typical rat velocity: 0.1-0.5 m/s, max ~1.0 m/s
+        - 2.0 m/s threshold includes safety margin for sudden movements
+
+        Units
+        -----
+        - Position: meters (m)
+        - Velocity: meters/second (m/s)
+        - Time: seconds (s)
+        - Frame rate: 30 Hz (camera)
+
+        References
+        ----------
+        .. [PRD] §13: Robustness & Data Quality
         """
         config_sim = SimpleSimConfig(
             duration_s=10.0,
@@ -151,8 +224,52 @@ class TestOutOfBoundsMeasurements:
 class TestSwapAndDropoutStability:
     """Test that filter remains stable under LED swaps and long dropouts."""
 
-    def test_filter_stable_under_frequent_swaps(self):
-        """Test that filter doesn't diverge with frequent LED swaps."""
+    def test_filter_stable_under_frequent_swaps(self) -> None:
+        """Test that filter doesn't diverge with frequent LED swaps.
+
+        This test verifies PRD Tier 3 requirement: filter must handle
+        LED swap artifacts without catastrophic divergence.
+
+        Test Scenario
+        -------------
+        - Duration: 30.0 seconds (Ornstein-Uhlenbeck motion)
+        - LED configuration: Dual LED (4 cm spacing)
+        - Swap mode: Persistent (event-based, not per-frame)
+        - Swap rate: 0.5 events/second (1 swap every 2 seconds)
+        - Swap duration: 2.0 ± 0.5 seconds (mean ± std)
+        - Dropout rate: 10% (additional challenge)
+        - Sensor noise: 5 mm (cam_sigma_m = 0.005 m)
+
+        Expected Behavior
+        -----------------
+        - Filter tracks trajectory despite swapped LED labels
+        - Position covariance remains bounded < MAX_COVARIANCE_DURING_SWAPS_M2
+        - No NaN/Inf in state estimates or covariance
+        - Transient covariance spikes during swaps, but stable overall
+
+        Assertions
+        ----------
+        - max(tr(P_pos)) < MAX_COVARIANCE_DURING_SWAPS_M2 (0.01 m² = 10 cm std)
+        - All state estimates finite (no NaN/Inf)
+        - Covariance trace bounded despite ~15 swap events
+
+        Units
+        -----
+        - Position covariance: m² (variance)
+        - Swap rate: events/second
+        - Swap duration: seconds
+        - Frame rate: 30 Hz (camera), 200 Hz (IMU)
+
+        Notes
+        -----
+        Persistent swaps are more realistic than per-frame swaps.
+        They represent LED confusion due to similar brightness,
+        reflections, or occlusions.
+
+        References
+        ----------
+        .. [PRD] Tier 3: LED swap detection and resolution
+        """
         config_sim = RatIMUSimConfig(
             duration_s=30.0,
             use_second_led=True,
@@ -193,10 +310,55 @@ class TestSwapAndDropoutStability:
         # Position estimates should remain finite
         assert np.all(np.isfinite(result.filtered_means[:, :2])), "Filter produced NaN/Inf"
 
-    def test_filter_stable_during_long_dropout(self):
+    def test_filter_stable_during_long_dropout(self) -> None:
         """Test that filter remains stable during extended vision dropout.
 
-        PRD §4.2: ≥5s dropout should not cause divergence.
+        This test verifies PRD §4.2 robustness requirement: filter must
+        remain stable (no divergence) during ≥5 second vision dropout.
+
+        Test Scenario
+        -------------
+        - Duration: 15.0 seconds total
+          - 0-5s: Baseline with vision
+          - 5-10s: Complete vision dropout (5 seconds, IMU-only)
+          - 10-15s: Recovery with vision
+        - Motion: Constant velocity (0.2 m/s rightward)
+        - Sensor noise: 3 mm (cam_noise_std = 0.003 m)
+        - Dropout injection: Manual (frames 150-299 at 30 Hz)
+
+        Expected Behavior
+        -----------------
+        - Filter propagates via IMU during dropout (no vision)
+        - Covariance grows during dropout (increasing uncertainty)
+        - Covariance growth bounded < MAX_DROPOUT_COVARIANCE_M2 (100 m²)
+        - After recovery: covariance decreases (vision reconverges)
+        - No NaN/Inf despite extended IMU-only propagation
+
+        Assertions
+        ----------
+        - No NaN/Inf in filtered states (stability check)
+        - Covariance grows during dropout: P_mid > P_start
+        - Covariance bounded: P_mid < MAX_DROPOUT_COVARIANCE_M2 (100 m²)
+        - Covariance decreases after recovery: P_after < P_mid
+
+        Units
+        -----
+        - Duration: seconds (s)
+        - Position covariance: m² (variance)
+        - Drift bound (PRD): 15 cm (not explicitly tested here)
+
+        Notes
+        -----
+        PRD §4.2 specifies drift ≤ 15 cm after 5s dropout.
+        This test focuses on stability (no divergence).
+        Drift requirement tested separately in acceptance tests.
+
+        Covariance can legitimately grow to ~10 m² during 5s dropout.
+        This represents realistic uncertainty growth in IMU-only mode.
+
+        References
+        ----------
+        .. [PRD] §4.2: Robustness Requirements (≥5s dropout → ≤15cm drift)
         """
         # Create scenario with guaranteed 5s dropout
         config_sim = SimpleSimConfig(
@@ -257,7 +419,7 @@ class TestSwapAndDropoutStability:
                 pos_cov_trace[dropout_end + 50] < pos_cov_trace[dropout_mid]
             ), "Filter didn't reconverge after dropout"
 
-    def test_filter_handles_correlated_swaps_and_dropouts(self):
+    def test_filter_handles_correlated_swaps_and_dropouts(self) -> None:
         """Test filter stability with simultaneous swaps and dropouts."""
         config_sim = RatIMUSimConfig(
             duration_s=20.0,
@@ -289,7 +451,7 @@ class TestSwapAndDropoutStability:
 class TestBiasEstimationStability:
     """Test that bias estimates remain stable across occlusions."""
 
-    def test_bias_covariance_bounded_during_dropout(self):
+    def test_bias_covariance_bounded_during_dropout(self) -> None:
         """Test that bias covariance remains bounded during vision dropout."""
         config_sim = SimpleSimConfig(
             duration_s=20.0,
@@ -336,7 +498,7 @@ class TestBiasEstimationStability:
         # (May not decrease immediately if bias is weakly observable)
         assert np.trace(bias_cov_after) < 0.1, "Bias cov unbounded after recovery"
 
-    def test_bias_estimates_stable_across_multiple_dropouts(self):
+    def test_bias_estimates_stable_across_multiple_dropouts(self) -> None:
         """Test bias estimates remain stable with multiple dropout events."""
         config_sim = RatIMUSimConfig(
             duration_s=30.0,
@@ -374,7 +536,7 @@ class TestBiasEstimationStability:
         assert np.max(np.abs(bias_accel_x)) < 1.0, "Accel X bias exceeded physical bounds"
         assert np.max(np.abs(bias_accel_y)) < 1.0, "Accel Y bias exceeded physical bounds"
 
-    def test_bias_convergence_not_disrupted_by_dropout(self):
+    def test_bias_convergence_not_disrupted_by_dropout(self) -> None:
         """Test that bias convergence continues after dropout recovery.
 
         Circular motion should allow gyro bias to converge. Dropout should
