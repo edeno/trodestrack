@@ -338,15 +338,8 @@ def update_step(
     """
     m_pred, P_pred = state.mean, state.cov
 
-    # Process confidence scores
-    # Default to high confidence if not provided
-    if confidence is None:
-        conf = jnp.ones(4)
-    else:
-        # Clip confidence to [1e-2, 1.0] to prevent numerical issues
-        # - Upper bound: 1.0 (perfect confidence)
-        # - Lower bound: 1e-2 (prevents R → ∞)
-        conf = jnp.clip(confidence, 1e-2, 1.0)
+    # Confidence→R scaling via shared helper
+    from trodestrack.models.filter_common import confidence_to_R_diagonal
 
     # If no valid observation, return prediction unchanged with zero log-likelihood
     def no_update(m, P):
@@ -405,10 +398,10 @@ def update_step(
                 innov_4 = jnp.where(obs_mask, innov_4_raw, 0.0)  # Zero invalid components
 
                 # Confidence-scaled measurement noise
-                # R_i = R_base / conf_i for each dimension
-                # Higher confidence → smaller R → trust measurement more
-                R_base = config.measurement_noise_pos
-                R_diag = R_base / conf  # Shape (4,)
+                # R_i = R_base / conf_i for each dimension (shared helper)
+                R_diag = confidence_to_R_diagonal(
+                    confidence, base=config.measurement_noise_pos, size=4
+                )
                 R4 = jnp.diag(R_diag)
 
                 # Innovation covariance (always 4×4)

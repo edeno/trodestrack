@@ -549,12 +549,8 @@ def update_step(
     """
     m_pred, P_pred = state.mean, state.cov
 
-    # Process confidence scores (default to high confidence if not provided)
-    if confidence is None:
-        conf = jnp.ones(4)
-    else:
-        # Clip confidence to [1e-2, 1.0] to prevent numerical issues
-        conf = jnp.clip(confidence, 1e-2, 1.0)
+    # Confidence→R scaling helper
+    from trodestrack.models.filter_common import confidence_to_R_diagonal
 
     # If no valid observation, return prediction unchanged
     def no_update(m, P):
@@ -599,11 +595,9 @@ def update_step(
             meas_deviations = sigmas_meas - z_pred
             S = jnp.tensordot(w_cov, _outer_product_batch(meas_deviations, meas_deviations), axes=1)
 
-            # Add measurement noise R with confidence scaling
-            # Scale R by confidence: R_eff = R_base / conf (lower conf → larger R)
-            R_base = config.measurement_noise_pos
-            R_conf_scaled = R_base / conf  # Element-wise scaling
-            R = jnp.diag(R_conf_scaled)  # Full 4×4 matrix (no huge-R masking)
+            # Add measurement noise R with confidence scaling (shared helper)
+            R_diag = confidence_to_R_diagonal(confidence, base=config.measurement_noise_pos, size=4)
+            R = jnp.diag(R_diag)  # Full 4×4 matrix (no huge-R masking)
             S = S + R
 
             # Compute cross-covariance between state and observations

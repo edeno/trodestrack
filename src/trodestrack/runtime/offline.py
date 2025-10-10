@@ -353,7 +353,7 @@ def rts_smoother(
                         theta=theta,
                         dt=dt,
                         n=n,
-                        has_vision=~in_blackout,
+                        has_vision=jnp.logical_not(in_blackout),
                         dtype=dtype,
                     )
                 else:
@@ -732,7 +732,7 @@ def sigma_point_smoother(
                         theta=theta,
                         dt=dt,
                         n=n,
-                        has_vision=~in_blackout,
+                        has_vision=jnp.logical_not(in_blackout),
                         dtype=dtype,
                     )
                 else:

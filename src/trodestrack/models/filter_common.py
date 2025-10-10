@@ -414,19 +414,12 @@ def update_zupt(
 ) -> tuple[FilterState, jnp.ndarray]:
     """Apply zero-velocity pseudo-measurement when stationary."""
 
+    from trodestrack.models.zupt import zupt_model
+
     mean, cov = state
-    vx, vy = mean[2], mean[3]
-    v_mag = jnp.sqrt(vx**2 + vy**2)
+    n = mean.shape[0]
 
-    is_stationary = (v_mag < config.zupt_velocity_threshold) & config.enable_zupt
-
-    R_scalar = lax.select(is_stationary, config.zupt_measurement_noise, 1e6)
-    R = jnp.diag(jnp.array([R_scalar, R_scalar]))
-
-    innovation = -mean[2:4]
-    H = jnp.zeros((2, 8))
-    H = H.at[0, 2].set(1.0)
-    H = H.at[1, 3].set(1.0)
+    H, R, innovation = zupt_model(config, mean, n, dtype=mean.dtype)
 
     S = H @ cov @ H.T + R
     K = psd_solve(S, H @ cov).T
@@ -437,6 +430,32 @@ def update_zupt(
     log_det = jnp.linalg.slogdet(S)[1]
     innov_quad = innovation @ psd_solve(S, innovation)
     log_likelihood = -0.5 * (2 * jnp.log(2 * jnp.pi) + log_det + innov_quad)
-    log_likelihood = lax.select(is_stationary, log_likelihood, jnp.array(0.0))
+
+    # Zero out log-likelihood when ZUPT is effectively disabled (large R)
+    stationary = (
+        jnp.sqrt((mean[2] ** 2 + mean[3] ** 2)) < config.zupt_velocity_threshold
+    ) & config.enable_zupt
+    log_likelihood = lax.select(
+        stationary, log_likelihood, jnp.array(0.0, dtype=log_likelihood.dtype)
+    )
 
     return FilterState(mean=mean_updated, cov=cov_updated), log_likelihood
+
+
+def confidence_to_R_diagonal(
+    confidence: jnp.ndarray | None,
+    *,
+    base: float,
+    size: int,
+    clip_min: float = 1e-2,
+) -> jnp.ndarray:
+    """Map confidence scores to per-dimension measurement noise.
+
+    Returns a length-`size` vector of diagonal entries for R.
+    - If `confidence` is None → all entries = base
+    - Else R_i = base / clip(conf_i, clip_min, 1.0)
+    """
+    if confidence is None:
+        return jnp.full(size, base)
+    conf = jnp.clip(confidence, clip_min, 1.0)
+    return base / conf
