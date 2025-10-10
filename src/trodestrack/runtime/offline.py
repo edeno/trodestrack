@@ -22,9 +22,8 @@ import jax.numpy as jnp
 import numpy as np
 from jax import jacfwd, lax
 
-from trodestrack.models.ekf import (
-    EKFConfig,
-    EKFResult,
+from trodestrack.models.ekf import EKFConfig, EKFResult
+from trodestrack.models.filter_common import (
     dynamics_function,
     psd_solve,
     symmetrize,
@@ -622,7 +621,25 @@ def sigma_point_smoother(
                     lambda: jnp.array(dt_imu_mean),
                 )
 
+                dtype = x_s.dtype
                 Q_k = Q_rate * dt
+
+                # IMU input noise mapping (matches EKF RTS smoother)
+                # Only apply for 8D state (standard 2D tracking)
+                if n == 8:
+                    std_w = jnp.asarray(
+                        ukf_config.imu_gyro_noise_density * jnp.sqrt(dt), dtype=dtype
+                    )
+                    std_f = jnp.asarray(
+                        ukf_config.imu_accel_noise_density * jnp.sqrt(dt), dtype=dtype
+                    )
+                    Q_u = jnp.diag(jnp.array([std_w**2, std_f**2, std_f**2], dtype=dtype))
+
+                    theta = x_s[4]
+                    G = build_G_matrix(theta, dt)
+                    Q_total = Q_k + G @ Q_u @ G.T
+                else:
+                    Q_total = Q_k
 
                 # Generate sigma points
                 sigmas = _compute_sigma_points(x_s, P_s, n, lamb)
@@ -643,7 +660,7 @@ def sigma_point_smoother(
                     vmap(_outer_product, in_axes=(0, 0))(deviations, deviations),
                     axes=1,
                 )
-                P_pred = P_pred + Q_k
+                P_pred = P_pred + Q_total
 
                 return m_pred, P_pred
 
