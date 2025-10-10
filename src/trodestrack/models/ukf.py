@@ -264,6 +264,89 @@ def compute_weights(
 # =============================================================================
 
 
+def make_led_selector(only_led1: bool, only_led2: bool) -> jnp.ndarray:
+    """Create 2×4 selector matrix for single-LED observations.
+
+    Extracts the active 2D subspace from 4D measurement space.
+    Measurement layout: [led1_x, led1_y, led2_x, led2_y]
+
+    Args:
+        only_led1: True if only LED1 is valid
+        only_led2: True if only LED2 is valid
+
+    Returns:
+        M: 2×4 selector matrix
+            - LED1-only: rows [1,0,0,0] and [0,1,0,0]
+            - LED2-only: rows [0,0,1,0] and [0,0,0,1]
+    """
+    # LED1 selector: picks first 2 dimensions
+    M_led1 = jnp.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]])
+
+    # LED2 selector: picks last 2 dimensions
+    M_led2 = jnp.array([[0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
+
+    # Select based on which LED is valid
+    return lax.select(only_led1, M_led1, M_led2)
+
+
+def compute_nis_and_loglik(
+    innov4: jnp.ndarray,
+    S4: jnp.ndarray,
+    both_leds: bool,
+    only_led1: bool,
+    only_led2: bool,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Compute exact NIS and log-likelihood for 2D or 4D measurement.
+
+    Uses Cholesky decomposition for numerical stability and computes
+    statistics in the active measurement subspace (2D or 4D).
+
+    Args:
+        innov4: Innovation vector (4,) in full measurement space
+        S4: Innovation covariance (4, 4)
+        both_leds: True if both LEDs valid (4D measurement)
+        only_led1: True if only LED1 valid (2D measurement)
+        only_led2: True if only LED2 valid (2D measurement)
+
+    Returns:
+        Tuple of (nis, log_likelihood):
+            - nis: Normalized Innovation Squared (scalar)
+            - log_likelihood: Gaussian log-likelihood (scalar)
+
+    Notes:
+        - 4D case: Uses full innovation covariance
+        - 2D case: Projects to active subspace via selector matrix
+        - Both return exact statistics (no diagonal approximation)
+        - NIS follows χ²(k) where k=2 or 4 depending on measurement dim
+    """
+    from jax.scipy.linalg import cho_solve
+
+    # 4D branch: both LEDs valid
+    def compute_4d():
+        L4 = jnp.linalg.cholesky(S4 + 1e-9 * jnp.eye(4))
+        x4 = cho_solve((L4, True), innov4)
+        nis = jnp.dot(innov4, x4)
+        logdet = 2.0 * jnp.sum(jnp.log(jnp.diag(L4)))
+        loglik = -0.5 * (logdet + nis + 4 * jnp.log(2 * jnp.pi))
+        return nis, loglik
+
+    # 2D branch: single LED valid
+    def compute_2d():
+        M2 = make_led_selector(only_led1, only_led2)  # (2, 4)
+        S2 = M2 @ S4 @ M2.T  # (2, 2)
+        innov2 = M2 @ innov4  # (2,)
+
+        L2 = jnp.linalg.cholesky(S2 + 1e-9 * jnp.eye(2))
+        x2 = cho_solve((L2, True), innov2)
+        nis = jnp.dot(innov2, x2)
+        logdet = 2.0 * jnp.sum(jnp.log(jnp.diag(L2)))
+        loglik = -0.5 * (logdet + nis + 2 * jnp.log(2 * jnp.pi))
+        return nis, loglik
+
+    # Select based on LED validity
+    return lax.cond(both_leds, compute_4d, compute_2d)
+
+
 def _outer_product_batch(x: jnp.ndarray, y: jnp.ndarray) -> jnp.ndarray:
     """Compute batched outer products for covariance reconstruction.
 
@@ -465,8 +548,10 @@ def update_step(
         led1_valid = jnp.isfinite(z_led1[0])
         led2_valid = jnp.isfinite(z_led2[0])
 
-        # Build observation vector
-        z_obs_full = jnp.concatenate([z_led1, z_led2])
+        # Build observation vector (replace NaN with 0 to avoid propagation)
+        z_led1_clean = jnp.where(jnp.isfinite(z_led1), z_led1, 0.0)
+        z_led2_clean = jnp.where(jnp.isfinite(z_led2), z_led2, 0.0)
+        z_obs_full = jnp.concatenate([z_led1_clean, z_led2_clean])
         obs_mask = jnp.array([led1_valid, led1_valid, led2_valid, led2_valid])
 
         # If no valid LEDs, skip update
@@ -497,12 +582,11 @@ def update_step(
             meas_deviations = sigmas_meas - z_pred
             S = jnp.tensordot(w_cov, _outer_product_batch(meas_deviations, meas_deviations), axes=1)
 
-            # Add measurement noise R (masked for invalid observations)
+            # Add measurement noise R with confidence scaling
             # Scale R by confidence: R_eff = R_base / conf (lower conf → larger R)
             R_base = config.measurement_noise_pos
             R_conf_scaled = R_base / conf  # Element-wise scaling
-            R_diag = jnp.where(obs_mask, R_conf_scaled, 1e10)
-            R = jnp.diag(R_diag)
+            R = jnp.diag(R_conf_scaled)  # Full 4×4 matrix (no huge-R masking)
             S = S + R
 
             # Compute cross-covariance between state and observations
@@ -511,14 +595,31 @@ def update_step(
                 w_cov, _outer_product_batch(state_deviations, meas_deviations), axes=1
             )
 
-            # Innovation (with masking)
+            # Innovation (full 4D vector, NaN handling via LED validity flags)
             innov_full = z_obs_full - z_pred
-            innov = jnp.where(obs_mask, innov_full, 0.0)
 
-            # Kalman gain
+            # Determine LED validity for subspace computation
+            both_leds = led1_valid & led2_valid
+            only_led1 = led1_valid & ~led2_valid
+            only_led2 = led2_valid & ~led1_valid
+
+            # Compute exact NIS and log-likelihood in active subspace
+            # (no diagonal approximation - uses Cholesky + cho_solve)
+            nis, log_lik = compute_nis_and_loglik(
+                innov_full,
+                S,
+                both_leds,
+                only_led1,
+                only_led2,
+            )
+
+            # Kalman gain and update
+            # Note: We use full 4×4 S here but only the valid dimensions
+            # will contribute via the innovation vector (NaN handling below)
             K = psd_solve(S, P_cross.T).T
 
-            # Update mean
+            # Update mean: set invalid LED innovations to zero
+            innov = jnp.where(obs_mask, innov_full, 0.0)
             m_upd = m_in + K @ innov
 
             # Update covariance using UKF's native form
@@ -528,13 +629,6 @@ def update_step(
             # without linearization, making the K S K^T term naturally stable
             P_upd = P_in - K @ S @ K.T
             P_upd = symmetrize(P_upd)
-
-            # Compute log-likelihood (only for valid dimensions)
-            # Use diagonal approximation for masked observations
-            log_lik_per_dim = -0.5 * (
-                jnp.log(2 * jnp.pi) + jnp.log(jnp.diag(S)) + innov_full**2 / jnp.diag(S)
-            )
-            log_lik = jnp.where(obs_mask, log_lik_per_dim, 0.0).sum()
 
             return UKFState(mean=m_upd, cov=P_upd), log_lik
 
