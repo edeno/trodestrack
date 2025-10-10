@@ -16,6 +16,7 @@ Estimate a rat’s position, velocity, and heading on a maze using:
 
 **Constraints:** dim lighting, occlusions, LED reflections, occasional handling, uncalibrated IMU tilt, ruler-based pixel→cm scale. Must support **online filtering** and **offline smoothing**. Implemented in **JAX** with `jax.lax.scan`.
 
+Future: extend to full 3D pose (roll/pitch/yaw) with magnetometer. Also could use TTL pulses for time sync verification and for IR beam breaks (e.g., reward zones)
 ---
 
 ## 2. Goals & Non-Goals
