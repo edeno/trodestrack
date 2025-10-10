@@ -1,6 +1,7 @@
 # TASKS.md
 
 **NOTE:** Currently working through REVIEW.md P0 blockers before resuming milestone tasks.
+
 - ✅ P0.1: SI Unit Standardization (commit 99c70cb)
 - ✅ P0.2: Generalized χ² Envelopes (commit ab0c75d)
 - ✅ P0.3: UKF Heading Measurement (commit cb5fa85)
@@ -188,17 +189,17 @@
   - [x] **PRD Ref:** Section 13 - "Mahalanobis gating for outlier rejection"
   - [x] **Tests:** Added dedicated gating suites (`tests/filters/test_ekf_gating.py`, `tests/filters/test_ukf_gating.py`)
 
-- [ ] **ZUPT (Zero-Velocity Update)** - `models/ekf.py`, `models/ukf.py`
-  - [ ] Implement stationary detection (velocity threshold check)
-  - [ ] Add velocity pseudo-measurement (zero-velocity constraint)
-  - [ ] Add config parameters:
-    - [ ] `enable_zupt: bool = False`
-    - [ ] `zupt_velocity_threshold: float = 0.05`  # m/s
-    - [ ] `zupt_measurement_noise: float = 0.001**2`  # (1mm)²
-  - [ ] Sequential update after heading measurement
-  - [ ] **Impact:** Worse stabilization during stops, drift accumulation at stationary periods
-  - [ ] **PRD Ref:** Section 9 - "Zero-velocity constraints during stationary periods"
-  - [ ] **Tests:** Add `tests/filters/test_zupt.py` (stationary, moving, dropout scenarios)
+- [x] **ZUPT (Zero-Velocity Update)** - `models/ekf.py`, `models/ukf.py`
+  - [x] Implement stationary detection (velocity threshold check)
+  - [x] Add velocity pseudo-measurement (zero-velocity constraint)
+  - [x] Add config parameters:
+    - [x] `enable_zupt: bool = False`
+    - [x] `zupt_velocity_threshold: float = 0.05`  # m/s
+    - [x] `zupt_measurement_noise: float = 0.01**2`  # (1 cm/s)²
+  - [x] Sequential update after heading measurement
+  - [x] **Impact:** Worse stabilization during stops, drift accumulation at stationary periods
+  - [x] **PRD Ref:** Section 9 - "Zero-velocity constraints during stationary periods"
+  - [x] **Tests:** Added `tests/filters/test_zupt.py` coverage (stationary, moving, dropout scenarios)
 
 - [ ] **Blackout-Aware Process Noise Adaptation** - `models/ekf.py`, `models/ukf.py`
   - [ ] Detect vision dropout (`mask_cam=False`)
@@ -234,6 +235,13 @@
   - [ ] **Impact:** UKF doesn't benefit from heading constraints
   - [ ] **Status:** EKF has this, UKF missing
   - [ ] **Tests:** Add to `tests/filters/test_ukf_accuracy.py`
+
+- [ ] **Shared Filter Config/State Refactor** - `models/ekf.py`, `models/ukf.py`
+  - [ ] Extract common config/state dataclasses usable by EKF and UKF
+  - [ ] Move shared helpers (init, ZUPT, gating) into neutral module
+  - [ ] Update both filters to consume shared structures without casting
+  - [ ] **Impact:** Reduces duplication, keeps filter behavior aligned as features expand
+  - [ ] **Tests:** Regression pass on EKF/UKF suites; add serialization round-trip if needed
 
 ### ✅ Recently Completed (This Session)
 
