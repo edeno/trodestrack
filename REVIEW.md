@@ -73,25 +73,30 @@ Below are symbol line maps to help you jump to the right places:
      - ✅ 13 new tests (dimensions 4, 6, 8, 10, 12) + 7 existing tests passing
      - ✅ Updated all docstrings to use (n,) instead of (8,)
 
-5. **Stability: Linalg Hardening & Joseph Form**
+5. ✅ **COMPLETED: Stability: Linalg Hardening & Joseph Form** (commit 88e5ac9)
    - **Why**: Prevent divergence with near‑singular covariances and keep PSD.
-   - **Touchpoints**:
-     - `src/trodestrack/models/ekf.py: gaussian_log_likelihood`, `apply_lifted_inverse` — add jitter and sign checks around `slogdet`; prefer Cholesky when feasible.
-     - `src/trodestrack/models/ukf.py: gaussian_log_likelihood` — ditto.
-     - New helper `joseph_update(P,K,H,R)` used in EKF position/heading and UKF.
+   - **Completed**:
+     - ✅ Added `joseph_update(P, K, H, R)` helper function
+     - ✅ Improved `gaussian_log_likelihood()` with adaptive jitter and sign checks
+     - ✅ Improved `gaussian_log_likelihood_ukf()` with identical stability features
+     - ✅ 14 new tests in test_joseph_form.py (all passing)
+     - ✅ No regressions (35/35 tests passing)
 
-6. **Reproducibility: Avoid Runtime Config Mutation**
+6. ✅ **COMPLETED: Reproducibility: Avoid Runtime Config Mutation** (commit 6b8f8c1)
    - **Why**: Immutable configs are a PRD requirement for reproducibility.
-   - **Touchpoints**:
-     - `src/trodestrack/models/ekf.py: extended_kalman_filter` — when auto‑inferring LED spacing, do not mutate config; instead return `estimated_led_distance` in the result and log it.
+   - **Completed**:
+     - ✅ Added `estimated_led_distance: float | None` field to EKFResult and UKFResult
+     - ✅ Modified `extended_kalman_filter()` to create `config_for_filter` without mutating original
+     - ✅ Modified `unscented_kalman_filter()` with identical pattern
+     - ✅ 8 new tests in test_config_immutability.py (all passing)
 
-7. **Fix Test Defects & Flakes**
+7. ✅ **COMPLETED: Fix Test Defects & Flakes** (commit TBD)
    - **Why**: CI stability and correctness.
-   - **Touchpoints**:
-     - `tests/filters/test_dropout_diagnostic.py` — script‑style side effects at import; move under `diagnostics/` or guard with `if __name__ == '__main__':`.
-     - `tests/filters/test_ukf_accuracy.py` — replace any `compute_position_rmse` used on velocities with `compute_velocity_rmse`.
-     - `tests/filters/test_vision_robustness.py` — make swaps verifiable (compare against truth arrays or a `swapped` mask).
-     - `tests/filters/test_prd_acceptance.py` — mark the 5‑s dropout drift assertion as `xfail(strict=False)`.
+   - **Completed**:
+     - ✅ Fixed test_dropout_diagnostic.py script-style side effects
+     - ✅ Fixed test_ukf_accuracy.py incorrect RMSE function usage
+     - ✅ Fixed test_vision_robustness.py swap verification
+     - ✅ Fixed test_prd_acceptance.py dropout drift test (skip → xfail)
 
 ---
 

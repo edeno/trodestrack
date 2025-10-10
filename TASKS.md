@@ -134,7 +134,7 @@
   - Reflections mirror LEDs across nearest wall when rat is near boundaries
   - Tests added in `tests/sim/test_led_wall_reflections.py` (16 tests passing)
   - New fields in SimOut: `led_reflection_applied`, `led1_truth_cam`, `led2_truth_cam`, `swap_applied`
-- [ ] Add persistent LED swaps (event-based, not per-frame)
+- [x] Add persistent LED swaps (event-based, not per-frame)
 
 ### ⚙️ Filter Robustness
 

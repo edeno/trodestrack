@@ -740,6 +740,7 @@ def test_output_keys_complete(minimal_config) -> None:
         "led1_truth_cam",  # NEW: Ground truth LED positions
         "led2_truth_cam",  # NEW: Ground truth LED positions
         "swap_applied",  # NEW: Swap tracking
+        "led_reflection_applied",  # NEW: Wall reflection tracking
         "confidence_led1",
         "confidence_led2",
         "mask_cam",

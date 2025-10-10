@@ -115,7 +115,22 @@ class RatIMUSimConfig:
         led1_offset_body: Position of LED1 in body frame [x, y] meters
         use_second_led: Enable second LED for heading measurements
         led2_offset_body: Position of LED2 in body frame [x, y] meters
+
+    LED Swap Configuration:
+        led_swap_mode: Swap behavior mode ("per_frame" or "persistent")
+            - "per_frame": Independent per-frame swaps (legacy behavior)
+            - "persistent": Event-based swaps that persist for a duration
         led_swap_prob: Probability of swapping LED1/LED2 labels per visible frame (0-1)
+            Used in "per_frame" mode only
+        led_swap_rate: Mean number of swap events per second (persistent mode)
+            Example: 0.5 = one swap every 2 seconds on average
+            Units: events/second
+        led_swap_duration_mean: Mean duration of each swap event (seconds)
+            Example: 1.0 = swaps last 1 second on average
+            Units: seconds
+        led_swap_duration_std: Standard deviation of swap duration (seconds)
+            Example: 0.3 = 0.3 second variability in duration
+            Units: seconds
         led_wall_reflection_prob: Probability of LED reflection artifacts near walls (0-1)
             Example: 0.3 = 30% chance of mirrored detection when near wall
             Range: [0, 1]
@@ -195,7 +210,15 @@ class RatIMUSimConfig:
     led2_offset_body: np.ndarray = field(
         default_factory=lambda: np.array([0.02, 0.0])
     )  # Front LED (2cm ahead of center)
-    led_swap_prob: float = 0.0  # Probability of swapping LED1/LED2 labels per frame
+    # LED swap configuration
+    led_swap_mode: str = "per_frame"  # "per_frame" or "persistent"
+    led_swap_prob: float = (
+        0.0  # Probability of swapping LED1/LED2 labels per frame (per_frame mode)
+    )
+    led_swap_rate: float = 0.5  # Mean swap events per second (persistent mode)
+    led_swap_duration_mean: float = 1.0  # Mean duration of swap event in seconds (persistent mode)
+    led_swap_duration_std: float = 0.3  # Std dev of swap duration in seconds (persistent mode)
+
     led_wall_reflection_prob: float = (
         0.0  # Probability of LED reflection artifacts near walls (0-1)
     )
@@ -288,10 +311,35 @@ class RatIMUSimConfig:
                 f"0 = independent dropouts, 1 = identical dropouts"
             )
 
+        # LED swap validation
+        if self.led_swap_mode not in ["per_frame", "persistent"]:
+            raise ValueError(
+                f"led_swap_mode must be 'per_frame' or 'persistent', got '{self.led_swap_mode}'.\n"
+                f"Example: led_swap_mode='persistent' for event-based swaps"
+            )
+
         if not 0 <= self.led_swap_prob <= 1:
             raise ValueError(
                 f"LED swap probability must be in [0, 1], got {self.led_swap_prob}.\n"
-                f"Example: led_swap_prob=0.05 (5% swap rate)"
+                f"Example: led_swap_prob=0.05 (5% swap rate in per_frame mode)"
+            )
+
+        if self.led_swap_rate < 0:
+            raise ValueError(
+                f"led_swap_rate must be non-negative, got {self.led_swap_rate}.\n"
+                f"Example: led_swap_rate=0.5 (0.5 swaps per second)"
+            )
+
+        if self.led_swap_duration_mean <= 0:
+            raise ValueError(
+                f"led_swap_duration_mean must be positive, got {self.led_swap_duration_mean}.\n"
+                f"Example: led_swap_duration_mean=1.0 (1 second mean duration)"
+            )
+
+        if self.led_swap_duration_std < 0:
+            raise ValueError(
+                f"led_swap_duration_std must be non-negative, got {self.led_swap_duration_std}.\n"
+                f"Example: led_swap_duration_std=0.3 (0.3 second std dev)"
             )
 
         if not 0 <= self.led_wall_reflection_prob <= 1:
@@ -847,25 +895,65 @@ def simulate_rat_imu(config: Optional[RatIMUSimConfig] = None, seed: int = 0) ->
     # Only swap when both LEDs are visible (otherwise swap doesn't make sense)
     swap_applied = np.zeros(T_cam, dtype=bool)  # Track which frames had swaps
 
-    if config.use_second_led and config.led_swap_prob > 0:
+    if config.use_second_led:
         both_visible = mask_led1 & mask_led2
-        swap_candidates = np.where(both_visible)[0]
-        if len(swap_candidates) > 0:
-            n_swaps = int(np.round(len(swap_candidates) * config.led_swap_prob))
-            if n_swaps > 0:
-                swap_indices = rng.choice(swap_candidates, size=n_swaps, replace=False)
-                swap_applied[swap_indices] = True
 
-                # Swap LED positions and confidences at selected frames
-                Z_cam_led1[swap_indices], Z_cam_led2[swap_indices] = (
-                    Z_cam_led2[swap_indices].copy(),
-                    Z_cam_led1[swap_indices].copy(),
-                )
-                if config.use_confidence:
-                    confidence_led1[swap_indices], confidence_led2[swap_indices] = (
-                        confidence_led2[swap_indices].copy(),
-                        confidence_led1[swap_indices].copy(),
+        if config.led_swap_mode == "per_frame":
+            # Legacy per-frame swaps: each frame independently with probability led_swap_prob
+            if config.led_swap_prob > 0:
+                swap_candidates = np.where(both_visible)[0]
+                if len(swap_candidates) > 0:
+                    n_swaps = int(np.round(len(swap_candidates) * config.led_swap_prob))
+                    if n_swaps > 0:
+                        swap_indices = rng.choice(swap_candidates, size=n_swaps, replace=False)
+                        swap_applied[swap_indices] = True
+
+        elif config.led_swap_mode == "persistent":
+            # Persistent swaps: event-based swaps that last for a duration
+            if config.led_swap_rate > 0:
+                # Generate swap events using a Poisson process
+                # Expected number of swap events in the session
+                expected_n_events = config.led_swap_rate * config.duration_s
+                n_events = rng.poisson(expected_n_events)
+
+                if n_events > 0:
+                    # Generate event start times (uniformly distributed across session)
+                    event_start_times = rng.uniform(0, config.duration_s, size=n_events)
+
+                    # Generate event durations (Gaussian with mean and std)
+                    event_durations = rng.normal(
+                        loc=config.led_swap_duration_mean,
+                        scale=config.led_swap_duration_std,
+                        size=n_events,
                     )
+                    # Clip durations to be positive
+                    event_durations = np.maximum(event_durations, dt_cam)
+
+                    # Mark frames as swapped for each event
+                    for start_time, duration in zip(event_start_times, event_durations):
+                        end_time = start_time + duration
+
+                        # Find camera frames within this swap event
+                        # Only swap frames where both LEDs are visible
+                        in_event = (t_cam_exp >= start_time) & (t_cam_exp < end_time)
+                        swap_frames = np.where(in_event & both_visible)[0]
+
+                        if len(swap_frames) > 0:
+                            swap_applied[swap_frames] = True
+
+        # Apply swaps to LED positions and confidences
+        if np.any(swap_applied):
+            swap_indices = np.where(swap_applied)[0]
+            # Swap LED positions and confidences at selected frames
+            Z_cam_led1[swap_indices], Z_cam_led2[swap_indices] = (
+                Z_cam_led2[swap_indices].copy(),
+                Z_cam_led1[swap_indices].copy(),
+            )
+            if config.use_confidence:
+                confidence_led1[swap_indices], confidence_led2[swap_indices] = (
+                    confidence_led2[swap_indices].copy(),
+                    confidence_led1[swap_indices].copy(),
+                )
 
     return {
         # Time

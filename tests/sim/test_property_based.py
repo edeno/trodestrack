@@ -311,6 +311,7 @@ def test_property_output_structure_complete(config: RatIMUSimConfig, seed: int) 
         "led1_truth_cam",  # NEW: Ground truth LED positions
         "led2_truth_cam",  # NEW: Ground truth LED positions
         "swap_applied",  # NEW: Swap tracking
+        "led_reflection_applied",  # NEW: Wall reflection tracking
         "confidence_led1",
         "confidence_led2",
         "mask_cam",

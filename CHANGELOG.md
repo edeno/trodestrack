@@ -2,6 +2,50 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-09 - Persistent LED Swaps (Event-Based)
+
+**Added:**
+- **Persistent LED Swap Feature** (`src/trodestrack/sim/rat_imu.py`)
+  - New parameter: `led_swap_mode` ("per_frame" or "persistent")
+  - New parameters for persistent mode: `led_swap_rate`, `led_swap_duration_mean`, `led_swap_duration_std`
+  - Implements event-based LED swaps using Poisson process for timing and Gaussian distribution for durations
+  - Swap events persist across multiple frames (not per-frame independent swaps)
+  - Backward compatible: "per_frame" mode preserves legacy behavior with `led_swap_prob`
+  - Only swaps frames where both LEDs are visible
+
+- **Comprehensive Test Suite** (`tests/sim/test_persistent_led_swaps.py`)
+  - 12 tests covering all aspects of persistent swaps (all passing)
+  - **Persistence**: Contiguous swap blocks vs scattered per-frame swaps
+  - **Duration**: Swap blocks last for configured duration
+  - **Determinism**: Same seed → same pattern
+  - **Interaction**: Only swap when both LEDs visible, respects dropouts
+  - **Backward compatibility**: per_frame mode still works
+  - **Validation**: Invalid modes, negative values rejected
+  - Run with: `uv run pytest tests/sim/test_persistent_led_swaps.py -v`
+
+**Implementation Details:**
+- Poisson process generates swap event times: `n_events ~ Poisson(rate × duration)`
+- Gaussian distribution for swap durations: `duration ~ N(mean, std²)`, clipped to ≥ dt_cam
+- Overlapping events merge into continuous swap blocks
+- Mathematical correctness verified by code review
+
+**Improved:**
+- **Documentation**: Enhanced docstring with per_frame vs persistent mode examples
+- **Validation**: Comprehensive parameter validation with helpful error messages
+- **Code Quality**: Formatted with black, reviewed and approved
+
+**Testing:**
+- ✅ 12/12 tests passing in test_persistent_led_swaps.py
+- ✅ No regressions in 154 existing sim tests
+- ✅ Code reviewed and approved (critical issues addressed)
+- ✅ Black, ruff formatting passing
+
+**Task Progress:**
+- ✅ Milestone 3: Add persistent LED swaps (event-based, not per-frame) - COMPLETE
+- Updated TASKS.md to mark persistent LED swaps as complete
+
+---
+
 ### Session: 2025-10-09 - LED Wall Reflection Artifacts
 
 **Added:**

@@ -2,6 +2,62 @@
 
 Development notes and debugging history for trodestrack project.
 
+## 2025-10-09 - Persistent LED Swaps: Event-Based Artifacts
+
+### Summary
+
+Implemented persistent (event-based) LED swap artifacts for realistic vision noise simulation. LED swaps now persist for durations rather than occurring independently at each frame.
+
+**Implementation:**
+
+- **Mode parameter**: `led_swap_mode` ("per_frame" | "persistent")
+- **Poisson process**: Swap events occur at random times with rate `led_swap_rate` (events/second)
+- **Gaussian durations**: Each swap lasts for `duration ~ N(mean, std²)` seconds, clipped to ≥ dt_cam
+- **Backward compatible**: "per_frame" mode preserves legacy behavior
+
+**Mathematical Model:**
+
+Event-based swaps model realistic scenarios where LED tracker gets confused and stays confused for a duration (e.g., LEDs pass close together, reflection artifacts, occlusion recovery).
+
+- Number of events: `n_events ~ Poisson(λ)` where `λ = rate × session_duration`
+- Event start times: Uniform over [0, session_duration]
+- Event durations: `duration_i ~ N(μ, σ²)`, clipped to [dt_cam, ∞)
+- Overlapping events merge into continuous blocks
+
+**Test Coverage:**
+
+- ✅ 12 comprehensive tests (all passing)
+- ✅ Persistence behavior (contiguous blocks vs scattered per-frame)
+- ✅ Duration accuracy (with tolerance for frame quantization)
+- ✅ Determinism (same seed → same pattern)
+- ✅ Visibility constraints (only swap when both LEDs visible)
+- ✅ Backward compatibility (per_frame mode unchanged)
+- ✅ Parameter validation (invalid modes, negative values rejected)
+
+**Design Decisions:**
+
+1. **Union behavior for overlaps**: Overlapping events merge naturally → continuous swap blocks
+2. **Minimum duration clipping**: Ensures at least one frame swapped per event
+3. **Visibility gating**: Swap blocks only applied where both LEDs visible (prevents nonsensical swaps during dropout)
+
+**Code Review Findings:**
+
+- ✅ Mathematically correct Poisson/Gaussian model
+- ✅ Proper determinism via RNG seeding
+- ✅ Comprehensive validation with helpful error messages
+- ✅ Clean implementation with good test coverage
+- ⚠️ Fixed: Unused test variables → added assertions
+- ⚠️ Fixed: Formatting → black applied
+
+**Files:**
+
+- [src/trodestrack/sim/rat_imu.py](src/trodestrack/sim/rat_imu.py) - Config params (lines 198-220), validation (297-326), implementation (877-939)
+- [tests/sim/test_persistent_led_swaps.py](tests/sim/test_persistent_led_swaps.py) - 12 tests, 270 lines
+
+**Status:** ✅ COMPLETE - All tests passing, no regressions, reviewed and approved
+
+---
+
 ## 2025-10-09 - IEKS + Blackout-Aware Smoothing: 0.54m Drift (Near Theory!)
 
 ### Summary
