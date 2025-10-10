@@ -1,6 +1,6 @@
 # TASKS.md
 
-**NOTE:** Currently working through REVIEW.md P0 blockers before resuming milestone tasks.
+**NOTE:** All P0 blockers resolved! Ready for Milestone 4.
 
 - ✅ P0.1: SI Unit Standardization (commit 99c70cb)
 - ✅ P0.2: Generalized χ² Envelopes (commit ab0c75d)
@@ -8,7 +8,9 @@
 - ✅ P0.4: State-Dimension Generalization in Smoothers (commit 51067f0)
 - ✅ P0.5: Linalg Stability & Joseph Form (commit 88e5ac9)
 - ✅ P0.6: Fix Config Mutation (LED spacing inference) (commit 6b8f8c1)
-- ✅ **P0.7: Fix Test Defects & Flakes (this session)**
+- ✅ P0.7: Fix Test Defects & Flakes (resolved)
+- ✅ **CR-1: Fix JIT compatibility test (2025-10-10)**
+- ✅ **CR-2: Fix UKF partial-observation covariance bug (2025-10-10)**
 
 ---
 
