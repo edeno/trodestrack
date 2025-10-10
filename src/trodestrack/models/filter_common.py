@@ -300,16 +300,34 @@ def initialize_state(
 
     Returns:
         Initial filter state with mean and covariance
+
+    Note:
+        If no valid observations exist (all NaN), initializes at origin with
+        large uncertainty. This allows prediction-only filtering to proceed.
     """
 
-    valid_indices = jnp.where(mask)[0]
-    first_valid = valid_indices[0] if len(valid_indices) > 0 else 0
+    # Find frames with valid mask AND finite LED observations
+    # (mask alone isn't sufficient - LEDs can be NaN even when mask=True)
+    led1_finite_mask = jnp.isfinite(led1_obs[:, 0])
+    led2_finite_mask = jnp.isfinite(led2_obs[:, 0])
+    any_led_finite = led1_finite_mask | led2_finite_mask
+    valid_with_data = mask & any_led_finite
 
-    led1_valid = jnp.isfinite(led1_obs[first_valid, 0])
-    led2_valid = jnp.isfinite(led2_obs[first_valid, 0])
+    valid_indices = jnp.where(valid_with_data)[0]
+    has_valid_obs = len(valid_indices) > 0
+    first_valid = valid_indices[0] if has_valid_obs else 0
 
-    pos_led1 = led1_obs[first_valid]
-    pos_led2 = led2_obs[first_valid]
+    # Check LED validity at first valid frame
+    led1_valid = jnp.isfinite(led1_obs[first_valid, 0]) if has_valid_obs else False
+    led2_valid = jnp.isfinite(led2_obs[first_valid, 0]) if has_valid_obs else False
+
+    # Replace NaN with zero to prevent propagation (only used if marked invalid)
+    pos_led1 = jnp.where(
+        jnp.isfinite(led1_obs[first_valid]), led1_obs[first_valid], jnp.array([0.0, 0.0])
+    )
+    pos_led2 = jnp.where(
+        jnp.isfinite(led2_obs[first_valid]), led2_obs[first_valid], jnp.array([0.0, 0.0])
+    )
 
     pos_init = jnp.where(
         led1_valid & led2_valid,
@@ -346,7 +364,8 @@ def initialize_state(
         )
         return (pos2 - pos1) / dt
 
-    vel_init = jnp.where(len(valid_indices) >= 2, compute_velocity(), jnp.zeros(2))
+    # Only compute velocity if we have at least 2 valid frames
+    vel_init = compute_velocity() if len(valid_indices) >= 2 else jnp.zeros(2)
 
     led_vec = pos_led2 - pos_led1
     heading_from_leds = jnp.arctan2(led_vec[1], led_vec[0])

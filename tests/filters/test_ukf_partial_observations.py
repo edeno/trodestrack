@@ -194,16 +194,12 @@ def test_ukf_gradual_led_dropout() -> None:
     assert np.all(np.isfinite(result.filtered_covariances)), "Covariances should remain finite"
 
 
-@pytest.mark.skip(
-    reason="Pre-existing bug: UKF produces NaN with all-NaN measurements (Issue #TBD)"
-)
 def test_ukf_no_leds_skips_update() -> None:
     """Test that UKF skips measurement update when no LEDs are valid.
 
-    NOTE: This test is currently skipped due to a pre-existing bug where the UKF
-    produces NaN covariances when all measurements are NaN for the entire session.
-    The filter should run prediction-only and remain stable, but currently fails.
-    This is unrelated to the recent Mahalanobis gating changes.
+    When all LED observations are NaN (complete dropout), the filter should
+    run in prediction-only mode and remain stable. Covariance should grow
+    due to process noise accumulation.
     """
     sim_config = RatIMUSimConfig(
         duration_s=5.0,
