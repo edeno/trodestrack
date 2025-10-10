@@ -237,12 +237,12 @@
   - [x] **Status:** EKF has this, UKF missing
   - [x] **Tests:** Add to `tests/filters/test_ukf_accuracy.py`
 
-- [ ] **Shared Filter Config/State Refactor** - `models/ekf.py`, `models/ukf.py`
-  - [ ] Extract common config/state dataclasses usable by EKF and UKF
-  - [ ] Move shared helpers (init, ZUPT, gating) into neutral module
-  - [ ] Update both filters to consume shared structures without casting
-  - [ ] **Impact:** Reduces duplication, keeps filter behavior aligned as features expand
-  - [ ] **Tests:** Regression pass on EKF/UKF suites; add serialization round-trip if needed
+- [x] **Shared Filter Config/State Refactor** - `models/ekf.py`, `models/ukf.py`
+  - [x] Extract common config/state dataclasses usable by EKF and UKF
+  - [x] Move shared helpers (init, ZUPT, gating) into neutral module
+  - [x] Update both filters to consume shared structures without casting
+  - [x] **Impact:** Reduces duplication, keeps filter behavior aligned as features expand
+  - [x] **Tests:** Added `tests/models/test_filter_common.py`; reran EKF/UKF suites
 
 ### 📊 Summary
 

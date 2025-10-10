@@ -250,9 +250,9 @@ class TestJosephFormIntegration:
         sig = inspect.signature(joseph_update)
         params = list(sig.parameters.keys())
 
-        # Should accept P, K, H, R
-        assert "P" in params
-        assert "K" in params
+        # Should accept cov_prior, gain, H, R
+        assert "cov_prior" in params
+        assert "gain" in params
         assert "H" in params
         assert "R" in params
 

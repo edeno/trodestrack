@@ -33,7 +33,7 @@ References:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import NamedTuple, cast
+from typing import NamedTuple
 
 import jax.numpy as jnp
 import numpy as np
@@ -41,9 +41,9 @@ from jax import lax, vmap
 
 from trodestrack.models.utils import build_G_matrix
 
-from trodestrack.models.ekf import (
-    EKFConfig,
-    EKFState,
+from trodestrack.models.filter_common import (
+    FilterCoreConfig,
+    FilterState,
     chi2_threshold,
     dynamics_function,
     initialize_state,
@@ -51,6 +51,7 @@ from trodestrack.models.ekf import (
     psd_solve,
     symmetrize,
     update_zupt,
+    wrap_angle,
 )
 
 # =============================================================================
@@ -59,108 +60,15 @@ from trodestrack.models.ekf import (
 
 
 @dataclass
-class UKFConfig:
-    """Unscented Kalman Filter configuration.
+class UKFConfig(FilterCoreConfig):
+    """Unscented Kalman filter configuration extending FilterCoreConfig."""
 
-    Inherits process noise and measurement noise settings from EKF.
-    Adds UKF-specific hyperparameters for sigma-point generation.
-
-    Process noise RATES (Q matrix diagonal, variance per unit time):
-        Same as EKF - see ekf.py EKFConfig for details.
-
-    Measurement noise (R matrix diagonal):
-        measurement_noise_pos: Camera position noise (m²)
-        measurement_noise_heading: LED heading noise (rad²)
-
-    IMU noise densities:
-        imu_gyro_noise_density: Gyroscope noise density (rad/s/√Hz)
-        imu_accel_noise_density: Accelerometer noise density (m/s²/√Hz)
-
-    Dynamics parameters:
-        damping_coeff: Velocity damping coefficient λ (1/s)
-        led_distance: Front-back LED spacing (m)
-
-    UKF hyperparameters:
-        alpha: Spread of sigma points (typically 1e-3 to 1)
-            - Smaller values keep points closer to mean
-            - Larger values spread points further out
-            - Typical: 1e-3 (conservative) or sqrt(3) (standard)
-
-        beta: Prior knowledge about distribution (optimal=2 for Gaussian)
-            - Incorporates higher-order moments
-            - beta=2 is optimal for Gaussian priors
-
-        kappa: Secondary scaling parameter
-            - Typically 0 or 3-n (where n=state dimension)
-            - kappa=0 common choice for moderate dimensions
-            - kappa=3-n ensures positive semi-definite covariance
-
-    Lambda computation:
-        lambda = alpha² * (n + kappa) - n
-        This determines sigma-point spread: sqrt((n + lambda) * P)
-    """
-
-    # Process noise RATES (variance/second, will be scaled by dt in filter)
-    process_noise_pos: float = 0.02  # m²/s → 1cm std @ 200Hz
-    process_noise_vel: float = 2.0  # (m/s)²/s → 10cm/s std @ 200Hz
-    process_noise_heading: float = 0.02  # rad²/s → 0.01rad std @ 200Hz
-    # Bias process noise
-    process_noise_gyro_bias: float = 2e-6  # (rad/s)²/s → slow drift
-    process_noise_accel_bias: float = 2e-4  # (m/s²)²/s → slow drift
-
-    # Measurement noise
-    measurement_noise_pos: float = 0.005**2  # (0.5 cm)²
-    measurement_noise_heading: float = 0.05**2  # (~3 deg)²
-
-    # IMU noise densities
-    imu_gyro_noise_density: float = 0.0001  # rad/s/√Hz
-    imu_accel_noise_density: float = 0.005  # m/s²/√Hz
-
-    # Dynamics
-    damping_coeff: float = 0.5  # 1/s
-    led_distance: float | None = 0.04  # 4 cm (None = auto-detect from data)
-
-    # Outlier rejection via Mahalanobis distance gating
-    use_mahalanobis_gating: bool = False  # Enable χ² gating
-    mahalanobis_threshold_prob: float = 0.997  # p-value for χ² threshold
-
-    # Heading pseudo-measurement from LED pair (feature parity with EKF)
-    use_heading_measurement: bool = False  # Enable heading observation from LED vector
-    led_distance_tolerance: float = 0.3  # ±30% tolerance for LED spacing gating
-    adaptive_heading_noise: bool = True  # Scale R_heading by baseline geometry
-
-    # Blackout-aware process noise (parity with EKF)
-    adaptive_q_during_dropout: bool = True  # Inflate kinematic Q when vision drops
-    dropout_q_pos_multiplier: float = 10.0  # Multiplier for position diffusion during dropouts
-    dropout_q_vel_multiplier: float = 10.0  # Multiplier for velocity diffusion during dropouts
-    dropout_q_bias_multiplier: float = 0.1  # Multiplier for bias random walks during dropouts
-    freeze_bias_during_blackout: bool = False  # Set bias Q=0 when no vision
-    reduce_imu_noise_during_blackout: bool = False  # Reduce input noise when no vision
-    blackout_imu_noise_scale: float = 0.5  # Scale factor for IMU noise (0.25-0.5 recommended)
-
-    # Zero-velocity update (ZUPT) parameters (shared with EKF)
-    enable_zupt: bool = False  # Enable ZUPT pseudo-measurement when stationary
-    zupt_velocity_threshold: float = 0.05  # Velocity magnitude threshold (m/s)
-    zupt_measurement_noise: float = 0.01**2  # ZUPT R matrix value ((m/s)²)
-
-    # UKF hyperparameters (defaults from dynamax/sbitzer UKF-exposed)
     alpha: float = 1.732  # sqrt(3), Sigma-point spread
     beta: float = 2.0  # Prior knowledge (2 = Gaussian optimal)
     kappa: float = 1.0  # Secondary scaling
 
 
-class UKFState(NamedTuple):
-    """UKF state representation.
-
-    Identical to EKF state structure for compatibility.
-
-    Attributes:
-        mean: State mean [x, y, vx, vy, θ, b_gz, b_ax, b_ay] (8,)
-        cov: State covariance (8, 8)
-    """
-
-    mean: jnp.ndarray  # (8,)
-    cov: jnp.ndarray  # (8, 8)
+UKFState = FilterState
 
 
 class UKFResult(NamedTuple):
@@ -777,8 +685,6 @@ def update_heading(
         Always performs update (JAX-friendly). Invalid observations are
         gated via R=1e6 → K≈0 → no actual update.
     """
-    from trodestrack.models.ekf import wrap_angle
-
     mask_bool = jnp.asarray(mask, dtype=bool)
 
     def no_update(state_in: UKFState) -> tuple[UKFState, jnp.ndarray]:
@@ -1082,18 +988,14 @@ def unscented_kalman_filter(
             mask_cam_jax[t_idx],
         )
 
-        # Zero-velocity update (reuse EKF implementation for parity)
-        ekf_state_after_heading = EKFState(
-            mean=state_after_heading.mean,
-            cov=state_after_heading.cov,
-        )
-        ekf_state_after_zupt, log_lik_zupt = update_zupt(
-            ekf_state_after_heading,
-            cast(EKFConfig, config_for_filter),
+        # Zero-velocity update (reuse shared implementation for parity)
+        state_after_zupt, log_lik_zupt = update_zupt(
+            state_after_heading,
+            config_for_filter,
         )
         state_filt = UKFState(
-            mean=ekf_state_after_zupt.mean,
-            cov=ekf_state_after_zupt.cov,
+            mean=state_after_zupt.mean,
+            cov=state_after_zupt.cov,
         )
 
         # Total log-likelihood (position + heading + ZUPT)

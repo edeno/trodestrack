@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-10 - Shared Filter Core Refactor
+
+**Added:**
+- Introduced `models/filter_common.py` consolidating `FilterCoreConfig`, `FilterState`, and shared helpers (`initialize_state`, `dynamics_function`, `measurement_function`, `update_zupt`, etc.).
+- New regression coverage in `tests/models/test_filter_common.py` to assert config parity and shared helper interoperability across EKF/UKF.
+
+**Changed:**
+- `EKFConfig`/`UKFConfig` now inherit from the shared `FilterCoreConfig`, and the filter modules expose the shared `FilterState` type directly.
+- EKF/UKF modules consume the shared helpers instead of duplicating logic, eliminating cross-module imports and keeping features aligned.
+- `joseph_update` is now defined once with descriptive parameter names and the tests expect the new signature (no backward-compat shim).
+
+**Verification:**
+- `uv run pytest tests/models/test_filter_common.py`
+- `uv run pytest tests/filters/test_ekf_heading_measurement.py tests/filters/test_ukf_accuracy.py`
+
 ### Session: 2025-10-10 - UKF Heading Mask Parity
 
 **Added:**

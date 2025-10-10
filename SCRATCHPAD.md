@@ -2,6 +2,25 @@
 
 Development notes and debugging history for trodestrack project.
 
+## 2025-10-10 - Shared Filter Core Refactor (Milestone 3 Medium Priority)
+
+### Problem
+
+- EKF and UKF each defined their own config dataclasses, state containers, and helper functions, causing drift between implementations and forcing UKF to import internals from `ekf.py`.
+- Lack of shared tests meant config defaults could diverge silently, risking behaviour mismatches against PRD requirements.
+
+### Resolution
+
+- Introduced `src/trodestrack/models/filter_common.py` housing `FilterCoreConfig`, `FilterState`, and shared helpers (`initialize_state`, `dynamics_function`, `measurement_function`, `update_zupt`, etc.).
+- Refactored `EKFConfig`/`UKFConfig` to inherit from `FilterCoreConfig` and now surface the shared `FilterState` directly via the filter modules.
+- Updated EKF/UKF modules to consume the shared utilities and removed cross-module imports, reducing duplication and keeping features in lockstep.
+- Dropped the temporary backwards-compat wrapper around `joseph_update`; the shared helper now exposes descriptive parameter names directly and tests were updated accordingly.
+
+### Verification
+
+- `uv run pytest tests/models/test_filter_common.py`
+- `uv run pytest tests/filters/test_ekf_heading_measurement.py tests/filters/test_ukf_accuracy.py`
+
 ## 2025-10-10 - UKF Heading Mask Parity (PRD §8)
 
 ### Problem
