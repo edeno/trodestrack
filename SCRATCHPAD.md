@@ -1752,3 +1752,32 @@ See git history for:
 - Rat IMU simulation with realistic OU dynamics
 - Test suite for stationary, constant velocity, circular, and dropout scenarios
 - NIS/NEES consistency diagnostics
+## 2025-10-10 — Layout wiring, smoke tests, and test timings
+
+- StateLayout threaded through EKF/UKF and offline smoothers
+  - Added `get_heading_index()` helper (2D-only guard) and removed hard-coded `x[4]` usages.
+  - `dynamics_function()` and `measurement_function()` now layout-aware; EKF/UKF pass `layout` explicitly.
+  - `initialize_state(..., layout=...)` maps mean/cov to correct indices and dimension.
+  - Offline smoothers (`rts_smoother`, `sigma_point_smoother`) use layout to read heading for Q assembly.
+
+- Tests added
+  - `tests/models/test_layout_smoke.py`: initialize/measurement mapping; EKF vision_only; UKF 2d_cam_3d_imu.
+  - `tests/runtime/test_smoother_layout_smoke.py`: smoother smoke for vision_only + 2d_cam_3d_imu; UKF n=10 shape guard.
+
+- Marked slow tests and documented runtimes in docstrings
+  - PRD acceptance, smoother parity, offline smoother, analytic long-dropout tests are `@pytest.mark.slow`.
+  - Runtime notes added to each slow test (observed locally on this machine).
+
+- Suite timing (tests/ only; excludes external `dynamax_code/*`)
+  - Not-slow: ~119.4 s
+  - Slow-only: ~91.3 s
+  - Total: ~210.7 s (~3m31s)
+
+- How to run
+  - Fast: `.venv/bin/pytest -q -m "not slow" tests`
+  - Slow only: `.venv/bin/pytest -q -m slow tests`
+  - Full: `.venv/bin/pytest -q tests`
+
+- Notes
+  - `dynamax_code/*` tests require `dynamax` and are not part of the project suite.
+  - Addressed NameError from layout scoping inside EKF closures; added explicit `layout=` threading.
