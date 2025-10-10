@@ -129,6 +129,15 @@ class UKFConfig:
     led_distance_tolerance: float = 0.3  # ±30% tolerance for LED spacing gating
     adaptive_heading_noise: bool = True  # Scale R_heading by baseline geometry
 
+    # Blackout-aware process noise (parity with EKF)
+    adaptive_q_during_dropout: bool = True  # Inflate kinematic Q when vision drops
+    dropout_q_pos_multiplier: float = 10.0  # Multiplier for position diffusion during dropouts
+    dropout_q_vel_multiplier: float = 10.0  # Multiplier for velocity diffusion during dropouts
+    dropout_q_bias_multiplier: float = 0.1  # Multiplier for bias random walks during dropouts
+    freeze_bias_during_blackout: bool = False  # Set bias Q=0 when no vision
+    reduce_imu_noise_during_blackout: bool = False  # Reduce input noise when no vision
+    blackout_imu_noise_scale: float = 0.5  # Scale factor for IMU noise (0.25-0.5 recommended)
+
     # Zero-velocity update (ZUPT) parameters (shared with EKF)
     enable_zupt: bool = False  # Enable ZUPT pseudo-measurement when stationary
     zupt_velocity_threshold: float = 0.05  # Velocity magnitude threshold (m/s)
@@ -437,6 +446,7 @@ def predict_step(
     u_imu: jnp.ndarray,
     dt_imu: float,
     config: UKFConfig,
+    has_vision: bool = True,
 ) -> UKFState:
     """UKF prediction step using IMU measurement via unscented transform.
 
@@ -481,14 +491,44 @@ def predict_step(
     P_pred = jnp.tensordot(w_cov, _outer_product_batch(deviations, deviations), axes=1)
 
     # Add process noise Q (time-scaled)
-    q_bg = config.process_noise_gyro_bias * dt_imu
-    q_bax = config.process_noise_accel_bias * dt_imu
-    q_bay = config.process_noise_accel_bias * dt_imu
-    q_px = config.process_noise_pos * dt_imu
-    q_py = config.process_noise_pos * dt_imu
-    q_vx = config.process_noise_vel * dt_imu
-    q_vy = config.process_noise_vel * dt_imu
-    q_th = config.process_noise_heading * dt_imu
+    dtype = m.dtype
+    q_bg = jnp.asarray(config.process_noise_gyro_bias * dt_imu, dtype=dtype)
+    q_bax = jnp.asarray(config.process_noise_accel_bias * dt_imu, dtype=dtype)
+    q_bay = jnp.asarray(config.process_noise_accel_bias * dt_imu, dtype=dtype)
+    q_px = jnp.asarray(config.process_noise_pos * dt_imu, dtype=dtype)
+    q_py = jnp.asarray(config.process_noise_pos * dt_imu, dtype=dtype)
+    q_vx = jnp.asarray(config.process_noise_vel * dt_imu, dtype=dtype)
+    q_vy = jnp.asarray(config.process_noise_vel * dt_imu, dtype=dtype)
+    q_th = jnp.asarray(config.process_noise_heading * dt_imu, dtype=dtype)
+
+    if config.adaptive_q_during_dropout:
+        pos_scale = lax.cond(
+            has_vision,
+            lambda: jnp.asarray(1.0, dtype=dtype),
+            lambda: jnp.asarray(config.dropout_q_pos_multiplier, dtype=dtype),
+        )
+        vel_scale = lax.cond(
+            has_vision,
+            lambda: jnp.asarray(1.0, dtype=dtype),
+            lambda: jnp.asarray(config.dropout_q_vel_multiplier, dtype=dtype),
+        )
+        bias_scale_adaptive = lax.cond(
+            has_vision,
+            lambda: jnp.asarray(1.0, dtype=dtype),
+            lambda: jnp.asarray(config.dropout_q_bias_multiplier, dtype=dtype),
+        )
+    else:
+        pos_scale = jnp.asarray(1.0, dtype=dtype)
+        vel_scale = jnp.asarray(1.0, dtype=dtype)
+        bias_scale_adaptive = jnp.asarray(1.0, dtype=dtype)
+
+    q_px = q_px * pos_scale
+    q_py = q_py * pos_scale
+    q_vx = q_vx * vel_scale
+    q_vy = q_vy * vel_scale
+    q_bg = q_bg * bias_scale_adaptive
+    q_bax = q_bax * bias_scale_adaptive
+    q_bay = q_bay * bias_scale_adaptive
 
     Q_proc = jnp.diag(jnp.array([q_px, q_py, q_vx, q_vy, q_th, q_bg, q_bax, q_bay]))
 
@@ -497,11 +537,30 @@ def predict_step(
     std_f = config.imu_accel_noise_density * jnp.sqrt(dt_imu)
     Q_u = jnp.diag(jnp.array([std_w**2, std_f**2, std_f**2]))
 
+    # Blackout-aware IMU noise scaling (parity with EKF)
+    imu_noise_scale = lax.cond(
+        config.reduce_imu_noise_during_blackout,
+        lambda: lax.select(has_vision, 1.0, config.blackout_imu_noise_scale),
+        lambda: 1.0,
+    )
+    Q_u = Q_u * imu_noise_scale
+
     # Build G matrix for input noise propagation (shared utility with EKF)
     theta = m[4]
     G = build_G_matrix(theta, dt_imu)
 
     Q = Q_proc + G @ Q_u @ G.T
+
+    # Optional bias freezing during blackout
+    bias_scale = lax.cond(
+        config.freeze_bias_during_blackout,
+        lambda: lax.select(has_vision, 1.0, 0.0),
+        lambda: 1.0,
+    )
+    Q = Q.at[5, 5].set(Q[5, 5] * bias_scale)
+    Q = Q.at[6, 6].set(Q[6, 6] * bias_scale)
+    Q = Q.at[7, 7].set(Q[7, 7] * bias_scale)
+
     P_pred = P_pred + Q
 
     # Symmetrize for numerical stability
@@ -937,6 +996,9 @@ def unscented_kalman_filter(
         """Single filtering step at camera frame t_idx."""
         state_prev, log_lik_accum = carry
 
+        # Check if we have vision at this timestep (for blackout-aware Q scaling)
+        has_vision_t = mask_cam_jax[t_idx]
+
         # Propagate using IMU samples in this segment
         def propagate_from_prev(state_in):
             """Propagate from previous camera frame to current."""
@@ -958,7 +1020,7 @@ def unscented_kalman_filter(
                         lambda: t_imu_jax[imu_idx] - t_imu_jax[imu_idx - 1],
                         lambda: jnp.array(dt_imu_mean),
                     )
-                    return predict_step(s, u, dt, config_for_filter)
+                    return predict_step(s, u, dt, config_for_filter, has_vision_t)
 
                 def no_propagate(s):
                     return s

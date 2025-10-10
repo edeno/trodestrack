@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-10 - Blackout-Aware Process Noise Adaptation
+
+**Added:**
+- Adaptive dropout tuning knobs (`adaptive_q_during_dropout`, `dropout_q_*_multiplier`) in both `EKFConfig` and `UKFConfig` to inflate translational diffusion and temper bias random walks when vision is unavailable.
+- UKF propagation now receives the per-frame vision mask so sigma-point prediction can share the same blackout heuristics as the EKF path.
+- Regression coverage via `test_ekf_adaptive_process_noise_scales_dropout_covariance` to guard covariance inflation and bias damping behavior during synthetic blackouts.
+
+**Changed:**
+- EKF/UKF `predict_step` now applies JAX-friendly scaling via `lax.cond`, keeps dtype consistency, and reuses existing bias-freeze / IMU-noise scaling hooks.
+- Analytic EKF/UKF fixtures pin dropout multipliers for deterministic tests while allowing targeted scenarios to crank the adaptive gains.
+
+**Verification:**
+- `uv run pytest tests/filters/test_ekf_analytic.py::test_ekf_adaptive_process_noise_scales_dropout_covariance`
+- `uv run pytest tests/filters/test_ekf_analytic.py`
+- `uv run pytest tests/filters/test_ukf_accuracy.py`
+
 ### Session: 2025-10-10 - ZUPT Parity for EKF/UKF
 
 **Added:**

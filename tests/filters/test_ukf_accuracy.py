@@ -71,6 +71,11 @@ def ukf_config():
         # Dynamics
         damping_coeff=0.5,  # 1/s
         led_distance=0.04,  # 4 cm
+        # Adaptive dropout tuning (explicit for stability in deterministic tests)
+        adaptive_q_during_dropout=False,
+        dropout_q_pos_multiplier=5.0,
+        dropout_q_vel_multiplier=5.0,
+        dropout_q_bias_multiplier=0.1,
         # UKF parameters (defaults from dynamax)
         alpha=1.732,  # sqrt(3), Sigma-point spread
         beta=2.0,  # Prior knowledge (2 = Gaussian optimal)
@@ -93,6 +98,10 @@ def ekf_config():
         imu_accel_noise_density=0.005,
         damping_coeff=0.5,
         led_distance=0.04,
+        adaptive_q_during_dropout=False,
+        dropout_q_pos_multiplier=5.0,
+        dropout_q_vel_multiplier=5.0,
+        dropout_q_bias_multiplier=0.1,
     )
 
 

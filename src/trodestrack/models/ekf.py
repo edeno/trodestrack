@@ -117,6 +117,10 @@ class EKFConfig:
     adaptive_heading_noise: bool = True  # Scale R_heading by baseline geometry
 
     # Blackout-aware process noise (P0 mitigation for camera dropouts)
+    adaptive_q_during_dropout: bool = True  # Inflate kinematic Q when vision drops
+    dropout_q_pos_multiplier: float = 10.0  # Multiplier for position diffusion during dropouts
+    dropout_q_vel_multiplier: float = 10.0  # Multiplier for velocity diffusion during dropouts
+    dropout_q_bias_multiplier: float = 0.1  # Multiplier for bias random walks during dropouts
     freeze_bias_during_blackout: bool = False  # Set bias Q=0 when no vision
     reduce_imu_noise_during_blackout: bool = False  # Reduce input noise when no vision
     blackout_imu_noise_scale: float = 0.5  # Scale factor for IMU noise (0.25-0.5 recommended)
@@ -852,16 +856,46 @@ def predict_step(
 
     # Time-scaled process noise for random walks and kinematic diffusion
     # Biases: random walk ~ q_b * dt
-    q_bg = config.process_noise_gyro_bias * dt_imu
-    q_bax = config.process_noise_accel_bias * dt_imu
-    q_bay = config.process_noise_accel_bias * dt_imu
+    dtype = m.dtype
+    q_bg = jnp.asarray(config.process_noise_gyro_bias * dt_imu, dtype=dtype)
+    q_bax = jnp.asarray(config.process_noise_accel_bias * dt_imu, dtype=dtype)
+    q_bay = jnp.asarray(config.process_noise_accel_bias * dt_imu, dtype=dtype)
 
     # Kinematics: simple dt scaling (could use dt² for position if needed)
-    q_px = config.process_noise_pos * dt_imu
-    q_py = config.process_noise_pos * dt_imu
-    q_vx = config.process_noise_vel * dt_imu
-    q_vy = config.process_noise_vel * dt_imu
-    q_th = config.process_noise_heading * dt_imu
+    q_px = jnp.asarray(config.process_noise_pos * dt_imu, dtype=dtype)
+    q_py = jnp.asarray(config.process_noise_pos * dt_imu, dtype=dtype)
+    q_vx = jnp.asarray(config.process_noise_vel * dt_imu, dtype=dtype)
+    q_vy = jnp.asarray(config.process_noise_vel * dt_imu, dtype=dtype)
+    q_th = jnp.asarray(config.process_noise_heading * dt_imu, dtype=dtype)
+
+    if config.adaptive_q_during_dropout:
+        pos_scale = lax.cond(
+            has_vision,
+            lambda: jnp.asarray(1.0, dtype=dtype),
+            lambda: jnp.asarray(config.dropout_q_pos_multiplier, dtype=dtype),
+        )
+        vel_scale = lax.cond(
+            has_vision,
+            lambda: jnp.asarray(1.0, dtype=dtype),
+            lambda: jnp.asarray(config.dropout_q_vel_multiplier, dtype=dtype),
+        )
+        bias_scale_adaptive = lax.cond(
+            has_vision,
+            lambda: jnp.asarray(1.0, dtype=dtype),
+            lambda: jnp.asarray(config.dropout_q_bias_multiplier, dtype=dtype),
+        )
+    else:
+        pos_scale = jnp.asarray(1.0, dtype=dtype)
+        vel_scale = jnp.asarray(1.0, dtype=dtype)
+        bias_scale_adaptive = jnp.asarray(1.0, dtype=dtype)
+
+    q_px = q_px * pos_scale
+    q_py = q_py * pos_scale
+    q_vx = q_vx * vel_scale
+    q_vy = q_vy * vel_scale
+    q_bg = q_bg * bias_scale_adaptive
+    q_bax = q_bax * bias_scale_adaptive
+    q_bay = q_bay * bias_scale_adaptive
 
     Q_proc = jnp.diag(jnp.array([q_px, q_py, q_vx, q_vy, q_th, q_bg, q_bax, q_bay]))
 

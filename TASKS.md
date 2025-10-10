@@ -201,18 +201,18 @@
   - [x] **PRD Ref:** Section 9 - "Zero-velocity constraints during stationary periods"
   - [x] **Tests:** Added `tests/filters/test_zupt.py` coverage (stationary, moving, dropout scenarios)
 
-- [ ] **Blackout-Aware Process Noise Adaptation** - `models/ekf.py`, `models/ukf.py`
-  - [ ] Detect vision dropout (`mask_cam=False`)
-  - [ ] Increase Q on position/velocity during dropout (e.g., 10x multiplier)
-  - [ ] Freeze or slow bias random walk during dropout (e.g., 0.1x multiplier)
-  - [ ] Add config parameters:
-    - [ ] `adaptive_q_during_dropout: bool = True`
-    - [ ] `dropout_q_pos_multiplier: float = 10.0`
-    - [ ] `dropout_q_vel_multiplier: float = 10.0`
-    - [ ] `dropout_q_bias_multiplier: float = 0.1`
-  - [ ] **Impact:** Over-confident or over-diffusive drift through dropouts, harder to meet PRD 5s blackout bound
-  - [ ] **PRD Ref:** Section 12 - "Adaptive Q during vision loss"
-  - [ ] **Tests:** Add to `tests/filters/test_ekf_analytic.py::test_ekf_handles_vision_dropout`
+- [x] **Blackout-Aware Process Noise Adaptation** - `models/ekf.py`, `models/ukf.py`
+  - [x] Detect vision dropout (`mask_cam=False`)
+  - [x] Increase Q on position/velocity during dropout (configurable multiplier)
+  - [x] Freeze or slow bias random walk during dropout (configurable multiplier)
+  - [x] Add config parameters:
+    - [x] `adaptive_q_during_dropout: bool = True`
+    - [x] `dropout_q_pos_multiplier: float = 10.0`
+    - [x] `dropout_q_vel_multiplier: float = 10.0`
+    - [x] `dropout_q_bias_multiplier: float = 0.1`
+  - [x] **Impact:** Over-confident or over-diffusive drift through dropouts, harder to meet PRD 5s blackout bound
+  - [x] **PRD Ref:** Section 12 - "Adaptive Q during vision loss"
+  - [x] **Tests:** Added `test_ekf_adaptive_process_noise_scales_dropout_covariance` in `tests/filters/test_ekf_analytic.py`
 
 ### ⚙️ Medium Priority (Robustness Polish)
 

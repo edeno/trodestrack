@@ -32,6 +32,7 @@ from trodestrack.models.ekf import (
 from jax import vmap
 
 from trodestrack.models.ukf import UKFConfig, UKFResult
+from trodestrack.models.utils import build_G_matrix
 
 # =============================================================================
 # Smoother Result Types
@@ -231,9 +232,6 @@ def rts_smoother(
         # Get IMU indices for interval [t_idx, t_idx+1)
         imu_indices = imu_index_arrays[t_idx + 1]
 
-        # Process noise rates (derived from state dimension)
-        Q_rate_base = build_Q_rate(ekf_config, n)
-
         # Blackout-aware noise scaling
         # Check if either frame k or k+1 is in blackout
         in_blackout = (mask_cam_jax is not None) and (
@@ -263,27 +261,94 @@ def rts_smoother(
                 # Compute Jacobian around linearization point (IEKS)
                 F_k = F_jac(x_lin_s, u, dt)
 
-                # Apply blackout-aware noise scaling
-                # For 8D state: indices [0:2]=pos, [2:4]=vel, [4]=heading, [5]=gyro_bias, [6:8]=accel_bias
-                Q_rate = lax.cond(
-                    in_blackout,
-                    lambda qr: jnp.where(
-                        jnp.arange(n) >= 5,  # All bias indices (5:8 for standard 8D state)
-                        qr * 0.05,  # Freeze bias RW almost completely (20x reduction)
-                        jnp.where(
-                            jnp.arange(n) >= 2,  # Velocity and heading indices (2:5)
-                            qr * 0.25,  # Strong reduction for velocity/heading (4x)
-                            qr * 0.5,  # Moderate reduction for position (2x)
-                        ),
-                    ),
-                    lambda qr: qr,
-                    Q_rate_base,
-                )
+                dtype = x_s.dtype
 
-                Q_k = Q_rate * dt
+                if n == 8:
+                    q_px = jnp.asarray(ekf_config.process_noise_pos * dt, dtype=dtype)
+                    q_py = jnp.asarray(ekf_config.process_noise_pos * dt, dtype=dtype)
+                    q_vx = jnp.asarray(ekf_config.process_noise_vel * dt, dtype=dtype)
+                    q_vy = jnp.asarray(ekf_config.process_noise_vel * dt, dtype=dtype)
+                    q_th = jnp.asarray(ekf_config.process_noise_heading * dt, dtype=dtype)
+                    q_bg = jnp.asarray(ekf_config.process_noise_gyro_bias * dt, dtype=dtype)
+                    q_bax = jnp.asarray(ekf_config.process_noise_accel_bias * dt, dtype=dtype)
+                    q_bay = jnp.asarray(ekf_config.process_noise_accel_bias * dt, dtype=dtype)
+
+                    if ekf_config.adaptive_q_during_dropout:
+                        pos_scale = lax.cond(
+                            in_blackout,
+                            lambda: jnp.asarray(ekf_config.dropout_q_pos_multiplier, dtype=dtype),
+                            lambda: jnp.asarray(1.0, dtype=dtype),
+                        )
+                        vel_scale = lax.cond(
+                            in_blackout,
+                            lambda: jnp.asarray(ekf_config.dropout_q_vel_multiplier, dtype=dtype),
+                            lambda: jnp.asarray(1.0, dtype=dtype),
+                        )
+                        bias_scale_adaptive = lax.cond(
+                            in_blackout,
+                            lambda: jnp.asarray(ekf_config.dropout_q_bias_multiplier, dtype=dtype),
+                            lambda: jnp.asarray(1.0, dtype=dtype),
+                        )
+                    else:
+                        pos_scale = jnp.asarray(1.0, dtype=dtype)
+                        vel_scale = jnp.asarray(1.0, dtype=dtype)
+                        bias_scale_adaptive = jnp.asarray(1.0, dtype=dtype)
+
+                    q_px = q_px * pos_scale
+                    q_py = q_py * pos_scale
+                    q_vx = q_vx * vel_scale
+                    q_vy = q_vy * vel_scale
+                    q_bg = q_bg * bias_scale_adaptive
+                    q_bax = q_bax * bias_scale_adaptive
+                    q_bay = q_bay * bias_scale_adaptive
+
+                    Q_k = jnp.diag(
+                        jnp.array(
+                            [q_px, q_py, q_vx, q_vy, q_th, q_bg, q_bax, q_bay],
+                            dtype=dtype,
+                        )
+                    )
+                else:
+                    Q_rate_base = build_Q_rate(ekf_config, n)
+                    q_diag = jnp.diag(Q_rate_base) * dt
+                    if ekf_config.adaptive_q_during_dropout:
+                        scale = lax.cond(
+                            in_blackout,
+                            lambda: jnp.asarray(ekf_config.dropout_q_pos_multiplier, dtype=dtype),
+                            lambda: jnp.asarray(1.0, dtype=dtype),
+                        )
+                        q_diag = q_diag * scale
+                    Q_k = jnp.diag(q_diag.astype(dtype))
 
                 # Predict covariance
-                P_pred = F_k @ P_s @ F_k.T + Q_k
+                # IMU input noise mapping (reuse EKF logic for blackout-aware scaling)
+                std_w = jnp.asarray(ekf_config.imu_gyro_noise_density * jnp.sqrt(dt), dtype=dtype)
+                std_f = jnp.asarray(ekf_config.imu_accel_noise_density * jnp.sqrt(dt), dtype=dtype)
+                Q_u = jnp.diag(jnp.array([std_w**2, std_f**2, std_f**2], dtype=dtype))
+
+                if ekf_config.reduce_imu_noise_during_blackout:
+                    imu_scale = lax.cond(
+                        in_blackout,
+                        lambda: jnp.asarray(ekf_config.blackout_imu_noise_scale, dtype=dtype),
+                        lambda: jnp.asarray(1.0, dtype=dtype),
+                    )
+                    Q_u = Q_u * imu_scale
+
+                theta = x_s[4]
+                G = build_G_matrix(theta, dt)
+                Q_total = Q_k + G @ Q_u @ G.T
+
+                if ekf_config.freeze_bias_during_blackout:
+                    bias_scale = lax.cond(
+                        in_blackout,
+                        lambda: jnp.asarray(0.0, dtype=dtype),
+                        lambda: jnp.asarray(1.0, dtype=dtype),
+                    )
+                    Q_total = Q_total.at[5, 5].set(Q_total[5, 5] * bias_scale)
+                    Q_total = Q_total.at[6, 6].set(Q_total[6, 6] * bias_scale)
+                    Q_total = Q_total.at[7, 7].set(Q_total[7, 7] * bias_scale)
+
+                P_pred = F_k @ P_s @ F_k.T + Q_total
                 P_pred = symmetrize(P_pred)
 
                 # Accumulate Jacobian: F_total = F_new @ F_prev

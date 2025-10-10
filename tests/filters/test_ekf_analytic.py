@@ -11,6 +11,8 @@ Tests verify:
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -79,6 +81,11 @@ def ekf_config():
         damping_coeff=0.5,  # 1/s
         # LED configuration
         led_distance=0.04,  # 4 cm front-back spacing
+        # Adaptive dropout tuning (slightly conservative for stability in analytic tests)
+        adaptive_q_during_dropout=False,
+        dropout_q_pos_multiplier=5.0,
+        dropout_q_vel_multiplier=5.0,
+        dropout_q_bias_multiplier=0.1,
     )
 
 
@@ -374,6 +381,101 @@ def test_ekf_handles_vision_dropout(sim_config, ekf_config):
                 assert (
                     var_during >= var_before * 0.99
                 ), f"Covariance should not shrink during dropout (before={var_before:.6f}, during={var_during:.6f})"
+
+
+def test_ekf_adaptive_process_noise_scales_dropout_covariance(ekf_config):
+    """Adaptive blackout process noise should inflate position/velocity Q and tame bias drift."""
+
+    # Generate deterministic constant-velocity trajectory without random dropouts
+    sim = simulate_constant_velocity(
+        SimpleSimConfig(
+            duration_s=8.0,
+            fs_imu=200.0,
+            fs_cam=30.0,
+            gyro_noise_density=0.001,
+            accel_noise_density=0.05,
+            gyro_bias_std=0.01,
+            accel_bias_std=0.05,
+            cam_noise_std=0.005,
+            cam_dropout_prob=0.0,
+        ),
+        initial_position=np.array([0.0, 0.0]),
+        velocity=np.array([0.15, -0.05]),
+        seed=123,
+    )
+
+    # Force a synthetic dropout window (approx. 1.5 seconds)
+    mask_cam = sim["mask_cam"].copy()
+    dropout_start = 90  # ~3 s at 30 Hz
+    dropout_end = 135  # ~4.5 s
+    mask_cam[dropout_start:dropout_end] = False
+
+    # Baseline configuration (no adaptive scaling)
+    base_config = replace(ekf_config, adaptive_q_during_dropout=False)
+    base_result = extended_kalman_filter(
+        ekf_config=base_config,
+        t_imu=sim["t_imu"],
+        U_imu=sim["U_imu"],
+        t_cam=sim["t_cam_exp"],
+        Z_cam_led1=sim["Z_cam_led1"],
+        Z_cam_led2=sim["Z_cam_led2"],
+        mask_cam=mask_cam,
+    )
+
+    # Adaptive configuration with aggressive scaling to make effect measurable
+    adaptive_config = replace(
+        ekf_config,
+        adaptive_q_during_dropout=True,
+        dropout_q_pos_multiplier=12.0,
+        dropout_q_vel_multiplier=18.0,
+        dropout_q_bias_multiplier=0.05,
+    )
+    adaptive_result = extended_kalman_filter(
+        ekf_config=adaptive_config,
+        t_imu=sim["t_imu"],
+        U_imu=sim["U_imu"],
+        t_cam=sim["t_cam_exp"],
+        Z_cam_led1=sim["Z_cam_led1"],
+        Z_cam_led2=sim["Z_cam_led2"],
+        mask_cam=mask_cam,
+    )
+
+    dropout_mask = ~mask_cam
+    assert dropout_mask.sum() > 0, "Synthetic dropout window should contain frames"
+
+    base_pred = np.asarray(base_result.predicted_covariances)
+    adaptive_pred = np.asarray(adaptive_result.predicted_covariances)
+
+    # Position covariance trace should inflate noticeably under adaptive scaling
+    base_pos_var = np.trace(base_pred[dropout_mask][:, :2, :2], axis1=1, axis2=2)
+    adaptive_pos_var = np.trace(adaptive_pred[dropout_mask][:, :2, :2], axis1=1, axis2=2)
+    assert adaptive_pos_var.mean() > base_pos_var.mean() * 1.5
+
+    # Bias covariance growth per dropout step should shrink with multiplier
+    dropout_indices = np.where(dropout_mask)[0]
+    assert dropout_indices.size > 0
+    assert dropout_indices[0] > 0
+
+    base_bias_cov = base_pred[dropout_indices, 5, 5]
+    adaptive_bias_cov = adaptive_pred[dropout_indices, 5, 5]
+
+    # Previous covariance to compute per-step growth (first reference uses frame before dropout)
+    base_bias_prev = np.concatenate(
+        [
+            [base_result.filtered_covariances[dropout_indices[0] - 1, 5, 5]],
+            base_bias_cov[:-1],
+        ]
+    )
+    adaptive_bias_prev = np.concatenate(
+        [
+            [adaptive_result.filtered_covariances[dropout_indices[0] - 1, 5, 5]],
+            adaptive_bias_cov[:-1],
+        ]
+    )
+
+    base_bias_growth = base_bias_cov - base_bias_prev
+    adaptive_bias_growth = adaptive_bias_cov - adaptive_bias_prev
+    assert adaptive_bias_growth.mean() <= base_bias_growth.mean() * 0.2
 
 
 # =============================================================================

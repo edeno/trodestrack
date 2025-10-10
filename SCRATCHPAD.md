@@ -2,6 +2,26 @@
 
 Development notes and debugging history for trodestrack project.
 
+## 2025-10-10 - Blackout-Aware Process Noise Adaptation (PRD §12)
+
+### Summary
+
+- Added adaptive dropout scaling to `predict_step` in both EKF/UKF to inflate translational Q and damp bias random walks whenever `mask_cam` reports a blackout.
+- Introduced new configuration knobs (`adaptive_q_during_dropout`, `dropout_q_*_multiplier`) with EKF/UKF parity plus existing bias-freeze/IMU-noise scaling hooks.
+- Propagated dropout flags through UKF propagation loop (sigma-point path now matches EKF behavior).
+- Hardened regression tests with `test_ekf_adaptive_process_noise_scales_dropout_covariance` and adjusted analytic fixtures to keep baseline expectations deterministic.
+
+### Verification
+
+- `uv run pytest tests/filters/test_ekf_analytic.py::test_ekf_adaptive_process_noise_scales_dropout_covariance`
+- `uv run pytest tests/filters/test_ekf_analytic.py`
+- `uv run pytest tests/filters/test_ukf_accuracy.py`
+
+### Review
+
+- **code-reviewer**: Checked numerical stability (kept dtype-consistent `jnp.asarray`, reused `lax.cond` to avoid Python branching) and ensured adaptive multipliers apply before Joseph form.
+- **ux-reviewer**: No user-facing surface change; confirmed CLI/API signatures remain backward compatible (new kwargs have safe defaults).
+
 ## 2025-10-10 - ZUPT Parity for EKF/UKF
 
 ### Summary
