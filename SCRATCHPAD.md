@@ -2,6 +2,50 @@
 
 Development notes and debugging history for trodestrack project.
 
+## 2025-10-09 - Robustness Test Suite (M3)
+
+### Summary
+
+Created comprehensive robustness test suite (`tests/filters/test_robustness.py`) covering Milestone 3 requirements. All 8 tests passing. Following TDD principles: tests written first, refined based on actual filter behavior.
+
+**Test Coverage:**
+
+1. **Outlier Rejection (Gating)**
+   - Extreme outliers rejected via Mahalanobis gating (5m error → RMSE < 5cm)
+   - Physically impossible measurements rejected (1m teleportation)
+   - Gating already working well - tests pass immediately
+
+2. **Swap & Dropout Stability**
+   - Frequent persistent swaps (0.5 events/sec) → covariance bounded < 10cm²
+   - 5-second dropout → covariance grows to ~10 m² but doesn't diverge (< 100 m²)
+   - Correlated swaps + dropouts → no NaN/Inf, filter remains stable
+
+3. **Bias Estimation Stability**
+   - 3-second dropout → bias covariance grows but remains < 0.1
+   - Multiple dropouts (25% rate) → bias estimates stay finite and within physical bounds
+   - Circular motion → bias convergence resumes after dropout recovery
+
+**Code Quality:**
+
+- Ruff/black linting: ✅ all checks passed
+- Named constants for thresholds (PRD-linked)
+- Type hints added for clarity (`-> None` on test methods)
+- Detailed assertion messages for debugging
+- Test execution time: 34.87s (8 tests)
+
+**Key Insights:**
+
+- After 5s dropout, covariance can legitimately grow to 10 m² (realistic uncertainty growth)
+- Covariance *decreases* when measurements resume (not increases) - updated test expectations
+- Gating is robust: immediately rejects extreme outliers without tuning
+- Bias estimates remain stable even with high dropout rates (25% correlated)
+
+**Files Modified:**
+- `tests/filters/test_robustness.py` (new, 400 lines, 8 tests)
+- `TASKS.md` (M3 robustness tests now ✅)
+
+---
+
 ## 2025-10-09 - Zero-Velocity Update (ZUPT) Implementation
 
 ### Summary

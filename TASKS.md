@@ -160,10 +160,10 @@
   - [x] No tunneling through walls
   - [x] Trajectory continuity preserved
   - [x] Deterministic with same seed
-- [ ] `tests/filters/test_robustness.py`
-  - [ ] Out-of-bounds measurements rejected
-  - [ ] Swap & dropout handling stable
-  - [ ] Bias estimation stable across occlusions
+- [x] `tests/filters/test_robustness.py`
+  - [x] Out-of-bounds measurements rejected
+  - [x] Swap & dropout handling stable
+  - [x] Bias estimation stable across occlusions
 
 ### 📊 Deliverables
 
