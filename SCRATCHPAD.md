@@ -2,6 +2,23 @@
 
 Development notes and debugging history for trodestrack project.
 
+## 2025-10-10 - Heading Measurement Robustness (PRD §8)
+
+### Problem
+
+- Vision dropouts flagged by `mask_cam` still triggered heading pseudo-updates because `update_heading` ignored the mask whenever stale LED coordinates remained finite.
+- Hard-coded 4 cm fallback in `update_heading` broke auto-detected baselines and silently disabled heading updates for wider LED spacing.
+
+### Resolution
+
+- Added `mask` parameter to `update_heading` and guard the update with `lax.cond`, returning the prior state and zero log-likelihood when the camera mask is false.
+- Extended spacing/geometry tests with `test_heading_update_respects_camera_mask` to assert that masked frames leave the state/covariance untouched while valid frames still adjust heading.
+- Removed the 4 cm fallback by deriving `expected_spacing` from configuration when available and otherwise trusting the observed LED baseline, with validation powered by the new `test_heading_update_handles_unknown_led_distance`.
+
+### Verification
+
+- `uv run pytest tests/filters/test_ekf_heading_measurement.py`
+
 ## 2025-10-10 - Blackout-Aware Process Noise Adaptation (PRD §12)
 
 ### Debug Follow-up (2025-10-10 PM)

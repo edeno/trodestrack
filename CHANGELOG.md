@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-10 - Heading Measurement Robustness Guard
+
+**Added:**
+- `update_heading` now accepts the per-frame camera mask and skips pseudo-measurements during dropouts to avoid integrating stale LED geometry.
+- Regression coverage via `test_heading_update_respects_camera_mask` to assert masked frames leave the EKF state and covariance untouched.
+- Regression coverage via `test_heading_update_handles_unknown_led_distance` to guard against hard-coded spacing assumptions when `led_distance` is auto-detected.
+
+**Changed:**
+- Sequential EKF heading update uses `lax.cond` for the mask guard while preserving existing spacing tolerance and adaptive-noise logic.
+- Removed the legacy 4 cm fallback by deriving LED spacing from configuration or the observed baseline when auto-detect is active.
+
+**Verification:**
+- `uv run pytest tests/filters/test_ekf_heading_measurement.py`
+
 ### Session: 2025-10-10 - Blackout-Aware Process Noise Adaptation
 
 **Added:**

@@ -14,7 +14,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
+import jax.numpy as jnp
+
+from trodestrack.models.ekf import EKFConfig, EKFState, extended_kalman_filter, update_heading
 from trodestrack.qa.metrics import compute_heading_rmse
 from trodestrack.sim.rat_imu import RatIMUSimConfig, simulate_rat_imu
 
@@ -236,6 +238,105 @@ def test_adaptive_noise_scales_with_baseline() -> None:
             assert exp_R < R_base
         else:
             assert np.isclose(exp_R, R_base)
+
+
+def test_heading_update_respects_camera_mask() -> None:
+    """Heading pseudo-measurement must respect camera mask dropouts.
+
+    When `mask_cam` is False (vision dropout), even finite LED coordinates should
+    not trigger a heading update—state and covariance must remain unchanged and
+    log-likelihood should be zero.
+    """
+    state = EKFState(
+        mean=jnp.array([0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0]),
+        cov=jnp.eye(8) * 0.1,
+    )
+
+    # LED geometry implying heading of ~0 rad (LED2 in front of LED1)
+    z_led1 = jnp.array([0.0, 0.0])
+    z_led2 = jnp.array([0.04, 0.0])
+
+    config = EKFConfig(
+        use_heading_measurement=True,
+        led_distance=0.04,
+        measurement_noise_heading=0.01**2,
+    )
+
+    # Dropout: mask False but LED arrays still contain finite values
+    state_dropout, log_lik_dropout = update_heading(
+        state,
+        z_led1,
+        z_led2,
+        config,
+        mask=False,
+    )
+
+    # Valid observation should adjust the heading estimate
+    state_valid, log_lik_valid = update_heading(
+        state,
+        z_led1,
+        z_led2,
+        config,
+        mask=True,
+    )
+
+    np.testing.assert_allclose(
+        np.array(state_dropout.mean),
+        np.array(state.mean),
+        err_msg="Heading update must be skipped when mask is False.",
+    )
+    np.testing.assert_allclose(
+        np.array(state_dropout.cov),
+        np.array(state.cov),
+        err_msg="Covariance should remain unchanged when heading update is masked.",
+    )
+    assert log_lik_dropout == pytest.approx(
+        0.0
+    ), "Masked heading update should yield zero log-likelihood."
+
+    # Ensure valid observation produced a non-trivial update (mean or covariance change)
+    assert not np.allclose(
+        np.array(state_valid.mean),
+        np.array(state.mean),
+    ), "Valid heading observation should update the state mean."
+    assert log_lik_valid != pytest.approx(
+        0.0
+    ), "Valid heading observation should produce non-zero log-likelihood."
+
+
+def test_heading_update_handles_unknown_led_distance() -> None:
+    """Auto-detected (None) LED spacing should still allow heading updates."""
+    state = EKFState(
+        mean=jnp.array([0.0, 0.0, 0.0, 0.0, 0.3, 0.0, 0.0, 0.0]),
+        cov=jnp.eye(8) * 0.1,
+    )
+
+    # Observed spacing far from the legacy 4 cm default to catch hard-coded fallbacks
+    z_led1 = jnp.array([0.0, 0.0])
+    z_led2 = jnp.array([0.08, 0.0])  # 8 cm baseline
+
+    config = EKFConfig(
+        use_heading_measurement=True,
+        led_distance=None,  # Force auto-detect path
+        measurement_noise_heading=0.01**2,
+    )
+
+    updated_state, log_lik = update_heading(
+        state,
+        z_led1,
+        z_led2,
+        config,
+        mask=True,
+    )
+
+    # Heading mean should move toward 0 rad (geometry indicates 0 heading)
+    assert not np.allclose(
+        np.array(updated_state.mean),
+        np.array(state.mean),
+    ), "Heading update should run even when led_distance is None."
+    assert log_lik != pytest.approx(
+        0.0
+    ), "Heading update should produce a finite log-likelihood when using observed spacing."
 
 
 def test_auto_detection_estimates_spacing() -> None:

@@ -216,17 +216,18 @@
 
 ### ⚙️ Medium Priority (Robustness Polish)
 
-- [ ] **Heading Measurement Robustness** - `models/ekf.py`
-  - [ ] Add LED spacing tolerance gating
-    - [ ] Reject heading update when spacing deviates too much from expected
-    - [ ] Use `led_distance_tolerance` parameter (already exists in config)
-  - [ ] Implement adaptive heading noise
-    - [ ] Increase R when observed LED spacing is short/poor
-    - [ ] Scale based on geometry quality metric
-  - [ ] **Impact:** Over-trusted heading during near-collinear LED geometry or partial occlusions
-  - [ ] **PRD Ref:** Section 8 - "Heading constraints with LED spacing validation"
-  - [ ] **Status:** Basic heading update exists in EKF, needs robustness features
-  - [ ] **Tests:** Enhance `tests/filters/test_ekf_heading_measurement.py`
+- [x] **Heading Measurement Robustness** - `models/ekf.py`
+  - [x] Add LED spacing tolerance gating
+    - [x] Reject heading update when spacing deviates too much from expected
+    - [x] Use `led_distance_tolerance` parameter (already exists in config)
+  - [x] Implement adaptive heading noise
+    - [x] Increase R when observed LED spacing is short/poor
+    - [x] Scale based on geometry quality metric
+  - [x] Respect camera dropout mask to block stale heading updates
+  - [x] **Impact:** Over-trusted heading during near-collinear LED geometry or partial occlusions
+  - [x] **PRD Ref:** Section 8 - "Heading constraints with LED spacing validation"
+  - [x] **Status:** Basic heading update exists in EKF, needs robustness features
+  - [x] **Tests:** Enhance `tests/filters/test_ekf_heading_measurement.py`
 
 - [ ] **UKF Heading Pseudo-Measurement** - `models/ukf.py`
   - [ ] Port EKF's `update_heading()` to UKF

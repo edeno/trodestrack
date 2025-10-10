@@ -1162,17 +1162,20 @@ def update_heading(
     z_led1: jnp.ndarray,
     z_led2: jnp.ndarray,
     config: EKFConfig,
+    mask: bool,
 ) -> tuple[EKFState, jnp.ndarray]:
     """Apply 1D heading pseudo-measurement update from LED pair.
 
     Sequential update after position update. Uses large-R gating pattern
-    for JAX compatibility (no branching).
+    for JAX compatibility (no branching) and respects the camera mask to
+    prevent updates during vision dropouts.
 
     Args:
         state: Current state (after position update)
         z_led1: LED1 observation (2,) in meters
         z_led2: LED2 observation (2,) in meters
         config: EKF configuration
+        mask: Camera validity flag (False skips update entirely)
 
     Returns:
         Updated state and heading measurement log-likelihood
@@ -1188,89 +1191,109 @@ def update_heading(
         Always performs update (JAX-friendly). Invalid observations are
         gated via R=1e6 → K≈0 → no actual update.
     """
-    m, P = state.mean, state.cov
+    mask_bool = jnp.asarray(mask, dtype=bool)
 
-    # Check LED validity
-    led1_valid = jnp.isfinite(z_led1).all()
-    led2_valid = jnp.isfinite(z_led2).all()
-    both_leds = led1_valid & led2_valid
+    def no_update(state_in: EKFState) -> tuple[EKFState, jnp.ndarray]:
+        return state_in, jnp.array(0.0, dtype=state_in.mean.dtype)
 
-    # Compute heading observation (always compute, gate via R)
-    dx = z_led2[0] - z_led1[0]
-    dy = z_led2[1] - z_led1[1]
-    heading_obs = jnp.arctan2(dy, dx)
+    def do_update(state_in: EKFState) -> tuple[EKFState, jnp.ndarray]:
+        m, P = state_in.mean, state_in.cov
 
-    # Check LED spacing validity
-    obs_spacing = jnp.sqrt(dx**2 + dy**2)
+        # Check LED validity
+        led1_valid = jnp.isfinite(z_led1).all()
+        led2_valid = jnp.isfinite(z_led2).all()
+        both_leds = led1_valid & led2_valid
 
-    # Determine expected spacing (use config value, which may be auto-detected)
-    expected_spacing = config.led_distance if config.led_distance is not None else 0.04
+        # Compute heading observation (always compute, gate via R)
+        dx = z_led2[0] - z_led1[0]
+        dy = z_led2[1] - z_led1[1]
+        heading_obs = jnp.arctan2(dy, dx)
 
-    # Spacing ratio and tolerance check (handle NaN safely)
-    spacing_ratio = obs_spacing / expected_spacing
-    spacing_valid = jnp.isfinite(spacing_ratio) & (
-        (spacing_ratio > (1 - config.led_distance_tolerance))
-        & (spacing_ratio < (1 + config.led_distance_tolerance))
-    )
+        # Check LED spacing validity
+        obs_spacing = jnp.sqrt(dx**2 + dy**2)
+        obs_spacing_valid = jnp.isfinite(obs_spacing) & (obs_spacing > 1e-6)
 
-    # Overall validity: both LEDs + spacing OK + feature enabled
-    use_heading = config.use_heading_measurement & both_leds & spacing_valid
+        if config.led_distance is not None:
+            expected_spacing = jnp.asarray(config.led_distance, dtype=obs_spacing.dtype)
+            spacing_ratio = jnp.where(
+                obs_spacing_valid,
+                obs_spacing / expected_spacing,
+                jnp.zeros_like(obs_spacing),
+            )
+            spacing_valid = obs_spacing_valid & (
+                (spacing_ratio > (1 - config.led_distance_tolerance))
+                & (spacing_ratio < (1 + config.led_distance_tolerance))
+            )
+        else:
+            expected_spacing = jnp.where(
+                obs_spacing_valid,
+                obs_spacing,
+                jnp.asarray(1.0, dtype=obs_spacing.dtype),
+            )
+            spacing_valid = obs_spacing_valid
 
-    # Base heading measurement noise
-    R_base = config.measurement_noise_heading
+        # Overall validity: both LEDs + spacing OK + feature enabled
+        use_heading = config.use_heading_measurement & both_leds & spacing_valid
 
-    # Adaptive noise scaling (if enabled and spacing is valid)
-    # Clip obs_spacing to avoid division by zero/NaN
-    obs_spacing_safe = jnp.where(
-        jnp.isfinite(obs_spacing) & (obs_spacing > 0.001), obs_spacing, expected_spacing
-    )
-    R_heading_adapted = lax.cond(
-        config.adaptive_heading_noise,
-        lambda: R_base * (expected_spacing / obs_spacing_safe) ** 2,
-        lambda: R_base,
-    )
+        # Base heading measurement noise
+        R_base = config.measurement_noise_heading
 
-    # Gate via large R (JAX-friendly: no branching)
-    # Valid: R ≈ 0.05² → strong update
-    # Invalid: R = 1e6 → K ≈ 0 → no update
-    R_heading = lax.select(use_heading, R_heading_adapted, 1e6)
+        # Adaptive noise scaling (if enabled and spacing is valid)
+        # Clip obs_spacing to avoid division by zero/NaN
+        obs_spacing_safe = jnp.where(
+            obs_spacing_valid,
+            obs_spacing,
+            jnp.maximum(expected_spacing, jnp.asarray(1e-3, dtype=obs_spacing.dtype)),
+        )
+        R_heading_adapted = lax.cond(
+            config.adaptive_heading_noise,
+            lambda: R_base * (expected_spacing / obs_spacing_safe) ** 2,
+            lambda: R_base,
+        )
 
-    # 1D heading update
-    # Measurement function: h(x) = x[4] (heading)
-    h_pred = m[4]
+        # Gate via large R (JAX-friendly: no branching)
+        # Valid: R ≈ 0.05² → strong update
+        # Invalid: R = 1e6 → K ≈ 0 → no update
+        R_heading = lax.select(use_heading, R_heading_adapted, 1e6)
 
-    # Innovation with angle wrapping (replace NaN with 0 for gated case)
-    innov_raw = wrap_angle(heading_obs - h_pred)
-    innov = jnp.where(jnp.isfinite(innov_raw), innov_raw, 0.0)
+        # 1D heading update
+        # Measurement function: h(x) = x[4] (heading)
+        h_pred = m[4]
 
-    # Jacobian: H = [0, 0, 0, 0, 1, 0, 0, 0]
-    # Shape (1, 8) for proper matrix operations
-    H = jnp.zeros((1, 8))
-    H = H.at[0, 4].set(1.0)
+        # Innovation with angle wrapping (replace NaN with 0 for gated case)
+        innov_raw = wrap_angle(heading_obs - h_pred)
+        innov = jnp.where(jnp.isfinite(innov_raw), innov_raw, 0.0)
 
-    # Innovation covariance (scalar, but treat as 1x1 matrix)
-    S = H @ P @ H.T + jnp.array([[R_heading]])
+        # Jacobian: H = [0, 0, 0, 0, 1, 0, 0, 0]
+        # Shape (1, 8) for proper matrix operations
+        H = jnp.zeros((1, 8))
+        H = H.at[0, 4].set(1.0)
 
-    # Kalman gain (8, 1)
-    K = psd_solve(S, H @ P).T
+        # Innovation covariance (scalar, but treat as 1x1 matrix)
+        S = H @ P @ H.T + jnp.array([[R_heading]])
 
-    # Mean update
-    m_upd = m + (K @ jnp.array([[innov]])).ravel()
-    m_upd = m_upd.at[4].set(wrap_angle(m_upd[4]))  # Wrap after update
+        # Kalman gain (8, 1)
+        K = psd_solve(S, H @ P).T
 
-    # Covariance update using Joseph form
-    R_mat = jnp.array([[R_heading]])
-    P_upd = joseph_update(P, K, H, R_mat)
+        # Mean update
+        m_upd = m + (K @ jnp.array([[innov]])).ravel()
+        m_upd = m_upd.at[4].set(wrap_angle(m_upd[4]))  # Wrap after update
 
-    # Log-likelihood (only meaningful if heading was used)
-    # For gated observations (R=1e6), this will be near zero
-    S_scalar = S[0, 0]  # Extract scalar from 1x1 matrix
-    log_lik = -0.5 * (jnp.log(2 * jnp.pi) + jnp.log(S_scalar) + innov**2 / S_scalar)
+        # Covariance update using Joseph form
+        R_mat = jnp.array([[R_heading]])
+        P_upd = joseph_update(P, K, H, R_mat)
 
-    # Zero out log-likelihood if not used (for cleaner accounting)
-    log_lik = lax.select(use_heading, log_lik, 0.0)
+        # Log-likelihood (only meaningful if heading was used)
+        # For gated observations (R=1e6), this will be near zero
+        S_scalar = S[0, 0]  # Extract scalar from 1x1 matrix
+        log_lik = -0.5 * (jnp.log(2 * jnp.pi) + jnp.log(S_scalar) + innov**2 / S_scalar)
 
-    return EKFState(m_upd, P_upd), log_lik
+        # Zero out log-likelihood if not used (for cleaner accounting)
+        log_lik = lax.select(use_heading, log_lik, 0.0)
+
+        return EKFState(m_upd, P_upd), log_lik
+
+    return lax.cond(mask_bool, do_update, no_update, state)
 
 
 def update_zupt(
@@ -1552,6 +1575,7 @@ def extended_kalman_filter(
             Z_cam_led1_jax[t_idx],
             Z_cam_led2_jax[t_idx],
             config_for_filter,
+            mask_cam_jax[t_idx],
         )
 
         # Zero-velocity update (ZUPT) for stationary detection (sequential after heading)
