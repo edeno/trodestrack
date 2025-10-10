@@ -175,22 +175,40 @@ def test_build_Q_rate_standard_8d():
 
 
 def test_build_Q_rate_non_standard_dimensions():
-    """Test Q_rate fallback for non-8D states uses uniform noise."""
+    """Test Q_rate for non-8D states uses StateLayout when available, fallback otherwise."""
     from trodestrack.models.process_noise import build_Q_rate
 
     config = EKFConfig()
 
-    # Test various non-8D dimensions
-    for n in [4, 6, 10, 12]:
+    # Test dimensions with known layouts
+    # n=10: LAYOUT_2D_CAM_3D_IMU
+    Q_10 = build_Q_rate(config, 10)
+    assert Q_10.shape == (10, 10)
+    # Should match LAYOUT_2D_CAM_3D_IMU structure
+    expected_10 = jnp.array(
+        [
+            config.process_noise_pos,  # x
+            config.process_noise_pos,  # y
+            config.process_noise_vel,  # vx
+            config.process_noise_vel,  # vy
+            config.process_noise_vel,  # vz
+            config.process_noise_heading,  # θ
+            config.process_noise_gyro_bias,  # b_gz
+            config.process_noise_accel_bias,  # b_ax
+            config.process_noise_accel_bias,  # b_ay
+            config.process_noise_accel_bias,  # b_az
+        ]
+    )
+    assert jnp.allclose(jnp.diag(Q_10), expected_10)
+    assert jnp.allclose(Q_10, jnp.diag(jnp.diag(Q_10)))
+
+    # Test dimensions without known layouts (should use uniform fallback)
+    for n in [4, 6, 12]:
         Q = build_Q_rate(config, n)
-
-        # Check shape
         assert Q.shape == (n, n)
-
-        # Should use uniform noise = process_noise_pos for all dimensions
+        # Should use uniform noise = process_noise_pos for unknown dimensions
         expected_diag = jnp.full(n, config.process_noise_pos)
         assert jnp.allclose(jnp.diag(Q), expected_diag)
-
         # Verify off-diagonal is zero (diagonal matrix)
         assert jnp.allclose(Q, jnp.diag(jnp.diag(Q)))
 
