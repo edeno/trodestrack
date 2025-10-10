@@ -288,7 +288,6 @@
 - [ ] `tests/benchmark/test_throughput.py`
   - [ ] Offline smoother ≥ 10× realtime (CPU)
   - [ ] Online EKF latency ≤ 33 ms (CPU)
-  - [ ] GPU benchmark ≥ 50× realtime (manual)
 
 ### 📊 QA & Visualization
 
