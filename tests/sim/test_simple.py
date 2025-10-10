@@ -60,10 +60,14 @@ def test_stationary_returns_correct_keys(config):
         "Z_cam_led1",
         "Z_cam_led2",
         "mask_cam",
-        "mask_led1",  # New: individual LED masks
-        "mask_led2",  # New: individual LED masks
+        "mask_led1",  # Individual LED masks
+        "mask_led2",  # Individual LED masks
         "confidence_led1",
         "confidence_led2",
+        "led1_truth_cam",  # Ground truth LED positions before noise/swaps/reflections
+        "led2_truth_cam",  # Ground truth LED positions before noise/swaps/reflections
+        "swap_applied",  # Artifact tracking
+        "led_reflection_applied",  # Artifact tracking
         "bias_gyro",
         "bias_accel_x",
         "bias_accel_y",

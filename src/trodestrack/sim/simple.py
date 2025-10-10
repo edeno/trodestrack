@@ -225,6 +225,15 @@ def simulate_stationary(
     mask_led1 = mask_cam.copy()
     mask_led2 = np.zeros(T_cam, dtype=bool)  # LED2 always dropped
 
+    # Ground truth LED positions (before noise/swaps/reflections)
+    # Simple sims don't apply swaps or reflections
+    led1_truth_cam = np.column_stack([position[0] * np.ones(T_cam), position[1] * np.ones(T_cam)])
+    led2_truth_cam = np.full((T_cam, 2), np.nan)  # No LED2 in stationary
+
+    # Artifact tracking (simple sims don't apply swaps/reflections)
+    swap_applied = np.zeros(T_cam, dtype=bool)
+    led_reflection_applied = np.zeros(T_cam, dtype=bool)
+
     return {
         "t_imu": t_imu,
         "t_cam_exp": t_cam_exp,
@@ -238,6 +247,10 @@ def simulate_stationary(
         "mask_led2": mask_led2,  # Always False (no LED2)
         "confidence_led1": np.ones(T_cam),
         "confidence_led2": np.zeros(T_cam),
+        "led1_truth_cam": led1_truth_cam,
+        "led2_truth_cam": led2_truth_cam,
+        "swap_applied": swap_applied,
+        "led_reflection_applied": led_reflection_applied,
         "bias_gyro": bias_gyro,
         "bias_accel_x": bias_accel_x,
         "bias_accel_y": bias_accel_y,
@@ -354,6 +367,15 @@ def simulate_constant_velocity(
     mask_led1 = mask_cam.copy()
     mask_led2 = np.zeros(T_cam, dtype=bool)
 
+    # Ground truth LED positions (before noise/swaps/reflections)
+    # Simple sims don't apply swaps or reflections
+    led1_truth_cam = np.column_stack([x_cam, y_cam])
+    led2_truth_cam = np.full((T_cam, 2), np.nan)  # No LED2 in constant velocity
+
+    # Artifact tracking (simple sims don't apply swaps/reflections)
+    swap_applied = np.zeros(T_cam, dtype=bool)
+    led_reflection_applied = np.zeros(T_cam, dtype=bool)
+
     return {
         "t_imu": t_imu,
         "t_cam_exp": t_cam_exp,
@@ -367,6 +389,10 @@ def simulate_constant_velocity(
         "mask_led2": mask_led2,
         "confidence_led1": np.ones(T_cam),
         "confidence_led2": np.zeros(T_cam),
+        "led1_truth_cam": led1_truth_cam,
+        "led2_truth_cam": led2_truth_cam,
+        "swap_applied": swap_applied,
+        "led_reflection_applied": led_reflection_applied,
         "bias_gyro": bias_gyro,
         "bias_accel_x": bias_accel_x,
         "bias_accel_y": bias_accel_y,
@@ -529,6 +555,15 @@ def simulate_circular(
     mask_led1 = mask_cam.copy()
     mask_led2 = mask_cam.copy()
 
+    # Ground truth LED positions (before noise/swaps/reflections)
+    # Simple sims don't apply swaps or reflections
+    led1_truth_cam = np.column_stack([x_cam - dx, y_cam - dy])  # Back LED
+    led2_truth_cam = np.column_stack([x_cam + dx, y_cam + dy])  # Front LED
+
+    # Artifact tracking (simple sims don't apply swaps/reflections)
+    swap_applied = np.zeros(T_cam, dtype=bool)
+    led_reflection_applied = np.zeros(T_cam, dtype=bool)
+
     return {
         "t_imu": t_imu,
         "t_cam_exp": t_cam_exp,
@@ -541,7 +576,11 @@ def simulate_circular(
         "mask_led1": mask_led1,
         "mask_led2": mask_led2,
         "confidence_led1": np.ones(T_cam),
-        "confidence_led2": np.zeros(T_cam),
+        "confidence_led2": np.ones(T_cam),  # Both LEDs have confidence in circular
+        "led1_truth_cam": led1_truth_cam,
+        "led2_truth_cam": led2_truth_cam,
+        "swap_applied": swap_applied,
+        "led_reflection_applied": led_reflection_applied,
         "bias_gyro": bias_gyro,
         "bias_accel_x": bias_accel_x,
         "bias_accel_y": bias_accel_y,
