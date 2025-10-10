@@ -1360,6 +1360,7 @@ def extended_kalman_filter(
     Z_cam_led2: np.ndarray,
     mask_cam: np.ndarray,
     initial_state: EKFState | None = None,
+    conf_cam: np.ndarray | None = None,
 ) -> EKFResult:
     """Run Extended Kalman Filter on full trajectory.
 
@@ -1381,6 +1382,11 @@ def extended_kalman_filter(
         Z_cam_led2: LED2 observations (N_cam, 2) in meters
         mask_cam: Camera validity mask (N_cam,)
         initial_state: Optional initial state (if None, auto-initialize)
+        conf_cam: Camera confidence scores (N_cam, 4) for [led1_x, led1_y, led2_x, led2_y]
+            Range: [0, 1], where 1.0 = high confidence
+            If None, defaults to 1.0 (high confidence, backward compatible)
+            Measurement noise is scaled as: R_eff = R_base / clip(conf, min, 1.0)
+            PRD requirement: "DLC confidence → measurement noise scaling" (Section 13)
 
     Returns:
         EKF filtering result with states at camera times
@@ -1392,6 +1398,7 @@ def extended_kalman_filter(
     Z_cam_led1_jax = jnp.array(Z_cam_led1)
     Z_cam_led2_jax = jnp.array(Z_cam_led2)
     mask_cam_jax = jnp.array(mask_cam)
+    conf_cam_jax = None if conf_cam is None else jnp.array(conf_cam)
 
     # Auto-detect LED spacing if not specified
     # Store estimated value to return in result (immutability: do NOT mutate config)
@@ -1501,6 +1508,7 @@ def extended_kalman_filter(
             Z_cam_led2_jax[t_idx],
             mask_cam_jax[t_idx],
             config_for_filter,
+            None if conf_cam_jax is None else conf_cam_jax[t_idx],
         )
 
         # Heading measurement update (sequential after position)

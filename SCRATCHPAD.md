@@ -2,6 +2,66 @@
 
 Development notes and debugging history for trodestrack project.
 
+## 2025-10-09 - Camera Confidence Integration (PRD §13 Compliance)
+
+### Summary
+
+Implemented camera confidence scaling for EKF and UKF, addressing critical PRD violation: "DLC confidence → measurement noise scaling" was supported in update_step but never wired through top-level APIs.
+
+**Implementation:**
+
+1. **EKF API Enhancement** ([src/trodestrack/models/ekf.py](src/trodestrack/models/ekf.py)):
+   - Added `conf_cam: np.ndarray | None = None` parameter to `extended_kalman_filter()` (line 1363)
+   - Converts to JAX array and passes through to `update_step()` at each frame (line 1511)
+   - Backward compatible: None defaults to high confidence (all 1.0)
+   - Documentation links to PRD §13 requirement
+
+2. **UKF API Enhancement** ([src/trodestrack/models/ukf.py](src/trodestrack/models/ukf.py)):
+   - Added `conf_cam` parameter to `unscented_kalman_filter()` (line 684)
+   - Added `confidence` parameter to `update_step()` with processing logic (lines 423, 451-456)
+   - Implemented R scaling: `R_eff = R_base / conf` (element-wise, lines 502-503)
+   - Wired through filter pipeline (line 852)
+
+**Test Coverage:**
+
+- Created comprehensive test suite: [tests/filters/test_ekf_confidence_integration.py](tests/filters/test_ekf_confidence_integration.py) (257 lines, 5 tests)
+- ✅ All 5 tests passing (12.90s)
+- ✅ No regressions: 8 EKF tests + 6 UKF tests still pass
+
+**Test Cases:**
+
+1. `test_confidence_parameter_exists`: API signature verification
+2. `test_low_confidence_increases_uncertainty`: Low conf → larger posterior covariance (2x+)
+3. `test_confidence_none_defaults_to_high`: Backward compatibility (None ≡ explicit 1.0)
+4. `test_varying_confidence_across_frames`: Time-varying confidence affects uncertainty trajectory
+5. `test_confidence_affects_log_likelihood`: Confidence scaling impacts marginal log-likelihood (>5% change)
+
+**Key Design Decisions:**
+
+- Confidence clipping: [1e-2, 1.0] prevents R → ∞ numerical issues
+- Scaling formula: `R_i = R_base / conf_i` (matches EKF update_step pattern from commit a75d16a)
+- JAX compatibility: All operations use JAX primitives (no Python branching)
+
+**Impact:**
+
+- ✅ PRD §13 compliance restored
+- ✅ Enables proper DLC integration (low-confidence frames automatically down-weighted)
+- ✅ Improves NIS consistency under occlusions/motion blur
+- ✅ Robustness improvement: filter adapts to measurement quality
+
+**Known Limitations (Future Work):**
+
+- UKF still uses diagonal S approximation for log-likelihood (line 530-533)
+- Should migrate to lifted subspace operator (like EKF) for exact multivariate Gaussian
+- Huge-R masking (1e10) could be replaced with 2D/4D subspace projection
+
+**Files Modified:**
+- [src/trodestrack/models/ekf.py](src/trodestrack/models/ekf.py) - API + wiring (lines 1363, 1401, 1511)
+- [src/trodestrack/models/ukf.py](src/trodestrack/models/ukf.py) - API + implementation (lines 423, 451-456, 502-503, 684, 727, 852)
+- [tests/filters/test_ekf_confidence_integration.py](tests/filters/test_ekf_confidence_integration.py) - New test suite (257 lines)
+
+---
+
 ## 2025-10-09 - Robustness Test Suite (M3)
 
 ### Summary

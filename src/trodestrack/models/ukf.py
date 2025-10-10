@@ -420,6 +420,7 @@ def update_step(
     z_led2: jnp.ndarray,
     mask: bool,
     config: UKFConfig,
+    confidence: jnp.ndarray | None = None,
 ) -> tuple[UKFState, float]:
     """UKF measurement update step using camera observations via unscented transform.
 
@@ -429,6 +430,11 @@ def update_step(
         z_led2: LED2 observation [x, y] in meters
         mask: Observation validity flag
         config: UKF configuration
+        confidence: Confidence scores [led1_x, led1_y, led2_x, led2_y] (4,)
+            Range: [0, 1], where 1.0 = high confidence
+            If None, defaults to 1.0 (high confidence)
+            Measurement noise is scaled as: R_eff = R_base / clip(conf, min, 1.0)
+            NOTE: Current implementation uses diagonal R approximation (see issue)
 
     Returns:
         Tuple of (updated_state, log_likelihood)
@@ -441,6 +447,13 @@ def update_step(
         5. Kalman update using cross-covariance
     """
     m_pred, P_pred = state.mean, state.cov
+
+    # Process confidence scores (default to high confidence if not provided)
+    if confidence is None:
+        conf = jnp.ones(4)
+    else:
+        # Clip confidence to [1e-2, 1.0] to prevent numerical issues
+        conf = jnp.clip(confidence, 1e-2, 1.0)
 
     # If no valid observation, return prediction unchanged
     def no_update(m, P):
@@ -485,7 +498,10 @@ def update_step(
             S = jnp.tensordot(w_cov, _outer_product_batch(meas_deviations, meas_deviations), axes=1)
 
             # Add measurement noise R (masked for invalid observations)
-            R_diag = jnp.where(obs_mask, config.measurement_noise_pos, 1e10)
+            # Scale R by confidence: R_eff = R_base / conf (lower conf → larger R)
+            R_base = config.measurement_noise_pos
+            R_conf_scaled = R_base / conf  # Element-wise scaling
+            R_diag = jnp.where(obs_mask, R_conf_scaled, 1e10)
             R = jnp.diag(R_diag)
             S = S + R
 
@@ -681,6 +697,7 @@ def unscented_kalman_filter(
     Z_cam_led2: np.ndarray,
     mask_cam: np.ndarray,
     initial_state: UKFState | None = None,
+    conf_cam: np.ndarray | None = None,
 ) -> UKFResult:
     """Run Unscented Kalman Filter on full trajectory.
 
@@ -703,6 +720,11 @@ def unscented_kalman_filter(
         Z_cam_led2: LED2 observations (N_cam, 2) in meters
         mask_cam: Camera validity mask (N_cam,)
         initial_state: Optional initial state (if None, auto-initialize)
+        conf_cam: Camera confidence scores (N_cam, 4) for [led1_x, led1_y, led2_x, led2_y]
+            Range: [0, 1], where 1.0 = high confidence
+            If None, defaults to 1.0 (high confidence, backward compatible)
+            Measurement noise is scaled as: R_eff = R_base / clip(conf, min, 1.0)
+            PRD requirement: "DLC confidence → measurement noise scaling" (Section 13)
 
     Returns:
         UKF filtering result with states at camera times
@@ -718,6 +740,7 @@ def unscented_kalman_filter(
     Z_cam_led1_jax = jnp.array(Z_cam_led1)
     Z_cam_led2_jax = jnp.array(Z_cam_led2)
     mask_cam_jax = jnp.array(mask_cam)
+    conf_cam_jax = None if conf_cam is None else jnp.array(conf_cam)
 
     # Auto-detect LED spacing if not specified
     # Store estimated value to return in result (immutability: do NOT mutate config)
@@ -826,6 +849,7 @@ def unscented_kalman_filter(
             Z_cam_led2_jax[t_idx],
             mask_cam_jax[t_idx],
             config_for_filter,
+            None if conf_cam_jax is None else conf_cam_jax[t_idx],
         )
 
         # Heading measurement update (sequential after position)
