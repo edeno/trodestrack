@@ -2,6 +2,18 @@
 
 Development notes and debugging history for trodestrack project.
 
+## 2025-10-10 - ZUPT Parity for EKF/UKF
+
+### Summary
+
+- Ported EKF ZUPT logic into UKF pathway by wrapping the UKF state/config with shared EKF utilities.
+- Extended `tests/filters/test_zupt.py` with UKF-focused fixtures ensuring drift suppression and no false activation.
+- UKF now exposes the same `enable_zupt`, `zupt_velocity_threshold`, and `zupt_measurement_noise` knobs as EKF.
+
+### Verification
+
+- `uv run pytest tests/filters/test_zupt.py`
+
 ## 2025-10-09 - UKF Log-Likelihood Fix: Exact Multivariate Form + Lifted Subspace Operator
 
 ### Summary

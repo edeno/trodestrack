@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
+from trodestrack.models.ukf import UKFConfig, unscented_kalman_filter
 from trodestrack.qa.metrics import compute_velocity_rmse
 from trodestrack.sim.simple import simulate_stationary
 
@@ -291,3 +292,87 @@ class TestZUPTNumericalStability:
 
         assert jnp.all(jnp.isfinite(result.filtered_means))
         assert jnp.all(jnp.isfinite(result.filtered_covariances))
+
+
+class TestUKFZUPT:
+    """UKF ZUPT behavior should mirror EKF implementation."""
+
+    @staticmethod
+    def _run_ukf(sim, config: UKFConfig):
+        """Helper to run UKF with provided configuration."""
+        return unscented_kalman_filter(
+            ukf_config=config,
+            t_imu=sim["t_imu"],
+            U_imu=sim["U_imu"],
+            t_cam=sim["t_cam_exp"],
+            Z_cam_led1=sim["Z_cam_led1"],
+            Z_cam_led2=sim["Z_cam_led2"],
+            mask_cam=sim["mask_cam"],
+        )
+
+    def test_zupt_disabled_by_default(self):
+        """UKF should keep ZUPT disabled unless explicitly enabled."""
+        config = UKFConfig()
+        assert config.enable_zupt is False
+
+    def test_zupt_reduces_velocity_drift_stationary(self):
+        """UKF ZUPT should suppress velocity drift when stationary."""
+        from trodestrack.sim.simple import SimpleSimConfig
+
+        config = SimpleSimConfig(duration_s=10.0, fs_imu=400, fs_cam=30)
+        sim = simulate_stationary(
+            config=config, position=np.array([0.5, 0.5]), heading=0.0, seed=123
+        )
+
+        # Run UKF without ZUPT
+        config_no_zupt = UKFConfig(enable_zupt=False)
+        result_no_zupt = self._run_ukf(sim, config_no_zupt)
+
+        # Run UKF with ZUPT enabled
+        config_with_zupt = UKFConfig(
+            enable_zupt=True,
+            zupt_velocity_threshold=0.05,
+            zupt_measurement_noise=0.01**2,
+        )
+        result_with_zupt = self._run_ukf(sim, config_with_zupt)
+
+        truth_vel = np.zeros((len(sim["t_cam_exp"]), 2))
+        vel_rmse_no_zupt = compute_velocity_rmse(result_no_zupt.filtered_means[:, 2:4], truth_vel)
+        vel_rmse_with_zupt = compute_velocity_rmse(
+            result_with_zupt.filtered_means[:, 2:4], truth_vel
+        )
+
+        assert (
+            vel_rmse_with_zupt < vel_rmse_no_zupt * 0.7
+        ), f"UKF ZUPT did not reduce velocity error: {vel_rmse_with_zupt:.4f} vs {vel_rmse_no_zupt:.4f}"
+        assert (
+            vel_rmse_with_zupt < 0.02
+        ), f"UKF ZUPT velocity error too high: {vel_rmse_with_zupt:.4f} m/s"
+
+    def test_zupt_does_not_activate_during_motion(self):
+        """UKF ZUPT should stay inactive when velocity exceeds threshold."""
+        from trodestrack.sim.simple import SimpleSimConfig, simulate_constant_velocity
+
+        config = SimpleSimConfig(duration_s=5.0, fs_imu=400, fs_cam=30)
+        sim = simulate_constant_velocity(
+            config=config,
+            initial_position=np.array([0.3, 0.3]),
+            velocity=np.array([0.2, 0.0]),
+            seed=99,
+        )
+
+        config_with_zupt = UKFConfig(
+            enable_zupt=True,
+            zupt_velocity_threshold=0.05,
+            zupt_measurement_noise=0.01**2,
+        )
+        result = self._run_ukf(sim, config_with_zupt)
+
+        truth_vel = np.tile([0.2, 0.0], (len(sim["t_cam_exp"]), 1))
+        vel_rmse = compute_velocity_rmse(result.filtered_means[:, 2:4], truth_vel)
+        assert vel_rmse < 0.10, f"UKF velocity RMSE too high: {vel_rmse:.4f} m/s"
+
+        mean_vx = jnp.mean(result.filtered_means[30:, 2])
+        assert (
+            jnp.abs(mean_vx - 0.2) < 0.05
+        ), f"UKF ZUPT incorrectly suppressed motion: mean vx = {mean_vx:.3f}"

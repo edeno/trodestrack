@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-10 - ZUPT Parity for EKF/UKF
+
+**Added:**
+- UKF now supports zero-velocity updates by reusing the EKF ZUPT implementation, keeping behavior aligned across filters.
+- UKF configuration exposes `enable_zupt`, `zupt_velocity_threshold`, and `zupt_measurement_noise` parameters for user control.
+- Extended `tests/filters/test_zupt.py` with UKF-specific stationary/motion/dropout coverage to guard against regressions.
+
+**Verification:**
+- `uv run pytest tests/filters/test_zupt.py`
+
 ### Session: 2025-10-09 - Mahalanobis Gating Integration
 
 **Added:**

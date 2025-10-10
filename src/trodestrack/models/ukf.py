@@ -33,7 +33,7 @@ References:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import NamedTuple
+from typing import NamedTuple, cast
 
 import jax.numpy as jnp
 import numpy as np
@@ -42,12 +42,15 @@ from jax import lax, vmap
 from trodestrack.models.utils import build_G_matrix
 
 from trodestrack.models.ekf import (
+    EKFConfig,
+    EKFState,
     chi2_threshold,
     dynamics_function,
     initialize_state,
     measurement_function,
     psd_solve,
     symmetrize,
+    update_zupt,
 )
 
 # =============================================================================
@@ -125,6 +128,11 @@ class UKFConfig:
     use_heading_measurement: bool = False  # Enable heading observation from LED vector
     led_distance_tolerance: float = 0.3  # ±30% tolerance for LED spacing gating
     adaptive_heading_noise: bool = True  # Scale R_heading by baseline geometry
+
+    # Zero-velocity update (ZUPT) parameters (shared with EKF)
+    enable_zupt: bool = False  # Enable ZUPT pseudo-measurement when stationary
+    zupt_velocity_threshold: float = 0.05  # Velocity magnitude threshold (m/s)
+    zupt_measurement_noise: float = 0.01**2  # ZUPT R matrix value ((m/s)²)
 
     # UKF hyperparameters (defaults from dynamax/sbitzer UKF-exposed)
     alpha: float = 1.732  # sqrt(3), Sigma-point spread
@@ -979,15 +987,29 @@ def unscented_kalman_filter(
 
         # Heading measurement update (sequential after position)
         # Only applied if use_heading_measurement=True (gated via large R otherwise)
-        state_filt, log_lik_heading = update_heading(
+        state_after_heading, log_lik_heading = update_heading(
             state_after_pos,
             Z_cam_led1_jax[t_idx],
             Z_cam_led2_jax[t_idx],
             config_for_filter,
         )
 
-        # Total log-likelihood (position + heading)
-        log_lik_k = log_lik_pos + log_lik_heading
+        # Zero-velocity update (reuse EKF implementation for parity)
+        ekf_state_after_heading = EKFState(
+            mean=state_after_heading.mean,
+            cov=state_after_heading.cov,
+        )
+        ekf_state_after_zupt, log_lik_zupt = update_zupt(
+            ekf_state_after_heading,
+            cast(EKFConfig, config_for_filter),
+        )
+        state_filt = UKFState(
+            mean=ekf_state_after_zupt.mean,
+            cov=ekf_state_after_zupt.cov,
+        )
+
+        # Total log-likelihood (position + heading + ZUPT)
+        log_lik_k = log_lik_pos + log_lik_heading + log_lik_zupt
 
         # Store outputs
         outputs = {
