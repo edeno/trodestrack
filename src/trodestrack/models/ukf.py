@@ -865,7 +865,7 @@ def unscented_kalman_filter(
     Z_cam_led1_jax = jnp.array(Z_cam_led1)
     Z_cam_led2_jax = jnp.array(Z_cam_led2)
     mask_cam_jax = jnp.array(mask_cam)
-    conf_cam_jax = None if conf_cam is None else jnp.array(conf_cam)
+    # Precompute clipped confidences device-side for stable shapes
     conf_cam_jax = None if conf_cam is None else jnp.clip(jnp.array(conf_cam), 1e-2, 1.0)
 
     # Auto-detect LED spacing if not specified
