@@ -244,22 +244,6 @@
   - [ ] **Impact:** Reduces duplication, keeps filter behavior aligned as features expand
   - [ ] **Tests:** Regression pass on EKF/UKF suites; add serialization round-trip if needed
 
-### ✅ Recently Completed (This Session)
-
-- [x] **Camera Confidence Integration** (Commit `f9757c3`)
-  - [x] EKF: Added `conf_cam` parameter to `extended_kalman_filter()`
-  - [x] UKF: Added `conf_cam` parameter to `unscented_kalman_filter()`
-  - [x] Both: Wired through to `update_step()` with R scaling
-  - [x] 5 comprehensive tests in `tests/filters/test_ekf_confidence_integration.py`
-  - [x] **PRD Ref:** Section 13 - "DLC confidence → measurement noise scaling"
-
-- [x] **UKF Log-Likelihood Fix** (Commit `21ad555`)
-  - [x] Replaced diagonal S approximation with exact multivariate form
-  - [x] Added lifted subspace operator (`make_led_selector`, `compute_nis_and_loglik`)
-  - [x] Removed huge-R masking (1e10) in favor of 2D/4D subspace projection
-  - [x] NaN handling to prevent propagation
-  - [x] Marginal log-likelihood now finite and mathematically correct
-
 ### 📊 Summary
 
 **Blockers for M4:**
