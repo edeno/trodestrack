@@ -229,13 +229,13 @@
   - [x] **Status:** Basic heading update exists in EKF, needs robustness features
   - [x] **Tests:** Enhance `tests/filters/test_ekf_heading_measurement.py`
 
-- [ ] **UKF Heading Pseudo-Measurement** - `models/ukf.py`
-  - [ ] Port EKF's `update_heading()` to UKF
-  - [ ] Add `use_heading_measurement` config parameter
-  - [ ] Ensure parity with EKF heading update logic
-  - [ ] **Impact:** UKF doesn't benefit from heading constraints
-  - [ ] **Status:** EKF has this, UKF missing
-  - [ ] **Tests:** Add to `tests/filters/test_ukf_accuracy.py`
+- [x] **UKF Heading Pseudo-Measurement** - `models/ukf.py`
+  - [x] Port EKF's `update_heading()` to UKF
+  - [x] Add `use_heading_measurement` config parameter
+  - [x] Ensure parity with EKF heading update logic
+  - [x] **Impact:** UKF doesn't benefit from heading constraints
+  - [x] **Status:** EKF has this, UKF missing
+  - [x] **Tests:** Add to `tests/filters/test_ukf_accuracy.py`
 
 - [ ] **Shared Filter Config/State Refactor** - `models/ekf.py`, `models/ukf.py`
   - [ ] Extract common config/state dataclasses usable by EKF and UKF

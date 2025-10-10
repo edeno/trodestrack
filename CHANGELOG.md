@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-10 - UKF Heading Mask Parity
+
+**Added:**
+- `update_heading` now accepts the camera mask in the UKF path, mirroring EKF behavior and preventing masked frames from applying heading pseudo-measurements.
+- Regression coverage via `test_ukf_heading_respects_camera_mask` to assert that masked observations leave the UKF state and covariance untouched while valid frames adjust heading.
+
+**Changed:**
+- Ported EKF spacing tolerance and adaptive heading noise scaling to the UKF update, including large-R gating and zeroed log-likelihoods for rejected observations.
+- UKF heading update now wraps its logic in a JAX-friendly `lax.cond`, returning the prior state immediately for masked frames to avoid numerical drift from stale LED geometry.
+
+**Verification:**
+- `uv run pytest tests/filters/test_ukf_accuracy.py`
+
 ### Session: 2025-10-10 - Heading Measurement Robustness Guard
 
 **Added:**

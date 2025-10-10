@@ -748,17 +748,20 @@ def update_heading(
     z_led1: jnp.ndarray,
     z_led2: jnp.ndarray,
     config: UKFConfig,
+    mask: bool,
 ) -> tuple[UKFState, float]:
     """Apply 1D heading pseudo-measurement update from LED pair (UKF version).
 
     Sequential update after position update. Uses large-R gating pattern
-    for JAX compatibility (no branching), same as EKF.
+    for JAX compatibility (no branching), same as EKF. The camera mask is
+    respected to prevent stale heading updates during vision dropouts.
 
     Args:
         state: Current state (after position update)
         z_led1: LED1 observation (2,) in meters
         z_led2: LED2 observation (2,) in meters
         config: UKF configuration
+        mask: Camera validity flag (False skips update entirely)
 
     Returns:
         Updated state and heading measurement log-likelihood
@@ -776,103 +779,125 @@ def update_heading(
     """
     from trodestrack.models.ekf import wrap_angle
 
-    m, P = state.mean, state.cov
+    mask_bool = jnp.asarray(mask, dtype=bool)
 
-    # Check LED validity
-    led1_valid = jnp.isfinite(z_led1).all()
-    led2_valid = jnp.isfinite(z_led2).all()
-    both_leds = led1_valid & led2_valid
+    def no_update(state_in: UKFState) -> tuple[UKFState, jnp.ndarray]:
+        zero = jnp.array(0.0, dtype=state_in.mean.dtype)
+        return state_in, zero
 
-    # Compute heading observation (always compute, gate via R)
-    dx = z_led2[0] - z_led1[0]
-    dy = z_led2[1] - z_led1[1]
-    heading_obs = jnp.arctan2(dy, dx)
+    def do_update(state_in: UKFState) -> tuple[UKFState, jnp.ndarray]:
+        m, P = state_in.mean, state_in.cov
 
-    # Check LED spacing validity
-    obs_spacing = jnp.sqrt(dx**2 + dy**2)
+        # Check LED validity
+        led1_valid = jnp.isfinite(z_led1).all()
+        led2_valid = jnp.isfinite(z_led2).all()
+        both_leds = led1_valid & led2_valid
 
-    # Determine expected spacing (use config value)
-    expected_spacing = config.led_distance
+        # Compute heading observation (always compute, gate via R)
+        dx = z_led2[0] - z_led1[0]
+        dy = z_led2[1] - z_led1[1]
+        heading_obs = jnp.arctan2(dy, dx)
 
-    # Spacing ratio and tolerance check (handle NaN safely)
-    spacing_ratio = obs_spacing / expected_spacing
-    spacing_valid = jnp.isfinite(spacing_ratio) & (
-        (spacing_ratio > (1 - config.led_distance_tolerance))
-        & (spacing_ratio < (1 + config.led_distance_tolerance))
-    )
+        # Check LED spacing validity
+        obs_spacing = jnp.sqrt(dx**2 + dy**2)
+        obs_spacing_valid = jnp.isfinite(obs_spacing) & (obs_spacing > 1e-6)
 
-    # Overall validity: both LEDs + spacing OK + feature enabled
-    use_heading = config.use_heading_measurement & both_leds & spacing_valid
+        if config.led_distance is not None:
+            expected_spacing = jnp.asarray(config.led_distance, dtype=obs_spacing.dtype)
+            spacing_ratio = jnp.where(
+                obs_spacing_valid,
+                obs_spacing / expected_spacing,
+                jnp.zeros_like(obs_spacing),
+            )
+            spacing_valid = obs_spacing_valid & (
+                (spacing_ratio > (1 - config.led_distance_tolerance))
+                & (spacing_ratio < (1 + config.led_distance_tolerance))
+            )
+        else:
+            expected_spacing = jnp.where(
+                obs_spacing_valid,
+                obs_spacing,
+                jnp.asarray(1.0, dtype=obs_spacing.dtype),
+            )
+            spacing_valid = obs_spacing_valid
 
-    # Base heading measurement noise
-    R_base = config.measurement_noise_heading
+        # Overall validity: both LEDs + spacing OK + feature enabled
+        use_heading = config.use_heading_measurement & both_leds & spacing_valid
 
-    # Adaptive noise scaling (if enabled and spacing is valid)
-    # Clip obs_spacing to avoid division by zero/NaN
-    obs_spacing_safe = jnp.where(
-        jnp.isfinite(obs_spacing) & (obs_spacing > 0.001), obs_spacing, expected_spacing
-    )
-    R_heading_adapted = lax.cond(
-        config.adaptive_heading_noise,
-        lambda: R_base * (expected_spacing / obs_spacing_safe) ** 2,
-        lambda: R_base,
-    )
+        # Base heading measurement noise
+        R_base = config.measurement_noise_heading
 
-    # Gate via large R (JAX-friendly: no branching)
-    # Valid: R ≈ 0.05² → strong update
-    # Invalid: R = 1e6 → K ≈ 0 → no update
-    R_heading = lax.select(use_heading, R_heading_adapted, 1e6)
+        # Adaptive noise scaling (if enabled and spacing is valid)
+        # Clip obs_spacing to avoid division by zero/NaN
+        obs_spacing_safe = jnp.where(
+            obs_spacing_valid,
+            obs_spacing,
+            jnp.maximum(expected_spacing, jnp.asarray(1e-3, dtype=obs_spacing.dtype)),
+        )
+        R_heading_adapted = lax.cond(
+            config.adaptive_heading_noise,
+            lambda: R_base * (expected_spacing / obs_spacing_safe) ** 2,
+            lambda: R_base,
+        )
 
-    # 1D unscented heading update
-    # For 1D measurement, we can use a simplified unscented transform
-    n = len(m)
-    lamb = config.alpha**2 * (n + config.kappa) - n
-    w_mean, w_cov = compute_weights(n, config.alpha, config.beta, lamb)
+        # Gate via large R (JAX-friendly: no branching)
+        # Valid: R ≈ 0.05² → strong update
+        # Invalid: R = 1e6 → K ≈ 0 → no update
+        R_heading = lax.select(use_heading, R_heading_adapted, 1e6)
 
-    # Generate sigma points
-    sigmas = compute_sigma_points(m, P, n, lamb)
+        # 1D unscented heading update
+        # For 1D measurement, we can use a simplified unscented transform
+        n = len(m)
+        lamb = config.alpha**2 * (n + config.kappa) - n
+        w_mean, w_cov = compute_weights(n, config.alpha, config.beta, lamb)
 
-    # Transform sigma points through 1D heading measurement function
-    # h(x) = x[4] (heading component)
-    sigmas_heading = sigmas[:, 4]  # (2n+1,)
+        # Generate sigma points
+        sigmas = compute_sigma_points(m, P, n, lamb)
 
-    # Predicted heading
-    h_pred = jnp.dot(w_mean, sigmas_heading)
+        # Transform sigma points through 1D heading measurement function
+        # h(x) = x[4] (heading component)
+        sigmas_heading = sigmas[:, 4]  # (2n+1,)
 
-    # Innovation with angle wrapping (replace NaN with 0 for gated case)
-    innov_raw = wrap_angle(heading_obs - h_pred)
-    innov = jnp.where(jnp.isfinite(innov_raw), innov_raw, 0.0)
+        # Predicted heading
+        h_pred = jnp.dot(w_mean, sigmas_heading)
 
-    # Innovation covariance (1D)
-    heading_deviations = sigmas_heading - h_pred
-    S = jnp.dot(w_cov, heading_deviations**2) + R_heading
+        # Innovation with angle wrapping (replace NaN with 0 for gated case)
+        innov_raw = wrap_angle(heading_obs - h_pred)
+        innov = jnp.where(jnp.isfinite(innov_raw), innov_raw, 0.0)
 
-    # Cross-covariance between state and heading measurement
-    # state_deviations: (2n+1, n), heading_deviations: (2n+1,)
-    # P_cross = sum_i w_cov[i] * state_dev[i, :] * heading_dev[i]
-    state_deviations = sigmas - m  # (2n+1, n)
-    weighted_products = state_deviations * heading_deviations[:, None]  # (2n+1, n)
-    P_cross = jnp.dot(w_cov, weighted_products)  # (n,)
+        # Innovation covariance (1D)
+        heading_deviations = sigmas_heading - h_pred
+        S = jnp.dot(w_cov, heading_deviations**2) + R_heading
 
-    # Kalman gain (nx1)
-    K = P_cross / S
+        # Cross-covariance between state and heading measurement
+        # state_deviations: (2n+1, n), heading_deviations: (2n+1,)
+        # P_cross = sum_i w_cov[i] * state_dev[i, :] * heading_dev[i]
+        state_deviations = sigmas - m  # (2n+1, n)
+        weighted_products = state_deviations * heading_deviations[:, None]  # (2n+1, n)
+        P_cross = jnp.dot(w_cov, weighted_products)  # (n,)
 
-    # Update mean
-    m_upd = m + K * innov
+        # Kalman gain (n,)
+        K = P_cross / S
 
-    # Wrap heading after update
-    m_upd = m_upd.at[4].set(wrap_angle(m_upd[4]))
+        # Update mean
+        m_upd = m + K * innov
 
-    # Update covariance using UKF's native form (1D measurement)
-    # UKF: P⁺ = P - K S K^T where S = σ² + R
-    # The unscented transform ensures numerical stability naturally
-    P_upd = P - jnp.outer(K, K) * S
-    P_upd = symmetrize(P_upd)
+        # Wrap heading after update
+        m_upd = m_upd.at[4].set(wrap_angle(m_upd[4]))
 
-    # Log-likelihood
-    log_lik = -0.5 * (jnp.log(2 * jnp.pi) + jnp.log(S) + innov**2 / S)
+        # Update covariance using UKF's native form (1D measurement)
+        # UKF: P⁺ = P - K S K^T where S = σ² + R
+        # The unscented transform ensures numerical stability naturally
+        P_upd = P - jnp.outer(K, K) * S
+        P_upd = symmetrize(P_upd)
 
-    return UKFState(m_upd, P_upd), log_lik
+        # Log-likelihood
+        log_lik = -0.5 * (jnp.log(2 * jnp.pi) + jnp.log(S) + innov**2 / S)
+        log_lik = lax.select(use_heading, log_lik, jnp.array(0.0, dtype=log_lik.dtype))
+
+        return UKFState(m_upd, P_upd), log_lik
+
+    return lax.cond(mask_bool, do_update, no_update, state)
 
 
 # =============================================================================
@@ -1054,6 +1079,7 @@ def unscented_kalman_filter(
             Z_cam_led1_jax[t_idx],
             Z_cam_led2_jax[t_idx],
             config_for_filter,
+            mask_cam_jax[t_idx],
         )
 
         # Zero-velocity update (reuse EKF implementation for parity)

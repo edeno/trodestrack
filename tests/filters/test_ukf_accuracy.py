@@ -13,13 +13,18 @@ Tests verify:
 
 from __future__ import annotations
 
+from dataclasses import replace
+
+import jax.numpy as jnp
 import numpy as np
 import pytest
 
 from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
 from trodestrack.models.ukf import (
     UKFConfig,
+    UKFState,
     unscented_kalman_filter,
+    update_heading,
 )
 from trodestrack.qa.metrics import compute_nees, compute_position_rmse, compute_velocity_rmse
 from trodestrack.sim.simple import (
@@ -454,3 +459,36 @@ def test_ukf_marginal_loglik_computation(sim_config, ukf_config):
     assert (
         -1000 < result.marginal_loglik < 10000
     ), f"Marginal log-likelihood {result.marginal_loglik} outside reasonable range"
+
+
+def test_ukf_heading_respects_camera_mask(ukf_config):
+    """Heading pseudo-measurement should be inert when mask is False."""
+    base_state = UKFState(
+        mean=jnp.array([0.0, 0.0, 0.0, 0.0, 0.3, 0.0, 0.0, 0.0]),
+        cov=jnp.eye(8) * 0.05,
+    )
+    z_led1 = jnp.array([0.0, 0.0])
+    z_led2 = jnp.array([0.04, 0.0])
+    config_with_heading = replace(
+        ukf_config,
+        use_heading_measurement=True,
+        adaptive_heading_noise=False,
+        led_distance=0.04,
+    )
+
+    # Masked observation should perform no update and return zero log-likelihood.
+    state_masked, log_lik_masked = update_heading(
+        base_state, z_led1, z_led2, config_with_heading, mask=False
+    )
+    np.testing.assert_allclose(np.array(state_masked.mean), np.array(base_state.mean), atol=1e-9)
+    np.testing.assert_allclose(np.array(state_masked.cov), np.array(base_state.cov), atol=1e-9)
+    assert float(log_lik_masked) == pytest.approx(0.0)
+
+    # With mask True, heading should move toward measurement (0 rad).
+    state_updated, log_lik_used = update_heading(
+        base_state, z_led1, z_led2, config_with_heading, mask=True
+    )
+    assert np.abs(state_updated.mean[4]) < np.abs(
+        base_state.mean[4]
+    ), "Heading should move toward measurement when mask is true"
+    assert float(log_lik_used) < 0.0, "Valid measurement should produce negative log-likelihood"

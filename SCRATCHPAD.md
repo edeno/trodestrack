@@ -2,6 +2,23 @@
 
 Development notes and debugging history for trodestrack project.
 
+## 2025-10-10 - UKF Heading Mask Parity (PRD §8)
+
+### Problem
+
+- UKF `update_heading` ignored `mask_cam`, so masked frames still applied heading pseudo-measurements if LED coordinates were finite, letting stale geometry leak into the filter.
+- Log-likelihood accounting never zeroed masked observations, making downstream metrics double-count inactive updates.
+
+### Resolution
+
+- Added an explicit `mask` guard to the UKF heading update, using `lax.cond` to short-circuit and return the prior state with zero log-likelihood whenever the camera frame is invalid.
+- Mirrored EKF spacing tolerance and adaptive noise handling in the UKF path, including large-R gating and log-likelihood zeroing for rejected observations.
+- Introduced `test_ukf_heading_respects_camera_mask` to assert that masked updates leave the state/covariance untouched while valid frames pull heading toward the LED-derived observation.
+
+### Verification
+
+- `uv run pytest tests/filters/test_ukf_accuracy.py`
+
 ## 2025-10-10 - Heading Measurement Robustness (PRD §8)
 
 ### Problem
