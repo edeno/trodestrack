@@ -3,7 +3,7 @@ from __future__ import annotations
 import jax.numpy as jnp
 
 from trodestrack.models.utils import build_G_matrix
-from typing import Any
+from typing import Any, Optional
 
 
 def build_Q_rate(config: Any, n: int, dtype=jnp.float32) -> jnp.ndarray:
@@ -46,6 +46,8 @@ def assemble_Q(
     *,
     has_vision: bool,
     dtype=jnp.float32,
+    G_override: Optional[jnp.ndarray] = None,
+    Qu_override: Optional[jnp.ndarray] = None,
 ) -> jnp.ndarray:
     """Assemble total process noise Q = Q_rate*dt (+ blackout scaling) + G Qu G^T.
 
@@ -82,16 +84,19 @@ def assemble_Q(
         Q_rate = Q_rate.at[7, 7].set(Q_rate[7, 7] * bias_mult)
 
     # IMU input noise mapping
-    Qu = build_input_noise_cov(config, dt, dtype=dtype)
+    Qu = Qu_override if Qu_override is not None else build_input_noise_cov(config, dt, dtype=dtype)
     if getattr(config, "reduce_imu_noise_during_blackout", False):
         scale = jnp.asarray(getattr(config, "blackout_imu_noise_scale", 1.0), dtype=dtype)
         Qu = Qu * jnp.where(has_vision, jnp.asarray(1.0, dtype=dtype), scale)
 
     # For standard 8D, use known G(theta, dt); otherwise, zero (no IMU mapping known)
-    if n == 8:
+    if G_override is not None:
+        Q = Q_rate + G_override @ Qu @ G_override.T
+    elif n == 8:
         G = build_G_matrix(jnp.asarray(theta, dtype=dtype), jnp.asarray(dt, dtype=dtype))
         Q = Q_rate + G @ Qu @ G.T
     else:
+        # No known input mapping for non-8D by default; return diffusion only.
         Q = Q_rate
 
     # Optionally freeze bias random walks during dropout

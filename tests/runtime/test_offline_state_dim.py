@@ -152,7 +152,7 @@ def test_build_Q_rate_standard_8d():
     Verifies that the standard 8D state uses the structured noise mapping:
     [x, y, vx, vy, θ, b_gz, b_ax, b_ay]
     """
-    from trodestrack.runtime.offline import build_Q_rate
+    from trodestrack.models.process_noise import build_Q_rate
 
     config = EKFConfig()
     Q = build_Q_rate(config, 8)
@@ -176,7 +176,7 @@ def test_build_Q_rate_standard_8d():
 
 def test_build_Q_rate_non_standard_dimensions():
     """Test Q_rate fallback for non-8D states uses uniform noise."""
-    from trodestrack.runtime.offline import build_Q_rate
+    from trodestrack.models.process_noise import build_Q_rate
 
     config = EKFConfig()
 
@@ -197,7 +197,7 @@ def test_build_Q_rate_non_standard_dimensions():
 
 def test_build_Q_rate_works_with_ukf_config():
     """Test that build_Q_rate accepts UKFConfig as well as EKFConfig."""
-    from trodestrack.runtime.offline import build_Q_rate
+    from trodestrack.models.process_noise import build_Q_rate
 
     ukf_config = UKFConfig()
     Q = build_Q_rate(ukf_config, 8)

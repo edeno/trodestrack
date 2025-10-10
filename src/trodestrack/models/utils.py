@@ -6,7 +6,7 @@ import jax.numpy as jnp
 
 
 def build_G_matrix(theta: float, dt: float) -> jnp.ndarray:
-    """Build IMU input noise propagation matrix (G) for 8-state model.
+    """Build IMU input noise propagation matrix (G) for standard 8-state model.
 
     Constructs the Jacobian ∂f/∂u that maps IMU measurement noise
     into state space for process noise covariance calculation:
@@ -62,5 +62,43 @@ def build_G_matrix(theta: float, dt: float) -> jnp.ndarray:
 
     # Position depends on accelerometer: ∂p/∂f = R(θ) * 0.5 * dt²
     G = G.at[0:2, 1:3].set(R_2d * (0.5 * dt * dt))
+
+    return G
+
+
+def build_G_matrix_generic(
+    n: int,
+    theta: float,
+    dt: float,
+    *,
+    pos_idx: tuple[int, int] = (0, 1),
+    vel_idx: tuple[int, int] = (2, 3),
+    theta_idx: int = 4,
+    dtype=jnp.float32,
+) -> jnp.ndarray:
+    """Generic IMU input noise mapping G for arbitrary state layouts.
+
+    - Places ∂θ/∂ω_z = dt at theta_idx
+    - Places ∂v/∂f = R(θ)·dt at vel_idx
+    - Places ∂p/∂f = R(θ)·0.5·dt² at pos_idx
+    Missing indices (out of bounds) are ignored.
+    """
+    G = jnp.zeros((n, 3), dtype=dtype)
+    c, s = jnp.cos(theta), jnp.sin(theta)
+    R_2d = jnp.array([[c, -s], [s, c]], dtype=dtype)
+
+    # Heading
+    if 0 <= theta_idx < n:
+        G = G.at[theta_idx, 0].set(dt)
+
+    # Velocity
+    vx_i, vy_i = vel_idx
+    if 0 <= vx_i < n and 0 <= vy_i < n:
+        G = G.at[vx_i : vy_i + 1, 1:3].set(R_2d * dt)
+
+    # Position
+    px_i, py_i = pos_idx
+    if 0 <= px_i < n and 0 <= py_i < n:
+        G = G.at[px_i : py_i + 1, 1:3].set(R_2d * (0.5 * dt * dt))
 
     return G
