@@ -154,14 +154,112 @@ def measurement_function(state: jnp.ndarray, led_distance: float) -> jnp.ndarray
     return jnp.array([px - dx, py - dy, px + dx, py + dy])
 
 
+def make_led_selector(only_led1: bool, only_led2: bool) -> jnp.ndarray:
+    """Create 2×4 selector matrix for single-LED observations.
+
+    Extracts the active 2D subspace from 4D measurement space.
+    Measurement layout: [led1_x, led1_y, led2_x, led2_y]
+
+    Args:
+        only_led1: True if only LED1 is valid
+        only_led2: True if only LED2 is valid
+
+    Returns:
+        M: 2×4 selector matrix
+            - LED1-only: rows [1,0,0,0] and [0,1,0,0]
+            - LED2-only: rows [0,0,1,0] and [0,0,0,1]
+
+    Examples:
+        >>> M = make_led_selector(only_led1=True, only_led2=False)
+        >>> M.shape
+        (2, 4)
+        >>> M @ jnp.array([x1, y1, x2, y2])  # Extracts [x1, y1]
+    """
+    # LED1 selector: picks first 2 dimensions
+    M_led1 = jnp.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]])
+
+    # LED2 selector: picks last 2 dimensions
+    M_led2 = jnp.array([[0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
+
+    # Select based on which LED is valid
+    return lax.select(only_led1, M_led1, M_led2)
+
+
+def apply_lifted_inverse(
+    S4: jnp.ndarray,
+    w4: jnp.ndarray,
+    both_leds: bool,
+    only_led1: bool,
+    only_led2: bool,
+) -> jnp.ndarray:
+    """Apply effective inverse S⁻¹ to 4D vector with lifted subspace operator.
+
+    This computes x = S_eff⁻¹ @ w where S_eff is either:
+    - Full 4×4 innovation covariance (both LEDs valid)
+    - Lifted 2×2 subspace (only one LED valid)
+
+    The key insight: compute in active subspace, then lift back to 4D.
+    This avoids large variance hacks while keeping static shapes for JAX.
+
+    Args:
+        S4: Innovation covariance (4, 4)
+        w4: Vector to multiply (4,)
+        both_leds: True if both LEDs are valid
+        only_led1: True if only LED1 is valid
+        only_led2: True if only LED2 is valid
+
+    Returns:
+        x4: Result of S_eff⁻¹ @ w4 (4,) with static shape
+
+    Algorithm:
+        - Both LEDs: x4 = solve(S4, w4)
+        - Single LED: x4 = M2ᵀ @ solve(M2 @ S4 @ M2ᵀ, M2 @ w4)
+          where M2 is 2×4 selector for active LED
+
+    References:
+        - Matrix cookbook: subspace projections
+        - Lifted Kalman filtering for partial observations
+
+    Examples:
+        >>> S = jnp.eye(4) * 0.01  # Innovation covariance
+        >>> innov = jnp.array([0.1, 0.2, nan, nan])  # Only LED1 valid
+        >>> x = apply_lifted_inverse(S, innov, False, True, False)
+        >>> x[:2]  # Should be ~[10, 20] (scaled by 1/0.01)
+        >>> x[2:]  # Should be [0, 0] (lifted from 2D subspace)
+    """
+    # 4D path: both LEDs valid
+    x4_full = psd_solve(S4, w4)
+
+    # 2D path: single LED valid
+    M2 = make_led_selector(only_led1, only_led2)  # (2, 4)
+    S2 = M2 @ S4 @ M2.T  # (2, 2) - subspace innovation covariance
+    w2 = M2 @ w4  # (2,) - project to subspace
+    x2 = psd_solve(S2, w2)  # (2,) - solve in subspace
+    x4_lifted = M2.T @ x2  # (4,) - lift back to 4D
+
+    # Select based on LED validity (both branches return same shape)
+    return lax.select(both_leds, x4_full, x4_lifted)
+
+
 def initialize_state(
     led1_obs: jnp.ndarray,
     led2_obs: jnp.ndarray,
     mask: jnp.ndarray,
-    dt_cam: float,
+    dt_cam: float | jnp.ndarray,
     led_distance: float = 0.04,
 ) -> FilterState:
-    """Bootstrap filter state from early LED observations."""
+    """Bootstrap filter state from early LED observations.
+
+    Args:
+        led1_obs: LED1 observations (N, 2)
+        led2_obs: LED2 observations (N, 2)
+        mask: Observation validity mask (N,)
+        dt_cam: Camera frame interval in seconds (can be float or JAX scalar for JIT)
+        led_distance: LED spacing in meters
+
+    Returns:
+        Initial filter state with mean and covariance
+    """
 
     valid_indices = jnp.where(mask)[0]
     first_valid = valid_indices[0] if len(valid_indices) > 0 else 0

@@ -47,6 +47,7 @@ from trodestrack.models.filter_common import (
     chi2_threshold,
     dynamics_function,
     initialize_state,
+    make_led_selector,
     measurement_function,
     psd_solve,
     symmetrize,
@@ -192,31 +193,7 @@ def compute_weights(
 # =============================================================================
 # Helper Functions
 # =============================================================================
-
-
-def make_led_selector(only_led1: bool, only_led2: bool) -> jnp.ndarray:
-    """Create 2×4 selector matrix for single-LED observations.
-
-    Extracts the active 2D subspace from 4D measurement space.
-    Measurement layout: [led1_x, led1_y, led2_x, led2_y]
-
-    Args:
-        only_led1: True if only LED1 is valid
-        only_led2: True if only LED2 is valid
-
-    Returns:
-        M: 2×4 selector matrix
-            - LED1-only: rows [1,0,0,0] and [0,1,0,0]
-            - LED2-only: rows [0,0,1,0] and [0,0,0,1]
-    """
-    # LED1 selector: picks first 2 dimensions
-    M_led1 = jnp.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]])
-
-    # LED2 selector: picks last 2 dimensions
-    M_led2 = jnp.array([[0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
-
-    # Select based on which LED is valid
-    return lax.select(only_led1, M_led1, M_led2)
+# NOTE: make_led_selector() is now imported from filter_common.py (shared with EKF)
 
 
 def compute_nis_and_loglik(
@@ -532,7 +509,6 @@ def update_step(
         z_led1_clean = jnp.where(jnp.isfinite(z_led1), z_led1, 0.0)
         z_led2_clean = jnp.where(jnp.isfinite(z_led2), z_led2, 0.0)
         z_obs_full = jnp.concatenate([z_led1_clean, z_led2_clean])
-        obs_mask = jnp.array([led1_valid, led1_valid, led2_valid, led2_valid])
 
         # If no valid LEDs, skip update
         def no_leds_update(m_in, P_in):
@@ -593,21 +569,52 @@ def update_step(
                 only_led2,
             )
 
-            # Kalman gain and update
-            # Note: We use full 4×4 S here but only the valid dimensions
-            # will contribute via the innovation vector (NaN handling below)
-            K = psd_solve(S, P_cross.T).T
+            # Kalman gain and covariance update using lifted subspace operator
+            # Project to active measurement subspace (2D or 4D) to avoid spurious
+            # covariance reduction from missing observations
+            #
+            # Algorithm:
+            #   - Both LEDs: standard 4D update
+            #   - Single LED: compute in 2D subspace, lift back to 4D
+            #
+            # This ensures K only affects the observed dimensions and prevents
+            # the filter from becoming overconfident when LEDs are occluded.
 
-            # Update mean: set invalid LED innovations to zero
-            innov = jnp.where(obs_mask, innov_full, 0.0)
-            m_upd = m_in + K @ innov
+            # Project innovation, covariance, and cross-correlation to active subspace
+            M = make_led_selector(only_led1, only_led2)  # (2, 4)
 
-            # Update covariance using UKF's native form
-            # UKF: P⁺ = P - K S K^T (where S includes R implicitly)
-            # This differs from EKF's Joseph form but achieves similar stability
-            # because the unscented transform captures cross-correlations exactly
-            # without linearization, making the K S K^T term naturally stable
-            P_upd = P_in - K @ S @ K.T
+            def compute_in_full_space():
+                """Both LEDs valid: standard 4D update."""
+                K_full = psd_solve(S, P_cross.T).T  # (8, 4)
+                innov_4d = innov_full  # (4,)
+                return K_full, innov_4d, S
+
+            def compute_in_subspace():
+                """Single LED valid: compute in 2D subspace, lift to 4D."""
+                # Project to 2D subspace
+                S_sub = M @ S @ M.T  # (2, 2)
+                P_cross_sub = P_cross @ M.T  # (8, 2)
+                innov_sub = M @ innov_full  # (2,)
+
+                # Compute gain in subspace
+                K_sub = psd_solve(S_sub, P_cross_sub.T).T  # (8, 2)
+
+                # Lift back to 4D (pad with zeros)
+                K_lifted = K_sub @ M  # (8, 4) - only affects active dims
+                innov_lifted = M.T @ innov_sub  # (4,)
+                S_lifted = M.T @ S_sub @ M  # (4, 4) - only active block
+
+                return K_lifted, innov_lifted, S_lifted
+
+            K, innov_active, S_active = lax.cond(
+                both_leds,
+                compute_in_full_space,
+                compute_in_subspace,
+            )
+
+            # Apply update in full 8D state space
+            m_upd = m_in + K @ innov_active
+            P_upd = P_in - K @ S_active @ K.T
             P_upd = symmetrize(P_upd)
 
             state_candidate = UKFState(mean=m_upd, cov=P_upd)
@@ -888,7 +895,7 @@ def unscented_kalman_filter(
             Z_cam_led1_jax,
             Z_cam_led2_jax,
             mask_cam_jax,
-            dt_cam=float(jnp.mean(jnp.diff(t_cam_jax))),
+            dt_cam=jnp.mean(jnp.diff(t_cam_jax)),  # Keep as JAX scalar for JIT compatibility
             led_distance=config_for_filter.led_distance,  # type: ignore[arg-type]
         )
         initial_state = UKFState(mean=ekf_init.mean, cov=ekf_init.cov)
@@ -902,7 +909,7 @@ def unscented_kalman_filter(
     max_imu_per_frame = int(counts.max())
 
     # Compute mean IMU timestep for fallback
-    dt_imu_mean = float(jnp.mean(jnp.diff(t_imu_jax)))
+    dt_imu_mean = jnp.mean(jnp.diff(t_imu_jax))  # Keep as JAX scalar for JIT compatibility
 
     def compute_imu_index_arrays():
         """Build padded index arrays for IMU samples between camera frames."""

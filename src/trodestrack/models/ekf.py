@@ -39,10 +39,12 @@ from jax import jacfwd, lax
 from trodestrack.models.filter_common import (
     FilterCoreConfig,
     FilterState,
+    apply_lifted_inverse,
     chi2_threshold,
     dynamics_function,
     initialize_state,
     joseph_update,
+    make_led_selector,
     measurement_function,
     psd_solve,
     symmetrize,
@@ -90,80 +92,8 @@ class EKFResult(NamedTuple):
 # =============================================================================
 # Utility Functions
 # =============================================================================
-
-
-def make_led_selector(only_led1: bool, only_led2: bool) -> jnp.ndarray:
-    """Create 2×4 selector matrix for single-LED observations.
-
-    Extracts the active 2D subspace from 4D measurement space.
-    Measurement layout: [led1_x, led1_y, led2_x, led2_y]
-
-    Args:
-        only_led1: True if only LED1 is valid
-        only_led2: True if only LED2 is valid
-
-    Returns:
-        M: 2×4 selector matrix
-            - LED1-only: rows [1,0,0,0] and [0,1,0,0]
-            - LED2-only: rows [0,0,1,0] and [0,0,0,1]
-    """
-    # LED1 selector: picks first 2 dimensions
-    M_led1 = jnp.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]])
-
-    # LED2 selector: picks last 2 dimensions
-    M_led2 = jnp.array([[0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
-
-    # Select based on which LED is valid
-    return lax.select(only_led1, M_led1, M_led2)
-
-
-def apply_lifted_inverse(
-    S4: jnp.ndarray,
-    w4: jnp.ndarray,
-    both_leds: bool,
-    only_led1: bool,
-    only_led2: bool,
-) -> jnp.ndarray:
-    """Apply effective inverse S⁻¹ to 4D vector with lifted subspace operator.
-
-    This computes x = S_eff⁻¹ @ w where S_eff is either:
-    - Full 4×4 innovation covariance (both LEDs valid)
-    - Lifted 2×2 subspace (only one LED valid)
-
-    The key insight: compute in active subspace, then lift back to 4D.
-    This avoids large variance hacks while keeping static shapes for JAX.
-
-    Args:
-        S4: Innovation covariance (4, 4)
-        w4: Vector to multiply (4,)
-        both_leds: True if both LEDs are valid
-        only_led1: True if only LED1 is valid
-        only_led2: True if only LED2 is valid
-
-    Returns:
-        x4: Result of S_eff⁻¹ @ w4 (4,) with static shape
-
-    Algorithm:
-        - Both LEDs: x4 = solve(S4, w4)
-        - Single LED: x4 = M2ᵀ @ solve(M2 @ S4 @ M2ᵀ, M2 @ w4)
-          where M2 is 2×4 selector for active LED
-
-    References:
-        - Matrix cookbook: subspace projections
-        - Lifted Kalman filtering for partial observations
-    """
-    # 4D path: both LEDs valid
-    x4_full = psd_solve(S4, w4)
-
-    # 2D path: single LED valid
-    M2 = make_led_selector(only_led1, only_led2)  # (2, 4)
-    S2 = M2 @ S4 @ M2.T  # (2, 2) - subspace innovation covariance
-    w2 = M2 @ w4  # (2,) - project to subspace
-    x2 = psd_solve(S2, w2)  # (2,) - solve in subspace
-    x4_lifted = M2.T @ x2  # (4,) - lift back to 4D
-
-    # Select based on LED validity (both branches return same shape)
-    return lax.select(both_leds, x4_full, x4_lifted)
+# NOTE: make_led_selector() and apply_lifted_inverse() are now imported
+# from filter_common.py to share with UKF
 
 
 def estimate_led_spacing(
@@ -873,7 +803,7 @@ def extended_kalman_filter(
             Z_cam_led1_jax,
             Z_cam_led2_jax,
             mask_cam_jax,
-            dt_cam=float(jnp.mean(jnp.diff(t_cam_jax))),
+            dt_cam=jnp.mean(jnp.diff(t_cam_jax)),  # Keep as JAX scalar for JIT compatibility
             led_distance=config_for_filter.led_distance,  # type: ignore[arg-type]
         )
 
@@ -887,7 +817,7 @@ def extended_kalman_filter(
     max_imu_per_frame = int(counts.max())
 
     # Compute mean IMU timestep for fallback when imu_idx == 0
-    dt_imu_mean = float(jnp.mean(jnp.diff(t_imu_jax)))
+    dt_imu_mean = jnp.mean(jnp.diff(t_imu_jax))  # Keep as JAX scalar for JIT compatibility
 
     def compute_imu_index_arrays():
         """Build padded index arrays for IMU samples between camera frames."""
