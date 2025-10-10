@@ -18,7 +18,7 @@ Your workflow MUST be:
    d. Run test until it PASSES
    e. Apply review agents (code-reviewer, ux-reviewer)
    f. Refactor for clarity and efficiency based on feedback
-   g. Add/Update docstrings and types (N11).
+   g. Add/Update docstrings and types.
 
 4. Update TASKS.md checkboxes as you complete items.
 
