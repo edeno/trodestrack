@@ -48,6 +48,7 @@ from trodestrack.models.filter_common import (
     initialize_state,
     make_led_selector,
     measurement_function,
+    prepare_heading_measurement,
     psd_solve,
     symmetrize,
     update_zupt,
@@ -593,62 +594,8 @@ def update_heading(
     def do_update(state_in: UKFState) -> tuple[UKFState, jnp.ndarray]:
         m, P = state_in.mean, state_in.cov
 
-        # Check LED validity
-        led1_valid = jnp.isfinite(z_led1).all()
-        led2_valid = jnp.isfinite(z_led2).all()
-        both_leds = led1_valid & led2_valid
-
-        # Compute heading observation (always compute, gate via R)
-        dx = z_led2[0] - z_led1[0]
-        dy = z_led2[1] - z_led1[1]
-        heading_obs = jnp.arctan2(dy, dx)
-
-        # Check LED spacing validity
-        obs_spacing = jnp.sqrt(dx**2 + dy**2)
-        obs_spacing_valid = jnp.isfinite(obs_spacing) & (obs_spacing > 1e-6)
-
-        if config.led_distance is not None:
-            expected_spacing = jnp.asarray(config.led_distance, dtype=obs_spacing.dtype)
-            spacing_ratio = jnp.where(
-                obs_spacing_valid,
-                obs_spacing / expected_spacing,
-                jnp.zeros_like(obs_spacing),
-            )
-            spacing_valid = obs_spacing_valid & (
-                (spacing_ratio > (1 - config.led_distance_tolerance))
-                & (spacing_ratio < (1 + config.led_distance_tolerance))
-            )
-        else:
-            expected_spacing = jnp.where(
-                obs_spacing_valid,
-                obs_spacing,
-                jnp.asarray(1.0, dtype=obs_spacing.dtype),
-            )
-            spacing_valid = obs_spacing_valid
-
-        # Overall validity: both LEDs + spacing OK + feature enabled
-        use_heading = config.use_heading_measurement & both_leds & spacing_valid
-
-        # Base heading measurement noise
-        R_base = config.measurement_noise_heading
-
-        # Adaptive noise scaling (if enabled and spacing is valid)
-        # Clip obs_spacing to avoid division by zero/NaN
-        obs_spacing_safe = jnp.where(
-            obs_spacing_valid,
-            obs_spacing,
-            jnp.maximum(expected_spacing, jnp.asarray(1e-3, dtype=obs_spacing.dtype)),
-        )
-        R_heading_adapted = lax.cond(
-            config.adaptive_heading_noise,
-            lambda: R_base * (expected_spacing / obs_spacing_safe) ** 2,
-            lambda: R_base,
-        )
-
-        # Gate via large R (JAX-friendly: no branching)
-        # Valid: R ≈ 0.05² → strong update
-        # Invalid: R = 1e6 → K ≈ 0 → no update
-        R_heading = lax.select(use_heading, R_heading_adapted, 1e6)
+        # Prepare heading measurement (shared preprocessing with EKF)
+        heading_obs, R_heading, use_heading = prepare_heading_measurement(z_led1, z_led2, config)
 
         # 1D unscented heading update
         # For 1D measurement, we can use a simplified unscented transform

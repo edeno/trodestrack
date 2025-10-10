@@ -575,3 +575,101 @@ def compute_nis_and_loglik(
 
     # Select based on LED validity
     return lax.cond(both_leds, compute_4d, compute_2d)
+
+
+def prepare_heading_measurement(
+    z_led1: jnp.ndarray,
+    z_led2: jnp.ndarray,
+    config: FilterCoreConfig,
+) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    """Prepare heading pseudo-measurement from LED pair geometry.
+
+    Computes heading observation from LED positions and determines
+    measurement noise with optional adaptive scaling. Handles validity
+    checks and spacing tolerance.
+
+    This is the common preprocessing logic shared by EKF and UKF
+    heading update functions. The actual Kalman update (EKF vs UKF)
+    happens after this preprocessing.
+
+    Args:
+        z_led1: LED1 observation (2,) in meters [x, y]
+        z_led2: LED2 observation (2,) in meters [x, y]
+        config: Filter configuration with heading measurement parameters
+
+    Returns:
+        Tuple of (heading_obs, R_heading, use_heading):
+            - heading_obs: Observed heading angle in radians
+            - R_heading: Measurement noise (small if valid, 1e6 if gated)
+            - use_heading: Boolean flag indicating if measurement is valid
+
+    Algorithm:
+        1. Check LED validity (both finite)
+        2. Compute heading: arctan2(dy, dx)
+        3. Check spacing tolerance (if led_distance specified)
+        4. Adaptive noise scaling: R ∝ (expected/observed)²
+        5. Gate invalid observations: R = 1e6 → no update
+
+    Notes:
+        - Returns R=1e6 for invalid observations (branchless gating)
+        - heading_obs always computed (may be NaN if invalid)
+        - Adaptive noise helps when LED spacing varies due to camera angle
+    """
+    # Check LED validity
+    led1_valid = jnp.isfinite(z_led1).all()
+    led2_valid = jnp.isfinite(z_led2).all()
+    both_leds = led1_valid & led2_valid
+
+    # Compute heading observation (always compute, gate via R)
+    dx = z_led2[0] - z_led1[0]
+    dy = z_led2[1] - z_led1[1]
+    heading_obs = jnp.arctan2(dy, dx)
+
+    # Check LED spacing validity
+    obs_spacing = jnp.sqrt(dx**2 + dy**2)
+    obs_spacing_valid = jnp.isfinite(obs_spacing) & (obs_spacing > 1e-6)
+
+    if config.led_distance is not None:
+        expected_spacing = jnp.asarray(config.led_distance, dtype=obs_spacing.dtype)
+        spacing_ratio = jnp.where(
+            obs_spacing_valid,
+            obs_spacing / expected_spacing,
+            jnp.zeros_like(obs_spacing),
+        )
+        spacing_valid = obs_spacing_valid & (
+            (spacing_ratio > (1 - config.led_distance_tolerance))
+            & (spacing_ratio < (1 + config.led_distance_tolerance))
+        )
+    else:
+        expected_spacing = jnp.where(
+            obs_spacing_valid,
+            obs_spacing,
+            jnp.asarray(1.0, dtype=obs_spacing.dtype),
+        )
+        spacing_valid = obs_spacing_valid
+
+    # Overall validity: both LEDs + spacing OK + feature enabled
+    use_heading = config.use_heading_measurement & both_leds & spacing_valid
+
+    # Base heading measurement noise
+    R_base = config.measurement_noise_heading
+
+    # Adaptive noise scaling (if enabled and spacing is valid)
+    # Clip obs_spacing to avoid division by zero/NaN
+    obs_spacing_safe = jnp.where(
+        obs_spacing_valid,
+        obs_spacing,
+        jnp.maximum(expected_spacing, jnp.asarray(1e-3, dtype=obs_spacing.dtype)),
+    )
+    R_heading_adapted = lax.cond(
+        config.adaptive_heading_noise,
+        lambda: R_base * (expected_spacing / obs_spacing_safe) ** 2,
+        lambda: R_base,
+    )
+
+    # Gate via large R (JAX-friendly: no branching)
+    # Valid: R ≈ 0.05² → strong update
+    # Invalid: R = 1e6 → K ≈ 0 → no update
+    R_heading = lax.select(use_heading, R_heading_adapted, 1e6)
+
+    return heading_obs, R_heading, use_heading
