@@ -89,6 +89,7 @@ def make_minimal_filter_result_ekf(n_cam: int, state_dim: int) -> EKFResult:
         predicted_means=jnp.array(predicted_means),
         predicted_covariances=jnp.array(predicted_covs),
         marginal_loglik=0.0,
+        estimated_led_distance=None,
     )
 
 
@@ -120,6 +121,7 @@ def make_minimal_filter_result_ukf(n_cam: int, state_dim: int) -> UKFResult:
         predicted_means=jnp.array(predicted_means),
         predicted_covariances=jnp.array(predicted_covs),
         marginal_loglik=0.0,
+        estimated_led_distance=None,
     )
 
 

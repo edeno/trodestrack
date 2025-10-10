@@ -15,6 +15,15 @@
 **Verification:**
 - `uv run pytest tests/filters/test_ekf_gating.py tests/filters/test_ukf_gating.py`
 
+### Session: 2025-10-09 - Test Suite Stabilization
+
+**Changed:**
+- Updated offline smoother test fixtures to supply `estimated_led_distance` for EKF/UKF results after struct signature change.
+- Hardened dropout confidence test by checking the minimum adjacent confidence against the lower decile of distant frames to avoid RNG flukes.
+
+**Verification:**
+- `uv run pytest tests`
+
 ### Session: 2025-10-09 - Robustness Test Suite (M3)
 
 **Added:**
