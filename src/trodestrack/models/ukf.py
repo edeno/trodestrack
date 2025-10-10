@@ -39,7 +39,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax import lax, vmap
 
-from trodestrack.models.utils import build_G_matrix
+from trodestrack.models.process_noise import assemble_Q
 
 from trodestrack.models.filter_common import (
     FilterCoreConfig,
@@ -436,76 +436,16 @@ def predict_step(
     deviations = sigmas_prop - m_pred
     P_pred = jnp.tensordot(w_cov, _outer_product_batch(deviations, deviations), axes=1)
 
-    # Add process noise Q (time-scaled)
+    # Add process noise Q using shared assembly for parity with EKF/smoothers
     dtype = m.dtype
-    q_bg = jnp.asarray(config.process_noise_gyro_bias * dt_imu, dtype=dtype)
-    q_bax = jnp.asarray(config.process_noise_accel_bias * dt_imu, dtype=dtype)
-    q_bay = jnp.asarray(config.process_noise_accel_bias * dt_imu, dtype=dtype)
-    q_px = jnp.asarray(config.process_noise_pos * dt_imu, dtype=dtype)
-    q_py = jnp.asarray(config.process_noise_pos * dt_imu, dtype=dtype)
-    q_vx = jnp.asarray(config.process_noise_vel * dt_imu, dtype=dtype)
-    q_vy = jnp.asarray(config.process_noise_vel * dt_imu, dtype=dtype)
-    q_th = jnp.asarray(config.process_noise_heading * dt_imu, dtype=dtype)
-
-    if config.adaptive_q_during_dropout:
-        pos_scale = lax.cond(
-            has_vision,
-            lambda: jnp.asarray(1.0, dtype=dtype),
-            lambda: jnp.asarray(config.dropout_q_pos_multiplier, dtype=dtype),
-        )
-        vel_scale = lax.cond(
-            has_vision,
-            lambda: jnp.asarray(1.0, dtype=dtype),
-            lambda: jnp.asarray(config.dropout_q_vel_multiplier, dtype=dtype),
-        )
-        bias_scale_adaptive = lax.cond(
-            has_vision,
-            lambda: jnp.asarray(1.0, dtype=dtype),
-            lambda: jnp.asarray(config.dropout_q_bias_multiplier, dtype=dtype),
-        )
-    else:
-        pos_scale = jnp.asarray(1.0, dtype=dtype)
-        vel_scale = jnp.asarray(1.0, dtype=dtype)
-        bias_scale_adaptive = jnp.asarray(1.0, dtype=dtype)
-
-    q_px = q_px * pos_scale
-    q_py = q_py * pos_scale
-    q_vx = q_vx * vel_scale
-    q_vy = q_vy * vel_scale
-    q_bg = q_bg * bias_scale_adaptive
-    q_bax = q_bax * bias_scale_adaptive
-    q_bay = q_bay * bias_scale_adaptive
-
-    Q_proc = jnp.diag(jnp.array([q_px, q_py, q_vx, q_vy, q_th, q_bg, q_bax, q_bay]))
-
-    # IMU input noise (same as EKF)
-    std_w = config.imu_gyro_noise_density * jnp.sqrt(dt_imu)
-    std_f = config.imu_accel_noise_density * jnp.sqrt(dt_imu)
-    Q_u = jnp.diag(jnp.array([std_w**2, std_f**2, std_f**2]))
-
-    # Blackout-aware IMU noise scaling (parity with EKF)
-    imu_noise_scale = lax.cond(
-        config.reduce_imu_noise_during_blackout,
-        lambda: lax.select(has_vision, 1.0, config.blackout_imu_noise_scale),
-        lambda: 1.0,
+    Q = assemble_Q(
+        config,
+        theta=m[4],
+        dt=dt_imu,
+        n=n,
+        has_vision=has_vision,
+        dtype=dtype,
     )
-    Q_u = Q_u * imu_noise_scale
-
-    # Build G matrix for input noise propagation (shared utility with EKF)
-    theta = m[4]
-    G = build_G_matrix(theta, dt_imu)
-
-    Q = Q_proc + G @ Q_u @ G.T
-
-    # Optional bias freezing during blackout
-    bias_scale = lax.cond(
-        config.freeze_bias_during_blackout,
-        lambda: lax.select(has_vision, 1.0, 0.0),
-        lambda: 1.0,
-    )
-    Q = Q.at[5, 5].set(Q[5, 5] * bias_scale)
-    Q = Q.at[6, 6].set(Q[6, 6] * bias_scale)
-    Q = Q.at[7, 7].set(Q[7, 7] * bias_scale)
 
     P_pred = P_pred + Q
 
@@ -926,6 +866,7 @@ def unscented_kalman_filter(
     Z_cam_led2_jax = jnp.array(Z_cam_led2)
     mask_cam_jax = jnp.array(mask_cam)
     conf_cam_jax = None if conf_cam is None else jnp.array(conf_cam)
+    conf_cam_jax = None if conf_cam is None else jnp.clip(jnp.array(conf_cam), 1e-2, 1.0)
 
     # Auto-detect LED spacing if not specified
     # Store estimated value to return in result (immutability: do NOT mutate config)
