@@ -1313,6 +1313,19 @@ EKF position tracking is excellent (0.5cm RMSE) even during bias convergence bec
 
 See [diagnostics/README.md](diagnostics/README.md) for full diagnostic history.
 
+## 2025-10-09 - Mahalanobis Gating Integration
+
+### Summary
+
+- Added `use_mahalanobis_gating` + `mahalanobis_threshold_prob` to `UKFConfig` for parity with EKF.
+- Wired χ² gating into UKF `update_step` using lifted subspace NIS and `chi2_threshold`.
+- Guarded against non-finite NIS values and ensured rejected updates return the predicted state.
+- Created `tests/filters/test_ukf_gating.py` to cover reject/accept scenarios alongside existing EKF suite.
+
+### Verification
+
+- `uv run pytest tests/filters/test_ekf_gating.py tests/filters/test_ukf_gating.py`
+
 ---
 
 ## 2025-10-08 - Fixed EKF Heading Initialization

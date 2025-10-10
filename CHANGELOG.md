@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-09 - Mahalanobis Gating Integration
+
+**Added:**
+- `use_mahalanobis_gating` and `mahalanobis_threshold_prob` fields in `UKFConfig` for feature parity with EKF.
+- Dedicated UKF gating unit tests (`tests/filters/test_ukf_gating.py`) covering reject/accept scenarios.
+
+**Changed:**
+- Wired χ² Mahalanobis gating into `models/ukf.update_step()` with lifted NIS computation and JIT-safe branching.
+- Guarded against non-finite NIS values to force rejection instead of propagating NaNs.
+
+**Verification:**
+- `uv run pytest tests/filters/test_ekf_gating.py tests/filters/test_ukf_gating.py`
+
 ### Session: 2025-10-09 - Robustness Test Suite (M3)
 
 **Added:**

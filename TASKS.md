@@ -179,14 +179,14 @@
 
 ### 🚨 High Priority (PRD Blockers)
 
-- [ ] **Mahalanobis Gating (Outlier Rejection)** - `models/ekf.py`, `models/ukf.py`
-  - [ ] Implement proper k-DOF χ² test (k=2 or 4 depending on LED availability)
-  - [ ] Add NIS threshold computation (χ²(k, 0.95))
-  - [ ] Add JIT-safe reject branch (`lax.cond` to skip update when NIS > threshold)
-  - [ ] Proper 2D/4D subspace gating (use lifted operator)
-  - [ ] **Impact:** Currently outliers (reflections, swaps) can leak into state
-  - [ ] **PRD Ref:** Section 13 - "Mahalanobis gating for outlier rejection"
-  - [ ] **Tests:** Add to `tests/filters/test_robustness.py`
+- [x] **Mahalanobis Gating (Outlier Rejection)** - `models/ekf.py`, `models/ukf.py`
+  - [x] Implement proper k-DOF χ² test (k=2 or 4 depending on LED availability)
+  - [x] Add NIS threshold computation (χ²(k, 0.95))
+  - [x] Add JIT-safe reject branch (`lax.cond` to skip update when NIS > threshold)
+  - [x] Proper 2D/4D subspace gating (use lifted operator)
+  - [x] **Impact:** Outliers (reflections, swaps) rejected before corrupting state
+  - [x] **PRD Ref:** Section 13 - "Mahalanobis gating for outlier rejection"
+  - [x] **Tests:** Added dedicated gating suites (`tests/filters/test_ekf_gating.py`, `tests/filters/test_ukf_gating.py`)
 
 - [ ] **ZUPT (Zero-Velocity Update)** - `models/ekf.py`, `models/ukf.py`
   - [ ] Implement stationary detection (velocity threshold check)

@@ -42,6 +42,7 @@ from jax import lax, vmap
 from trodestrack.models.utils import build_G_matrix
 
 from trodestrack.models.ekf import (
+    chi2_threshold,
     dynamics_function,
     initialize_state,
     measurement_function,
@@ -115,6 +116,10 @@ class UKFConfig:
     # Dynamics
     damping_coeff: float = 0.5  # 1/s
     led_distance: float | None = 0.04  # 4 cm (None = auto-detect from data)
+
+    # Outlier rejection via Mahalanobis distance gating
+    use_mahalanobis_gating: bool = False  # Enable χ² gating
+    mahalanobis_threshold_prob: float = 0.997  # p-value for χ² threshold
 
     # Heading pseudo-measurement from LED pair (feature parity with EKF)
     use_heading_measurement: bool = False  # Enable heading observation from LED vector
@@ -630,7 +635,33 @@ def update_step(
             P_upd = P_in - K @ S @ K.T
             P_upd = symmetrize(P_upd)
 
-            return UKFState(mean=m_upd, cov=P_upd), log_lik
+            state_candidate = UKFState(mean=m_upd, cov=P_upd)
+
+            def apply_gating():
+                """Apply Mahalanobis gating to reject outliers."""
+
+                def dof_from_visibility():
+                    return lax.cond(both_leds, lambda: 4, lambda: 2)
+
+                threshold = chi2_threshold(dof_from_visibility(), config.mahalanobis_threshold_prob)
+
+                def accept():
+                    return state_candidate, log_lik
+
+                def reject():
+                    return UKFState(mean=m_in, cov=P_in), 0.0
+
+                nis_safe = jnp.where(jnp.isfinite(nis), nis, jnp.inf)
+                return lax.cond(nis_safe < threshold, accept, reject)
+
+            def skip_gating():
+                return state_candidate, log_lik
+
+            return lax.cond(
+                config.use_mahalanobis_gating,
+                apply_gating,
+                skip_gating,
+            )
 
         # Conditional update based on LED availability
         return lax.cond(
