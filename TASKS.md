@@ -335,7 +335,6 @@
   - [ ] `trodestrack smooth`
   - [ ] `trodestrack online`
   - [ ] `trodestrack report`
-  - [ ] `trodestrack calib-homography`
 - [ ] Verify reproducibility:
   - [ ] Deterministic RNG seeding
   - [ ] Version pinning via `uv.lock`
