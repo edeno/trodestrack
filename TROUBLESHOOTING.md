@@ -814,7 +814,7 @@ print(f"Problem: Position RMSE is {compute_position_rmse(...):.4f} m (expected <
 - **[TUNING.md](TUNING.md)** - Parameter selection guide
 - **[PRD.md](PRD.md)** - Mathematical model and requirements
 - **[Examples](examples/README.md)** - Educational examples with expected outputs
-- **[GitHub Issues](https://github.com/yourusername/trodestrack/issues)** - Report bugs
+- **[GitHub Issues](https://github.com/edeno/trodestrack/issues)** - Report bugs
 
 ---
 

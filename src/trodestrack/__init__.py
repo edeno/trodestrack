@@ -36,7 +36,7 @@ Examples:
   # Generate report with custom title
   trodestrack report --run run1/ --pdf report.pdf --title "Session 2024-10-11"
 
-For more information, visit: https://github.com/yourusername/trodestrack
+For more information, visit: https://github.com/edeno/trodestrack
         """,
     )
 

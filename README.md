@@ -23,7 +23,7 @@ trodestrack combines video tracking (Trodes LEDs and/or DeepLabCut keypoints) wi
 ### Install from source
 
 ```bash
-git clone https://github.com/yourusername/trodestrack.git
+git clone https://github.com/edeno/trodestrack.git
 cd trodestrack
 uv sync
 ```
@@ -36,7 +36,7 @@ The fastest way to understand TrodesTrack is to run the EKF example on synthetic
 
 ```bash
 # Clone and setup
-git clone https://github.com/yourusername/trodestrack.git
+git clone https://github.com/edeno/trodestrack.git
 cd trodestrack
 uv sync
 
@@ -249,7 +249,7 @@ If you use trodestrack in your research, please cite:
   title={trodestrack: Sensor-fused 2D rat tracking with JAX EKF/UKF},
   author={Your Name},
   year={2025},
-  url={https://github.com/yourusername/trodestrack}
+  url={https://github.com/edeno/trodestrack}
 }
 ```
 
