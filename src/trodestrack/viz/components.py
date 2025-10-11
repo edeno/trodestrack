@@ -23,16 +23,19 @@ from trodestrack.viz.styles import COLORS
 class RatArtist:
     """Visualize rat body, orientation, and velocity.
 
-    The rat is represented as a circle (body) with a heading arrow and
-    velocity vector for clear motion indication.
+    Represents the rat as a circle (meters) with a heading arrow and a velocity
+    arrow. Methods update matplotlib artists in place for efficient blitting.
     """
 
     def __init__(self, ax: Axes, body_radius: float = 0.03):
         """Initialize rat artist.
 
-        Args:
-            ax: Matplotlib axes to draw on
-            body_radius: Radius of rat body circle in meters (default: 3cm)
+        Parameters
+        ----------
+        ax : Axes
+            Matplotlib axes to draw on.
+        body_radius : float, default 0.03
+            Body circle radius (m).
         """
         self.ax = ax
         self.body_radius = body_radius
@@ -85,15 +88,23 @@ class RatArtist:
     ) -> list[Any]:
         """Update rat position, orientation, and velocity.
 
-        Args:
-            x: X position in meters
-            y: Y position in meters
-            theta: Heading angle in radians (0 = +X axis, counterclockwise)
-            vx: X velocity in m/s (optional, for velocity arrow)
-            vy: Y velocity in m/s (optional, for velocity arrow)
+        Parameters
+        ----------
+        x : float
+            X position (m).
+        y : float
+            Y position (m).
+        theta : float
+            Heading angle (rad), 0 = +X axis, CCW positive.
+        vx : float, default 0.0
+            X velocity (m/s).
+        vy : float, default 0.0
+            Y velocity (m/s).
 
-        Returns:
-            List of modified artists for blitting
+        Returns
+        -------
+        list[Any]
+            Modified artists for blitting.
         """
         # Update body position
         self.body.center = (x, y)

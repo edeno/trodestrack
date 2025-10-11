@@ -62,26 +62,45 @@ def generate_qa_report(
     Creates a multi-page PDF with summary statistics, time series plots,
     consistency checks, and configuration details.
 
-    Args:
-        pdf_path: Output PDF file path
-        t: Time vector, shape (N,) in seconds
-        positions_true: Ground truth positions, shape (N, 2) in meters
-        positions_est: Estimated positions, shape (N, 2) in meters
-        velocities_true: Ground truth velocities, shape (N, 2) in m/s
-        velocities_est: Estimated velocities, shape (N, 2) in m/s
-        headings_true: Ground truth headings, shape (N,) in radians
-        headings_est: Estimated headings, shape (N,) in radians
-        nees: NEES values, shape (N,)
-        state_dim: State dimensionality for NEES chi-squared bounds
-        nis: Optional NIS values, shape (M,)
-        measurement_dim: Measurement dimensionality for NIS (required if nis provided)
-        config: Optional filter configuration dictionary
-        title: Report title (default: "Filter QA Report")
+    Parameters
+    ----------
+    pdf_path : Path or str
+        Output PDF file path.
+    t : NDArray[np.float64]
+        Time vector (N,) in seconds.
+    positions_true : NDArray[np.float64]
+        Ground truth positions (N, 2) in meters.
+    positions_est : NDArray[np.float64]
+        Estimated positions (N, 2) in meters.
+    velocities_true : NDArray[np.float64]
+        Ground truth velocities (N, 2) in m/s.
+    velocities_est : NDArray[np.float64]
+        Estimated velocities (N, 2) in m/s.
+    headings_true : NDArray[np.float64]
+        Ground truth headings (N,) in radians.
+    headings_est : NDArray[np.float64]
+        Estimated headings (N,) in radians.
+    nees : NDArray[np.float64]
+        NEES values (N,).
+    state_dim : int
+        State dimensionality for NEES χ² bounds.
+    nis : NDArray[np.float64] | None, optional
+        NIS values (N,). If provided, ``measurement_dim`` is required.
+    measurement_dim : int | None, optional
+        Measurement dimensionality for NIS χ² bounds.
+    config : dict | None, optional
+        Filter configuration to embed on the summary page.
+    title : str, default "Filter QA Report"
+        Report title.
 
-    Raises:
-        ValueError: If array shapes are inconsistent or required parameters missing
-        FileNotFoundError: If pdf_path directory doesn't exist
-        OSError: If PDF cannot be created (permissions, disk space, etc.)
+    Raises
+    ------
+    ValueError
+        If array shapes are inconsistent or required parameters are missing.
+    FileNotFoundError
+        If ``pdf_path`` directory doesn't exist.
+    OSError
+        If the PDF cannot be created (permissions, disk space, etc.).
 
     Example:
         >>> import numpy as np
