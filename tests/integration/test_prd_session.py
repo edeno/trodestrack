@@ -488,9 +488,9 @@ def test_nees_consistency():
 
     # Compute NEES for all timesteps
     nees_values = compute_nees(
-        truth=truth_full_state,
-        estimates=filter_result.filtered_means,
-        covariances=filter_result.filtered_covariances,
+        states_true=truth_full_state,
+        states_est=filter_result.filtered_means,
+        covariances_est=filter_result.filtered_covariances,
     )
 
     # Chi-squared bounds for 8 DOF at 95% CI
