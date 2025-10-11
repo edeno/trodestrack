@@ -27,6 +27,7 @@ from trodestrack.qa.metrics import (
     compute_velocity_rmse,
 )
 from trodestrack.qa.plots import (
+    plot_heading_error,
     plot_nees_histogram,
     plot_nis_histogram,
     plot_position_error,
@@ -111,10 +112,10 @@ def generate_qa_report(
         1. Title page with summary statistics
         2. Position error time series
         3. Velocity error time series
-        4. 2D trajectory plot (true vs estimated)
-        5. NEES histogram with chi-squared bounds
-        6. NIS histogram (if provided)
-        7. Filter configuration (if provided)
+        4. Heading error time series
+        5. 2D trajectory plot (true vs estimated)
+        6. NEES histogram with chi-squared bounds
+        7. NIS histogram (if provided)
     """
     # Convert to Path
     pdf_path = Path(pdf_path)
@@ -185,17 +186,24 @@ def generate_qa_report(
             pdf.savefig(fig_vel, bbox_inches="tight")
             plt.close(fig_vel)
 
-            # Page 4: 2D trajectory plot
+            # Page 4: Heading error time series
+            fig_heading, _ = plot_heading_error(
+                t, headings_true, headings_est, prd_threshold_deg=PRD_HEADING_MAE_DEG
+            )
+            pdf.savefig(fig_heading, bbox_inches="tight")
+            plt.close(fig_heading)
+
+            # Page 5: 2D trajectory plot
             fig_traj = _create_trajectory_plot(positions_true, positions_est)
             pdf.savefig(fig_traj, bbox_inches="tight")
             plt.close(fig_traj)
 
-            # Page 5: NEES histogram
+            # Page 6: NEES histogram
             fig_nees, _ = plot_nees_histogram(nees, state_dim=state_dim, confidence=0.95)
             pdf.savefig(fig_nees, bbox_inches="tight")
             plt.close(fig_nees)
 
-            # Page 6 (optional): NIS histogram
+            # Page 7 (optional): NIS histogram
             if nis is not None and measurement_dim is not None:
                 fig_nis, _ = plot_nis_histogram(
                     nis, measurement_dim=measurement_dim, confidence=0.95

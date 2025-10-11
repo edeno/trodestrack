@@ -10,9 +10,14 @@
     - Page 1: Summary statistics with PRD threshold comparisons
     - Page 2: Position error time series with PRD threshold line
     - Page 3: Velocity error time series
-    - Page 4: 2D trajectory comparison (ground truth vs estimate)
-    - Page 5: NEES histogram with chi-squared bounds
-    - Page 6 (optional): NIS histogram with chi-squared bounds
+    - Page 4: **Heading error time series with PRD threshold line (7°)**
+    - Page 5: 2D trajectory comparison (ground truth vs estimate)
+    - Page 6: NEES histogram with chi-squared bounds
+    - Page 7 (optional): NIS histogram with chi-squared bounds
+  - **New function:** `plot_heading_error()` in `qa/plots.py`
+    - Proper angle wrapping for heading errors
+    - Optional PRD threshold line (7 degrees)
+    - Orange color for heading (distinct from position/velocity)
   - Summary page sections:
     - Accuracy metrics (position/velocity/heading RMSE) with PRD requirements
     - NEES consistency (mean, std, chi-squared bounds, % within bounds)

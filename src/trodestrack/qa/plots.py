@@ -244,6 +244,79 @@ def plot_velocity_error(
     return fig, ax
 
 
+def plot_heading_error(
+    t: NDArray[np.float64],
+    headings_true: NDArray[np.float64],
+    headings_est: NDArray[np.float64],
+    mask: NDArray[np.bool_] | None = None,
+    prd_threshold_deg: float | None = None,
+) -> tuple[Figure, Axes]:
+    """Plot heading error over time with proper angle wrapping.
+
+    Args:
+        t: Time vector, shape (N,) in seconds
+        headings_true: Ground truth headings, shape (N,) in radians
+        headings_est: Estimated headings, shape (N,) in radians
+        mask: Optional validity mask, shape (N,). Only valid (True) entries plotted.
+        prd_threshold_deg: If provided, plot PRD requirement threshold in degrees (e.g., 7.0)
+
+    Returns:
+        Tuple of (figure, axes)
+
+    Example:
+        >>> import numpy as np
+        >>> t = np.linspace(0, 10, 100)
+        >>> heading_true = np.linspace(0, 2*np.pi, 100)
+        >>> heading_est = heading_true + np.random.randn(100) * 0.1
+        >>> fig, ax = plot_heading_error(t, heading_true, heading_est, prd_threshold_deg=7.0)
+        >>> plt.close(fig)
+
+    Notes:
+        PRD requirement: heading error ≤ 7.0 degrees
+        Angle wrapping ensures errors are in [-π, π] range.
+    """
+    if headings_true.shape != headings_est.shape:
+        raise ValueError(f"Shape mismatch: true {headings_true.shape} vs est {headings_est.shape}")
+
+    apply_tufte_style()
+
+    # Compute wrapped heading error (in [-π, π])
+    errors = headings_true - headings_est
+    errors_wrapped = np.arctan2(np.sin(errors), np.cos(errors))
+    errors_deg = np.rad2deg(np.abs(errors_wrapped))
+
+    # Apply mask if provided
+    if mask is not None:
+        t_plot = t[mask]
+        error_plot = errors_deg[mask]
+    else:
+        t_plot = t
+        error_plot = errors_deg
+
+    # Create plot
+    fig, ax = plt.subplots(figsize=(8, 3), constrained_layout=True)
+
+    # Plot error
+    ax.plot(t_plot, error_plot, color=COLORS["orange"], linewidth=1.0, label="Heading Error")
+
+    # Plot PRD threshold if provided
+    if prd_threshold_deg is not None:
+        ax.axhline(
+            prd_threshold_deg,
+            color=COLORS["red"],
+            linewidth=1.0,
+            linestyle="--",
+            label=f"PRD threshold ({prd_threshold_deg:.0f}°)",
+        )
+
+    # Labels
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Heading Error (degrees)")
+    ax.legend(loc="upper right")
+
+    return fig, ax
+
+
 def plot_nees_histogram(
     nees: NDArray[np.float64],
     state_dim: int,

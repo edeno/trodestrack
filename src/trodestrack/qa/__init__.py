@@ -15,6 +15,7 @@ from trodestrack.qa.metrics import (
 )
 from trodestrack.qa.plots import (
     plot_covariance_ellipse,
+    plot_heading_error,
     plot_nees_histogram,
     plot_nis_histogram,
     plot_position_error,
@@ -40,6 +41,7 @@ __all__ = [
     "plot_residuals",
     "plot_position_error",
     "plot_velocity_error",
+    "plot_heading_error",
     "plot_nees_histogram",
     "plot_nis_histogram",
     "plot_covariance_ellipse",
