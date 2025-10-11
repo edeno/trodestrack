@@ -477,8 +477,10 @@ def create_diagnostic_video(
         those returns since blit=False. With blitting disabled, matplotlib redraws the
         entire figure each frame, so we don't need to track individual artist changes.
 
-        Returns:
-            Empty list (blitting is disabled, so return value is ignored)
+        Returns
+        -------
+        list[Artist]
+            Empty list (blitting is disabled; return value is ignored).
         """
         # Get data for this frame
         t = video_data["t_video"][frame_idx]

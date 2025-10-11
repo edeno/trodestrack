@@ -140,8 +140,10 @@ def plot_position_error(
     prd_threshold_m : float | None, optional
         If provided, plot PRD requirement threshold (e.g., 0.02 for 2 cm).
 
-    Returns:
-        Tuple of (figure, axes)
+    Returns
+    -------
+    tuple[Figure, Axes]
+        Matplotlib Figure and Axes.
 
     Example:
         >>> import numpy as np
@@ -565,8 +567,10 @@ def plot_covariance_ellipse(
         - 2σ ellipse contains ~86% of probability mass
         - 3σ ellipse contains ~99% of probability mass
 
-    Raises:
-        ValueError: If mean or cov are not 2D, or if cov is singular
+    Raises
+    ------
+    ValueError
+        If mean or cov are not 2D, or if cov is singular.
     """
     if mean.shape != (2,):
         raise ValueError(f"Expected 2D mean, got shape {mean.shape}")

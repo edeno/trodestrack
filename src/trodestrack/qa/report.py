@@ -253,18 +253,29 @@ def _create_summary_page(
 ) -> Figure:
     """Create summary page with metrics and configuration.
 
-    Args:
-        title: Report title
-        pos_rmse: Position RMSE in meters
-        vel_rmse: Velocity RMSE in m/s
-        heading_mae: Heading MAE in radians
-        heading_rmse: Heading RMSE in radians
-        nees_stats: NEES statistics dictionary
-        nis_stats: Optional NIS statistics dictionary
-        config: Optional configuration dictionary
+    Parameters
+    ----------
+    title : str
+        Report title.
+    pos_rmse : float
+        Position RMSE (m).
+    vel_rmse : float
+        Velocity RMSE (m/s).
+    heading_mae : float
+        Heading MAE (rad).
+    heading_rmse : float
+        Heading RMSE (rad).
+    nees_stats : dict
+        NEES statistics dictionary.
+    nis_stats : dict | None
+        Optional NIS statistics dictionary.
+    config : dict | None
+        Optional configuration dictionary.
 
-    Returns:
-        Matplotlib figure
+    Returns
+    -------
+    Figure
+        Matplotlib figure.
     """
     fig = plt.figure(figsize=(8.5, 11))  # US Letter size
     fig.suptitle(title, fontsize=16, fontweight="bold", y=0.98)
@@ -361,12 +372,17 @@ def _create_trajectory_plot(
 ) -> Figure:
     """Create 2D trajectory comparison plot.
 
-    Args:
-        positions_true: Ground truth positions, shape (N, 2) in meters
-        positions_est: Estimated positions, shape (N, 2) in meters
+    Parameters
+    ----------
+    positions_true : NDArray[np.float64]
+        Ground truth positions (N, 2) in meters.
+    positions_est : NDArray[np.float64]
+        Estimated positions (N, 2) in meters.
 
-    Returns:
-        Matplotlib figure
+    Returns
+    -------
+    Figure
+        Matplotlib figure.
     """
     fig, ax = plt.subplots(figsize=(8, 8), constrained_layout=True)
 

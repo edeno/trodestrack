@@ -230,12 +230,17 @@ def rts_smoother(
     def smoother_step(carry, args):
         """Single backward smoothing step.
 
-        Args:
-            carry: (smoothed_mean_next, smoothed_cov_next) at time k+1
-            args: (t, filtered_mean_k, filtered_cov_k, lin_mean_k) at time k
+        Parameters
+        ----------
+        carry : tuple[jnp.ndarray, jnp.ndarray]
+            ``(smoothed_mean_next, smoothed_cov_next)`` at time k+1.
+        args : tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
+            ``(t, filtered_mean_k, filtered_cov_k, lin_mean_k)`` at time k.
 
-        Returns:
-            Updated carry and smoothed estimates at time k
+        Returns
+        -------
+        tuple[tuple[jnp.ndarray, jnp.ndarray], tuple[jnp.ndarray, jnp.ndarray]]
+            Updated carry and smoothed estimates at time k.
         """
         smoothed_mean_next, smoothed_cov_next = carry
         t, filtered_mean, filtered_cov, lin_mean = args
@@ -311,14 +316,21 @@ def rts_smoother(
 def _compute_sigma_points(m: jnp.ndarray, P: jnp.ndarray, n: int, lamb: float) -> jnp.ndarray:
     """Generate sigma points for unscented transform.
 
-    Args:
-        m: Mean (n,)
-        P: Covariance (n, n)
-        n: State dimension
-        lamb: UKF lambda parameter
+    Parameters
+    ----------
+    m : jnp.ndarray
+        Mean (n,).
+    P : jnp.ndarray
+        Covariance (n, n).
+    n : int
+        State dimension.
+    lamb : float
+        UKF lambda parameter.
 
-    Returns:
-        Sigma points (2n+1, n)
+    Returns
+    -------
+    jnp.ndarray
+        Sigma points (2n+1, n).
     """
     # Regularize covariance for Cholesky
     P_reg = symmetrize(P)
@@ -376,19 +388,8 @@ def sigma_point_smoother(
     SmootherResult
         Smoothed means and covariances at camera times; log-likelihood copied
         from the forward UKF pass.
-
-    Args:
-        filter_result: Output from unscented_kalman_filter()
-        ukf_config: UKF configuration
-        t_imu: IMU timestamps (N_imu,)
-        U_imu: IMU measurements [ω_z, f_x, f_y] (N_imu, 3)
-        t_cam: Camera timestamps (N_cam,)
-        mask_cam: Camera mask (N_cam,) - if provided, applies blackout-aware noise scaling
-
-    Returns:
-        SmootherResult with smoothed means and covariances
-
-    Note:
+    Notes
+    -----
         Uses unscented transform for prediction to compute cross-covariance
         between filtered[k] and predicted[k+1], which is needed for the gain.
         State dimension is derived from filter_result.filtered_means.shape[1].
@@ -445,10 +446,10 @@ def sigma_point_smoother(
     ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
         """Predict from frame t_idx to t_idx+1 using sigma points.
 
-        Returns:
-            m_pred: Predicted mean (n,)
-            P_pred: Predicted covariance (n, n)
-            S_cross: Cross-covariance P(x_k, x_{k+1}) (n, n)
+        Returns
+        -------
+        tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]
+            m_pred (n,), P_pred (n, n), S_cross = P(x_k, x_{k+1}) (n, n).
         """
         imu_indices = imu_index_arrays[t_idx + 1]
 

@@ -230,13 +230,19 @@ def compute_nees(
     For a consistent filter, NEES should follow a chi-squared distribution with
     degrees of freedom equal to state dimension.
 
-    Args:
-        states_true: Ground truth states, shape (N, D)
-        states_est: Estimated states, shape (N, D)
-        covariances_est: Estimated covariances, shape (N, D, D)
+    Parameters
+    ----------
+    states_true : NDArray[np.float64]
+        Ground truth states (N, D).
+    states_est : NDArray[np.float64]
+        Estimated states (N, D).
+    covariances_est : NDArray[np.float64]
+        Estimated covariances (N, D, D).
 
-    Returns:
-        NEES values per timestep, shape (N,)
+    Returns
+    -------
+    NDArray[np.float64]
+        NEES values per timestep (N,).
 
     Example:
         >>> true_state = np.array([[0.0, 0.0], [1.0, 1.0]])
@@ -297,12 +303,17 @@ def compute_nis(
     predicted innovation covariances. For a consistent filter, NIS should follow
     a chi-squared distribution with degrees of freedom equal to measurement dimension.
 
-    Args:
-        innovations: Measurement innovations (residuals), shape (N, M)
-        innovation_covariances: Innovation covariances, shape (N, M, M)
+    Parameters
+    ----------
+    innovations : NDArray[np.float64]
+        Measurement innovations (N, M).
+    innovation_covariances : NDArray[np.float64]
+        Innovation covariances (N, M, M).
 
-    Returns:
-        NIS values per timestep, shape (N,)
+    Returns
+    -------
+    NDArray[np.float64]
+        NIS values per timestep (N,).
 
     Example:
         >>> innovations = np.array([[0.1, 0.1], [0.2, -0.1]])
@@ -493,12 +504,18 @@ def compute_nees_stats(
 ) -> dict[str, float]:
     """Compute summary statistics for NEES consistency check.
 
-    Args:
-        nees: NEES values per timestep, shape (N,)
-        state_dim: Dimension of state (degrees of freedom for chi-squared)
-        confidence: Confidence level for chi-squared bounds (default: 0.95 for 95% CI)
+    Parameters
+    ----------
+    nees : NDArray[np.float64]
+        NEES values per timestep (N,).
+    state_dim : int
+        State dimension (degrees of freedom for χ²).
+    confidence : float, default 0.95
+        Confidence level for χ² bounds.
 
-    Returns:
+    Returns
+    -------
+    dict[str, float]
         Dictionary with keys:
         - mean: Mean NEES (should be ~state_dim for consistent filter)
         - std: Standard deviation
@@ -584,11 +601,15 @@ def chi2_ci95(df: int) -> tuple[float, float]:
 
     This is a convenience wrapper around chi2_bounds() with confidence=0.95.
 
-    Args:
-        df: Degrees of freedom (measurement/state dimensionality)
+    Parameters
+    ----------
+    df : int
+        Degrees of freedom (measurement/state dimensionality).
 
-    Returns:
-        Tuple of (lower_bound, upper_bound) for 95% CI
+    Returns
+    -------
+    tuple[float, float]
+        (lower_bound, upper_bound) for 95% CI.
 
     Example:
         >>> lower, upper = chi2_ci95(df=2)

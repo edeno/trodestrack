@@ -154,12 +154,18 @@ class LEDArtist:
     ):
         """Initialize LED artist.
 
-        Args:
-            ax: Matplotlib axes to draw on
-            led_id: LED identifier (1 or 2)
-            color: Color for this LED (e.g., COLORS["blue"])
-            marker_size: Radius of LED marker in meters
-            show_residuals: Show residual lines from expected to observed position
+        Parameters
+        ----------
+        ax : Axes
+            Matplotlib axes to draw on.
+        led_id : int
+            LED identifier (1 or 2).
+        color : str
+            Color for this LED (e.g., COLORS["blue"]).
+        marker_size : float, default 0.008
+            Radius of LED marker (m).
+        show_residuals : bool, default False
+            Show residual lines from expected to observed position.
         """
         self.led_id = led_id
         self.color = color
@@ -219,16 +225,25 @@ class LEDArtist:
     ) -> list[Any]:
         """Update LED position, visibility, and confidence.
 
-        Args:
-            x: Observed X position in meters
-            y: Observed Y position in meters
-            visible: Whether LED is detected in this frame
-            confidence: Detection confidence [0, 1] (used for halo alpha)
-            x_expected: Expected X position from body model (for residuals)
-            y_expected: Expected Y position from body model (for residuals)
+        Parameters
+        ----------
+        x : float
+            Observed X (m).
+        y : float
+            Observed Y (m).
+        visible : bool
+            Whether LED is detected in this frame.
+        confidence : float, default 1.0
+            Detection confidence [0, 1] used for halo alpha.
+        x_expected : float | None, optional
+            Expected X from body model (for residuals).
+        y_expected : float | None, optional
+            Expected Y from body model (for residuals).
 
-        Returns:
-            List of modified artists for blitting
+        Returns
+        -------
+        list[Any]
+            Modified artists for blitting.
         """
         artists = [self.marker, self.halo, self.dropout_marker]
 
@@ -293,11 +308,16 @@ class TrailArtist:
     def __init__(self, ax: Axes, trail_length_s: float, fps: int, color: str | None = None):
         """Initialize trail artist.
 
-        Args:
-            ax: Matplotlib axes to draw on
-            trail_length_s: Length of trail in seconds
-            fps: Video frame rate (frames per second)
-            color: Trail color (default: COLORS["blue"])
+        Parameters
+        ----------
+        ax : Axes
+            Matplotlib axes to draw on.
+        trail_length_s : float
+            Length of trail in seconds.
+        fps : int
+            Video frame rate (frames per second).
+        color : str | None, optional
+            Trail color (default: COLORS["blue"]).
         """
         if color is None:
             color = COLORS["blue"]
@@ -313,12 +333,17 @@ class TrailArtist:
     def update(self, x: float, y: float) -> list[Any]:
         """Add new position and update fading trail.
 
-        Args:
-            x: Current X position in meters
-            y: Current Y position in meters
+        Parameters
+        ----------
+        x : float
+            Current X position (m).
+        y : float
+            Current Y position (m).
 
-        Returns:
-            List of modified artists for blitting
+        Returns
+        -------
+        list[Any]
+            Modified artists for blitting.
         """
         self.positions.append([x, y])
 
@@ -348,8 +373,10 @@ class HUDArtist:
     def __init__(self, ax: Axes):
         """Initialize HUD artist.
 
-        Args:
-            ax: Matplotlib axes to draw on
+        Parameters
+        ----------
+        ax : Axes
+            Matplotlib axes to draw on.
         """
         # State info only (time shown in progress bar)
         self.state_text = ax.text(
@@ -368,16 +395,21 @@ class HUDArtist:
     def update(self, t: float, state: dict[str, Any]) -> list[Text]:
         """Update HUD text with current state.
 
-        Args:
-            t: Current time in seconds
-            state: Dictionary with state information:
-                - speed: Speed in m/s
-                - theta: Heading in radians
-                - led1_visible: LED1 detection status
-                - led2_visible: LED2 detection status
+        Parameters
+        ----------
+        t : float
+            Current time (s).
+        state : dict[str, Any]
+            Dictionary with state information:
+            - speed: Speed in m/s
+            - theta: Heading in radians
+            - led1_visible: LED1 detection status
+            - led2_visible: LED2 detection status
 
-        Returns:
-            List of modified text artists
+        Returns
+        -------
+        list[Text]
+            Modified text artists.
         """
         # Format state info
         speed_ms = state.get("speed", 0.0)

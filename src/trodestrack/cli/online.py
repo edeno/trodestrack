@@ -32,8 +32,10 @@ from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
 def add_online_parser(subparsers: argparse._SubParsersAction) -> None:
     """Add online subcommand parser.
 
-    Args:
-        subparsers: Subparsers object from argparse
+    Parameters
+    ----------
+    subparsers : argparse._SubParsersAction
+        Subparsers object from argparse.
     """
     parser = subparsers.add_parser(
         "online",
@@ -189,16 +191,24 @@ def load_data_file(
 ) -> np.ndarray:
     """Load a data file with validation.
 
-    Args:
-        path: Path to data file
-        name: Descriptive name for error messages
-        expected_shape: Expected shape (None to skip validation)
+    Parameters
+    ----------
+    path : Path
+        Path to data file.
+    name : str
+        Descriptive name for error messages.
+    expected_shape : tuple[int, ...] | None, optional
+        Expected shape (None to skip validation).
 
-    Returns:
-        Loaded numpy array
+    Returns
+    -------
+    np.ndarray
+        Loaded numpy array.
 
-    Raises:
-        SystemExit: If file doesn't exist or has wrong shape
+    Raises
+    ------
+    SystemExit
+        If file doesn't exist or has wrong shape.
     """
     if not path.exists():
         print(f"Error: {name} file not found: {path}", file=sys.stderr)
@@ -223,8 +233,10 @@ def load_data_file(
 def run_online(args: argparse.Namespace) -> None:
     """Execute the online command.
 
-    Args:
-        args: Parsed command-line arguments
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed command-line arguments.
     """
     print("=" * 80)
     print("trodestrack online — Real-time Filtering")

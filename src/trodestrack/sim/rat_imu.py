@@ -473,11 +473,11 @@ def simulate_rat_imu(config: Optional[RatIMUSimConfig] = None, seed: int = 0) ->
     Returns
     -------
     SimOut
-        Dictionary-like output with time arrays (t_imu, t_cam_exp, t_cam_obs),
-        ground truth channels (X_truth (T_imu,5), yaw_rate_truth, accel_world_truth,
+        Output with time arrays (t_imu, t_cam_exp, t_cam_obs), ground truth
+        channels (X_truth (T_imu,5), yaw_rate_truth, accel_world_truth,
         accel_body_truth), IMU measurements (U_imu (T_imu,3) = [ω_z(rad/s), f_x, f_y]
-        with biases), and camera measurements (Z_cam_led1/2 (T_cam,2), masks, confidences),
-        plus metadata (config).
+        with biases), and camera measurements (Z_cam_led1/2 (T_cam,2), masks,
+        confidences), plus metadata (config).
     """
     if config is None:
         config = RatIMUSimConfig()
@@ -975,11 +975,15 @@ def make_default_config(**kwargs) -> RatIMUSimConfig:
     """
     Create a RatIMUSimConfig with optional overrides.
 
-    Args:
-        **kwargs: Fields to override in default config
+    Parameters
+    ----------
+    **kwargs
+        Fields to override in default config.
 
-    Returns:
-        RatIMUSimConfig instance
+    Returns
+    -------
+    RatIMUSimConfig
+        New configuration instance.
 
     Example:
         >>> cfg = make_default_config(duration_s=120.0, fs_imu=1000.0, use_second_led=True)

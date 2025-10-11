@@ -98,11 +98,15 @@ class UKFConfig(FilterCoreConfig):
             - Initial development/debugging
             - When encountering numerical instabilities
 
-        Args:
-            **kwargs: Override any default parameters
+        Parameters
+        ----------
+        **kwargs
+            Override any default parameters.
 
-        Returns:
-            UKFConfig with alpha=1e-3, beta=2.0, kappa=0.0
+        Returns
+        -------
+        UKFConfig
+            Preset with alpha=1e-3, beta=2.0, kappa=0.0.
 
         Example:
             >>> cfg = UKFConfig.conservative(use_mahalanobis_gating=True)
@@ -121,11 +125,15 @@ class UKFConfig(FilterCoreConfig):
             - Strong nonlinearities (fast rotations)
             - Well-tuned noise parameters
 
-        Args:
-            **kwargs: Override any default parameters
+        Parameters
+        ----------
+        **kwargs
+            Override any default parameters.
 
-        Returns:
-            UKFConfig with alpha=sqrt(3), beta=2.0, kappa=1.0
+        Returns
+        -------
+        UKFConfig
+            Preset with alpha=sqrt(3), beta=2.0, kappa=1.0.
 
         Example:
             >>> cfg = UKFConfig.aggressive(use_heading_measurement=True)
