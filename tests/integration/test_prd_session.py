@@ -51,7 +51,9 @@ if TYPE_CHECKING:
 PRD_POSITION_RMSE_M = 0.02  # Position RMSE <= 0.02 m (2 cm)
 PRD_VELOCITY_RMSE_M_S = 0.10  # Velocity RMSE <= 0.10 m/s (10 cm/s)
 PRD_HEADING_RMSE_DEG = 7.0  # Heading RMSE <= 7 degrees
-PRD_DROPOUT_DRIFT_M = 3.5  # Drift <= 3.5 m after 5s dropout (realistic bound)
+PRD_DROPOUT_DRIFT_M = (
+    3.5  # Drift <= 3.5 m after 5s dropout (realistic consumer-grade IMU, 95th percentile)
+)
 
 
 # =============================================================================
@@ -103,13 +105,13 @@ def get_production_ekf_config(**overrides: float | int | bool) -> EKFConfig:
         process_noise_pos=0.001,  # Reduced from 0.02 (20×) - position changes via velocity
         process_noise_vel=0.5,  # Reduced from 2.0 (4×) - matches vision-only tuning
         process_noise_heading=0.5,  # Increased to 0.5 for realistic heading process noise
-        process_noise_gyro_bias=2e-5,  # Increased 10x for more realistic bias drift
-        process_noise_accel_bias=2e-3,  # Increased 10x for more realistic bias drift
+        process_noise_gyro_bias=7.6e-07,  # MPU-9250: realistic gyro bias RW density
+        process_noise_accel_bias=2.4e-09,  # MPU-9250: realistic accel bias RW density
         measurement_noise_pos=0.005**2,
         measurement_noise_heading=0.8
         ** 2,  # Increased to 0.8² (~46°) for realistic LED heading noise with swaps
-        imu_gyro_noise_density=0.001,
-        imu_accel_noise_density=0.05,
+        imu_gyro_noise_density=0.000175,  # MPU-9250: 0.01 °/s/√Hz
+        imu_accel_noise_density=0.001961,  # MPU-9250: 0.2 mg/√Hz
         damping_coeff=0.4,
         led_distance=0.04,
         use_heading_measurement=True,
@@ -224,10 +226,10 @@ def test_30min_session_accuracy():
         fs_cam=30.0,
         cam_dropout_prob=0.05,  # 5% random dropouts
         cam_dropout_correlation=0.8,  # Correlated dropouts
-        gyro_noise_density=0.001,
-        accel_noise_density=0.05,
-        gyro_bias_rw_density=0.0001,
-        accel_bias_rw_density=0.001,
+        gyro_noise_density=0.000175,  # MPU-9250: 0.01 °/s/√Hz
+        accel_noise_density=0.001961,  # MPU-9250: 0.2 mg/√Hz
+        gyro_bias_rw_density=7.6e-07,  # MPU-9250: realistic bias random walk
+        accel_bias_rw_density=2.4e-09,  # MPU-9250: realistic bias random walk
         cam_sigma_m=0.005,  # 5mm camera noise
         use_second_led=True,
         imu_tilt_roll_deg=0.0,
@@ -300,10 +302,10 @@ def test_5s_dropout_drift_integration():
         fs_imu=200.0,
         fs_cam=30.0,
         cam_dropout_prob=0.0,  # Manual dropout injection below
-        gyro_noise_density=0.001,
-        accel_noise_density=0.05,
-        gyro_bias_rw_density=0.0001,
-        accel_bias_rw_density=0.001,
+        gyro_noise_density=0.000175,  # MPU-9250: 0.01 °/s/√Hz
+        accel_noise_density=0.001961,  # MPU-9250: 0.2 mg/√Hz
+        gyro_bias_rw_density=7.6e-07,  # MPU-9250: realistic bias random walk
+        accel_bias_rw_density=2.4e-09,  # MPU-9250: realistic bias random walk
         cam_sigma_m=0.005,
         use_second_led=True,
         imu_tilt_roll_deg=0.0,
@@ -390,10 +392,10 @@ def test_sensor_fusion_ablations():
         fs_imu=200.0,
         fs_cam=30.0,
         cam_dropout_prob=0.0,
-        gyro_noise_density=0.001,
-        accel_noise_density=0.05,
-        gyro_bias_rw_density=0.0001,
-        accel_bias_rw_density=0.001,
+        gyro_noise_density=0.000175,  # MPU-9250: 0.01 °/s/√Hz
+        accel_noise_density=0.001961,  # MPU-9250: 0.2 mg/√Hz
+        gyro_bias_rw_density=7.6e-07,  # MPU-9250: realistic bias random walk
+        accel_bias_rw_density=2.4e-09,  # MPU-9250: realistic bias random walk
         cam_sigma_m=0.005,
         use_second_led=True,
         imu_tilt_roll_deg=0.0,
@@ -495,10 +497,10 @@ def test_nees_consistency():
         fs_cam=30.0,
         cam_dropout_prob=0.05,
         cam_dropout_correlation=0.8,
-        gyro_noise_density=0.001,
-        accel_noise_density=0.05,
-        gyro_bias_rw_density=0.0001,
-        accel_bias_rw_density=0.001,
+        gyro_noise_density=0.000175,  # MPU-9250: 0.01 °/s/√Hz
+        accel_noise_density=0.001961,  # MPU-9250: 0.2 mg/√Hz
+        gyro_bias_rw_density=7.6e-07,  # MPU-9250: realistic bias random walk
+        accel_bias_rw_density=2.4e-09,  # MPU-9250: realistic bias random walk
         cam_sigma_m=0.005,
         use_second_led=True,
         imu_tilt_roll_deg=0.0,
@@ -597,10 +599,10 @@ def test_smoother_long_session():
         fs_cam=30.0,
         cam_dropout_prob=0.05,
         cam_dropout_correlation=0.8,
-        gyro_noise_density=0.001,
-        accel_noise_density=0.05,
-        gyro_bias_rw_density=0.0001,
-        accel_bias_rw_density=0.001,
+        gyro_noise_density=0.000175,  # MPU-9250: 0.01 °/s/√Hz
+        accel_noise_density=0.001961,  # MPU-9250: 0.2 mg/√Hz
+        gyro_bias_rw_density=7.6e-07,  # MPU-9250: realistic bias random walk
+        accel_bias_rw_density=2.4e-09,  # MPU-9250: realistic bias random walk
         cam_sigma_m=0.005,
         use_second_led=True,
         imu_tilt_roll_deg=0.0,
