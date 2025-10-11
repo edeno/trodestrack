@@ -44,3 +44,4 @@ calibration_*.yaml
 *.log
 *.sh
 *.mp4
+examples/*.pdf
