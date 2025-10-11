@@ -76,9 +76,8 @@ from trodestrack.viz.styles import COLORS, apply_tufte_style
 # Apply clean visualization style (Tufte principles: maximize data-ink ratio)
 apply_tufte_style()
 
-# Output directory
-OUTPUT_DIR = Path("output/examples")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+# Output directory (save in examples/ folder for easy access)
+OUTPUT_DIR = Path(__file__).parent
 
 
 # =============================================================================

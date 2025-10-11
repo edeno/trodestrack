@@ -78,7 +78,7 @@ from trodestrack.viz.styles import COLORS, apply_tufte_style
 apply_tufte_style()
 
 # Output directory
-OUTPUT_DIR = Path("output/examples")
+OUTPUT_DIR = Path(__file__).parent
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
