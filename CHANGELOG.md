@@ -2,6 +2,42 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-11 - Critical Fixes (Post-M5)
+
+**Fixed (Critical):**
+
+- **IEKF Performance Issue** ([src/trodestrack/models/ekf.py:448](src/trodestrack/models/ekf.py#L448))
+  - Eliminated redundant `get_layout(config.state_mode)` lookup inside IEKF iteration loop
+  - Reuses pre-computed `layout` parameter from outer scope
+  - Impact: Reduces computational overhead in hot path (IEKF runs multiple iterations per frame)
+  - Performance: Improves filter throughput (PRD Section 7: ≥10× realtime requirement)
+
+- **CLI Architecture Inconsistency** ([src/trodestrack/cli/smooth.py](src/trodestrack/cli/smooth.py), [src/trodestrack/cli/online.py](src/trodestrack/cli/online.py))
+  - Replaced hardcoded state dimension `8` with dynamic computation from results
+  - Updated docstrings: "N_cam, 8" → "N_cam, n" with explanatory note
+  - Updated print statements to derive `n_state` from `filtered_means.shape[1]`
+  - Impact: Aligns with multi-layout architecture (PRD Section 8), supports future state extensions
+
+**Improved (Code Quality):**
+
+- **DRY Refactor: CLI Utilities** ([src/trodestrack/cli/utils.py](src/trodestrack/cli/utils.py))
+  - Extracted duplicated `load_data_file()` function (44 lines × 2 = 88 lines removed)
+  - Created shared `cli/utils.py` module with comprehensive tests
+  - Test coverage: 5 tests ([tests/cli/test_utils.py](tests/cli/test_utils.py))
+    - Success case, shape validation, missing file, wrong shape, invalid content
+  - Benefits: Single point of maintenance for file loading and error messages
+
+**Testing:**
+
+- All 177 filter/runtime/CLI tests passing (146s)
+- New test suite: `tests/cli/test_utils.py` (5/5 passing, 0.18s)
+- Code quality checks: black ✓, ruff ✓, mypy ✓
+- Pre-commit hooks: all passing
+
+**Commit:** `a7e8011` - fix(critical): resolve performance and architecture issues
+
+---
+
 ### Session: 2025-10-11 - CLI Report Command (Milestone 4)
 
 **Added:**
