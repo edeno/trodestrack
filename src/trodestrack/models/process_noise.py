@@ -4,6 +4,7 @@ from typing import Any, Optional
 
 import jax.numpy as jnp
 
+from trodestrack.models.filter_common import symmetrize
 from trodestrack.models.state_layout import LAYOUT_REGISTRY
 
 
@@ -90,7 +91,9 @@ def build_input_noise_cov(config: Any, dt: float, dtype=jnp.float32) -> jnp.ndar
     """
     sg = (config.imu_gyro_noise_density * jnp.sqrt(dt)) ** 2
     sa = (config.imu_accel_noise_density * jnp.sqrt(dt)) ** 2
-    return jnp.diag(jnp.array([sg, sa, sa], dtype=dtype))
+
+    Qu = jnp.diag(jnp.array([sg, sa, sa], dtype=dtype))
+    return symmetrize(Qu)
 
 
 def assemble_Q(

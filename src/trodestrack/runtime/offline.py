@@ -321,8 +321,7 @@ def _compute_sigma_points(m: jnp.ndarray, P: jnp.ndarray, n: int, lamb: float) -
         Sigma points (2n+1, n)
     """
     # Regularize covariance for Cholesky
-    eps = 1e-8
-    P_reg = P + eps * jnp.eye(n)
+    P_reg = symmetrize(P)
 
     # Compute Cholesky decomposition
     L = jnp.linalg.cholesky(P_reg)
