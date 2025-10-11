@@ -18,8 +18,8 @@ Key features:
     - IMU pre-integration between camera frames
     - Velocity damping to model drag
     - Dual-LED position and heading measurements
-    - Mahalanobis gating for outlier rejection (future)
-    - RTS smoother for offline processing (future)
+    - Mahalanobis gating for outlier rejection
+    - RTS smoother for offline processing (see runtime/offline.py)
 
 References:
     - PRD.md Section 6: Mathematical Model
@@ -52,9 +52,9 @@ from trodestrack.models.filter_common import (
     update_zupt,
     wrap_angle,
 )
+from trodestrack.models.filter_utils import compute_imu_index_arrays
 from trodestrack.models.process_noise import assemble_Q
-from trodestrack.models.state_layout import get_layout, get_heading_index, StateLayout
-
+from trodestrack.models.state_layout import StateLayout, get_heading_index, get_layout
 
 # =============================================================================
 # Configuration & State
@@ -582,52 +582,11 @@ def extended_kalman_filter(
     # Resolve state layout once for this run
     layout = get_layout(config_for_filter.state_mode)
 
-    # Precompute IMU indices for each camera interval
-    # For efficient scanning, we create a fixed-size index array with padding
-    # Compute exact maximum per-frame count once (on CPU/NumPy) for robust padding
-    cuts = np.searchsorted(t_imu, t_cam)
-    counts = np.diff(np.r_[0, cuts])
-    max_imu_per_frame = int(counts.max())
-
     # Compute mean IMU timestep for fallback when imu_idx == 0
     dt_imu_mean = jnp.mean(jnp.diff(t_imu_jax))  # Keep as JAX scalar for JIT compatibility
 
-    def compute_imu_index_arrays():
-        """Build padded index arrays for IMU samples between camera frames.
-
-        IMPORTANT: This is a HOST-SIDE precomputation, NOT JIT-traced.
-        The Python loop over n_cam runs on CPU/host before filter execution,
-        producing static index arrays that are baked into the JIT-compiled filter.
-
-        This approach is intentional:
-        - Avoids dynamic loop unrolling inside JIT (which would lock in n_cam)
-        - Precomputes index arrays once rather than recomputing per filter call
-        - Results in cleaner, more maintainable JIT-compiled code
-
-        If you JIT an outer function that calls this, the loop will be unrolled
-        at trace-time, not runtime. Use numpy arrays in the loop if you want to
-        avoid JAX tracing surprises (currently uses JAX arrays, which is fine).
-
-        Returns:
-            jnp.ndarray: (n_cam, max_imu_per_frame) array of IMU indices
-                where -1 indicates padding (invalid index)
-        """
-        all_indices = []
-        for i in range(n_cam):
-            if i == 0:
-                # First frame: no IMU propagation
-                indices = jnp.full(max_imu_per_frame, -1, dtype=jnp.int32)
-            else:
-                t_prev = t_cam_jax[i - 1]
-                t_current = t_cam_jax[i]
-                # Find IMU samples in (t_prev, t_current]
-                mask = (t_imu_jax > t_prev) & (t_imu_jax <= t_current)
-                valid_indices = jnp.where(mask, size=max_imu_per_frame, fill_value=-1)[0]
-                indices = valid_indices
-            all_indices.append(indices)
-        return jnp.array(all_indices)
-
-    imu_index_arrays = compute_imu_index_arrays()
+    # Precompute IMU index arrays (host-side, using shared utility)
+    imu_index_arrays = compute_imu_index_arrays(t_imu, t_cam)
 
     # Precompute device-friendly measurement inputs per frame
     led1_valid_arr = jnp.isfinite(Z_cam_led1_jax[:, 0])

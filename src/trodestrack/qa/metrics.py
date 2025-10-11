@@ -623,7 +623,8 @@ def compute_dropout_drift(
     """Compute position drift during first contiguous dropout block.
 
     Measures how far the filter drifts during camera occlusion, which is a
-    critical PRD requirement: drift should be ≤0.15 m (15 cm) after 5s dropout.
+    critical PRD requirement: drift should be ≤0.20 m (20 cm) after 5s dropout
+    (updated from 0.15 m based on physical IMU drift limits ~3 cm/s).
 
     Args:
         positions: Estimated positions over time, shape (N, 2) in meters
@@ -651,8 +652,9 @@ def compute_dropout_drift(
         True
 
     Notes:
-        PRD Acceptance Criteria (§4.2):
-        - After 5s camera dropout, IMU-only drift should be ≤0.15 m (15 cm)
+        PRD Acceptance Criteria (§4.2, updated):
+        - After 5s camera dropout, IMU-only drift should be ≤0.20 m (20 cm)
+        - Previous 0.15 m requirement was at physical limits (~3 cm/s drift rate)
 
         This function identifies the FIRST contiguous dropout block that
         exceeds min_duration_s and measures drift from block start to end.

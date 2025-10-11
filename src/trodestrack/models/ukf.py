@@ -54,8 +54,9 @@ from trodestrack.models.filter_common import (
     update_zupt,
     wrap_angle,
 )
+from trodestrack.models.filter_utils import compute_imu_index_arrays
 from trodestrack.models.process_noise import assemble_Q
-from trodestrack.models.state_layout import get_layout, get_heading_index, StateLayout
+from trodestrack.models.state_layout import StateLayout, get_heading_index, get_layout
 
 # =============================================================================
 # Configuration & State
@@ -753,42 +754,11 @@ def unscented_kalman_filter(
     # Resolve state layout once for this run
     layout = get_layout(config_for_filter.state_mode)
 
-    # Precompute IMU indices for each camera interval
-    # Compute exact maximum per-frame count once (on CPU/NumPy) for robust padding
-    cuts = np.searchsorted(t_imu, t_cam)
-    counts = np.diff(np.r_[0, cuts])
-    max_imu_per_frame = int(counts.max())
-
     # Compute mean IMU timestep for fallback
     dt_imu_mean = jnp.mean(jnp.diff(t_imu_jax))  # Keep as JAX scalar for JIT compatibility
 
-    def compute_imu_index_arrays():
-        """Build padded index arrays for IMU samples between camera frames.
-
-        IMPORTANT: This is a HOST-SIDE precomputation, NOT JIT-traced.
-        The Python loop over n_cam runs on CPU/host before filter execution,
-        producing static index arrays that are baked into the JIT-compiled filter.
-
-        Returns:
-            jnp.ndarray: (n_cam, max_imu_per_frame) array of IMU indices
-                where -1 indicates padding (invalid index)
-        """
-        all_indices = []
-        for i in range(n_cam):
-            if i == 0:
-                # First frame: no IMU propagation
-                indices = jnp.full(max_imu_per_frame, -1, dtype=jnp.int32)
-            else:
-                t_prev = t_cam_jax[i - 1]
-                t_current = t_cam_jax[i]
-                # Find IMU samples in (t_prev, t_current]
-                mask = (t_imu_jax > t_prev) & (t_imu_jax <= t_current)
-                valid_indices = jnp.where(mask, size=max_imu_per_frame, fill_value=-1)[0]
-                indices = valid_indices
-            all_indices.append(indices)
-        return jnp.array(all_indices)
-
-    imu_index_arrays = compute_imu_index_arrays()
+    # Precompute IMU index arrays (host-side, using shared utility)
+    imu_index_arrays = compute_imu_index_arrays(t_imu, t_cam)
 
     # Precompute device-friendly measurement inputs per frame
     led1_valid_arr = jnp.isfinite(Z_cam_led1_jax[:, 0])

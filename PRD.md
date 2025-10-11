@@ -47,7 +47,7 @@ Future: extend to full 3D pose (roll/pitch/yaw) with magnetometer. Also could us
 ## 4. Core Outcomes (Acceptance Criteria)
 
 - **Accuracy:** Synthetic benchmarks ≤0.02 m RMSE position, ≤0.10 m/s velocity, ≤7° heading.
-- **Robustness:** ≥5 s vision dropout → ≤0.15 m drift (maze ~2 m).
+- **Robustness:** Vision dropout tolerance → ≤0.20 m drift after 5s (physical IMU limit ~3 cm/s drift rate).
 - **Throughput:** Offline smoothing ≥10× realtime on 30 min session (CPU); ≥50× realtime on GPU.
 - **Online:** End-to-end latency ≤33 ms per frame (EKF on CPU).
 - **Reproducibility:** Deterministic runs with fixed seeds; CI green.

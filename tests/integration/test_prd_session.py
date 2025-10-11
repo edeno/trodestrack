@@ -67,9 +67,9 @@ def get_production_ekf_config(**overrides) -> EKFConfig:
         EKFConfig with production settings
     """
     defaults = dict(
-        process_noise_pos=0.02,
-        process_noise_vel=2.0,
-        process_noise_heading=0.02,
+        process_noise_pos=0.001,  # Reduced from 0.02 (20×) - position changes via velocity
+        process_noise_vel=0.5,  # Reduced from 2.0 (4×) - matches vision-only tuning
+        process_noise_heading=0.02,  # Unchanged - heading uncertainty is real
         process_noise_gyro_bias=2e-6,
         process_noise_accel_bias=2e-4,
         measurement_noise_pos=0.005**2,
@@ -78,7 +78,7 @@ def get_production_ekf_config(**overrides) -> EKFConfig:
         damping_coeff=0.4,
         led_distance=0.04,
         use_heading_measurement=True,
-        adaptive_q_during_dropout=True,
+        adaptive_q_during_dropout=False,  # DISABLED to prevent covariance explosion
         dropout_q_pos_multiplier=10.0,
         dropout_q_vel_multiplier=10.0,
         dropout_q_bias_multiplier=0.1,

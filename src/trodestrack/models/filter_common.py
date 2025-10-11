@@ -727,4 +727,3 @@ def prepare_heading_measurement(
     R_heading = lax.select(use_heading, R_heading_adapted, 1e6)
 
     return heading_obs, R_heading, use_heading
-    return heading_obs, R_heading, use_heading
