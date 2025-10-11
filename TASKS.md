@@ -320,7 +320,14 @@
 - [ ] API Reference via MkDocs or Sphinx
 - [ ] Tuning Guide with NEES-based diagnostics
 - [ ] Troubleshooting Guide (common filter failures)
-- [ ] `examples/03_filter_demos.py` – visualize EKF/UKF performance
+- [x] **Examples folder refactored with comprehensive pedagogical demos** (2025-10-11)
+  - [x] `examples/03_ekf_basic_scenarios.py` – EKF fundamentals (stationary, const-vel, circular)
+  - [x] `examples/04_ukf_basic_scenarios.py` – UKF vs EKF comparison with metrics
+  - [x] `examples/05_ekf_with_dropouts.py` – EKF robustness (10%, 20%, 30% dropout)
+  - [x] `examples/06_ukf_with_dropouts.py` – UKF vs EKF under stress
+  - [x] `examples/README.md` – Comprehensive learning guide with progressive path
+  - [x] All examples save outputs to examples/ folder (proper organization)
+  - [x] 5,395 lines of pedagogical code with detailed explanations
 
 ### 🧱 Packaging
 
