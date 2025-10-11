@@ -1,4 +1,4 @@
-"""Quality assurance metrics and plotting for tracking performance evaluation."""
+"""Quality assurance metrics, plotting, and reporting for tracking performance evaluation."""
 
 from trodestrack.qa.metrics import (
     chi2_bounds,
@@ -21,6 +21,7 @@ from trodestrack.qa.plots import (
     plot_residuals,
     plot_velocity_error,
 )
+from trodestrack.qa.report import generate_qa_report
 
 __all__ = [
     # Metrics
@@ -42,4 +43,6 @@ __all__ = [
     "plot_nees_histogram",
     "plot_nis_histogram",
     "plot_covariance_ellipse",
+    # Report
+    "generate_qa_report",
 ]

@@ -2,6 +2,79 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-10 - QA Report Generation (Milestone 4)
+
+**Added:**
+- **QA Report Module** (`src/trodestrack/qa/report.py`, 382 lines)
+  - `generate_qa_report()` - Multi-page PDF report generator
+    - Page 1: Summary statistics with PRD threshold comparisons
+    - Page 2: Position error time series with PRD threshold line
+    - Page 3: Velocity error time series
+    - Page 4: 2D trajectory comparison (ground truth vs estimate)
+    - Page 5: NEES histogram with chi-squared bounds
+    - Page 6 (optional): NIS histogram with chi-squared bounds
+  - Summary page sections:
+    - Accuracy metrics (position/velocity/heading RMSE) with PRD requirements
+    - NEES consistency (mean, std, chi-squared bounds, % within bounds)
+    - NIS consistency (if provided)
+    - Filter configuration (smart value formatting)
+  - Professional PDF features:
+    - matplotlib `PdfPages` for multi-page generation
+    - PDF metadata (title, author, subject, keywords)
+    - US Letter size (8.5 × 11 inches)
+    - Automatic figure cleanup (no memory leaks)
+    - Monospace font for aligned text
+
+**Comprehensive Test Suite** (`tests/qa/test_report.py`, 313 lines, 7 tests):
+- Basic report creation with minimal inputs
+- Optional parameters (NIS, config)
+- Different trajectory types (circular motion)
+- Shape validation errors
+- PDF path validation
+- Summary statistics presence (file size >50KB)
+- Custom titles
+- All 7 tests passing
+
+**Code Quality:**
+- Type hints: mypy clean (0 errors, 100% coverage)
+- Code style: ruff clean, black formatted
+- Documentation: NumPy-style docstrings with usage examples
+- PRD constants: Module-level constants for DRY principle
+  - `PRD_POSITION_RMSE_M = 0.02` (2 cm)
+  - `PRD_VELOCITY_RMSE_MS = 0.10` (10 cm/s)
+  - `PRD_HEADING_MAE_DEG = 7.0` (7 degrees)
+
+**API Updates:**
+- Added `generate_qa_report` to `qa/__init__.py` exports
+- Users can now `from trodestrack.qa import generate_qa_report`
+- Clean API: removed unused `covariances` parameter
+- Proper validation: NIS requires `measurement_dim` parameter
+
+**Integration:**
+- Reuses `qa.metrics` for RMSE and consistency computations
+- Reuses `qa.plots` for time series and histogram visualizations
+- Uses `viz.styles` for consistent Tufte/Gelman formatting
+- Fully integrated with existing QA infrastructure
+
+**Validation:**
+- Comprehensive input validation (shape checking, path validation)
+- Clear error messages with context
+- Proper handling of optional parameters
+- PDF directory must exist (raises FileNotFoundError)
+
+**Task Progress:**
+- ✅ Milestone 4: `qa/report.py` complete (TASKS.md line 289)
+- ✅ Code reviewed and approved (APPROVE WITH COMMENTS)
+- 🔴 Remaining M4: CLI command `trodestrack report` (not started)
+
+**Future Enhancements:**
+- PASS/FAIL indicators on summary page
+- Convergence time metrics
+- Trajectory statistics (duration, speed, path length)
+- Page titles on individual plots
+
+---
+
 ### Session: 2025-10-10 - QA Plotting Utilities (Milestone 4)
 
 **Added:**
