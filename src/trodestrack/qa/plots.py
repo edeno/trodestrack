@@ -31,18 +31,26 @@ def plot_residuals(
 ) -> tuple[Figure, list[Axes]]:
     """Plot residual time series with optional confidence bands.
 
-    Residuals are measurement innovations (observed - predicted). For a well-tuned
+    Residuals are measurement innovations (observed − predicted). For a well-tuned
     filter, residuals should be zero-mean white noise within confidence bounds.
 
-    Args:
-        t: Time vector, shape (N,) in seconds
-        residuals: Residuals over time, shape (N, D) where D is dimensionality
-        ylabel: Y-axis label for the residual plot
-        confidence_std: If provided, plot ±confidence_std bands (e.g., 0.01 for ±1cm)
-        dim_labels: Custom labels for each dimension (default: ["X (m)", "Y (m)"])
+    Parameters
+    ----------
+    t : NDArray[np.float64]
+        Time vector (N,) in seconds.
+    residuals : NDArray[np.float64]
+        Residuals over time (N, D) where D is dimensionality.
+    ylabel : str, default "Residuals"
+        Y-axis label.
+    confidence_std : float | None, optional
+        If provided, plot ±confidence_std bands (e.g., 0.01 for ±1 cm).
+    dim_labels : list[str] | None, optional
+        Custom labels for each dimension (default auto-labels).
 
-    Returns:
-        Tuple of (figure, axes) where axes is a list of D subplots
+    Returns
+    -------
+    tuple[Figure, list[Axes]]
+        Matplotlib Figure and list of Axes (length D).
 
     Example:
         >>> import numpy as np
@@ -119,12 +127,18 @@ def plot_position_error(
 ) -> tuple[Figure, Axes]:
     """Plot Euclidean position error over time.
 
-    Args:
-        t: Time vector, shape (N,) in seconds
-        positions_true: Ground truth positions, shape (N, 2) in meters
-        positions_est: Estimated positions, shape (N, 2) in meters
-        mask: Optional validity mask, shape (N,). Only valid (True) entries plotted.
-        prd_threshold_m: If provided, plot PRD requirement threshold (e.g., 0.02 for 2cm)
+    Parameters
+    ----------
+    t : NDArray[np.float64]
+        Time vector (N,) in seconds.
+    positions_true : NDArray[np.float64]
+        Ground truth positions (N, 2) in meters.
+    positions_est : NDArray[np.float64]
+        Estimated positions (N, 2) in meters.
+    mask : NDArray[np.bool_] | None, optional
+        Optional validity mask (N,). Only valid (True) entries plotted.
+    prd_threshold_m : float | None, optional
+        If provided, plot PRD requirement threshold (e.g., 0.02 for 2 cm).
 
     Returns:
         Tuple of (figure, axes)
@@ -191,14 +205,21 @@ def plot_velocity_error(
 ) -> tuple[Figure, Axes]:
     """Plot Euclidean velocity error over time.
 
-    Args:
-        t: Time vector, shape (N,) in seconds
-        velocities_true: Ground truth velocities, shape (N, 2) in m/s
-        velocities_est: Estimated velocities, shape (N, 2) in m/s
-        mask: Optional validity mask, shape (N,). Only valid (True) entries plotted.
+    Parameters
+    ----------
+    t : NDArray[np.float64]
+        Time vector (N,) in seconds.
+    velocities_true : NDArray[np.float64]
+        Ground truth velocities (N, 2) in m/s.
+    velocities_est : NDArray[np.float64]
+        Estimated velocities (N, 2) in m/s.
+    mask : NDArray[np.bool_] | None, optional
+        Optional validity mask (N,). Only valid (True) entries plotted.
 
-    Returns:
-        Tuple of (figure, axes)
+    Returns
+    -------
+    tuple[Figure, Axes]
+        Matplotlib Figure and Axes.
 
     Example:
         >>> import numpy as np
@@ -253,15 +274,23 @@ def plot_heading_error(
 ) -> tuple[Figure, Axes]:
     """Plot heading error over time with proper angle wrapping.
 
-    Args:
-        t: Time vector, shape (N,) in seconds
-        headings_true: Ground truth headings, shape (N,) in radians
-        headings_est: Estimated headings, shape (N,) in radians
-        mask: Optional validity mask, shape (N,). Only valid (True) entries plotted.
-        prd_threshold_deg: If provided, plot PRD requirement threshold in degrees (e.g., 7.0)
+    Parameters
+    ----------
+    t : NDArray[np.float64]
+        Time vector (N,) in seconds.
+    headings_true : NDArray[np.float64]
+        Ground truth headings (N,) in radians.
+    headings_est : NDArray[np.float64]
+        Estimated headings (N,) in radians.
+    mask : NDArray[np.bool_] | None, optional
+        Optional validity mask (N,). Only valid (True) entries plotted.
+    prd_threshold_deg : float | None, optional
+        If provided, plot PRD requirement threshold (degrees), e.g., 7.0.
 
-    Returns:
-        Tuple of (figure, axes)
+    Returns
+    -------
+    tuple[Figure, Axes]
+        Matplotlib Figure and Axes.
 
     Example:
         >>> import numpy as np
@@ -324,16 +353,22 @@ def plot_nees_histogram(
 ) -> tuple[Figure, Axes]:
     """Plot NEES histogram with chi-squared confidence bounds.
 
-    NEES (Normalized Estimation Error Squared) should follow χ²(state_dim) distribution
-    for a consistent filter. Bounds show expected range for given confidence level.
+    NEES (Normalized Estimation Error Squared) should follow χ²(state_dim) for
+    a consistent filter. Bounds show expected range for the given confidence.
 
-    Args:
-        nees: NEES values, shape (N,)
-        state_dim: State dimensionality (degrees of freedom for chi-squared)
-        confidence: Confidence level for chi-squared bounds (default: 0.95)
+    Parameters
+    ----------
+    nees : NDArray[np.float64]
+        NEES values (N,).
+    state_dim : int
+        State dimensionality (degrees of freedom for χ²).
+    confidence : float, default 0.95
+        Confidence level for χ² bounds.
 
-    Returns:
-        Tuple of (figure, axes)
+    Returns
+    -------
+    tuple[Figure, Axes]
+        Matplotlib Figure and Axes.
 
     Example:
         >>> import numpy as np
@@ -405,16 +440,22 @@ def plot_nis_histogram(
 ) -> tuple[Figure, Axes]:
     """Plot NIS histogram with chi-squared confidence bounds.
 
-    NIS (Normalized Innovation Squared) should follow χ²(measurement_dim) distribution
-    for a consistent filter. Bounds show expected range for given confidence level.
+    NIS (Normalized Innovation Squared) should follow χ²(measurement_dim) for
+    a consistent filter. Bounds show expected range for the given confidence.
 
-    Args:
-        nis: NIS values, shape (N,)
-        measurement_dim: Measurement dimensionality (degrees of freedom for chi-squared)
-        confidence: Confidence level for chi-squared bounds (default: 0.95)
+    Parameters
+    ----------
+    nis : NDArray[np.float64]
+        NIS values (N,).
+    measurement_dim : int
+        Measurement dimensionality (degrees of freedom for χ²).
+    confidence : float, default 0.95
+        Confidence level for χ² bounds.
 
-    Returns:
-        Tuple of (figure, axes)
+    Returns
+    -------
+    tuple[Figure, Axes]
+        Matplotlib Figure and Axes.
 
     Example:
         >>> import numpy as np
@@ -490,18 +531,26 @@ def plot_covariance_ellipse(
     """Plot 2D covariance ellipse with optional trajectory overlay.
 
     Visualizes position uncertainty as ellipses at 1σ, 2σ, 3σ levels (configurable).
-    Useful for understanding filter uncertainty and correlation structure.
 
-    Args:
-        mean: Mean position, shape (2,) in meters
-        cov: Covariance matrix, shape (2, 2) in meters²
-        n_std: Sigma levels to plot (default: [1, 2, 3] for 1σ, 2σ, 3σ)
-        trajectory: Optional trajectory to overlay, shape (N, 2) in meters
-        color: Ellipse color (matplotlib color name or hex)
-        alpha: Ellipse transparency (0=transparent, 1=opaque)
+    Parameters
+    ----------
+    mean : NDArray[np.float64]
+        Mean position (2,) in meters.
+    cov : NDArray[np.float64]
+        Covariance matrix (2, 2) in m².
+    n_std : list[float] | None, optional
+        Sigma levels to plot; default [1, 2, 3].
+    trajectory : NDArray[np.float64] | None, optional
+        Optional trajectory to overlay (N, 2) in meters.
+    color : str, default "blue"
+        Ellipse color (matplotlib color name or hex).
+    alpha : float, default 0.3
+        Ellipse face transparency.
 
-    Returns:
-        Tuple of (figure, axes)
+    Returns
+    -------
+    tuple[Figure, Axes]
+        Matplotlib Figure and Axes.
 
     Example:
         >>> import numpy as np
