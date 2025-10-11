@@ -41,6 +41,7 @@ from trodestrack.models.filter_common import (
     FilterState,
     apply_lifted_inverse,
     chi2_threshold,
+    compute_imu_index_arrays,
     compute_nis_and_loglik,
     dynamics_function,
     initialize_state,
@@ -52,7 +53,6 @@ from trodestrack.models.filter_common import (
     update_zupt,
     wrap_angle,
 )
-from trodestrack.models.filter_utils import compute_imu_index_arrays
 from trodestrack.models.process_noise import assemble_Q
 from trodestrack.models.state_layout import StateLayout, get_heading_index, get_layout
 

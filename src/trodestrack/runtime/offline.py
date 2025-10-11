@@ -23,8 +23,12 @@ import numpy as np
 from jax import jacfwd, lax, vmap
 
 from trodestrack.models.ekf import EKFConfig, EKFResult
-from trodestrack.models.filter_common import dynamics_function, psd_solve, symmetrize
-from trodestrack.models.filter_utils import compute_imu_index_arrays
+from trodestrack.models.filter_common import (
+    compute_imu_index_arrays,
+    dynamics_function,
+    psd_solve,
+    symmetrize,
+)
 from trodestrack.models.process_noise import assemble_Q
 from trodestrack.models.ukf import UKFConfig, UKFResult
 

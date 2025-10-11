@@ -193,7 +193,7 @@ def assemble_Q(
 
         if layout is not None and layout.has_biases:
             # Use layout to build dimension-agnostic G matrix
-            from trodestrack.models.utils import build_G_matrix_generic
+            from trodestrack.models.filter_common import build_G_matrix_generic
 
             # For 2D heading, use scalar heading_idx; for 3D, skip IMU mapping for now
             if layout.has_heading_2d:
