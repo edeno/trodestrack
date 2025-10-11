@@ -1,0 +1,550 @@
+# TrodesTrack Filter Tuning Guide
+
+**A systematic approach to parameter selection using NEES-based diagnostics**
+
+This guide helps you tune Extended Kalman Filter (EKF) and Unscented Kalman Filter (UKF) parameters for optimal tracking performance on your specific dataset.
+
+---
+
+## 📋 Table of Contents
+
+1. [Quick Start](#quick-start)
+2. [Understanding Filter Consistency](#understanding-filter-consistency)
+3. [Core Parameters](#core-parameters)
+4. [Diagnostic Workflow](#diagnostic-workflow)
+5. [Common Tuning Scenarios](#common-tuning-scenarios)
+6. [Advanced Features](#advanced-features)
+7. [Parameter Reference](#parameter-reference)
+
+---
+
+## Quick Start
+
+### The 5-Minute Tuning Checklist
+
+1. **Run with default parameters** on your data
+2. **Check NEES** (Normalized Estimation Error Squared) in the QA report
+3. **If NEES < 6.0** → filter is overconfident → increase process noise
+4. **If NEES > 10.0** → filter is underconfident → decrease process noise or increase measurement noise
+5. **Iterate** until NEES ≈ 8.0 ± 2.0 (for 8D state)
+
+### Generate Your First QA Report
+
+```python
+from trodestrack.models.ekf import ekf_forward, EKFConfig, ekf_initialize_state
+from trodestrack.qa.report import generate_filter_report
+
+# Load your data into simulation format (see I/O guide)
+# sim = load_my_data(...)
+
+# Run filter with default config
+cfg = EKFConfig()
+x0, P0 = ekf_initialize_state(sim, cfg)
+fwd = ekf_forward(x0, P0, cfg, sim)
+
+# Generate diagnostic report
+generate_filter_report(
+    states_fwd=fwd['x'],
+    states_truth=sim.get('x_truth'),  # Optional: ground truth if available
+    covariances=fwd['P'],
+    config=cfg,
+    output_path="tuning_report.pdf"
+)
+```
+
+**Key metrics to check:**
+- **NEES panel**: Should be centered around 8.0 with most samples in [6.0, 10.0]
+- **Position RMSE**: Target ≤ 2 cm (PRD requirement)
+- **Velocity RMSE**: Target ≤ 10 cm/s
+- **Heading RMSE**: Target ≤ 7°
+- **Innovation statistics**: Should be zero-mean with small variance
+
+---
+
+## Understanding Filter Consistency
+
+### What is NEES?
+
+**Normalized Estimation Error Squared (NEES)** measures whether your filter's uncertainty estimates are honest:
+
+```
+NEES = eₖᵀ Pₖ⁻¹ eₖ
+```
+
+Where:
+- `eₖ = x̂ₖ - xₖ` is the estimation error
+- `Pₖ` is the filter's covariance estimate
+
+**For a consistent 8D filter:**
+- **Expected NEES**: 8.0 (equal to state dimension)
+- **95% CI**: [3.3, 13.4] (from χ²(8, 0.025) to χ²(8, 0.975))
+- **Ideal range**: [6.0, 10.0] (informal guideline for "well-tuned")
+
+### Interpreting NEES
+
+| NEES Value | Diagnosis | Action |
+|------------|-----------|--------|
+| < 6.0 | **Overconfident** | Increase Q (process noise) |
+| 6.0 - 10.0 | **Well-tuned** ✓ | No action needed |
+| > 10.0 | **Underconfident** | Decrease Q or increase R |
+| Highly variable | **Inconsistent** | Check for outliers, tune gating |
+
+### Why NEES Matters
+
+- **NEES ≈ 8.0** → filter covariance matches actual error
+- **NEES < 6.0** → covariance too small → smoother won't improve results
+- **NEES > 10.0** → covariance too large → filter underutilizes measurements
+
+**Pro Tip:** Slightly underconfident (NEES ≈ 9-10) is safer than overconfident for real data.
+
+---
+
+## Core Parameters
+
+### Process Noise (Q Matrix)
+
+Controls how much the filter trusts the dynamics model vs measurements.
+
+```python
+@dataclass
+class FilterCoreConfig:
+    # Position random walk (m²/s)
+    process_noise_pos: float = 0.02  # DEFAULT
+
+    # Velocity random walk (m²/s³)
+    process_noise_vel: float = 2.0   # DEFAULT
+
+    # Heading random walk (rad²/s)
+    process_noise_heading: float = 0.02  # DEFAULT
+
+    # Gyro bias random walk (rad²/s³)
+    process_noise_gyro_bias: float = 2e-6  # DEFAULT
+
+    # Accel bias random walk (m²/s⁵)
+    process_noise_accel_bias: float = 2e-4  # DEFAULT
+```
+
+**When to adjust:**
+- **Increase Q** if NEES < 6.0 (filter too confident)
+- **Decrease Q** if NEES > 10.0 (filter too uncertain)
+- **Increase `process_noise_vel`** if velocity estimates lag true motion
+- **Increase `process_noise_gyro_bias`** if heading drifts during rotation
+
+### Measurement Noise (R Matrix)
+
+Controls how much the filter trusts the camera observations.
+
+```python
+    # Position measurement variance (m²)
+    measurement_noise_pos: float = 0.005**2  # (5 mm)² = 2.5e-5
+
+    # Heading measurement variance (rad²)
+    measurement_noise_heading: float = 0.05**2  # (~3°)² = 2.5e-3
+```
+
+**When to adjust:**
+- **Increase R** if camera tracking is noisy (jittery LED detections)
+- **Decrease R** if camera tracking is very precise (controlled lab setup)
+- **Scale with DLC confidence**: Set `R = base_R / confidence²` (built-in)
+
+### IMU Noise Densities
+
+Model the IMU sensor's intrinsic noise characteristics.
+
+```python
+    # Gyro noise density (rad/s/√Hz)
+    imu_gyro_noise_density: float = 0.0001  # DEFAULT
+
+    # Accel noise density (m/s²/√Hz)
+    imu_accel_noise_density: float = 0.005  # DEFAULT
+```
+
+**When to adjust:**
+- **Increase** if IMU data is noisy (cheap sensor, poor attachment)
+- **Decrease** if IMU data is clean (high-quality sensor, rigid mounting)
+- **Use sensor datasheet** values if available (recommended)
+
+### Velocity Damping
+
+Models air drag and friction.
+
+```python
+    # Damping coefficient λ (1/s)
+    damping_coeff: float = 0.5  # DEFAULT
+```
+
+**Interpretation:**
+- `λ = 0.5` → velocity decays to 60% in 1 second without acceleration
+- `λ = 1.0` → velocity decays to 37% in 1 second (high drag)
+- `λ = 0.0` → no drag (unrealistic for animals)
+
+**When to adjust:**
+- **Increase λ** if animal stops quickly (high friction surface)
+- **Decrease λ** if animal glides (smooth surface, low friction)
+
+---
+
+## Diagnostic Workflow
+
+### Step 1: Baseline Run
+
+Run filter with **default parameters** and generate QA report:
+
+```bash
+uv run python examples/08_qa_report_generation.py
+```
+
+### Step 2: Examine NEES Histogram
+
+Open `tuning_report.pdf` and check the **NEES histogram** panel:
+
+- **Most samples in [6.0, 10.0]?** → Well-tuned ✓
+- **Peak < 6.0?** → Overconfident → Go to Step 3
+- **Peak > 10.0?** → Underconfident → Go to Step 4
+
+### Step 3: Fix Overconfidence (NEES < 6.0)
+
+**Problem:** Filter covariance is too small.
+
+**Solutions (try in order):**
+
+1. **Increase position process noise** by 2-5×
+   ```python
+   cfg = EKFConfig(process_noise_pos=0.1)  # Was 0.02
+   ```
+
+2. **Increase velocity process noise** by 2×
+   ```python
+   cfg = EKFConfig(process_noise_vel=4.0)  # Was 2.0
+   ```
+
+3. **Increase IMU noise densities** by 2×
+   ```python
+   cfg = EKFConfig(
+       imu_gyro_noise_density=0.0002,  # Was 0.0001
+       imu_accel_noise_density=0.01    # Was 0.005
+   )
+   ```
+
+**Re-run and check NEES.** Repeat until NEES ≈ 8.0.
+
+### Step 4: Fix Underconfidence (NEES > 10.0)
+
+**Problem:** Filter covariance is too large.
+
+**Solutions (try in order):**
+
+1. **Decrease position process noise** by 2×
+   ```python
+   cfg = EKFConfig(process_noise_pos=0.01)  # Was 0.02
+   ```
+
+2. **Increase measurement trust** (decrease R) by 2×
+   ```python
+   cfg = EKFConfig(measurement_noise_pos=0.0025**2)  # Was 0.005**2
+   ```
+
+3. **Decrease IMU noise densities** by 2×
+   ```python
+   cfg = EKFConfig(
+       imu_gyro_noise_density=0.00005,  # Was 0.0001
+       imu_accel_noise_density=0.0025   # Was 0.005
+   )
+   ```
+
+**Re-run and check NEES.** Repeat until NEES ≈ 8.0.
+
+### Step 5: Check RMSE vs PRD Targets
+
+Once NEES is in range, verify accuracy:
+
+| Metric | Target | How to Check |
+|--------|--------|--------------|
+| Position RMSE | ≤ 2 cm | Summary table in PDF |
+| Velocity RMSE | ≤ 10 cm/s | Summary table in PDF |
+| Heading RMSE | ≤ 7° | Summary table in PDF |
+
+**If RMSE targets not met:**
+- Check for **outliers** → Enable Mahalanobis gating (see below)
+- Check for **bias convergence** → Inspect bias estimate plots
+- Check for **LED swaps** → Inspect trajectory plot for discontinuities
+
+---
+
+## Common Tuning Scenarios
+
+### Scenario 1: Camera Occlusions
+
+**Symptom:** Large position errors during occlusions, NEES spikes during blackouts.
+
+**Solution:** Enable adaptive process noise during dropout.
+
+```python
+cfg = EKFConfig(
+    adaptive_q_during_dropout=True,        # Enable adaptation
+    dropout_q_pos_multiplier=10.0,         # Inflate position uncertainty 10×
+    dropout_q_vel_multiplier=10.0,         # Inflate velocity uncertainty 10×
+    dropout_q_bias_multiplier=0.1          # Slow bias drift (optional)
+)
+```
+
+**Effect:** Filter becomes more uncertain during blackouts → smoother can correct with future data.
+
+### Scenario 2: Poor LED Tracking
+
+**Symptom:** Jittery position estimates, frequent outliers, high NIS.
+
+**Solution:** Increase measurement noise and enable gating.
+
+```python
+cfg = EKFConfig(
+    measurement_noise_pos=0.01**2,         # Increase from 0.005² (was 5mm, now 1cm)
+    use_mahalanobis_gating=True,           # Reject outliers
+    mahalanobis_threshold_prob=0.99        # Reject top 1% (tighter than 0.997)
+)
+```
+
+**Effect:** Filter trusts measurements less, rejects extreme outliers.
+
+### Scenario 3: Heading Drift
+
+**Symptom:** Heading estimate drifts away from true heading during straight-line motion.
+
+**Solution:** Enable heading pseudo-measurements from dual LEDs.
+
+```python
+cfg = EKFConfig(
+    use_heading_measurement=True,          # Extract heading from LED pair
+    led_distance=0.04,                     # Auto-detect if None
+    led_distance_tolerance=0.3,            # Reject if spacing > 30% off
+    adaptive_heading_noise=True            # Increase R for poor geometry
+)
+```
+
+**Effect:** Heading is constrained by LED orientation, reducing drift.
+
+**Important:** Only use if LED spacing is reliable (≥ 3 cm, rigid attachment).
+
+### Scenario 4: Stationary Drift
+
+**Symptom:** Position estimate drifts during stationary periods (rat not moving).
+
+**Solution:** Enable zero-velocity updates (ZUPT).
+
+```python
+cfg = EKFConfig(
+    enable_zupt=True,                      # Enable ZUPT
+    zupt_velocity_threshold=0.05,          # Trigger if |v| < 5 cm/s
+    zupt_measurement_noise=0.01**2         # Trust velocity=0 with 1 cm/s noise
+)
+```
+
+**Effect:** When velocity drops below threshold, filter applies v=0 constraint.
+
+### Scenario 5: Fast, Erratic Motion
+
+**Symptom:** Filter lags behind true motion, velocity RMSE high, NEES < 6.0.
+
+**Solution:** Increase velocity process noise.
+
+```python
+cfg = EKFConfig(
+    process_noise_vel=5.0,                 # Increase from 2.0 (default)
+    damping_coeff=0.3                      # Decrease damping (animal doesn't stop quickly)
+)
+```
+
+**Effect:** Filter tracks rapid velocity changes more aggressively.
+
+---
+
+## Advanced Features
+
+### Mahalanobis Gating (Outlier Rejection)
+
+**Purpose:** Reject measurements that are statistically inconsistent with state estimate.
+
+**When to use:**
+- LED reflections off walls
+- Occasional tracking errors (DLC artifacts)
+- LED swaps not automatically resolved
+
+**Configuration:**
+
+```python
+cfg = EKFConfig(
+    use_mahalanobis_gating=True,
+    mahalanobis_threshold_prob=0.997       # Reject measurements beyond 3σ
+)
+```
+
+**Threshold probabilities:**
+- `0.95` → Reject ~5% of measurements (loose gate)
+- `0.99` → Reject ~1% of measurements (moderate gate)
+- `0.997` → Reject ~0.3% of measurements (tight gate, **recommended**)
+
+**Diagnostic:** Check **NIS (Normalized Innovation Squared)** in QA report. If many samples exceed threshold, increase `measurement_noise_pos`.
+
+### Adaptive Measurement Noise
+
+**Purpose:** Scale measurement trust based on DLC confidence or LED geometry quality.
+
+**Built-in scaling:**
+```python
+R_scaled = R_base / confidence²
+```
+
+**Additional heading noise scaling:**
+
+```python
+cfg = EKFConfig(
+    adaptive_heading_noise=True            # Scale heading R with LED geometry
+)
+```
+
+**Effect:** Poor LED geometry (near-collinear) → higher heading noise → less trust.
+
+### Iterated EKF (IEKF)
+
+**Purpose:** Improve linearization accuracy for highly nonlinear measurements (e.g., heading).
+
+```python
+cfg = EKFConfig(num_iter=3)  # DEFAULT: 1 (standard EKF)
+```
+
+**Cost:** 3× slower per update.
+
+**When to use:**
+- Large heading corrections (> 30°)
+- Rapid rotations with sparse camera updates
+- UKF too slow but EKF linearization insufficient
+
+---
+
+## Parameter Reference
+
+### Complete FilterCoreConfig
+
+```python
+from trodestrack.models.ekf import EKFConfig
+
+cfg = EKFConfig(
+    # --- Process Noise ---
+    process_noise_pos=0.02,                # Position random walk (m²/s)
+    process_noise_vel=2.0,                 # Velocity random walk (m²/s³)
+    process_noise_heading=0.02,            # Heading random walk (rad²/s)
+    process_noise_gyro_bias=2e-6,          # Gyro bias random walk (rad²/s³)
+    process_noise_accel_bias=2e-4,         # Accel bias random walk (m²/s⁵)
+
+    # --- Measurement Noise ---
+    measurement_noise_pos=0.005**2,        # Position measurement variance (m²)
+    measurement_noise_heading=0.05**2,     # Heading measurement variance (rad²)
+
+    # --- IMU Noise ---
+    imu_gyro_noise_density=0.0001,         # Gyro noise density (rad/s/√Hz)
+    imu_accel_noise_density=0.005,         # Accel noise density (m/s²/√Hz)
+
+    # --- Dynamics ---
+    damping_coeff=0.5,                     # Velocity damping λ (1/s)
+    led_distance=None,                     # Auto-detect LED spacing (m)
+
+    # --- Mahalanobis Gating ---
+    use_mahalanobis_gating=False,          # Enable outlier rejection
+    mahalanobis_threshold_prob=0.997,      # Reject beyond 3σ
+
+    # --- Heading Measurement ---
+    use_heading_measurement=False,         # Use dual-LED heading constraint
+    led_distance_tolerance=0.3,            # Reject if spacing > 30% off
+    adaptive_heading_noise=True,           # Scale noise with geometry quality
+
+    # --- Adaptive Q During Dropout ---
+    adaptive_q_during_dropout=True,        # Inflate Q during camera blackout
+    dropout_q_pos_multiplier=10.0,         # Position uncertainty multiplier
+    dropout_q_vel_multiplier=10.0,         # Velocity uncertainty multiplier
+    dropout_q_bias_multiplier=0.1,         # Bias drift multiplier
+
+    # --- Zero-Velocity Update (ZUPT) ---
+    enable_zupt=False,                     # Enable stationary detection
+    zupt_velocity_threshold=0.05,          # Trigger if |v| < 5 cm/s
+    zupt_measurement_noise=0.01**2,        # ZUPT measurement noise (m²/s²)
+
+    # --- Advanced ---
+    num_iter=1,                            # IEKF iterations (1 = standard EKF)
+    state_mode="2d_full"                   # State layout (8D: "2d_full")
+)
+```
+
+### Quick Reference: What to Tune First
+
+| Issue | Parameter | Typical Change |
+|-------|-----------|----------------|
+| NEES < 6.0 | `process_noise_pos` | Increase 2-5× |
+| NEES > 10.0 | `process_noise_pos` | Decrease 2× |
+| Velocity lag | `process_noise_vel` | Increase 2× |
+| Heading drift | `use_heading_measurement` | Set to `True` |
+| Stationary drift | `enable_zupt` | Set to `True` |
+| Jittery tracking | `measurement_noise_pos` | Increase 2× |
+| Occlusion drift | `adaptive_q_during_dropout` | Set to `True` |
+| Frequent outliers | `use_mahalanobis_gating` | Set to `True` |
+
+---
+
+## Best Practices
+
+1. **Always start with default parameters** → Generate baseline QA report
+2. **Tune one parameter at a time** → Isolate effects
+3. **Use NEES as primary metric** → Accuracy follows consistency
+4. **Validate on multiple sessions** → Avoid overfitting to one dataset
+5. **Document final parameters** → Save config YAML for reproducibility
+6. **Re-tune if hardware changes** → New IMU, new camera, new LED attachment
+7. **Use smoother for offline analysis** → Corrects filter overconfidence
+
+---
+
+## Troubleshooting
+
+### NEES Won't Converge
+
+**Possible causes:**
+1. **Unmodeled dynamics** → Try UKF instead of EKF
+2. **LED swaps** → Enable heading measurement or manual swap correction
+3. **Time sync issues** → Check IMU/camera timestamp alignment
+4. **Sensor calibration** → Verify IMU units (see PRD Section 5)
+
+### Position Accurate but NEES High
+
+**Diagnosis:** Covariance is too large (underconfident).
+
+**Solution:** Decrease process noise or increase measurement trust.
+
+### Position Inaccurate but NEES Low
+
+**Diagnosis:** Systematic error (bias, calibration, modeling error).
+
+**Solutions:**
+- Check IMU bias convergence plots
+- Verify camera calibration (homography)
+- Check LED distance auto-detection
+
+### Filter Diverges
+
+**Diagnosis:** Numerical instability or severe model mismatch.
+
+**Solutions:**
+1. Check input data for `NaN` or `Inf` values
+2. Ensure camera measurements are in meters (not pixels)
+3. Increase process noise by 10× as sanity check
+4. Enable Joseph-form updates (built-in, but verify)
+
+---
+
+## Further Reading
+
+- **[PRD.md](PRD.md)** - Full mathematical model and acceptance criteria
+- **[Examples](examples/README.md)** - See Examples 03-04 for NEES interpretation
+- **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** - Detailed failure mode analysis
+- **Särkkä (2013)** - "Bayesian Filtering and Smoothing" (textbook reference)
+
+---
+
+**Questions?** Open an issue on GitHub with your QA report and parameter configuration.

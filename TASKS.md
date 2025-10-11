@@ -323,9 +323,25 @@
 
 ### 🧭 Documentation
 
-- [ ] README: Quickstart with synthetic + example dataset
-- [ ] Tuning Guide with NEES-based diagnostics
-- [ ] Troubleshooting Guide (common filter failures)
+- [x] **README: Quickstart with synthetic + example dataset** (2025-10-11)
+  - [x] Updated Quick Start section with progressive 5-step workflow
+  - [x] Added Python API examples (simulation, filtering, QA reports)
+  - [x] Updated Project Status to reflect M4 completion
+  - [x] Reorganized documentation links (User vs Developer docs)
+- [x] **Tuning Guide with NEES-based diagnostics** (2025-10-11)
+  - [x] Complete parameter reference with defaults
+  - [x] NEES interpretation and consistency checks
+  - [x] Diagnostic workflow (5-step process)
+  - [x] Common tuning scenarios (occlusions, jitter, drift, etc.)
+  - [x] Advanced features (gating, ZUPT, adaptive Q, IEKF)
+  - [x] Quick reference table for common issues
+- [x] **Troubleshooting Guide (common filter failures)** (2025-10-11)
+  - [x] Quick diagnostic checklist (data sanity, config, QA report)
+  - [x] Symptom index with jump links
+  - [x] 11 common problems with diagnostic steps and solutions
+  - [x] Data quality issues (LED detection, IMU saturation, time sync)
+  - [x] Advanced debugging (visualization, integration tests, EKF vs UKF)
+  - [x] Template for minimal reproducible examples
 - [x] **Examples folder refactored with comprehensive pedagogical demos** (2025-10-11)
   - [x] `examples/03_ekf_basic_scenarios.py` – EKF fundamentals (stationary, const-vel, circular)
   - [x] `examples/04_ukf_basic_scenarios.py` – UKF vs EKF comparison with metrics
