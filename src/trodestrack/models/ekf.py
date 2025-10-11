@@ -330,7 +330,7 @@ def update_step(
     state: EKFState,
     z_led1: jnp.ndarray,
     z_led2: jnp.ndarray,
-    mask: bool,
+    observation_is_valid: bool,
     config: EKFConfig,
     confidence: jnp.ndarray | None = None,
     *,
@@ -350,7 +350,7 @@ def update_step(
         LED1 observation (2,) [x, y] in meters.
     z_led2 : jnp.ndarray
         LED2 observation (2,) [x, y] in meters.
-    mask : bool
+    observation_is_valid : bool
         Observation validity flag.
     config : EKFConfig
         EKF configuration.
@@ -522,8 +522,8 @@ def update_step(
             P,
         )
 
-    # Conditional update based on mask
-    return lax.cond(mask, do_update, no_update, m_pred, P_pred)
+    # Conditional update based on validity flag
+    return lax.cond(observation_is_valid, do_update, no_update, m_pred, P_pred)
 
 
 def update_heading(
@@ -531,7 +531,7 @@ def update_heading(
     z_led1: jnp.ndarray,
     z_led2: jnp.ndarray,
     config: EKFConfig,
-    mask: bool,
+    observation_is_valid: bool,
 ) -> tuple[EKFState, jnp.ndarray]:
     """Apply 1D heading pseudo-measurement update from LED pair.
 
@@ -545,7 +545,7 @@ def update_heading(
         LED2 observation (2,) in meters.
     config : EKFConfig
         EKF configuration.
-    mask : bool
+    observation_is_valid : bool
         Camera validity flag (False skips update entirely).
 
     Returns
@@ -558,7 +558,7 @@ def update_heading(
     Uses large-R gating: invalid observations yield R=1e6 so K≈0, avoiding
     branching in JAX while preventing spurious updates.
     """
-    mask_bool = jnp.asarray(mask, dtype=bool)
+    observation_flag = jnp.asarray(observation_is_valid, dtype=bool)
 
     def no_update(state_in: EKFState) -> tuple[EKFState, jnp.ndarray]:
         return state_in, jnp.array(0.0, dtype=state_in.mean.dtype)
@@ -607,7 +607,7 @@ def update_heading(
 
         return EKFState(m_upd, P_upd), log_lik
 
-    return lax.cond(mask_bool, do_update, no_update, state)
+    return lax.cond(observation_flag, do_update, no_update, state)
 
 
 # =============================================================================

@@ -247,7 +247,7 @@ def test_adaptive_noise_scales_with_baseline() -> None:
 def test_heading_update_respects_camera_mask() -> None:
     """Heading pseudo-measurement must respect camera mask dropouts.
 
-    When `mask_cam` is False (vision dropout), even finite LED coordinates should
+    When the camera validity flag is False (vision dropout), even finite LED coordinates should
     not trigger a heading update—state and covariance must remain unchanged and
     log-likelihood should be zero.
     """
@@ -266,13 +266,13 @@ def test_heading_update_respects_camera_mask() -> None:
         measurement_noise_heading=0.01**2,
     )
 
-    # Dropout: mask False but LED arrays still contain finite values
+    # Dropout: validity flag False but LED arrays still contain finite values
     state_dropout, log_lik_dropout = update_heading(
         state,
         z_led1,
         z_led2,
         config,
-        mask=False,
+        observation_is_valid=False,
     )
 
     # Valid observation should adjust the heading estimate
@@ -281,18 +281,18 @@ def test_heading_update_respects_camera_mask() -> None:
         z_led1,
         z_led2,
         config,
-        mask=True,
+        observation_is_valid=True,
     )
 
     np.testing.assert_allclose(
         np.array(state_dropout.mean),
         np.array(state.mean),
-        err_msg="Heading update must be skipped when mask is False.",
+        err_msg="Heading update must be skipped when observation flag is False.",
     )
     np.testing.assert_allclose(
         np.array(state_dropout.cov),
         np.array(state.cov),
-        err_msg="Covariance should remain unchanged when heading update is masked.",
+        err_msg="Covariance should remain unchanged when heading update is disabled.",
     )
     assert log_lik_dropout == pytest.approx(
         0.0
@@ -330,7 +330,7 @@ def test_heading_update_handles_unknown_led_distance() -> None:
         z_led1,
         z_led2,
         config,
-        mask=True,
+        observation_is_valid=True,
     )
 
     # Heading mean should move toward 0 rad (geometry indicates 0 heading)

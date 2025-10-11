@@ -465,7 +465,7 @@ def test_ukf_marginal_loglik_computation(sim_config, ukf_config):
 
 
 def test_ukf_heading_respects_camera_mask(ukf_config):
-    """Heading pseudo-measurement should be inert when mask is False."""
+    """Heading pseudo-measurement should be inert when observation flag is False."""
     base_state = UKFState(
         mean=jnp.array([0.0, 0.0, 0.0, 0.0, 0.3, 0.0, 0.0, 0.0]),
         cov=jnp.eye(8) * 0.05,
@@ -481,7 +481,7 @@ def test_ukf_heading_respects_camera_mask(ukf_config):
 
     # Masked observation should perform no update and return zero log-likelihood.
     state_masked, log_lik_masked = update_heading(
-        base_state, z_led1, z_led2, config_with_heading, mask=False
+        base_state, z_led1, z_led2, config_with_heading, observation_is_valid=False
     )
     np.testing.assert_allclose(np.array(state_masked.mean), np.array(base_state.mean), atol=1e-9)
     np.testing.assert_allclose(np.array(state_masked.cov), np.array(base_state.cov), atol=1e-9)
@@ -489,9 +489,9 @@ def test_ukf_heading_respects_camera_mask(ukf_config):
 
     # With mask True, heading should move toward measurement (0 rad).
     state_updated, log_lik_used = update_heading(
-        base_state, z_led1, z_led2, config_with_heading, mask=True
+        base_state, z_led1, z_led2, config_with_heading, observation_is_valid=True
     )
     assert np.abs(state_updated.mean[4]) < np.abs(
         base_state.mean[4]
-    ), "Heading should move toward measurement when mask is true"
+    ), "Heading should move toward measurement when observation flag is true"
     assert float(log_lik_used) < 0.0, "Valid measurement should produce negative log-likelihood"

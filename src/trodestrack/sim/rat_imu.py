@@ -986,7 +986,7 @@ def make_default_config(**kwargs) -> RatIMUSimConfig:
         New configuration instance.
 
     Example:
-        >>> cfg = make_default_config(duration_s=120.0, fs_imu=1000.0, use_second_led=True)
+        >>> config = make_default_config(duration_s=120.0, fs_imu=1000.0, use_second_led=True)
     """
     config = RatIMUSimConfig()
     for key, value in kwargs.items():

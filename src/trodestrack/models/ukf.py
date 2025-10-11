@@ -109,7 +109,7 @@ class UKFConfig(FilterCoreConfig):
             Preset with alpha=1e-3, beta=2.0, kappa=0.0.
 
         Example:
-            >>> cfg = UKFConfig.conservative(use_mahalanobis_gating=True)
+            >>> config = UKFConfig.conservative(use_mahalanobis_gating=True)
         """
         return cls(alpha=1e-3, beta=2.0, kappa=0.0, **kwargs)
 
@@ -136,7 +136,7 @@ class UKFConfig(FilterCoreConfig):
             Preset with alpha=sqrt(3), beta=2.0, kappa=1.0.
 
         Example:
-            >>> cfg = UKFConfig.aggressive(use_heading_measurement=True)
+            >>> config = UKFConfig.aggressive(use_heading_measurement=True)
         """
         return cls(alpha=1.732, beta=2.0, kappa=1.0, **kwargs)
 
@@ -418,7 +418,7 @@ def update_step(
     state: UKFState,
     z_led1: jnp.ndarray,
     z_led2: jnp.ndarray,
-    mask: bool,
+    observation_is_valid: bool,
     config: UKFConfig,
     confidence: jnp.ndarray | None = None,
     *,
@@ -437,7 +437,7 @@ def update_step(
         LED1 observation (2,) [x, y] in meters.
     z_led2 : jnp.ndarray
         LED2 observation (2,) [x, y] in meters.
-    mask : bool
+    observation_is_valid : bool
         Observation validity flag.
     config : UKFConfig
         UKF configuration.
@@ -618,8 +618,8 @@ def update_step(
             P,
         )
 
-    # Conditional update based on mask
-    return lax.cond(mask, do_update, no_update, m_pred, P_pred)
+    # Conditional update based on validity flag
+    return lax.cond(observation_is_valid, do_update, no_update, m_pred, P_pred)
 
 
 def update_heading(
@@ -627,7 +627,7 @@ def update_heading(
     z_led1: jnp.ndarray,
     z_led2: jnp.ndarray,
     config: UKFConfig,
-    mask: bool,
+    observation_is_valid: bool,
 ) -> tuple[UKFState, float]:
     """Apply 1D heading pseudo-measurement update (UKF variant).
 
@@ -641,7 +641,7 @@ def update_heading(
         LED2 observation (2,) in meters.
     config : UKFConfig
         UKF configuration.
-    mask : bool
+    observation_is_valid : bool
         Camera validity flag (False skips update entirely).
 
     Returns
@@ -649,7 +649,7 @@ def update_heading(
     tuple[UKFState, float]
         Updated state and heading measurement log-likelihood (scalar).
     """
-    mask_bool = jnp.asarray(mask, dtype=bool)
+    observation_flag = jnp.asarray(observation_is_valid, dtype=bool)
 
     def no_update(state_in: UKFState) -> tuple[UKFState, jnp.ndarray]:
         zero = jnp.array(0.0, dtype=state_in.mean.dtype)
@@ -714,7 +714,7 @@ def update_heading(
 
         return UKFState(m_upd, P_upd), log_lik
 
-    return lax.cond(mask_bool, do_update, no_update, state)
+    return lax.cond(observation_flag, do_update, no_update, state)
 
 
 # =============================================================================

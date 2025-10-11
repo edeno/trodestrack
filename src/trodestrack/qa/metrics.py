@@ -22,7 +22,7 @@ from numpy.typing import NDArray
 def compute_position_rmse(
     positions_true: NDArray[np.float64],
     positions_est: NDArray[np.float64],
-    mask: NDArray[np.bool_] | None = None,
+    valid_mask: NDArray[np.bool_] | None = None,
 ) -> float:
     """Compute root mean square error for 2D position estimates.
 
@@ -32,7 +32,7 @@ def compute_position_rmse(
         Ground truth positions (N, 2) in meters.
     positions_est : NDArray[np.float64]
         Estimated positions (N, 2) in meters.
-    mask : NDArray[np.bool_] | None, optional
+    valid_mask : NDArray[np.bool_] | None, optional
         Optional validity mask (N,). Only True entries used.
 
     Returns
@@ -47,9 +47,9 @@ def compute_position_rmse(
         >>> print(f"{rmse:.4f} m")
         0.1414 m
 
-        >>> # With mask
-        >>> mask = np.array([True, False])  # Ignore second sample
-        >>> rmse_masked = compute_position_rmse(true_pos, est_pos, mask=mask)
+        >>> # With validity mask
+        >>> valid_mask = np.array([True, False])  # Ignore second sample
+        >>> rmse_masked = compute_position_rmse(true_pos, est_pos, valid_mask=valid_mask)
         >>> print(f"{rmse_masked:.4f} m")
         0.1414 m
     """
@@ -61,14 +61,14 @@ def compute_position_rmse(
     if positions_true.shape[1] != 2:
         raise ValueError(f"Expected 2D positions, got shape {positions_true.shape}")
 
-    # Build validity mask: finite values + optional user mask
+    # Build validity mask: finite values + optional user-provided mask
     valid = np.isfinite(positions_true).all(axis=1) & np.isfinite(positions_est).all(axis=1)
-    if mask is not None:
-        if mask.shape[0] != positions_true.shape[0]:
+    if valid_mask is not None:
+        if valid_mask.shape[0] != positions_true.shape[0]:
             raise ValueError(
-                f"Mask shape {mask.shape} incompatible with positions {positions_true.shape}"
+                f"Mask shape {valid_mask.shape} incompatible with positions {positions_true.shape}"
             )
-        valid &= mask
+        valid &= valid_mask
 
     if not np.any(valid):
         raise ValueError("No valid samples remaining after masking and NaN filtering")
@@ -84,7 +84,7 @@ def compute_position_rmse(
 def compute_velocity_rmse(
     velocities_true: NDArray[np.float64],
     velocities_est: NDArray[np.float64],
-    mask: NDArray[np.bool_] | None = None,
+    valid_mask: NDArray[np.bool_] | None = None,
 ) -> float:
     """Compute root mean square error for 2D velocity estimates.
 
@@ -94,7 +94,7 @@ def compute_velocity_rmse(
         Ground truth velocities (N, 2) in m/s.
     velocities_est : NDArray[np.float64]
         Estimated velocities (N, 2) in m/s.
-    mask : NDArray[np.bool_] | None, optional
+    valid_mask : NDArray[np.bool_] | None, optional
         Optional validity mask (N,). Only True entries used.
 
     Returns
@@ -117,14 +117,14 @@ def compute_velocity_rmse(
     if velocities_true.shape[1] != 2:
         raise ValueError(f"Expected 2D velocities, got shape {velocities_true.shape}")
 
-    # Build validity mask: finite values + optional user mask
+    # Build validity mask: finite values + optional user-provided mask
     valid = np.isfinite(velocities_true).all(axis=1) & np.isfinite(velocities_est).all(axis=1)
-    if mask is not None:
-        if mask.shape[0] != velocities_true.shape[0]:
+    if valid_mask is not None:
+        if valid_mask.shape[0] != velocities_true.shape[0]:
             raise ValueError(
-                f"Mask shape {mask.shape} incompatible with velocities {velocities_true.shape}"
+                f"Mask shape {valid_mask.shape} incompatible with velocities {velocities_true.shape}"
             )
-        valid &= mask
+        valid &= valid_mask
 
     if not np.any(valid):
         raise ValueError("No valid samples remaining after masking and NaN filtering")
@@ -711,8 +711,8 @@ def compute_dropout_drift(
         >>> # Simulate 10s trajectory with 5s dropout at t=3-8s
         >>> t = np.linspace(0, 10, 100)
         >>> positions = np.column_stack([t * 0.1, np.zeros_like(t)])  # Moving at 0.1 m/s
-        >>> mask = (t < 3.0) | (t >= 8.0)  # Dropout from 3-8s
-        >>> result = compute_dropout_drift(positions, mask, t, min_duration_s=4.0)
+        >>> valid_mask = (t < 3.0) | (t >= 8.0)  # Dropout from 3-8s
+        >>> result = compute_dropout_drift(positions, valid_mask, t, min_duration_s=4.0)
         >>> # Drift should be ~0.5 m (5s * 0.1 m/s)
         >>> 0.4 < result['drift_m'] < 0.6
         True

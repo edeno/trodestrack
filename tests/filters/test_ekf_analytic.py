@@ -100,7 +100,7 @@ def test_initialize_state_from_camera():
     state = initialize_state(
         led1_obs=led1_obs,
         led2_obs=led2_obs,
-        mask=mask,
+        observation_mask=mask,
         dt_cam=dt_cam,
         led_distance=0.04,
     )
@@ -130,7 +130,7 @@ def test_initialize_state_handles_missing_data():
     state = initialize_state(
         led1_obs=led1_obs,
         led2_obs=led2_obs,
-        mask=mask,
+        observation_mask=mask,
         dt_cam=dt_cam,
         led_distance=0.04,
     )

@@ -50,7 +50,9 @@ def test_measurement_function_respects_layout_indices() -> None:
 
 
 def test_ekf_smoke_vision_only_shapes() -> None:
-    cfg = EKFConfig(state_mode="vision_only", led_distance=0.04, use_heading_measurement=False)
+    ekf_config = EKFConfig(
+        state_mode="vision_only", led_distance=0.04, use_heading_measurement=False
+    )
 
     # Small 3-frame scenario
     t_cam = np.array([0.0, 0.0333, 0.0666], dtype=np.float32)
@@ -62,17 +64,19 @@ def test_ekf_smoke_vision_only_shapes() -> None:
     Z2 = Z1 + np.array([0.04, 0.0], dtype=np.float32)
     mask = np.array([True, True, True])
 
-    res = extended_kalman_filter(
-        cfg, t_imu, U_imu, t_cam, Z1, Z2, mask, initial_state=None, conf_cam=None
+    filter_result = extended_kalman_filter(
+        ekf_config, t_imu, U_imu, t_cam, Z1, Z2, mask, initial_state=None, conf_cam=None
     )
 
     # Shapes reflect 5D state
-    assert res.filtered_means.shape == (3, get_layout("vision_only").n)
-    assert res.predicted_means.shape == (3, get_layout("vision_only").n)
+    assert filter_result.filtered_means.shape == (3, get_layout("vision_only").n)
+    assert filter_result.predicted_means.shape == (3, get_layout("vision_only").n)
 
 
 def test_ukf_smoke_2d_cam_3d_imu_shapes() -> None:
-    cfg = UKFConfig(state_mode="2d_cam_3d_imu", led_distance=0.04, use_heading_measurement=False)
+    ukf_config = UKFConfig(
+        state_mode="2d_cam_3d_imu", led_distance=0.04, use_heading_measurement=False
+    )
 
     # Small 3-frame scenario
     t_cam = np.array([0.0, 0.0333, 0.0666], dtype=np.float32)
@@ -84,10 +88,10 @@ def test_ukf_smoke_2d_cam_3d_imu_shapes() -> None:
     Z2 = Z1 + np.array([0.04, 0.0], dtype=np.float32)
     mask = np.array([True, True, True])
 
-    res = unscented_kalman_filter(
-        cfg, t_imu, U_imu, t_cam, Z1, Z2, mask, initial_state=None, conf_cam=None
+    filter_result = unscented_kalman_filter(
+        ukf_config, t_imu, U_imu, t_cam, Z1, Z2, mask, initial_state=None, conf_cam=None
     )
 
     # Shapes reflect 10D state
-    assert res.filtered_means.shape == (3, get_layout("2d_cam_3d_imu").n)
-    assert res.predicted_means.shape == (3, get_layout("2d_cam_3d_imu").n)
+    assert filter_result.filtered_means.shape == (3, get_layout("2d_cam_3d_imu").n)
+    assert filter_result.predicted_means.shape == (3, get_layout("2d_cam_3d_imu").n)

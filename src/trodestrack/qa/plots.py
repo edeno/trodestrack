@@ -122,7 +122,7 @@ def plot_position_error(
     t: NDArray[np.float64],
     positions_true: NDArray[np.float64],
     positions_est: NDArray[np.float64],
-    mask: NDArray[np.bool_] | None = None,
+    valid_mask: NDArray[np.bool_] | None = None,
     prd_threshold_m: float | None = None,
 ) -> tuple[Figure, Axes]:
     """Plot Euclidean position error over time.
@@ -135,7 +135,7 @@ def plot_position_error(
         Ground truth positions (N, 2) in meters.
     positions_est : NDArray[np.float64]
         Estimated positions (N, 2) in meters.
-    mask : NDArray[np.bool_] | None, optional
+    valid_mask : NDArray[np.bool_] | None, optional
         Optional validity mask (N,). Only valid (True) entries plotted.
     prd_threshold_m : float | None, optional
         If provided, plot PRD requirement threshold (e.g., 0.02 for 2 cm).
@@ -167,10 +167,10 @@ def plot_position_error(
     errors = positions_true - positions_est
     euclidean_error = np.linalg.norm(errors, axis=1)
 
-    # Apply mask if provided
-    if mask is not None:
-        t_plot = t[mask]
-        error_plot = euclidean_error[mask]
+    # Apply validity mask if provided
+    if valid_mask is not None:
+        t_plot = t[valid_mask]
+        error_plot = euclidean_error[valid_mask]
     else:
         t_plot = t
         error_plot = euclidean_error
@@ -203,7 +203,7 @@ def plot_velocity_error(
     t: NDArray[np.float64],
     velocities_true: NDArray[np.float64],
     velocities_est: NDArray[np.float64],
-    mask: NDArray[np.bool_] | None = None,
+    valid_mask: NDArray[np.bool_] | None = None,
 ) -> tuple[Figure, Axes]:
     """Plot Euclidean velocity error over time.
 
@@ -215,7 +215,7 @@ def plot_velocity_error(
         Ground truth velocities (N, 2) in m/s.
     velocities_est : NDArray[np.float64]
         Estimated velocities (N, 2) in m/s.
-    mask : NDArray[np.bool_] | None, optional
+    valid_mask : NDArray[np.bool_] | None, optional
         Optional validity mask (N,). Only valid (True) entries plotted.
 
     Returns
@@ -245,10 +245,10 @@ def plot_velocity_error(
     errors = velocities_true - velocities_est
     euclidean_error = np.linalg.norm(errors, axis=1)
 
-    # Apply mask if provided
-    if mask is not None:
-        t_plot = t[mask]
-        error_plot = euclidean_error[mask]
+    # Apply validity mask if provided
+    if valid_mask is not None:
+        t_plot = t[valid_mask]
+        error_plot = euclidean_error[valid_mask]
     else:
         t_plot = t
         error_plot = euclidean_error
@@ -271,7 +271,7 @@ def plot_heading_error(
     t: NDArray[np.float64],
     headings_true: NDArray[np.float64],
     headings_est: NDArray[np.float64],
-    mask: NDArray[np.bool_] | None = None,
+    valid_mask: NDArray[np.bool_] | None = None,
     prd_threshold_deg: float | None = None,
 ) -> tuple[Figure, Axes]:
     """Plot heading error over time with proper angle wrapping.
@@ -284,7 +284,7 @@ def plot_heading_error(
         Ground truth headings (N,) in radians.
     headings_est : NDArray[np.float64]
         Estimated headings (N,) in radians.
-    mask : NDArray[np.bool_] | None, optional
+    valid_mask : NDArray[np.bool_] | None, optional
         Optional validity mask (N,). Only valid (True) entries plotted.
     prd_threshold_deg : float | None, optional
         If provided, plot PRD requirement threshold (degrees), e.g., 7.0.
@@ -316,10 +316,10 @@ def plot_heading_error(
     errors_wrapped = np.arctan2(np.sin(errors), np.cos(errors))
     errors_deg = np.rad2deg(np.abs(errors_wrapped))
 
-    # Apply mask if provided
-    if mask is not None:
-        t_plot = t[mask]
-        error_plot = errors_deg[mask]
+    # Apply validity mask if provided
+    if valid_mask is not None:
+        t_plot = t[valid_mask]
+        error_plot = errors_deg[valid_mask]
     else:
         t_plot = t
         error_plot = errors_deg

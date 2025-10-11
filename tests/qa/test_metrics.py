@@ -61,7 +61,7 @@ def test_position_rmse_with_mask():
 
     # With mask excluding last sample, RMSE should be zero
     mask = np.array([True, True, False])
-    rmse = compute_position_rmse(true_pos, est_pos, mask=mask)
+    rmse = compute_position_rmse(true_pos, est_pos, valid_mask=mask)
     assert_allclose(rmse, 0.0, atol=1e-10)
 
     # Without mask, RMSE should be large
@@ -136,7 +136,7 @@ def test_velocity_rmse_with_mask():
     est_vel = np.array([[0.1, 0.1], [0.2, 0.2], [999.0, 999.0]])
 
     mask = np.array([True, True, False])
-    rmse = compute_velocity_rmse(true_vel, est_vel, mask=mask)
+    rmse = compute_velocity_rmse(true_vel, est_vel, valid_mask=mask)
     assert_allclose(rmse, 0.0, atol=1e-10)
 
 

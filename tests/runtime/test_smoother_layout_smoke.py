@@ -22,35 +22,41 @@ def _tiny_synthetic_sequence():
 def test_rts_smoother_smoke_vision_only_layout():
     t_cam, t_imu, U_imu, Z1, Z2, mask = _tiny_synthetic_sequence()
 
-    cfg = EKFConfig(state_mode="vision_only", led_distance=0.04, use_heading_measurement=False)
-    filt = extended_kalman_filter(
-        cfg, t_imu, U_imu, t_cam, Z1, Z2, mask, initial_state=None, conf_cam=None
+    ekf_config = EKFConfig(
+        state_mode="vision_only", led_distance=0.04, use_heading_measurement=False
     )
-    sm = rts_smoother(filt, cfg, t_imu, U_imu, t_cam)
+    filter_result = extended_kalman_filter(
+        ekf_config, t_imu, U_imu, t_cam, Z1, Z2, mask, initial_state=None, conf_cam=None
+    )
+    smoother_result = rts_smoother(filter_result, ekf_config, t_imu, U_imu, t_cam)
 
-    assert filt.filtered_means.shape[1] == 5
-    assert sm.smoothed_means.shape[1] == 5
+    assert filter_result.filtered_means.shape[1] == 5
+    assert smoother_result.smoothed_means.shape[1] == 5
 
 
 def test_sigma_point_smoother_smoke_2d_cam_3d_imu_layout():
     t_cam, t_imu, U_imu, Z1, Z2, mask = _tiny_synthetic_sequence()
 
-    cfg = UKFConfig(state_mode="2d_cam_3d_imu", led_distance=0.04, use_heading_measurement=False)
-    filt = unscented_kalman_filter(
-        cfg, t_imu, U_imu, t_cam, Z1, Z2, mask, initial_state=None, conf_cam=None
+    ukf_config = UKFConfig(
+        state_mode="2d_cam_3d_imu", led_distance=0.04, use_heading_measurement=False
     )
-    sm = sigma_point_smoother(filt, cfg, t_imu, U_imu, t_cam)
+    filter_result = unscented_kalman_filter(
+        ukf_config, t_imu, U_imu, t_cam, Z1, Z2, mask, initial_state=None, conf_cam=None
+    )
+    smoother_result = sigma_point_smoother(filter_result, ukf_config, t_imu, U_imu, t_cam)
 
-    assert filt.filtered_means.shape[1] == 10
-    assert sm.smoothed_means.shape[1] == 10
+    assert filter_result.filtered_means.shape[1] == 10
+    assert smoother_result.smoothed_means.shape[1] == 10
 
 
 def test_ukf_layout_no_hardcoded_8d():
     # Ensure UKF works with 10D without indexing errors.
     t_cam, t_imu, U_imu, Z1, Z2, mask = _tiny_synthetic_sequence()
-    cfg = UKFConfig(state_mode="2d_cam_3d_imu", led_distance=0.04, use_heading_measurement=True)
-    res = unscented_kalman_filter(
-        cfg, t_imu, U_imu, t_cam, Z1, Z2, mask, initial_state=None, conf_cam=None
+    ukf_config = UKFConfig(
+        state_mode="2d_cam_3d_imu", led_distance=0.04, use_heading_measurement=True
     )
-    assert res.filtered_means.shape == (3, 10)
-    assert res.predicted_covariances.shape == (3, 10, 10)
+    filter_result = unscented_kalman_filter(
+        ukf_config, t_imu, U_imu, t_cam, Z1, Z2, mask, initial_state=None, conf_cam=None
+    )
+    assert filter_result.filtered_means.shape == (3, 10)
+    assert filter_result.predicted_covariances.shape == (3, 10, 10)

@@ -370,16 +370,16 @@ def test_prd_dropout_drift_5s():
     # Ensure no usable pixels during blackout (set LEDs to NaN)
     for key in ("Z_cam_led1", "Z_cam_led2"):
         if key in sim_data_dropout:
-            arr = sim_data_dropout[key].copy()
-            arr[dropout_start_idx:dropout_end_idx] = float("nan")
-            sim_data_dropout[key] = arr
+            led_measurements = sim_data_dropout[key].copy()
+            led_measurements[dropout_start_idx:dropout_end_idx] = float("nan")
+            sim_data_dropout[key] = led_measurements
 
     # Force per-LED masks off as well
     for key in ("mask_led1", "mask_led2"):
         if key in sim_data_dropout:
-            arr = sim_data_dropout[key].copy()
-            arr[dropout_start_idx:dropout_end_idx] = False
-            sim_data_dropout[key] = arr
+            led_visibility = sim_data_dropout[key].copy()
+            led_visibility[dropout_start_idx:dropout_end_idx] = False
+            sim_data_dropout[key] = led_visibility
 
     # Run EKF with dropout - enable P0 mitigations for blackout-aware filtering
     # P0 fixes from user playbook (reduces drift toward theoretical floor ~0.5m):
@@ -467,16 +467,16 @@ def test_prd_dropout_drift_5s_smoothed():
     # Ensure no usable pixels during blackout (set LEDs to NaN)
     for key in ("Z_cam_led1", "Z_cam_led2"):
         if key in sim_data_dropout:
-            arr = sim_data_dropout[key].copy()
-            arr[dropout_start_idx:dropout_end_idx] = float("nan")
-            sim_data_dropout[key] = arr
+            led_measurements = sim_data_dropout[key].copy()
+            led_measurements[dropout_start_idx:dropout_end_idx] = float("nan")
+            sim_data_dropout[key] = led_measurements
 
     # Force per-LED masks off as well
     for key in ("mask_led1", "mask_led2"):
         if key in sim_data_dropout:
-            arr = sim_data_dropout[key].copy()
-            arr[dropout_start_idx:dropout_end_idx] = False
-            sim_data_dropout[key] = arr
+            led_visibility = sim_data_dropout[key].copy()
+            led_visibility[dropout_start_idx:dropout_end_idx] = False
+            sim_data_dropout[key] = led_visibility
 
     # Run EKF with blackout-aware filtering
     ekf_config_override = {

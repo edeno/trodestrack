@@ -127,7 +127,7 @@ class TestPlotPositionError:
         mask = t < 5.0  # Only first half valid
 
         # Act
-        fig, ax = plot_position_error(t, pos_true, pos_est, mask=mask)
+        fig, ax = plot_position_error(t, pos_true, pos_est, valid_mask=mask)
 
         # Assert: Plot should only show data where mask is True
         lines = ax.get_lines()

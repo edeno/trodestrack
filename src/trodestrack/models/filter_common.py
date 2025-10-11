@@ -481,7 +481,7 @@ def apply_lifted_inverse(
 def initialize_state(
     led1_obs: jnp.ndarray,
     led2_obs: jnp.ndarray,
-    mask: jnp.ndarray,
+    observation_mask: jnp.ndarray,
     dt_cam: float | jnp.ndarray,
     led_distance: float = 0.04,
     *,
@@ -495,7 +495,7 @@ def initialize_state(
         LED1 observations (N, 2) in meters.
     led2_obs : jnp.ndarray
         LED2 observations (N, 2) in meters.
-    mask : jnp.ndarray
+    observation_mask : jnp.ndarray
         Observation validity mask (N,), boolean.
     dt_cam : float or jnp.ndarray
         Camera frame interval (s). JAX scalar allowed for JIT.
@@ -515,12 +515,12 @@ def initialize_state(
     uncertainty, allowing prediction-only filtering to proceed.
     """
 
-    # Find frames with valid mask AND finite LED observations
-    # (mask alone isn't sufficient - LEDs can be NaN even when mask=True)
+    # Find frames with valid observation mask AND finite LED observations
+    # (the mask alone isn't sufficient -- LEDs can be NaN even when observation_mask=True)
     led1_finite_mask = jnp.isfinite(led1_obs[:, 0])
     led2_finite_mask = jnp.isfinite(led2_obs[:, 0])
     any_led_finite = led1_finite_mask | led2_finite_mask
-    valid_with_data = mask & any_led_finite
+    valid_with_data = observation_mask & any_led_finite
 
     valid_indices = jnp.where(valid_with_data)[0]
     has_valid_obs = len(valid_indices) > 0
@@ -964,8 +964,8 @@ def compute_imu_index_arrays(
             valid_indices = np.array([], dtype=np.int32)
         else:
             # Find IMU samples in (t_prev, t_current]
-            mask = (t_imu_np > t_cam_np[i - 1]) & (t_imu_np <= t_cam_np[i])
-            valid_indices = np.nonzero(mask)[0]
+            interval_mask = (t_imu_np > t_cam_np[i - 1]) & (t_imu_np <= t_cam_np[i])
+            valid_indices = np.nonzero(interval_mask)[0]
 
         all_indices.append(valid_indices)
 
