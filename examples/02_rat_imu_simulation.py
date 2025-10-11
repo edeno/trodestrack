@@ -28,7 +28,6 @@ from matplotlib.gridspec import GridSpec
 
 from trodestrack.sim.rat_imu import RatIMUSimConfig, simulate_rat_imu
 
-
 # =============================================================================
 # Matplotlib Configuration (Tufte/Gelman best practices)
 # =============================================================================
