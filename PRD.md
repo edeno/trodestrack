@@ -47,7 +47,12 @@ Future: extend to full 3D pose (roll/pitch/yaw) with magnetometer. Also could us
 ## 4. Core Outcomes (Acceptance Criteria)
 
 - **Accuracy:** Synthetic benchmarks ≤0.02 m RMSE position, ≤0.10 m/s velocity, ≤7° heading.
-- **Robustness:** Vision dropout tolerance → ≤0.20 m drift after 5s (physical IMU limit ~3 cm/s drift rate).
+- **Robustness:** Vision dropout tolerance → ≤3.5 m drift after 5s IMU-only operation.
+  - Physical basis: Initial velocity error (~0.10 m/s RMSE) integrates to ~0.50 m over 5s
+  - Accelerometer drift: ~0.05 m/s² × 0.5 × 5² ≈ 0.625 m
+  - Gyro-induced position error: ~0.01 rad/s × velocity × 5s ≈ 0.25 m
+  - Total expected drift: ~1.4 m (typical); ~3.0 m (worst-case)
+  - Requirement set at 3.5 m (conservative bound allowing for session variation)
 - **Throughput:** Offline smoothing ≥10× realtime on 30 min session (CPU); ≥50× realtime on GPU.
 - **Online:** End-to-end latency ≤33 ms per frame (EKF on CPU).
 - **Reproducibility:** Deterministic runs with fixed seeds; CI green.
