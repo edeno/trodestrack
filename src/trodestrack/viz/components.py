@@ -9,8 +9,8 @@ from __future__ import annotations
 from collections import deque
 from typing import Any, Deque
 
-from jax import Array
 import numpy as np
+from jax import Array
 from matplotlib.axes import Axes
 from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D

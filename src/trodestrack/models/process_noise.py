@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Optional, cast
 
-from jax import Array
-
 import jax.numpy as jnp
+from jax import Array
 
 from trodestrack.models.filter_common import symmetrize
 from trodestrack.models.state_layout import LAYOUT_REGISTRY, get_heading_index

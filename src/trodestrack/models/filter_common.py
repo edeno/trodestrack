@@ -10,9 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import NamedTuple
 
-import numpy as np
-
 import jax.numpy as jnp
+import numpy as np
 from jax import Array, lax
 from jax.scipy.linalg import cho_factor, cho_solve
 

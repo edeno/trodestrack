@@ -9,7 +9,6 @@ from numpy.typing import NDArray
 
 from trodestrack.sim.utils import SimOut, interp_angle
 
-
 FloatArray = NDArray[np.floating[Any]]
 IntArray = NDArray[np.integer[Any]]
 
