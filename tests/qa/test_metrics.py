@@ -1,335 +1,624 @@
-"""
-Unit tests for QA metrics computation.
+"""Tests for quality assurance metrics module.
+
+Tests cover:
+- RMSE computation for position, velocity, heading
+- NEES and NIS consistency checks
+- Residual autocorrelation (whiteness test)
+- Dropout drift measurement
+- Edge cases: NaN handling, singular covariances, empty inputs
 """
 
-import pytest
 import numpy as np
-import jax.numpy as jnp
+import pytest
+from numpy.testing import assert_allclose
 
 from trodestrack.qa.metrics import (
-    compute_rmse,
+    chi2_ci95,
+    compute_dropout_drift,
+    compute_heading_error,
+    compute_heading_rmse,
     compute_nees,
-    compute_position_nees,
-    compute_occlusion_drift,
-    evaluate_prd_compliance,
+    compute_nees_stats,
+    compute_nis,
+    compute_nis_stats,
+    compute_position_rmse,
+    compute_residual_autocorrelation,
+    compute_velocity_rmse,
 )
 
+# =============================================================================
+# Position RMSE Tests
+# =============================================================================
 
-class TestRMSEMetrics:
-    """Test RMSE computation functions."""
 
-    def test_perfect_estimates(self):
-        """Test RMSE with perfect estimates (should be zero)."""
-        n_steps = 100
-        states = jnp.ones((n_steps, 8))
+def test_position_rmse_perfect_match():
+    """Perfect estimate should give zero RMSE."""
+    true_pos = np.array([[0.0, 0.0], [1.0, 1.0], [2.0, 2.0]])
+    est_pos = true_pos.copy()
 
-        rmse = compute_rmse(states, states)
+    rmse = compute_position_rmse(true_pos, est_pos)
+    assert_allclose(rmse, 0.0, atol=1e-10)
 
-        assert rmse["position_rmse_cm"] == pytest.approx(0.0, abs=1e-6)
-        assert rmse["velocity_rmse_cm_s"] == pytest.approx(0.0, abs=1e-6)
-        assert rmse["heading_rmse_deg"] == pytest.approx(0.0, abs=1e-6)
 
-    def test_known_offset_rmse(self):
-        """Test RMSE with known constant offset."""
-        n_steps = 100
+def test_position_rmse_known_error():
+    """Known error should give expected RMSE."""
+    # True positions at origin
+    true_pos = np.array([[0.0, 0.0], [0.0, 0.0], [0.0, 0.0]])
 
-        # Ground truth: all zeros
-        gt_states = jnp.zeros((n_steps, 8))
+    # Estimates offset by (0.03, 0.04) -> Euclidean error = 0.05 m = 5 cm
+    est_pos = np.array([[0.03, 0.04], [0.03, 0.04], [0.03, 0.04]])
 
-        # Estimated: constant offset
-        est_states = jnp.zeros((n_steps, 8))
-        est_states = est_states.at[:, 0].set(3.0)  # 3 cm offset in x
-        est_states = est_states.at[:, 1].set(4.0)  # 4 cm offset in y
-        est_states = est_states.at[:, 2].set(5.0)  # 5 cm/s offset in vx
-        est_states = est_states.at[:, 3].set(12.0)  # 12 cm/s offset in vy
-        est_states = est_states.at[:, 4].set(np.pi / 6)  # 30 degree offset in heading
+    rmse = compute_position_rmse(true_pos, est_pos)
+    # RMSE = sqrt(mean((0.05)^2)) = 0.05 m
+    assert_allclose(rmse, 0.05, atol=1e-10)
 
-        rmse = compute_rmse(est_states, gt_states)
 
-        # Position RMSE should be sqrt(3^2 + 4^2) = 5.0
-        assert rmse["position_rmse_cm"] == pytest.approx(5.0, abs=1e-6)
+def test_position_rmse_with_mask():
+    """Mask should exclude invalid samples."""
+    true_pos = np.array([[0.0, 0.0], [1.0, 1.0], [2.0, 2.0]])
+    # Last sample has large error
+    est_pos = np.array([[0.0, 0.0], [1.0, 1.0], [10.0, 10.0]])
 
-        # Velocity RMSE should be sqrt(5^2 + 12^2) = 13.0
-        assert rmse["velocity_rmse_cm_s"] == pytest.approx(13.0, abs=1e-6)
+    # With mask excluding last sample, RMSE should be zero
+    mask = np.array([True, True, False])
+    rmse = compute_position_rmse(true_pos, est_pos, mask=mask)
+    assert_allclose(rmse, 0.0, atol=1e-10)
 
-        # Heading RMSE should be 30 degrees
-        assert rmse["heading_rmse_deg"] == pytest.approx(30.0, abs=1e-6)
+    # Without mask, RMSE should be large
+    rmse_no_mask = compute_position_rmse(true_pos, est_pos)
+    assert rmse_no_mask > 4.0  # Should be ~6.5 m
 
-    def test_angle_wrapping_rmse(self):
-        """Test RMSE correctly handles angle wrapping."""
-        n_steps = 100
 
-        # Ground truth: 0 radians
-        gt_states = jnp.zeros((n_steps, 8))
+def test_position_rmse_with_nans():
+    """NaNs should be automatically filtered out."""
+    true_pos = np.array([[0.0, 0.0], [1.0, 1.0], [2.0, 2.0]])
+    est_pos = np.array([[0.0, 0.0], [np.nan, 1.0], [2.0, 2.0]])
 
-        # Estimated: just over π (should wrap to small negative angle)
-        est_states = jnp.zeros((n_steps, 8))
-        est_states = est_states.at[:, 4].set(np.pi + 0.1)  # Slightly over π
+    # Should compute RMSE only on valid samples (first and third)
+    rmse = compute_position_rmse(true_pos, est_pos)
+    assert_allclose(rmse, 0.0, atol=1e-10)
 
-        rmse = compute_rmse(est_states, gt_states)
 
-        # Should wrap to -π + 0.1, giving error magnitude of π - 0.1
-        expected_error_rad = np.pi - 0.1
-        expected_error_deg = expected_error_rad * 180.0 / np.pi
+def test_position_rmse_shape_mismatch():
+    """Mismatched shapes should raise ValueError."""
+    true_pos = np.array([[0.0, 0.0], [1.0, 1.0]])
+    est_pos = np.array([[0.0, 0.0]])
 
-        assert rmse["heading_rmse_deg"] == pytest.approx(expected_error_deg, abs=1e-3)
+    with pytest.raises(ValueError, match="Shape mismatch"):
+        compute_position_rmse(true_pos, est_pos)
 
-    def test_rmse_with_mask(self):
-        """Test RMSE computation with validity mask."""
-        n_steps = 100
 
-        gt_states = jnp.zeros((n_steps, 8))
+def test_position_rmse_wrong_dimension():
+    """Non-2D positions should raise ValueError."""
+    true_pos = np.array([[0.0, 0.0, 0.0]])  # 3D
+    est_pos = np.array([[0.0, 0.0, 0.0]])
 
-        # First half: perfect estimates, second half: large errors
-        est_states = jnp.zeros((n_steps, 8))
-        est_states = est_states.at[50:, 0].set(10.0)  # Large error in second half
+    with pytest.raises(ValueError, match="Expected 2D positions"):
+        compute_position_rmse(true_pos, est_pos)
 
-        # Mask to include only first half (perfect estimates)
-        mask = jnp.arange(n_steps) < 50
 
-        rmse = compute_rmse(est_states, gt_states, mask)
+def test_position_rmse_no_valid_samples():
+    """All invalid samples should raise ValueError."""
+    true_pos = np.array([[0.0, 0.0], [1.0, 1.0]])
+    est_pos = np.array([[np.nan, 0.0], [1.0, np.nan]])
 
-        # Should be zero since we masked out the errors
-        assert rmse["position_rmse_cm"] == pytest.approx(0.0, abs=1e-6)
+    with pytest.raises(ValueError, match="No valid samples"):
+        compute_position_rmse(true_pos, est_pos)
 
-        # Without mask, should have significant error
-        rmse_no_mask = compute_rmse(est_states, gt_states)
-        assert rmse_no_mask["position_rmse_cm"] > 5.0
 
+# =============================================================================
+# Velocity RMSE Tests
+# =============================================================================
 
-class TestNEESMetrics:
-    """Test NEES computation functions."""
 
-    def test_nees_perfect_filter(self):
-        """Test NEES with perfectly calibrated filter (identity covariance)."""
-        n_steps = 100
+def test_velocity_rmse_perfect_match():
+    """Perfect velocity estimate should give zero RMSE."""
+    true_vel = np.array([[0.1, 0.2], [0.3, 0.4]])
+    est_vel = true_vel.copy()
 
-        # Ground truth: zeros
-        gt_states = jnp.zeros((n_steps, 8))
+    rmse = compute_velocity_rmse(true_vel, est_vel)
+    assert_allclose(rmse, 0.0, atol=1e-10)
 
-        # Estimated: small random errors
-        rng = np.random.RandomState(42)
-        errors = rng.randn(n_steps, 8) * 0.1
-        est_states = jnp.array(errors)
 
-        # Covariances: identity (matches error magnitude)
-        covariances = jnp.tile(jnp.eye(8) * 0.01, (n_steps, 1, 1))  # 0.1^2 = 0.01
+def test_velocity_rmse_known_error():
+    """Known velocity error should give expected RMSE."""
+    true_vel = np.array([[0.0, 0.0], [0.0, 0.0]])
+    # Error magnitude = sqrt(0.03^2 + 0.04^2) = 0.05 m/s
+    est_vel = np.array([[0.03, 0.04], [0.03, 0.04]])
 
-        nees = compute_nees(est_states, gt_states, covariances)
+    rmse = compute_velocity_rmse(true_vel, est_vel)
+    assert_allclose(rmse, 0.05, atol=1e-10)
 
-        # NEES should be close to 8 (state dimension) for well-calibrated filter
-        assert nees["nees_mean"] == pytest.approx(8.0, abs=2.0)
-        assert nees["nees_consistency_ratio"] == pytest.approx(1.0, abs=0.25)
 
-    def test_nees_underconfident_filter(self):
-        """Test NEES with underconfident filter (too large covariances)."""
-        n_steps = 100
+def test_velocity_rmse_with_mask():
+    """Mask should exclude invalid velocity samples."""
+    true_vel = np.array([[0.1, 0.1], [0.2, 0.2], [0.3, 0.3]])
+    est_vel = np.array([[0.1, 0.1], [0.2, 0.2], [999.0, 999.0]])
 
-        gt_states = jnp.zeros((n_steps, 8))
+    mask = np.array([True, True, False])
+    rmse = compute_velocity_rmse(true_vel, est_vel, mask=mask)
+    assert_allclose(rmse, 0.0, atol=1e-10)
 
-        # Small errors
-        rng = np.random.RandomState(42)
-        errors = rng.randn(n_steps, 8) * 0.1
-        est_states = jnp.array(errors)
 
-        # Large covariances (10x actual error variance)
-        covariances = jnp.tile(jnp.eye(8) * 0.1, (n_steps, 1, 1))
+# =============================================================================
+# Heading Error Tests
+# =============================================================================
 
-        nees = compute_nees(est_states, gt_states, covariances)
 
-        # NEES should be much less than 8 (underconfident)
-        assert nees["nees_consistency_ratio"] < 0.5
+def test_heading_error_perfect_match():
+    """Perfect heading estimate should give zero error."""
+    true_heading = np.array([0.0, np.pi / 2, np.pi])
+    est_heading = true_heading.copy()
 
-    def test_position_nees_subset(self):
-        """Test position-only NEES computation."""
-        n_steps = 50
+    error = compute_heading_error(true_heading, est_heading)
+    assert_allclose(error, 0.0, atol=1e-10)
 
-        gt_states = jnp.zeros((n_steps, 8))
 
-        # Position errors only
-        est_states = jnp.zeros((n_steps, 8))
-        est_states = est_states.at[:, 0].set(0.1)  # x error
-        est_states = est_states.at[:, 1].set(0.1)  # y error
+def test_heading_error_known_error():
+    """Known heading error should be computed correctly with wrapping."""
+    # True: [0, π/2, π], Est: [0.1, π/2+0.1, π-0.1]
+    # Errors: [0.1, 0.1, -0.1] rad
+    # Mean absolute error = 0.1 rad ≈ 5.73°
+    true_heading = np.array([0.0, np.pi / 2, np.pi])
+    est_heading = np.array([0.1, np.pi / 2 + 0.1, np.pi - 0.1])
 
-        # Full covariances
-        covariances = jnp.tile(jnp.eye(8) * 0.01, (n_steps, 1, 1))
+    error = compute_heading_error(true_heading, est_heading)
+    assert_allclose(error, 0.1, atol=1e-10)  # Returns radians (SI unit)
 
-        pos_nees = compute_position_nees(est_states, gt_states, covariances)
 
-        # Position NEES should be close to 2 (position dimension)
-        assert pos_nees["position_nees_mean"] == pytest.approx(2.0, abs=1.0)
-        assert pos_nees["position_nees_expected"] == 2.0
+def test_heading_error_wrapping():
+    """Heading error should handle angle wrapping correctly."""
+    # True: 0.1 rad, Est: -0.1 rad (or 2π - 0.1)
+    # Wrapped difference should be 0.2 rad (shortest path)
+    true_heading = np.array([0.1])
+    est_heading = np.array([-0.1])
 
+    error = compute_heading_error(true_heading, est_heading)
+    assert_allclose(error, 0.2, atol=1e-10)  # Returns radians (SI unit)
 
-class TestOcclusionDrift:
-    """Test occlusion drift analysis."""
+    # Test wrap-around at ±π
+    true_heading = np.array([np.pi - 0.1])
+    est_heading = np.array([-np.pi + 0.1])
 
-    def test_no_occlusions(self):
-        """Test drift analysis with no occlusions."""
-        n_steps = 100
-        states = jnp.zeros((n_steps, 8))
-        occlusion_mask = jnp.zeros(n_steps, dtype=bool)
+    error = compute_heading_error(true_heading, est_heading)
+    # Shortest path: 0.2 rad (not 2π - 0.2)
+    assert_allclose(error, 0.2, atol=1e-10)  # Returns radians (SI unit)
 
-        drift = compute_occlusion_drift(states, states, occlusion_mask)
 
-        assert drift["num_occlusions"] == 0
-        assert drift["mean_drift_cm"] == 0.0
+def test_heading_rmse():
+    """RMSE for heading should handle angle wrapping."""
+    true_heading = np.array([0.0, np.pi / 2, np.pi])
+    est_heading = np.array([0.1, np.pi / 2 + 0.1, np.pi - 0.1])
 
-    def test_single_occlusion_no_drift(self):
-        """Test single occlusion with no drift."""
-        n_steps = 100
-        states = jnp.zeros((n_steps, 8))
+    rmse = compute_heading_rmse(true_heading, est_heading)
+    # Errors: [0.1, 0.1, -0.1] rad -> RMSE = sqrt(mean(0.01, 0.01, 0.01)) = 0.1 rad
+    assert_allclose(rmse, 0.1, atol=1e-10)
 
-        # Single occlusion in middle
-        occlusion_mask = jnp.zeros(n_steps, dtype=bool)
-        occlusion_mask = occlusion_mask.at[40:60].set(True)  # 20 frame occlusion
 
-        drift = compute_occlusion_drift(states, states, occlusion_mask, dt=1.0 / 30.0)
+# =============================================================================
+# NEES Tests
+# =============================================================================
 
-        assert drift["num_occlusions"] == 1
-        assert drift["mean_drift_cm"] == pytest.approx(0.0, abs=1e-6)
 
-    def test_single_occlusion_with_drift(self):
-        """Test single occlusion with known drift."""
-        n_steps = 100
+def test_nees_consistent_filter():
+    """NEES should be ~state_dim for a consistent filter."""
+    np.random.seed(42)
+    state_dim = 5
+    N = 100
 
-        # Ground truth: stationary
-        gt_states = jnp.zeros((n_steps, 8))
+    # Generate errors consistent with covariance
+    cov = np.eye(state_dim) * 0.1
+    errors = np.random.multivariate_normal(np.zeros(state_dim), cov, size=N)
 
-        # Estimated: drift during occlusion
-        est_states = jnp.zeros((n_steps, 8))
-        # Add 10 cm drift in x during occlusion (frames 40-60)
-        drift_frames = jnp.arange(40, 60)
-        for i, frame in enumerate(drift_frames):
-            est_states = est_states.at[frame, 0].set(i * 0.5)  # 0.5 cm per frame
+    true_state = np.zeros((N, state_dim))
+    est_state = true_state + errors
+    cov_est = np.stack([cov] * N)
 
-        # Continue drift after occlusion ends
-        est_states = est_states.at[60:, 0].set(10.0)  # Final 10 cm offset
+    nees = compute_nees(true_state, est_state, cov_est)
 
-        # Occlusion during drift period
-        occlusion_mask = jnp.zeros(n_steps, dtype=bool)
-        occlusion_mask = occlusion_mask.at[40:60].set(True)
+    # Mean NEES should be approximately equal to state dimension
+    mean_nees = np.mean(nees)
+    # Allow generous tolerance due to finite sample size
+    assert 3.0 < mean_nees < 7.0, f"Mean NEES {mean_nees:.2f} outside expected range [3, 7]"
 
-        drift = compute_occlusion_drift(est_states, gt_states, occlusion_mask, dt=1.0 / 30.0)
 
-        assert drift["num_occlusions"] == 1
-        assert drift["mean_drift_cm"] == pytest.approx(10.0, abs=0.5)
+def test_nees_overconfident_filter():
+    """NEES should be high when covariance is underestimated."""
+    np.random.seed(42)
+    state_dim = 2
+    N = 50
 
-    def test_multiple_occlusions(self):
-        """Test multiple occlusion segments."""
-        n_steps = 150
+    # True error larger than estimated covariance (filter is overconfident)
+    true_cov = np.eye(state_dim) * 1.0  # Large error
+    est_cov = np.eye(state_dim) * 0.1  # Small covariance (overconfident)
 
-        gt_states = jnp.zeros((n_steps, 8))
-        est_states = jnp.zeros((n_steps, 8))
+    errors = np.random.multivariate_normal(np.zeros(state_dim), true_cov, size=N)
+    true_state = np.zeros((N, state_dim))
+    est_state = true_state + errors
+    cov_est = np.stack([est_cov] * N)
 
-        # Two occlusion periods with different drifts
-        occlusion_mask = jnp.zeros(n_steps, dtype=bool)
-        occlusion_mask = occlusion_mask.at[20:40].set(True)  # First occlusion: frames 20-39
-        occlusion_mask = occlusion_mask.at[80:100].set(True)  # Second occlusion: frames 80-99
+    nees = compute_nees(true_state, est_state, cov_est)
 
-        # Simulate drift during first occlusion (from 0 to 5 cm during frames 20-39)
-        for i in range(20, 40):
-            progress = (i - 20) / (40 - 20)  # 0.0 to 1.0
-            est_states = est_states.at[i, 0].set(progress * 5.0)
+    # NEES should be much higher than state_dim (overconfident)
+    mean_nees = np.mean(nees)
+    assert mean_nees > 10.0, f"Expected high NEES for overconfident filter, got {mean_nees:.2f}"
 
-        # Continue with 5 cm error until second occlusion
-        est_states = est_states.at[40:80, 0].set(5.0)
 
-        # Simulate additional drift during second occlusion (from 5 to 8 cm during frames 80-99)
-        for i in range(80, 100):
-            progress = (i - 80) / (100 - 80)  # 0.0 to 1.0
-            est_states = est_states.at[i, 0].set(5.0 + progress * 3.0)
+def test_nees_shape_mismatch():
+    """NEES should raise error on shape mismatch."""
+    true_state = np.zeros((10, 5))
+    est_state = np.zeros((10, 5))
+    cov_est = np.zeros((10, 4, 4))  # Wrong dimension
 
-        # Continue with 8 cm error after second occlusion
-        est_states = est_states.at[100:, 0].set(8.0)
+    with pytest.raises(ValueError, match="Covariance shape mismatch"):
+        compute_nees(true_state, est_state, cov_est)
 
-        drift = compute_occlusion_drift(est_states, gt_states, occlusion_mask, dt=1.0 / 30.0)
 
-        assert drift["num_occlusions"] == 2
-        # First occlusion should have ~5 cm drift, second should have ~3 cm drift
-        assert drift["max_drift_cm"] >= 3.0  # At least one occlusion should have significant drift
+def test_nees_singular_covariance():
+    """NEES should return inf for singular covariance."""
+    true_state = np.array([[0.0, 0.0]])
+    est_state = np.array([[1.0, 1.0]])
+    cov_est = np.array([[[0.0, 0.0], [0.0, 0.0]]])  # Singular
 
-    def test_short_occlusions_filtered(self):
-        """Test that very short occlusions are filtered out."""
-        n_steps = 100
+    nees = compute_nees(true_state, est_state, cov_est)
+    assert np.isinf(nees[0])
 
-        states = jnp.zeros((n_steps, 8))
 
-        # Very short occlusion (2 frames)
-        occlusion_mask = jnp.zeros(n_steps, dtype=bool)
-        occlusion_mask = occlusion_mask.at[50:52].set(True)
+# =============================================================================
+# NIS Tests
+# =============================================================================
 
-        drift = compute_occlusion_drift(states, states, occlusion_mask, dt=1.0 / 30.0)
 
-        # Should be filtered out as too short
-        assert drift["num_occlusions"] == 0
+def test_nis_consistent_filter():
+    """NIS should be ~measurement_dim for a consistent filter."""
+    np.random.seed(42)
+    meas_dim = 2
+    N = 100
 
+    # Generate innovations consistent with covariance
+    cov = np.eye(meas_dim) * 0.1
+    innovations = np.random.multivariate_normal(np.zeros(meas_dim), cov, size=N)
+    cov_est = np.stack([cov] * N)
 
-class TestPRDCompliance:
-    """Test PRD compliance evaluation."""
+    nis = compute_nis(innovations, cov_est)
 
-    def test_all_passing_metrics(self):
-        """Test PRD evaluation with all passing metrics."""
-        metrics = {
-            "position_rmse_cm": 1.5,
-            "velocity_rmse_cm_s": 8.0,
-            "heading_rmse_deg": 5.0,
-            "max_drift_cm": 10.0,
-        }
+    # Mean NIS should be approximately equal to measurement dimension
+    mean_nis = np.mean(nis)
+    assert 1.0 < mean_nis < 3.0, f"Mean NIS {mean_nis:.2f} outside expected range [1, 3]"
 
-        compliance = evaluate_prd_compliance(metrics)
 
-        assert compliance["position_rmse_ok"]
-        assert compliance["velocity_rmse_ok"]
-        assert compliance["heading_rmse_ok"]
-        assert compliance["occlusion_drift_ok"]
-        assert compliance["overall_prd_compliant"]
+def test_nis_singular_covariance():
+    """NIS should return inf for singular innovation covariance."""
+    innovations = np.array([[1.0, 1.0]])
+    cov = np.array([[[0.0, 0.0], [0.0, 0.0]]])  # Singular
 
-    def test_some_failing_metrics(self):
-        """Test PRD evaluation with some failing metrics."""
-        metrics = {
-            "position_rmse_cm": 2.5,  # Fails (> 2.0)
-            "velocity_rmse_cm_s": 8.0,  # Passes
-            "heading_rmse_deg": 5.0,  # Passes
-            "max_drift_cm": 20.0,  # Fails (> 15.0)
-        }
+    nis = compute_nis(innovations, cov)
+    assert np.isinf(nis[0])
 
-        compliance = evaluate_prd_compliance(metrics)
 
-        assert not compliance["position_rmse_ok"]
-        assert compliance["velocity_rmse_ok"]
-        assert compliance["heading_rmse_ok"]
-        assert not compliance["occlusion_drift_ok"]
-        assert not compliance["overall_prd_compliant"]
+# =============================================================================
+# NEES/NIS Stats Tests
+# =============================================================================
 
-    def test_missing_metrics(self):
-        """Test PRD evaluation with missing metrics."""
-        metrics = {
-            "position_rmse_cm": 1.5,
-            # Missing other metrics
-        }
 
-        compliance = evaluate_prd_compliance(metrics)
+def test_nees_stats():
+    """NEES stats should compute chi-squared bounds correctly."""
+    np.random.seed(42)
+    state_dim = 5
+    nees = np.random.chisquare(df=state_dim, size=100)
 
-        assert compliance["position_rmse_ok"]
-        # Missing metrics shouldn't affect overall if present ones pass
-        assert "velocity_rmse_ok" not in compliance
-        assert "overall_prd_compliant" in compliance
+    stats = compute_nees_stats(nees, state_dim)
 
-    def test_boundary_values(self):
-        """Test PRD evaluation at exact threshold boundaries."""
-        metrics = {
-            "position_rmse_cm": 2.0,  # Exactly at threshold
-            "velocity_rmse_cm_s": 10.0,  # Exactly at threshold
-            "heading_rmse_deg": 7.0,  # Exactly at threshold
-            "max_drift_cm": 15.0,  # Exactly at threshold
-        }
+    # Check all required keys present
+    assert "mean" in stats
+    assert "std" in stats
+    assert "chi2_lower" in stats
+    assert "chi2_upper" in stats
+    assert "pct_in_bounds" in stats
+    assert "confidence" in stats
+    assert stats["confidence"] == 0.95  # Default confidence
 
-        compliance = evaluate_prd_compliance(metrics)
+    # Mean should be approximately state_dim for chi-squared(state_dim)
+    assert 4.0 < stats["mean"] < 6.0
 
-        # At threshold should pass
-        assert compliance["position_rmse_ok"]
-        assert compliance["velocity_rmse_ok"]
-        assert compliance["heading_rmse_ok"]
-        assert compliance["occlusion_drift_ok"]
-        assert compliance["overall_prd_compliant"]
+    # Most samples should be within 95% CI (allow some variance)
+    assert stats["pct_in_bounds"] > 85.0
+
+
+def test_nis_stats():
+    """NIS stats should compute chi-squared bounds correctly."""
+    np.random.seed(42)
+    meas_dim = 4
+    nis = np.random.chisquare(df=meas_dim, size=100)
+
+    stats = compute_nis_stats(nis, meas_dim)
+
+    # Check all required keys present
+    assert "mean" in stats
+    assert "std" in stats
+    assert "chi2_lower" in stats
+    assert "chi2_upper" in stats
+    assert "pct_in_bounds" in stats
+    assert "confidence" in stats
+    assert stats["confidence"] == 0.95  # Default confidence
+
+    # Mean should be approximately meas_dim for chi-squared(meas_dim)
+    assert 3.0 < stats["mean"] < 5.0
+
+
+def test_chi2_ci95():
+    """Chi-squared 95% CI should match known values."""
+    # For df=2: 95% CI ≈ [0.051, 7.378]
+    lower, upper = chi2_ci95(df=2)
+    assert_allclose(lower, 0.051, atol=0.01)
+    assert_allclose(upper, 7.378, atol=0.01)
+
+    # For df=4: 95% CI ≈ [0.484, 11.143]
+    lower, upper = chi2_ci95(df=4)
+    assert_allclose(lower, 0.484, atol=0.01)
+    assert_allclose(upper, 11.143, atol=0.01)
+
+
+def test_chi2_bounds_95():
+    """chi2_bounds should match chi2_ci95 for 95% confidence."""
+    from trodestrack.qa.metrics import chi2_bounds
+
+    # Should match chi2_ci95 exactly
+    for df in [2, 4, 5, 8]:
+        lower_old, upper_old = chi2_ci95(df=df)
+        lower_new, upper_new = chi2_bounds(df=df, confidence=0.95)
+        assert_allclose(lower_new, lower_old, rtol=1e-10)
+        assert_allclose(upper_new, upper_old, rtol=1e-10)
+
+
+def test_chi2_bounds_different_confidences():
+    """chi2_bounds should work with different confidence levels."""
+    from trodestrack.qa.metrics import chi2_bounds
+
+    # 90% CI should be narrower than 95% CI
+    lower_90, upper_90 = chi2_bounds(df=4, confidence=0.90)
+    lower_95, upper_95 = chi2_bounds(df=4, confidence=0.95)
+    lower_99, upper_99 = chi2_bounds(df=4, confidence=0.99)
+
+    # Wider confidence → wider interval
+    assert lower_90 > lower_95
+    assert lower_95 > lower_99
+    assert upper_90 < upper_95
+    assert upper_95 < upper_99
+
+
+def test_within_envelope_basic():
+    """within_envelope should correctly identify values in/out of bounds."""
+    from trodestrack.qa.metrics import within_envelope
+
+    # Generate chi-squared samples
+    np.random.seed(42)
+    df = 4
+    values = np.random.chisquare(df, size=1000)
+
+    # With 95% confidence, expect ~95% within bounds
+    pct = within_envelope(values, df=df, confidence=0.95)
+    assert 0.93 < pct < 0.97, f"Expected ~95%, got {pct * 100:.1f}%"
+
+    # With 99% confidence, expect ~99% within bounds
+    pct_99 = within_envelope(values, df=df, confidence=0.99)
+    assert 0.97 < pct_99 < 1.0, f"Expected ~99%, got {pct_99 * 100:.1f}%"
+    assert pct_99 > pct, "99% envelope should contain more values than 95%"
+
+
+def test_within_envelope_edge_cases():
+    """within_envelope should handle edge cases correctly."""
+    from trodestrack.qa.metrics import within_envelope
+
+    # All zeros → 0% within bounds (below lower threshold)
+    values = np.zeros(100)
+    pct = within_envelope(values, df=4, confidence=0.95)
+    assert pct == 0.0
+
+    # All very large values → 0% within bounds (above upper threshold)
+    values = np.full(100, 1000.0)
+    pct = within_envelope(values, df=4, confidence=0.95)
+    assert pct == 0.0
+
+    # Values at mean of chi-squared → 100% within bounds
+    values = np.full(100, 4.0)  # Mean of chi-squared(4) = 4
+    pct = within_envelope(values, df=4, confidence=0.95)
+    assert pct == 1.0
+
+
+# =============================================================================
+# Residual Autocorrelation Tests
+# =============================================================================
+
+
+def test_autocorrelation_white_noise():
+    """White noise should have near-zero autocorrelation at lag > 0."""
+    np.random.seed(42)
+    white_noise = np.random.randn(200)
+
+    acf = compute_residual_autocorrelation(white_noise, max_lag=10)
+
+    # Lag 0 should be 1.0
+    assert_allclose(acf[0], 1.0, atol=1e-10)
+
+    # Higher lags should be near zero (95% bounds: ±1.96/sqrt(N) ≈ ±0.14)
+    # Use looser bound for robustness
+    assert np.all(np.abs(acf[1:]) < 0.2)
+
+
+def test_autocorrelation_correlated_signal():
+    """Correlated signal should show non-zero autocorrelation."""
+    np.random.seed(42)
+    # AR(1) process: x[t] = 0.8 * x[t-1] + noise
+    N = 200
+    x = np.zeros(N)
+    for t in range(1, N):
+        x[t] = 0.8 * x[t - 1] + 0.3 * np.random.randn()
+
+    acf = compute_residual_autocorrelation(x, max_lag=5)
+
+    # Lag 0 should be 1.0
+    assert_allclose(acf[0], 1.0, atol=1e-10)
+
+    # Lag 1 should show strong positive correlation (~0.8)
+    assert acf[1] > 0.5
+
+
+def test_autocorrelation_multivariate():
+    """Multivariate residuals should compute ACF per dimension."""
+    np.random.seed(42)
+    residuals = np.random.randn(100, 3)
+
+    acf = compute_residual_autocorrelation(residuals, max_lag=5)
+
+    # Should return (3, 6) array: 3 dimensions × 6 lags (0-5)
+    assert acf.shape == (3, 6)
+
+    # Each dimension should have lag-0 correlation = 1.0
+    assert_allclose(acf[:, 0], 1.0, atol=1e-10)
+
+
+def test_autocorrelation_constant_input():
+    """Constant input should return ACF[0]=1, rest=NaN."""
+    constant = np.ones(50)
+
+    acf = compute_residual_autocorrelation(constant, max_lag=3)
+
+    # Lag 0 should be 1.0
+    assert_allclose(acf[0], 1.0, atol=1e-10)
+
+    # Higher lags should be NaN (zero variance)
+    assert np.all(np.isnan(acf[1:]))
+
+
+# =============================================================================
+# Dropout Drift Tests
+# =============================================================================
+
+
+def test_dropout_drift_no_dropout():
+    """No dropout should return None values."""
+    t = np.linspace(0, 10, 100)
+    positions = np.column_stack([t * 0.1, np.zeros_like(t)])
+    mask = np.ones(100, dtype=bool)  # All valid (no dropout)
+
+    result = compute_dropout_drift(positions, mask, t, min_duration_s=5.0)
+
+    assert result["drift_m"] is None
+    assert result["duration_s"] is None
+    assert result["start_idx"] is None
+    assert result["end_idx"] is None
+
+
+def test_dropout_drift_too_short():
+    """Dropout shorter than min_duration should return None."""
+    t = np.linspace(0, 10, 100)
+    positions = np.column_stack([t * 0.1, np.zeros_like(t)])
+
+    # Create 2s dropout (shorter than 5s minimum)
+    mask = (t < 3.0) | (t >= 5.0)
+
+    result = compute_dropout_drift(positions, mask, t, min_duration_s=5.0)
+
+    assert result["drift_m"] is None
+
+
+def test_dropout_drift_known_drift():
+    """Known dropout with constant velocity should give expected drift."""
+    # 10s trajectory at 0.1 m/s in x-direction
+    t = np.linspace(0, 10, 1000)
+    positions = np.column_stack([t * 0.1, np.zeros_like(t)])
+
+    # Dropout from t=3s to t=8s (5s duration)
+    mask = (t < 3.0) | (t >= 8.0)
+
+    result = compute_dropout_drift(positions, mask, t, min_duration_s=4.0)
+
+    # Drift should be ~0.5 m (5s * 0.1 m/s)
+    assert result["drift_m"] is not None
+    assert 0.45 < result["drift_m"] < 0.55
+
+    # Duration should be ~5s
+    assert result["duration_s"] is not None
+    assert 4.8 < result["duration_s"] < 5.2
+
+
+def test_dropout_drift_multiple_blocks():
+    """Should return first qualifying dropout block."""
+    t = np.linspace(0, 20, 2000)
+    positions = np.column_stack([t * 0.1, np.zeros_like(t)])
+
+    # Two dropout blocks: [2-4s] (too short) and [10-16s] (long enough)
+    mask = (t < 2.0) | ((t >= 4.0) & (t < 10.0)) | (t >= 16.0)
+
+    result = compute_dropout_drift(positions, mask, t, min_duration_s=5.0)
+
+    # Should return second block (10-16s, ~6s duration, ~0.6m drift)
+    assert result["drift_m"] is not None
+    assert 0.55 < result["drift_m"] < 0.65
+    assert 5.8 < result["duration_s"] < 6.2
+
+
+def test_dropout_drift_shape_mismatch():
+    """Mismatched input shapes should raise ValueError."""
+    positions = np.zeros((100, 2))
+    mask = np.zeros(50, dtype=bool)  # Wrong size
+    t = np.zeros(100)
+
+    with pytest.raises(ValueError, match="Shape mismatch"):
+        compute_dropout_drift(positions, mask, t)
+
+
+# =============================================================================
+# Integration Tests
+# =============================================================================
+
+
+def test_metrics_workflow_integration():
+    """Test full QA workflow: generate data, compute all metrics."""
+    np.random.seed(42)
+    N = 100
+    state_dim = 5
+    meas_dim = 2
+
+    # Generate synthetic ground truth and estimates
+    true_state = np.random.randn(N, state_dim) * 0.1
+    errors = np.random.randn(N, state_dim) * 0.05
+    est_state = true_state + errors
+
+    # Generate covariances
+    cov_est = np.stack([np.eye(state_dim) * 0.05**2] * N)
+
+    # Compute NEES
+    nees = compute_nees(true_state, est_state, cov_est)
+    nees_stats = compute_nees_stats(nees, state_dim)
+
+    assert nees.shape == (N,)
+    assert "mean" in nees_stats
+
+    # Compute position RMSE (first 2 dimensions)
+    pos_rmse = compute_position_rmse(true_state[:, :2], est_state[:, :2])
+    assert pos_rmse > 0
+
+    # Compute velocity RMSE (next 2 dimensions)
+    vel_rmse = compute_velocity_rmse(true_state[:, 2:4], est_state[:, 2:4])
+    assert vel_rmse > 0
+
+    # Compute heading error (last dimension)
+    heading_error = compute_heading_error(true_state[:, 4], est_state[:, 4])
+    assert heading_error >= 0
+
+    # Generate innovations and compute NIS
+    innovations = np.random.randn(N, meas_dim) * 0.1
+    innov_cov = np.stack([np.eye(meas_dim) * 0.1**2] * N)
+    nis = compute_nis(innovations, innov_cov)
+    nis_stats = compute_nis_stats(nis, meas_dim)
+
+    assert nis.shape == (N,)
+    assert "mean" in nis_stats
+
+    # Check residual autocorrelation
+    residuals = innovations[:, 0]
+    acf = compute_residual_autocorrelation(residuals, max_lag=5)
+    assert acf.shape == (6,)
+    assert_allclose(acf[0], 1.0, atol=1e-10)

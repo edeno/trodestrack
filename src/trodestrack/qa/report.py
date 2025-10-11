@@ -1,463 +1,435 @@
-"""
-Comprehensive QA report generation for tracking analysis.
+"""Quality assurance report generation for filter diagnostics.
 
-This module provides end-to-end report generation capabilities, combining
-metrics computation, visualization, and structured output for complete
-quality assurance analysis of tracking sessions.
+This module generates comprehensive PDF reports containing:
+- Summary statistics (RMSE, NEES, NIS)
+- Time series plots (position/velocity error, residuals)
+- Consistency checks (NEES/NIS histograms)
+- 2D trajectory visualization
+- Filter configuration parameters
 """
 
-import json
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Dict, Optional, Union, Tuple
-import numpy as np
-import jax.numpy as jnp
+
 import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib.figure import Figure
+from numpy.typing import NDArray
 
-from .metrics import (
-    compute_rmse,
-    compute_nees,
-    compute_position_nees,
-    compute_occlusion_drift,
-    evaluate_prd_compliance,
+from trodestrack.qa.metrics import (
+    compute_heading_error,
+    compute_heading_rmse,
+    compute_nees_stats,
+    compute_nis_stats,
+    compute_position_rmse,
+    compute_velocity_rmse,
 )
-from .plots import (
-    plot_trajectory_comparison,
-    plot_velocity_and_heading,
-    plot_nees_analysis,
-    plot_bias_traces,
-    plot_measurement_residuals,
+from trodestrack.qa.plots import (
+    plot_heading_error,
+    plot_nees_histogram,
+    plot_nis_histogram,
+    plot_position_error,
+    plot_velocity_error,
 )
-from .logging import QALogger
+from trodestrack.viz.styles import COLORS, apply_tufte_style
 
-
-class QAReportGenerator:
-    """
-    Comprehensive QA report generator for tracking analysis.
-
-    Combines metrics computation, visualization, and structured logging
-    to provide complete quality assurance analysis and reporting.
-    """
-
-    def __init__(
-        self,
-        output_dir: Union[str, Path],
-        session_name: Optional[str] = None,
-    ):
-        """
-        Initialize QA report generator.
-
-        Args:
-            output_dir: Directory for output files and reports
-            session_name: Optional session name for organizing outputs
-        """
-        self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-
-        # Initialize QA logger
-        self.logger = QALogger(output_dir, session_name or "qa_report")
-
-        # Storage for analysis results
-        self.metrics = {}
-        self.plots = {}
-        self.data_summary = {}
-
-    def analyze_tracking_session(
-        self,
-        estimated_states: jnp.ndarray,
-        ground_truth_states: jnp.ndarray,
-        covariances: jnp.ndarray,
-        timestamps: Optional[jnp.ndarray] = None,
-        occlusion_mask: Optional[jnp.ndarray] = None,
-        residuals: Optional[Dict[str, jnp.ndarray]] = None,
-        measurement_validity: Optional[Dict[str, jnp.ndarray]] = None,
-        arena_bounds: Optional[Tuple[float, float, float, float]] = None,
-        filter_parameters: Optional[Dict] = None,
-    ) -> Dict:
-        """
-        Perform comprehensive QA analysis of a tracking session.
-
-        Args:
-            estimated_states: Shape (N, 8) estimated states
-            ground_truth_states: Shape (N, 8) ground truth states
-            covariances: Shape (N, 8, 8) covariance matrices
-            timestamps: Optional timestamps
-            occlusion_mask: Optional occlusion mask
-            residuals: Optional measurement residuals
-            measurement_validity: Optional measurement validity masks
-            arena_bounds: Optional arena bounds for plotting
-            filter_parameters: Optional filter configuration for logging
-
-        Returns:
-            Dictionary with comprehensive analysis results
-        """
-        self.logger.logger.info("Starting comprehensive QA analysis")
-
-        # Log input data hashes for reproducibility
-        self.logger.log_data_hash("estimated_states", estimated_states)
-        self.logger.log_data_hash("ground_truth_states", ground_truth_states)
-        self.logger.log_data_hash("covariances", covariances)
-
-        if filter_parameters:
-            self.logger.log_parameters(filter_parameters)
-
-        # Store data summary
-        self.data_summary = {
-            "num_timesteps": len(estimated_states),
-            "state_dimension": estimated_states.shape[1],
-            "duration_s": float(timestamps[-1] - timestamps[0]) if timestamps is not None else None,
-            "occlusion_fraction": (
-                float(jnp.mean(occlusion_mask)) if occlusion_mask is not None else 0.0
-            ),
-        }
-
-        # 1. Compute RMSE metrics
-        self.logger.logger.info("Computing RMSE metrics")
-        rmse_metrics = compute_rmse(estimated_states, ground_truth_states)
-        self.metrics.update(rmse_metrics)
-
-        # 2. Compute NEES consistency metrics
-        self.logger.logger.info("Computing NEES consistency metrics")
-        nees_metrics = compute_nees(estimated_states, ground_truth_states, covariances)
-        self.metrics.update(nees_metrics)
-
-        position_nees_metrics = compute_position_nees(
-            estimated_states, ground_truth_states, covariances
-        )
-        self.metrics.update(position_nees_metrics)
-
-        # 3. Occlusion drift analysis
-        if occlusion_mask is not None:
-            self.logger.logger.info("Computing occlusion drift metrics")
-            dt = 1.0 / 30.0  # Default to 30 Hz
-            if timestamps is not None and len(timestamps) > 1:
-                dt = float((timestamps[1] - timestamps[0]))
-
-            drift_metrics = compute_occlusion_drift(
-                estimated_states, ground_truth_states, occlusion_mask, dt
-            )
-            self.metrics.update(drift_metrics)
-
-        # 4. PRD compliance evaluation
-        self.logger.logger.info("Evaluating PRD compliance")
-        compliance = evaluate_prd_compliance(self.metrics)
-        self.metrics.update(compliance)
-
-        # Log all computed metrics
-        self.logger.log_metrics(self.metrics)
-
-        # 5. Generate visualization plots
-        self.logger.logger.info("Generating visualization plots")
-        self._generate_plots(
-            estimated_states,
-            ground_truth_states,
-            covariances,
-            timestamps,
-            occlusion_mask,
-            residuals,
-            measurement_validity,
-            arena_bounds,
-        )
-
-        # 6. Save data artifacts
-        self.logger.logger.info("Saving data artifacts")
-        self._save_data_artifacts(estimated_states, covariances, timestamps, residuals)
-
-        # 7. Generate summary report
-        self.logger.logger.info("Generating summary report")
-        summary_report = self._generate_summary_report()
-
-        analysis_results = {
-            "metrics": self.metrics,
-            "data_summary": self.data_summary,
-            "plots": self.plots,
-            "summary_report": summary_report,
-            "output_dir": str(self.output_dir),
-        }
-
-        self.logger.logger.info("QA analysis completed successfully")
-        return analysis_results
-
-    def _generate_plots(
-        self,
-        estimated_states: jnp.ndarray,
-        ground_truth_states: jnp.ndarray,
-        covariances: jnp.ndarray,
-        timestamps: Optional[jnp.ndarray],
-        occlusion_mask: Optional[jnp.ndarray],
-        residuals: Optional[Dict[str, jnp.ndarray]],
-        measurement_validity: Optional[Dict[str, jnp.ndarray]],
-        arena_bounds: Optional[Tuple[float, float, float, float]],
-    ) -> None:
-        """Generate all QA plots and save to output directory."""
-
-        # 1. Trajectory comparison
-        trajectory_path = self.output_dir / f"{self.logger.session_name}_trajectory.png"
-        fig_traj = plot_trajectory_comparison(
-            estimated_states,
-            ground_truth_states,
-            timestamps,
-            occlusion_mask,
-            arena_bounds,
-            title=f"Trajectory Analysis - {self.logger.session_name}",
-            save_path=trajectory_path,
-        )
-        plt.close(fig_traj)
-        self.plots["trajectory"] = str(trajectory_path)
-        self.logger.save_artifact(
-            "trajectory_plot", trajectory_path, "2D trajectory comparison with error analysis"
-        )
-
-        # 2. Velocity and heading analysis
-        velocity_path = self.output_dir / f"{self.logger.session_name}_velocity_heading.png"
-        fig_vel = plot_velocity_and_heading(
-            estimated_states,
-            ground_truth_states,
-            timestamps,
-            occlusion_mask,
-            title=f"Velocity & Heading Analysis - {self.logger.session_name}",
-            save_path=velocity_path,
-        )
-        plt.close(fig_vel)
-        self.plots["velocity_heading"] = str(velocity_path)
-        self.logger.save_artifact(
-            "velocity_heading_plot", velocity_path, "Velocity and heading error analysis"
-        )
-
-        # 3. NEES consistency analysis
-        nees_path = self.output_dir / f"{self.logger.session_name}_nees.png"
-        fig_nees = plot_nees_analysis(
-            estimated_states,
-            ground_truth_states,
-            covariances,
-            timestamps,
-            title=f"NEES Consistency Analysis - {self.logger.session_name}",
-            save_path=nees_path,
-        )
-        plt.close(fig_nees)
-        self.plots["nees"] = str(nees_path)
-        self.logger.save_artifact("nees_plot", nees_path, "NEES filter consistency analysis")
-
-        # 4. Bias traces
-        bias_path = self.output_dir / f"{self.logger.session_name}_bias_traces.png"
-        fig_bias = plot_bias_traces(
-            estimated_states,
-            ground_truth_states,
-            timestamps,
-            title=f"IMU Bias Estimates - {self.logger.session_name}",
-            save_path=bias_path,
-        )
-        plt.close(fig_bias)
-        self.plots["bias_traces"] = str(bias_path)
-        self.logger.save_artifact("bias_traces_plot", bias_path, "IMU bias estimation over time")
-
-        # 5. Measurement residuals (if available)
-        if residuals:
-            residuals_path = self.output_dir / f"{self.logger.session_name}_residuals.png"
-            fig_res = plot_measurement_residuals(
-                residuals,
-                timestamps,
-                measurement_validity,
-                title=f"Measurement Residuals - {self.logger.session_name}",
-                save_path=residuals_path,
-            )
-            plt.close(fig_res)
-            self.plots["residuals"] = str(residuals_path)
-            self.logger.save_artifact(
-                "residuals_plot", residuals_path, "Measurement residual analysis"
-            )
-
-    def _save_data_artifacts(
-        self,
-        estimated_states: jnp.ndarray,
-        covariances: jnp.ndarray,
-        timestamps: Optional[jnp.ndarray],
-        residuals: Optional[Dict[str, jnp.ndarray]],
-    ) -> None:
-        """Save data artifacts in structured formats."""
-
-        try:
-            # Save states to parquet
-            self.logger.save_states_parquet(estimated_states, covariances, timestamps)
-
-            # Save residuals to parquet (if available)
-            if residuals:
-                self.logger.save_residuals_parquet(residuals, timestamps)
-
-        except ImportError:
-            self.logger.logger.warning("pandas not available - skipping parquet export")
-
-        # Always save metrics as JSON
-        metrics_path = self.output_dir / f"{self.logger.session_name}_metrics.json"
-        with open(metrics_path, "w") as f:
-            # Convert JAX arrays to lists for JSON serialization
-            json_metrics = {}
-            for key, value in self.metrics.items():
-                if isinstance(value, (jnp.ndarray, np.ndarray)):
-                    json_metrics[key] = value.tolist()
-                else:
-                    json_metrics[key] = value
-
-            json.dump(json_metrics, f, indent=2, default=str)
-
-        self.logger.save_artifact(
-            "metrics_json", metrics_path, "Computed QA metrics in JSON format"
-        )
-
-    def _generate_summary_report(self) -> str:
-        """Generate comprehensive text summary report."""
-
-        # Get logger summary
-        base_summary = self.logger.create_summary_report()
-
-        # Add detailed analysis
-        detailed_lines = [
-            "",
-            "Detailed Analysis:",
-            "=" * 40,
-            "",
-        ]
-
-        # Data summary
-        detailed_lines.extend(
-            [
-                "Data Summary:",
-                f"  Duration: {self.data_summary.get('duration_s', 'N/A')} seconds",
-                f"  Timesteps: {self.data_summary.get('num_timesteps', 'N/A')}",
-                f"  State dimension: {self.data_summary.get('state_dimension', 'N/A')}",
-                f"  Occlusion fraction: {self.data_summary.get('occlusion_fraction', 0.0):.1%}",
-                "",
-            ]
-        )
-
-        # Performance vs PRD requirements
-        detailed_lines.extend(
-            [
-                "PRD Compliance Assessment:",
-                "-" * 30,
-            ]
-        )
-
-        # Position RMSE
-        pos_rmse = self.metrics.get("position_rmse_cm", None)
-        if pos_rmse is not None:
-            status = "✓ PASS" if pos_rmse <= 2.0 else "✗ FAIL"
-            detailed_lines.append(f"  Position RMSE: {pos_rmse:.2f} cm (≤2.0 cm) {status}")
-
-        # Velocity RMSE
-        vel_rmse = self.metrics.get("velocity_rmse_cm_s", None)
-        if vel_rmse is not None:
-            status = "✓ PASS" if vel_rmse <= 10.0 else "✗ FAIL"
-            detailed_lines.append(f"  Velocity RMSE: {vel_rmse:.2f} cm/s (≤10.0 cm/s) {status}")
-
-        # Heading RMSE
-        head_rmse = self.metrics.get("heading_rmse_deg", None)
-        if head_rmse is not None:
-            status = "✓ PASS" if head_rmse <= 7.0 else "✗ FAIL"
-            detailed_lines.append(f"  Heading RMSE: {head_rmse:.2f}° (≤7.0°) {status}")
-
-        # Occlusion drift
-        max_drift = self.metrics.get("max_drift_cm", None)
-        if max_drift is not None:
-            status = "✓ PASS" if max_drift <= 15.0 else "✗ FAIL"
-            detailed_lines.append(f"  Max occlusion drift: {max_drift:.2f} cm (≤15.0 cm) {status}")
-
-        detailed_lines.append("")
-
-        # NEES consistency
-        if "nees_consistency_ratio" in self.metrics:
-            ratio = self.metrics["nees_consistency_ratio"]
-            detailed_lines.extend(
-                [
-                    "Filter Consistency (NEES):",
-                    "-" * 25,
-                    f"  Full state NEES ratio: {ratio:.3f} (ideal: 1.0)",
-                ]
-            )
-
-            if ratio < 0.8:
-                detailed_lines.append("    → Filter overconfident (uncertainty too small)")
-            elif ratio > 1.2:
-                detailed_lines.append("    → Filter underconfident (uncertainty too large)")
-            else:
-                detailed_lines.append("    → Filter well-calibrated ✓")
-
-        if "position_nees_consistency_ratio" in self.metrics:
-            pos_ratio = self.metrics["position_nees_consistency_ratio"]
-            detailed_lines.append(f"  Position NEES ratio: {pos_ratio:.3f} (ideal: 1.0)")
-
-        detailed_lines.append("")
-
-        # Occlusion analysis
-        if "num_occlusions" in self.metrics:
-            num_occ = self.metrics["num_occlusions"]
-            mean_drift = self.metrics.get("mean_drift_cm", 0.0)
-            max_drift = self.metrics.get("max_drift_cm", 0.0)
-
-            detailed_lines.extend(
-                [
-                    "Occlusion Analysis:",
-                    "-" * 18,
-                    f"  Number of occlusions: {num_occ}",
-                    f"  Mean drift: {mean_drift:.2f} cm",
-                    f"  Max drift: {max_drift:.2f} cm",
-                    "",
-                ]
-            )
-
-        # Generated outputs
-        detailed_lines.extend(
-            [
-                "Generated Outputs:",
-                "-" * 18,
-            ]
-        )
-
-        for plot_name, plot_path in self.plots.items():
-            filename = Path(plot_path).name
-            detailed_lines.append(f"  {plot_name}: {filename}")
-
-        # Combine reports
-        full_report = base_summary + "\n" + "\n".join(detailed_lines)
-
-        # Save to file
-        report_path = self.output_dir / f"{self.logger.session_name}_report.txt"
-        with open(report_path, "w") as f:
-            f.write(full_report)
-
-        self.logger.save_artifact(
-            "summary_report", report_path, "Comprehensive text summary report"
-        )
-
-        return full_report
+# PRD Acceptance Criteria (Section 4)
+PRD_POSITION_RMSE_M = 0.02  # 2 cm
+PRD_VELOCITY_RMSE_MS = 0.10  # 10 cm/s
+PRD_HEADING_MAE_DEG = 7.0  # 7 degrees
 
 
 def generate_qa_report(
-    estimated_states: jnp.ndarray,
-    ground_truth_states: jnp.ndarray,
-    covariances: jnp.ndarray,
-    output_dir: Union[str, Path],
-    session_name: Optional[str] = None,
-    **kwargs,
-) -> Dict:
+    pdf_path: Path | str,
+    t: NDArray[np.float64],
+    positions_true: NDArray[np.float64],
+    positions_est: NDArray[np.float64],
+    velocities_true: NDArray[np.float64],
+    velocities_est: NDArray[np.float64],
+    headings_true: NDArray[np.float64],
+    headings_est: NDArray[np.float64],
+    nees: NDArray[np.float64],
+    state_dim: int,
+    nis: NDArray[np.float64] | None = None,
+    measurement_dim: int | None = None,
+    config: dict | None = None,
+    title: str = "Filter QA Report",
+) -> None:
+    """Generate comprehensive PDF quality assurance report.
+
+    Creates a multi-page PDF with summary statistics, time series plots,
+    consistency checks, and configuration details.
+
+    Parameters
+    ----------
+    pdf_path : Path or str
+        Output PDF file path.
+    t : NDArray[np.float64]
+        Time vector (N,) in seconds.
+    positions_true : NDArray[np.float64]
+        Ground truth positions (N, 2) in meters.
+    positions_est : NDArray[np.float64]
+        Estimated positions (N, 2) in meters.
+    velocities_true : NDArray[np.float64]
+        Ground truth velocities (N, 2) in m/s.
+    velocities_est : NDArray[np.float64]
+        Estimated velocities (N, 2) in m/s.
+    headings_true : NDArray[np.float64]
+        Ground truth headings (N,) in radians.
+    headings_est : NDArray[np.float64]
+        Estimated headings (N,) in radians.
+    nees : NDArray[np.float64]
+        NEES values (N,).
+    state_dim : int
+        State dimensionality for NEES χ² bounds.
+    nis : NDArray[np.float64] | None, optional
+        NIS values (N,). If provided, ``measurement_dim`` is required.
+    measurement_dim : int | None, optional
+        Measurement dimensionality for NIS χ² bounds.
+    config : dict | None, optional
+        Filter configuration to embed on the summary page.
+    title : str, default "Filter QA Report"
+        Report title.
+
+    Raises
+    ------
+    ValueError
+        If array shapes are inconsistent or required parameters are missing.
+    FileNotFoundError
+        If ``pdf_path`` directory doesn't exist.
+    OSError
+        If the PDF cannot be created (permissions, disk space, etc.).
+
+    Example:
+        >>> import numpy as np
+        >>> from pathlib import Path
+        >>> t = np.linspace(0, 10, 100)
+        >>> pos_true = np.column_stack([t * 0.1, np.zeros(100)])
+        >>> pos_est = pos_true + np.random.randn(100, 2) * 0.01
+        >>> vel_true = np.column_stack([np.ones(100) * 0.1, np.zeros(100)])
+        >>> vel_est = vel_true + np.random.randn(100, 2) * 0.01
+        >>> heading_true = np.zeros(100)
+        >>> heading_est = np.random.randn(100) * 0.1
+        >>> nees = np.random.chisquare(df=8, size=100)
+        >>> generate_qa_report(
+        ...     pdf_path=Path("report.pdf"),
+        ...     t=t,
+        ...     positions_true=pos_true,
+        ...     positions_est=pos_est,
+        ...     velocities_true=vel_true,
+        ...     velocities_est=vel_est,
+        ...     headings_true=heading_true,
+        ...     headings_est=heading_est,
+        ...     nees=nees,
+        ...     state_dim=8,
+        ... )
+
+    Notes:
+        Report sections:
+        1. Title page with summary statistics
+        2. Position error time series
+        3. Velocity error time series
+        4. Heading error time series
+        5. 2D trajectory plot (true vs estimated)
+        6. NEES histogram with chi-squared bounds
+        7. NIS histogram (if provided)
     """
-    Generate comprehensive QA report for tracking analysis.
+    # Convert to Path
+    pdf_path = Path(pdf_path)
 
-    Convenience function that creates a QAReportGenerator and runs
-    complete analysis with all default settings.
+    # Validation: Check array shapes
+    N = t.shape[0]
+    if positions_true.shape != (N, 2):
+        raise ValueError(f"Shape mismatch: positions_true {positions_true.shape} vs t {t.shape}")
+    if positions_est.shape != (N, 2):
+        raise ValueError(f"Shape mismatch: positions_est {positions_est.shape} vs t {t.shape}")
+    if velocities_true.shape != (N, 2):
+        raise ValueError(f"Shape mismatch: velocities_true {velocities_true.shape} vs t {t.shape}")
+    if velocities_est.shape != (N, 2):
+        raise ValueError(f"Shape mismatch: velocities_est {velocities_est.shape} vs t {t.shape}")
+    if headings_true.shape != (N,):
+        raise ValueError(f"Shape mismatch: headings_true {headings_true.shape} vs t {t.shape}")
+    if headings_est.shape != (N,):
+        raise ValueError(f"Shape mismatch: headings_est {headings_est.shape} vs t {t.shape}")
+    if nees.shape[0] != N:
+        raise ValueError(f"Shape mismatch: nees {nees.shape} vs t {t.shape}")
 
-    Args:
-        estimated_states: Shape (N, 8) estimated states
-        ground_truth_states: Shape (N, 8) ground truth states
-        covariances: Shape (N, 8, 8) covariance matrices
-        output_dir: Directory for output files
-        session_name: Optional session name
-        **kwargs: Additional arguments for analyze_tracking_session
+    if nis is not None and measurement_dim is None:
+        raise ValueError("measurement_dim required when nis is provided")
 
-    Returns:
-        Dictionary with comprehensive analysis results
+    # Validation: Check PDF path is writable
+    if not pdf_path.parent.exists():
+        raise FileNotFoundError(f"Directory does not exist: {pdf_path.parent}")
+
+    # Apply visualization style
+    apply_tufte_style()
+
+    # Compute summary statistics
+    pos_rmse = compute_position_rmse(positions_true, positions_est)
+    vel_rmse = compute_velocity_rmse(velocities_true, velocities_est)
+    heading_mae = compute_heading_error(headings_true, headings_est)
+    heading_rmse = compute_heading_rmse(headings_true, headings_est)
+    nees_stats = compute_nees_stats(nees, state_dim=state_dim, confidence=0.95)
+
+    if nis is not None and measurement_dim is not None:
+        nis_stats = compute_nis_stats(nis, measurement_dim=measurement_dim, confidence=0.95)
+    else:
+        nis_stats = None
+
+    # Create PDF
+    try:
+        with PdfPages(pdf_path) as pdf:
+            # Page 1: Title and summary statistics
+            fig_summary = _create_summary_page(
+                title=title,
+                pos_rmse=pos_rmse,
+                vel_rmse=vel_rmse,
+                heading_mae=heading_mae,
+                heading_rmse=heading_rmse,
+                nees_stats=nees_stats,
+                nis_stats=nis_stats,
+                config=config,
+            )
+            pdf.savefig(fig_summary, bbox_inches="tight")
+            plt.close(fig_summary)
+
+            # Page 2: Position error time series
+            fig_pos, _ = plot_position_error(t, positions_true, positions_est, prd_threshold_m=0.02)
+            pdf.savefig(fig_pos, bbox_inches="tight")
+            plt.close(fig_pos)
+
+            # Page 3: Velocity error time series
+            fig_vel, _ = plot_velocity_error(t, velocities_true, velocities_est)
+            pdf.savefig(fig_vel, bbox_inches="tight")
+            plt.close(fig_vel)
+
+            # Page 4: Heading error time series
+            fig_heading, _ = plot_heading_error(
+                t, headings_true, headings_est, prd_threshold_deg=PRD_HEADING_MAE_DEG
+            )
+            pdf.savefig(fig_heading, bbox_inches="tight")
+            plt.close(fig_heading)
+
+            # Page 5: 2D trajectory plot
+            fig_traj = _create_trajectory_plot(positions_true, positions_est)
+            pdf.savefig(fig_traj, bbox_inches="tight")
+            plt.close(fig_traj)
+
+            # Page 6: NEES histogram
+            fig_nees, _ = plot_nees_histogram(nees, state_dim=state_dim, confidence=0.95)
+            pdf.savefig(fig_nees, bbox_inches="tight")
+            plt.close(fig_nees)
+
+            # Page 7 (optional): NIS histogram
+            if nis is not None and measurement_dim is not None:
+                fig_nis, _ = plot_nis_histogram(
+                    nis, measurement_dim=measurement_dim, confidence=0.95
+                )
+                pdf.savefig(fig_nis, bbox_inches="tight")
+                plt.close(fig_nis)
+
+            # Set PDF metadata
+            d = pdf.infodict()
+            d["Title"] = title
+            d["Author"] = "trodestrack QA"
+            d["Subject"] = "Filter Quality Assurance Report"
+            d["Keywords"] = "EKF UKF tracking NEES NIS RMSE"
+
+    except OSError as e:
+        raise OSError(f"Failed to create PDF at {pdf_path}: {e}") from e
+
+
+def _create_summary_page(
+    title: str,
+    pos_rmse: float,
+    vel_rmse: float,
+    heading_mae: float,
+    heading_rmse: float,
+    nees_stats: dict,
+    nis_stats: dict | None,
+    config: dict | None,
+) -> Figure:
+    """Create summary page with metrics and configuration.
+
+    Parameters
+    ----------
+    title : str
+        Report title.
+    pos_rmse : float
+        Position RMSE (m).
+    vel_rmse : float
+        Velocity RMSE (m/s).
+    heading_mae : float
+        Heading MAE (rad).
+    heading_rmse : float
+        Heading RMSE (rad).
+    nees_stats : dict
+        NEES statistics dictionary.
+    nis_stats : dict | None
+        Optional NIS statistics dictionary.
+    config : dict | None
+        Optional configuration dictionary.
+
+    Returns
+    -------
+    Figure
+        Matplotlib figure.
     """
-    generator = QAReportGenerator(output_dir, session_name)
+    fig = plt.figure(figsize=(8.5, 11))  # US Letter size
+    fig.suptitle(title, fontsize=16, fontweight="bold", y=0.98)
 
-    return generator.analyze_tracking_session(
-        estimated_states, ground_truth_states, covariances, **kwargs
+    # Create text content
+    text_lines = []
+
+    # Section 1: Accuracy Metrics
+    text_lines.append("=" * 60)
+    text_lines.append("ACCURACY METRICS")
+    text_lines.append("=" * 60)
+    text_lines.append("")
+    text_lines.append(
+        f"Position RMSE:    {pos_rmse * 100:.2f} cm    "
+        f"(PRD req: ≤{PRD_POSITION_RMSE_M * 100:.1f} cm)"
     )
+    text_lines.append(
+        f"Velocity RMSE:    {vel_rmse * 100:.2f} cm/s  "
+        f"(PRD req: ≤{PRD_VELOCITY_RMSE_MS * 100:.1f} cm/s)"
+    )
+    text_lines.append(
+        f"Heading MAE:      {np.rad2deg(heading_mae):.2f}°     "
+        f"(PRD req: ≤{PRD_HEADING_MAE_DEG:.1f}°)"
+    )
+    text_lines.append(f"Heading RMSE:     {np.rad2deg(heading_rmse):.2f}°")
+    text_lines.append("")
+
+    # Section 2: NEES Consistency
+    text_lines.append("=" * 60)
+    text_lines.append("NEES CONSISTENCY (State Estimation)")
+    text_lines.append("=" * 60)
+    text_lines.append("")
+    text_lines.append(f"Mean NEES:        {nees_stats['mean']:.2f}")
+    text_lines.append(f"Std NEES:         {nees_stats['std']:.2f}")
+    text_lines.append(
+        f"95% CI bounds:    [{nees_stats['chi2_lower']:.2f}, {nees_stats['chi2_upper']:.2f}]"
+    )
+    text_lines.append(f"Within bounds:    {nees_stats['pct_in_bounds']:.1f}%  (expect ~95%)")
+    text_lines.append("")
+
+    # Section 3 (optional): NIS Consistency
+    if nis_stats is not None:
+        text_lines.append("=" * 60)
+        text_lines.append("NIS CONSISTENCY (Measurement Validation)")
+        text_lines.append("=" * 60)
+        text_lines.append("")
+        text_lines.append(f"Mean NIS:         {nis_stats['mean']:.2f}")
+        text_lines.append(f"Std NIS:          {nis_stats['std']:.2f}")
+        text_lines.append(
+            f"95% CI bounds:    [{nis_stats['chi2_lower']:.2f}, {nis_stats['chi2_upper']:.2f}]"
+        )
+        text_lines.append(f"Within bounds:    {nis_stats['pct_in_bounds']:.1f}%  (expect ~95%)")
+        text_lines.append("")
+
+    # Section 4 (optional): Configuration
+    if config is not None:
+        text_lines.append("=" * 60)
+        text_lines.append("FILTER CONFIGURATION")
+        text_lines.append("=" * 60)
+        text_lines.append("")
+        for key, value in config.items():
+            # Format value nicely
+            if isinstance(value, float):
+                if abs(value) < 1e-3 or abs(value) > 1e3:
+                    value_str = f"{value:.2e}"
+                else:
+                    value_str = f"{value:.6f}".rstrip("0").rstrip(".")
+            else:
+                value_str = str(value)
+
+            # Truncate long keys
+            key_str = key[:40]
+            text_lines.append(f"{key_str:45s} {value_str}")
+        text_lines.append("")
+
+    # Render text on figure
+    text_content = "\n".join(text_lines)
+    fig.text(
+        0.1,
+        0.95,
+        text_content,
+        verticalalignment="top",
+        fontfamily="monospace",
+        fontsize=9,
+        transform=fig.transFigure,
+    )
+
+    return fig
+
+
+def _create_trajectory_plot(
+    positions_true: NDArray[np.float64],
+    positions_est: NDArray[np.float64],
+) -> Figure:
+    """Create 2D trajectory comparison plot.
+
+    Parameters
+    ----------
+    positions_true : NDArray[np.float64]
+        Ground truth positions (N, 2) in meters.
+    positions_est : NDArray[np.float64]
+        Estimated positions (N, 2) in meters.
+
+    Returns
+    -------
+    Figure
+        Matplotlib figure.
+    """
+    fig, ax = plt.subplots(figsize=(8, 8), constrained_layout=True)
+
+    # Plot trajectories
+    ax.plot(
+        positions_true[:, 0],
+        positions_true[:, 1],
+        color=COLORS["gray"],
+        linewidth=1.5,
+        alpha=0.7,
+        label="Ground Truth",
+    )
+    ax.plot(
+        positions_est[:, 0],
+        positions_est[:, 1],
+        color=COLORS["blue"],
+        linewidth=1.0,
+        alpha=0.8,
+        label="Estimate",
+    )
+
+    # Mark start and end
+    ax.plot(
+        positions_true[0, 0],
+        positions_true[0, 1],
+        "o",
+        color=COLORS["green"],
+        markersize=10,
+        label="Start",
+        zorder=10,
+    )
+    ax.plot(
+        positions_true[-1, 0],
+        positions_true[-1, 1],
+        "s",
+        color=COLORS["red"],
+        markersize=10,
+        label="End",
+        zorder=10,
+    )
+
+    # Labels and formatting
+    ax.set_xlabel("X (m)")
+    ax.set_ylabel("Y (m)")
+    ax.set_title("2D Trajectory")
+    ax.set_aspect("equal", adjustable="box")
+    ax.legend(loc="best")
+    ax.grid(True, alpha=0.3)
+
+    return fig

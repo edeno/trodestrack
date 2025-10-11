@@ -1,13 +1,5 @@
-"""Runtime APIs for trodestrack."""
+"""Runtime processing: online filtering and offline smoothing.
 
-from .offline import SmoothingResult, smooth_session
-from .online import OnlineTracker, StreamingTracker, TrackingFrame, TrackingResult
-
-__all__ = [
-    "smooth_session",
-    "SmoothingResult",
-    "OnlineTracker",
-    "StreamingTracker",
-    "TrackingFrame",
-    "TrackingResult",
-]
+Entry points and helpers for executing filters in real time and applying
+Rauch–Tung–Striebel or sigma-point smoothers offline.
+"""

@@ -1,826 +1,809 @@
-"""Extended Kalman Filter implementation for 2D tracking.
+"""Extended Kalman Filter (EKF) for sensor-fused rat tracking.
 
-This module implements the EKF algorithm for online state estimation, featuring:
-- JAX-compiled prediction and update steps
-- Robust measurement handling with gating
-- Efficient Jacobian computation via automatic differentiation
-- Support for missing measurements and occlusions
-- Functional interface for lax.scan forward pass
+This module implements a 2D EKF with 8-state model:
+    x_k = [x, y, vx, vy, θ, b_gz, b_ax, b_ay]^T
+
+Where:
+    - (x, y): Position in meters
+    - (vx, vy): Velocity in m/s
+    - θ: Heading angle in radians
+    - b_gz: Gyroscope z-axis bias in rad/s
+    - b_ax, b_ay: Accelerometer x, y biases in m/s²
+
+The filter fuses:
+    - High-rate IMU measurements (gyro, accel) at ~200 Hz
+    - Low-rate camera observations (LED positions) at ~30 Hz
+
+Key features:
+    - IMU pre-integration between camera frames
+    - Velocity damping to model drag
+    - Dual-LED position and heading measurements
+    - Mahalanobis gating for outlier rejection
+    - RTS smoother for offline processing (see runtime/offline.py)
+
+References:
+    - PRD.md Section 6: Mathematical Model
+    - Dynamax inference_ekf.py
+    - Särkkä (2013) "Bayesian Filtering and Smoothing"
 """
 
-from typing import Any, Dict, NamedTuple, Optional, Tuple
+from __future__ import annotations
 
-import jax
+from dataclasses import dataclass
+from typing import NamedTuple
+
 import jax.numpy as jnp
-from chex import dataclass
-from jax import Array
-from jax.typing import ArrayLike
+import numpy as np
+from jax import jacfwd, lax, vmap
 
-from ._solvers import kalman_gain, mahalanobis_distance
-from .gating import chi_squared_threshold
-from .dynamics import (
-    compute_process_noise,
-    predict_covariance,
-    rotation_matrix_2d,
+from trodestrack.models.filter_common import (
+    FilterCoreConfig,
+    FilterState,
+    apply_lifted_inverse,
+    chi2_threshold,
+    compute_imu_index_arrays,
+    compute_nis_and_loglik,
+    dynamics_function,
+    initialize_state,
+    joseph_update,
+    measurement_function,
+    prepare_heading_measurement,
+    psd_solve,
+    symmetrize,
+    update_zupt,
     wrap_angle,
 )
-from .measurements import (
-    _create_position_heading_jacobian,
-    _create_position_jacobian,
-    create_measurement_noise,
-)
-from .state import State2D, array_to_state, state_to_array
+from trodestrack.models.process_noise import assemble_Q
+from trodestrack.models.state_layout import StateLayout, get_heading_index, get_layout
 
-
-class EKFState(NamedTuple):
-    """EKF state representation.
-
-    Attributes:
-        state: Current state estimate
-        covariance: State covariance matrix (8x8)
-        log_likelihood: Cumulative log-likelihood
-    """
-
-    state: ArrayLike  # 8-dimensional state vector
-    covariance: ArrayLike  # 8x8 covariance matrix
-    log_likelihood: float
-
-
-class EKFResult(NamedTuple):
-    """Result from EKF update step.
-
-    Attributes:
-        state: Updated EKF state
-        innovation: Measurement innovation (residual)
-        innovation_covariance: Innovation covariance matrix
-        kalman_gain: Kalman gain matrix
-        gated: Whether measurement was gated (rejected)
-    """
-
-    state: EKFState
-    innovation: ArrayLike
-    innovation_covariance: ArrayLike
-    kalman_gain: ArrayLike
-    gated: ArrayLike
-
-
-class EkfCarry(NamedTuple):
-    """Carry state for lax.scan EKF forward pass.
-
-    Attributes:
-        x: Current state estimate (8-dimensional)
-        P: Current covariance matrix (8x8)
-    """
-
-    x: ArrayLike
-    P: ArrayLike
-
-
-class EkfOutputs(NamedTuple):
-    """Outputs from EKF step for lax.scan.
-
-    Attributes:
-        x_filt: Filtered state estimate
-        P_filt: Filtered covariance matrix
-        x_pred: Predicted state estimate (before update)
-        P_pred: Predicted covariance matrix (before update)
-    """
-
-    x_filt: ArrayLike
-    P_filt: ArrayLike
-    x_pred: ArrayLike
-    P_pred: ArrayLike
-
-
-# Type alias for EKF step input
-EkfInput = Tuple[Dict[str, Any], float, Optional[ArrayLike], Dict[str, Any]]
+# =============================================================================
+# Configuration & State
+# =============================================================================
 
 
 @dataclass
-class EkfScanInputs:
-    """PyTree dataclass for EKF scan inputs.
+class EKFConfig(FilterCoreConfig):
+    """EKF configuration extending the shared FilterCoreConfig.
 
-    This provides a clean, functional structure for scan inputs that is
-    JIT-cache friendly and avoids large tuples with NaN padding.
+    Notes
+    -----
+    Inherits all parameters from :class:`FilterCoreConfig`. Adds
+    ``num_iter`` for iterated EKF (IEKF).
 
-    Attributes:
-        measurements: Measurement data (positions, headings, confidences, validity masks)
-        imu_data: IMU measurements [ax, ay, gz] for each frame
-        time_deltas: Time differences between frames
-        filter_params: Filter configuration parameters
+    Parameters
+    ----------
+    num_iter : int, default 1
+        Number of inner IEKF iterations per measurement update.
     """
 
-    # Measurement data
-    positions: ArrayLike  # (n_frames, 2) - [x, y] positions
-    headings: ArrayLike  # (n_frames,) - heading angles
-    confidences: ArrayLike  # (n_frames,) - measurement confidences
-    position_valid: ArrayLike  # (n_frames,) - True if position is valid
-    heading_valid: ArrayLike  # (n_frames,) - True if heading is valid
-
-    # IMU and timing
-    imu_blocks: ArrayLike  # (n_frames, 3) - [ax, ay, gz] for each frame
-    dt: ArrayLike  # (n_frames,) - time deltas
-
-    # Filter configuration (constant values)
-    velocity_damping: float
-    accel_noise_std: float
-    gyro_noise_std: float
-    bias_drift_std: float
-    position_noise_std: float
-    heading_noise_std: float
-    gate_threshold: float
+    num_iter: int = 1
 
 
-@jax.jit
-def ekf_predict(
-    ekf_state: EKFState,
-    dt: float,
-    accel: ArrayLike,
-    gyro: ArrayLike,
-    velocity_damping: float,
-    accel_noise_std: float,
-    gyro_noise_std: float,
-    bias_drift_std: float,
+EKFState = FilterState
+
+
+class EKFResult(NamedTuple):
+    """EKF filtering result.
+
+    Attributes
+    ----------
+    filtered_means : jnp.ndarray
+        Filtered state means at camera times (N_cam, n).
+    filtered_covariances : jnp.ndarray
+        Filtered covariances at camera times (N_cam, n, n).
+    predicted_means : jnp.ndarray
+        Predicted state means at camera times (N_cam, n).
+    predicted_covariances : jnp.ndarray
+        Predicted covariances at camera times (N_cam, n, n).
+    marginal_loglik : float
+        Sum of per-frame Gaussian log-likelihoods.
+    estimated_led_distance : float | None
+        Auto-detected LED spacing (m), or None if explicitly provided.
+    """
+
+    filtered_means: jnp.ndarray  # (N_cam, n)
+    filtered_covariances: jnp.ndarray  # (N_cam, n, n)
+    predicted_means: jnp.ndarray  # (N_cam, n)
+    predicted_covariances: jnp.ndarray  # (N_cam, n, n)
+    marginal_loglik: float
+    estimated_led_distance: float | None
+
+
+# =============================================================================
+# Utility Functions
+# =============================================================================
+
+
+def estimate_led_spacing(
+    Z_cam_led1: jnp.ndarray,
+    Z_cam_led2: jnp.ndarray,
+    mask_cam: jnp.ndarray,
+) -> float:
+    """Estimate LED spacing from camera observations.
+
+    Parameters
+    ----------
+    Z_cam_led1 : jnp.ndarray
+        LED1 positions (N_cam, 2) in meters.
+    Z_cam_led2 : jnp.ndarray
+        LED2 positions (N_cam, 2) in meters.
+    mask_cam : jnp.ndarray
+        Camera validity mask (N_cam,), boolean.
+
+    Returns
+    -------
+    float
+        Median LED spacing (m). Falls back to 0.04 m if no valid dual-LED frames.
+    """
+    # Find frames where both LEDs are visible
+    led1_valid = jnp.isfinite(Z_cam_led1).all(axis=1)
+    led2_valid = jnp.isfinite(Z_cam_led2).all(axis=1)
+    both_valid = led1_valid & led2_valid & mask_cam
+
+    # Compute distances for valid frames
+    distances = jnp.linalg.norm(Z_cam_led2 - Z_cam_led1, axis=1)
+
+    # Median of valid distances
+    valid_distances = jnp.where(both_valid, distances, jnp.nan)
+
+    # Use nanmedian, with fallback if all NaN
+    median_spacing = jnp.nanmedian(valid_distances)
+
+    # Fallback to 4 cm if no valid observations
+    return float(jnp.where(jnp.isnan(median_spacing), 0.04, median_spacing))
+
+
+def predict_step(
+    state: EKFState,
+    u_imu: jnp.ndarray,
+    dt_imu: float,
+    config: EKFConfig,
+    has_vision: bool = True,
+    *,
+    layout: StateLayout,
 ) -> EKFState:
-    """EKF prediction step.
+    """EKF prediction step using IMU measurement.
 
-    Args:
-        ekf_state: Current EKF state
-        dt: Time step (seconds)
-        accel: Accelerometer measurement [ax, ay] (m/s²)
-        gyro: Gyroscope measurement [gz] (rad/s)
-        velocity_damping: Velocity damping coefficient λ
-        accel_noise_std: Accelerometer noise std dev (m/s²)
-        gyro_noise_std: Gyroscope noise std dev (rad/s)
-        bias_drift_std: Bias drift std dev (per √s)
+    Parameters
+    ----------
+    state : EKFState
+        Current state (mean (n,), cov (n, n)).
+    u_imu : jnp.ndarray
+        IMU input [ω_z(rad/s), f_x(m/s^2), f_y(m/s^2)] (3,).
+    dt_imu : float
+        IMU timestep (s).
+    config : EKFConfig
+        EKF configuration.
+    has_vision : bool, default True
+        Whether a camera measurement is available at the current frame (for
+        blackout-aware Q scaling).
+    layout : StateLayout
+        State index mapping.
 
-    Returns:
-        Predicted EKF state
+    Returns
+    -------
+    EKFState
+        Predicted state.
     """
-    # Use pure JAX array operations instead of State2D conversion
-    predicted_state = _predict_state_jax(ekf_state.state, dt, accel, gyro, velocity_damping)
+    m, P = state.mean, state.cov
 
-    # Predict covariance using linearized dynamics
-    process_noise = compute_process_noise(dt, accel_noise_std, gyro_noise_std, bias_drift_std)
+    # Dynamics function with fixed parameters
+    def f(x):
+        return dynamics_function(x, u_imu, dt_imu, config.damping_coeff, layout)
 
-    predicted_covariance = predict_covariance(
-        ekf_state.covariance,
-        ekf_state.state,
-        dt,
-        accel,
-        gyro,
-        velocity_damping,
-        process_noise,
+    # Jacobian
+    F = jacfwd(f)
+    F_x = F(m)
+
+    # Predict mean
+    m_pred = f(m)
+
+    # Wrap heading angle to (-π, π] to prevent numerical issues
+    h_idx = get_heading_index(layout)
+    m_pred = m_pred.at[h_idx].set(wrap_angle(m_pred[h_idx]))
+
+    # Assemble process noise using shared helper
+    Q = assemble_Q(
+        config,
+        theta=m[h_idx],
+        dt=dt_imu,
+        n=m.shape[0],
+        has_vision=has_vision,
+        dtype=m.dtype,
     )
 
-    return EKFState(
-        state=predicted_state,
-        covariance=predicted_covariance,
-        log_likelihood=ekf_state.log_likelihood,
-    )
+    # Predict covariance
+    P_pred = F_x @ P @ F_x.T + Q
+    P_pred = symmetrize(P_pred)
+
+    return EKFState(mean=m_pred, cov=P_pred)
 
 
-@jax.jit
-def _predict_state_jax(
-    state_array: ArrayLike,
-    dt: float,
-    accel: ArrayLike,
-    gyro: ArrayLike,
-    velocity_damping: float,
-) -> Array:
-    """JAX-optimized state prediction function.
+# =============================================================================
+# Update Step Helpers
+# =============================================================================
 
-    Args:
-        state_array: State vector [x, y, vx, vy, θ, b_gz, b_ax, b_ay]
-        dt: Time step
-        accel: Accelerometer measurement [ax, ay]
-        gyro: Gyroscope measurement [gz]
-        velocity_damping: Velocity damping coefficient
 
-    Returns:
-        Predicted state vector
+def _prepare_camera_observations(
+    z_led1: jnp.ndarray,
+    z_led2: jnp.ndarray,
+    pre_z_obs_full: jnp.ndarray | None,
+    pre_led1_valid: bool | None,
+    pre_led2_valid: bool | None,
+) -> tuple[jnp.ndarray, jnp.ndarray, bool, bool]:
+    """Prepare camera observations for EKF update.
+
+    Parameters
+    ----------
+    z_led1 : jnp.ndarray
+        LED1 observation (2,) [x, y] in meters.
+    z_led2 : jnp.ndarray
+        LED2 observation (2,) [x, y] in meters.
+    pre_z_obs_full : jnp.ndarray | None
+        Optional precomputed concatenated observations (4,).
+    pre_led1_valid : bool | None
+        Optional precomputed LED1 validity.
+    pre_led2_valid : bool | None
+        Optional precomputed LED2 validity.
+
+    Returns
+    -------
+    tuple[jnp.ndarray, jnp.ndarray, bool, bool]
+        ``(z_obs_full, obs_mask, led1_valid, led2_valid)`` where
+        ``z_obs_full`` is (4,) and ``obs_mask`` is (4,) boolean mask.
     """
-    # Extract state components
-    pos = state_array[:2]
-    vel = state_array[2:4]
-    theta = state_array[4]
-    b_gz = state_array[5]
-    b_ax = state_array[6]
-    b_ay = state_array[7]
+    # Check which LEDs are valid (use precomputed if provided)
+    led1_valid = pre_led1_valid if pre_led1_valid is not None else jnp.isfinite(z_led1[0])
+    led2_valid = pre_led2_valid if pre_led2_valid is not None else jnp.isfinite(z_led2[0])
 
-    # Bias-corrected measurements
-    accel_corrected = accel - jnp.array([b_ax, b_ay])
-    gyro_corrected = gyro[0] - b_gz
+    # Build observation vector (use precomputed if provided)
+    z_obs_full = pre_z_obs_full if pre_z_obs_full is not None else jnp.concatenate([z_led1, z_led2])
 
-    # Rotate acceleration from IMU/body frame to world frame
-    R = rotation_matrix_2d(theta)
-    accel_world = R @ accel_corrected
+    # Construct observation mask
+    obs_mask = jnp.array([led1_valid, led1_valid, led2_valid, led2_valid])
 
-    # Convert acceleration to cm/s² for consistency with position units
-    accel_corrected_cm = accel_world * 100.0
-
-    # Apply velocity damping: v_damped = v * (1 - λ*dt)
-    damping_factor = 1.0 - velocity_damping * dt
-    vel_damped = vel * damping_factor
-
-    # Velocity update: v_{k+1} = v_damped + a * dt
-    vel_new = vel_damped + accel_corrected_cm * dt
-
-    # Position update: x_{k+1} = x_k + v_k * dt + 0.5 * a * dt²
-    pos_new = pos + vel * dt + 0.5 * accel_corrected_cm * dt**2
-
-    # Heading update: θ_{k+1} = wrap(θ_k + ω * dt)
-    theta_new = wrap_angle(theta + gyro_corrected * dt)
-
-    # Biases remain unchanged (random walk model)
-    return jnp.array([pos_new[0], pos_new[1], vel_new[0], vel_new[1], theta_new, b_gz, b_ax, b_ay])
+    return z_obs_full, obs_mask, led1_valid, led2_valid
 
 
-def ekf_update(
-    ekf_state: EKFState,
-    measurement: ArrayLike,
-    measurement_noise: ArrayLike,
-    has_heading: bool,
-    gate_threshold: Optional[float] = None,  # Auto-computed based on DoF if None
-) -> EKFResult:
-    """EKF measurement update step.
+def _compute_lifted_joseph_covariance(
+    P_iter: jnp.ndarray,
+    H4: jnp.ndarray,
+    S4: jnp.ndarray,
+    both_leds: bool,
+    only_led1: bool,
+    only_led2: bool,
+) -> jnp.ndarray:
+    """Joseph-form covariance update using lifted subspace operator.
 
-    Args:
-        ekf_state: Predicted EKF state
-        measurement: Measurement vector (position + optional heading)
-        measurement_noise: Measurement noise covariance matrix R
-        has_heading: Whether measurement includes heading
-        gate_threshold: Chi-squared threshold for gating (auto-computed if None)
+    Parameters
+    ----------
+    P_iter : jnp.ndarray
+        Prior covariance (n, n).
+    H4 : jnp.ndarray
+        Measurement Jacobian (4, n).
+    S4 : jnp.ndarray
+        Innovation covariance (4, 4).
+    both_leds : bool
+        Both LEDs valid flag.
+    only_led1 : bool
+        Only LED1 valid flag.
+    only_led2 : bool
+        Only LED2 valid flag.
 
-    Returns:
-        EKF update result
+    Returns
+    -------
+    jnp.ndarray
+        Posterior covariance (n, n).
+
+    Notes
+    -----
+    Implements P⁺ = P − P Hᵀ S⁻¹ H P. The lifted inverse ensures the correct
+    active subspace (2D vs 4D) is used when only one LED is visible.
     """
-    # Auto-compute threshold based on degrees of freedom if not provided
-    if gate_threshold is None:
-        dof = 3 if has_heading else 2
-        gate_threshold = chi_squared_threshold(dof, p_value=0.01)
+    HP = H4 @ P_iter  # (4, n)
+    PH_t = P_iter @ H4.T  # (n, 4)
 
-    # Use specialized functions for each case to avoid conditional logic in JAX
-    # Note: This is acceptable since the branching happens at the Python level (not in JIT)
-    # and avoids recompilation issues
-    if has_heading:
-        return _ekf_update_position_heading(
-            ekf_state, measurement, measurement_noise, gate_threshold
-        )
-    else:
-        return _ekf_update_position_only(ekf_state, measurement, measurement_noise, gate_threshold)
+    # Vectorized application of lifted inverse to columns of HP
+    # Uses vmap for cleaner, more JAX-idiomatic code
+    def apply_inv_to_col(col: jnp.ndarray) -> jnp.ndarray:
+        """Apply S_eff⁻¹ to a column vector."""
+        return apply_lifted_inverse(S4, col, both_leds, only_led1, only_led2)
 
+    # Vectorize over columns (axis 1)
+    inv_S_HP = vmap(apply_inv_to_col, in_axes=1, out_axes=1)(HP)  # (4, n)
 
-@jax.jit
-def _ekf_update_position_only(
-    ekf_state: EKFState,
-    measurement: ArrayLike,
-    measurement_noise: ArrayLike,
-    gate_threshold: float,
-) -> EKFResult:
-    """JAX-compiled EKF update for position-only measurements."""
-    # Compute measurement Jacobian (position only)
-    H = _create_position_jacobian(ekf_state.state)
+    # Complete Joseph form
+    PH_t_inv_S_HP = PH_t @ inv_S_HP  # (n, n)
+    P_upd = P_iter - PH_t_inv_S_HP
+    P_upd = symmetrize(P_upd)
 
-    # Predicted measurement (position only)
-    predicted_measurement = ekf_state.state[:2]
-
-    # Innovation (measurement residual)
-    innovation = measurement - predicted_measurement
-
-    # Innovation covariance: S = H * P * H^T + R
-    innovation_covariance = H @ ekf_state.covariance @ H.T + measurement_noise
-
-    # Mahalanobis gating using safe solve
-    mahalanobis_dist = mahalanobis_distance(innovation, innovation_covariance)
-    gated = mahalanobis_dist > gate_threshold
-
-    # Kalman gain: K = P * H^T * S^{-1} using safe solve
-    K = kalman_gain(ekf_state.covariance, H, measurement_noise)
-
-    # State update: x = x + K * innovation (only if not gated)
-    updated_state = jnp.where(gated, ekf_state.state, ekf_state.state + K @ innovation)
-
-    # Covariance update using Joseph form for numerical stability: P = (I - K*H) @ P @ (I - K*H)^T + K @ R @ K^T
-    identity = jnp.eye(8)
-    I_KH = identity - K @ H
-    joseph_covariance = I_KH @ ekf_state.covariance @ I_KH.T + K @ measurement_noise @ K.T
-    updated_covariance = jnp.where(gated, ekf_state.covariance, joseph_covariance)
-
-    # Log-likelihood update (only if not gated)
-    log_det_S = jnp.linalg.slogdet(innovation_covariance)[1]
-    measurement_dim = 2
-    log_likelihood_update = -0.5 * (
-        measurement_dim * jnp.log(2 * jnp.pi) + log_det_S + mahalanobis_dist
-    )
-
-    updated_log_likelihood = jnp.where(
-        gated, ekf_state.log_likelihood, ekf_state.log_likelihood + log_likelihood_update
-    )
-
-    updated_ekf_state = EKFState(
-        state=updated_state,
-        covariance=updated_covariance,
-        log_likelihood=updated_log_likelihood,
-    )
-
-    return EKFResult(
-        state=updated_ekf_state,
-        innovation=innovation,
-        innovation_covariance=innovation_covariance,
-        kalman_gain=K,
-        gated=gated,
-    )
+    return P_upd
 
 
-@jax.jit
-def _ekf_update_position_heading(
-    ekf_state: EKFState,
-    measurement: ArrayLike,
-    measurement_noise: ArrayLike,
-    gate_threshold: float,
-) -> EKFResult:
-    """JAX-compiled EKF update for position + heading measurements."""
-    # Compute measurement Jacobian (position + heading)
-    H = _create_position_heading_jacobian(ekf_state.state)
+def update_step(
+    state: EKFState,
+    z_led1: jnp.ndarray,
+    z_led2: jnp.ndarray,
+    mask: bool,
+    config: EKFConfig,
+    confidence: jnp.ndarray | None = None,
+    *,
+    pre_z_obs_full: jnp.ndarray | None = None,
+    pre_conf: jnp.ndarray | None = None,
+    pre_led1_valid: bool | None = None,
+    pre_led2_valid: bool | None = None,
+    layout: StateLayout,
+) -> tuple[EKFState, float]:
+    """EKF measurement update step using camera observations.
 
-    # Predicted measurement (position + heading)
-    predicted_measurement = jnp.concatenate(
-        [ekf_state.state[:2], jnp.array([ekf_state.state[4]])]  # position [x, y]  # heading [θ]
-    )
+    Parameters
+    ----------
+    state : EKFState
+        Predicted state.
+    z_led1 : jnp.ndarray
+        LED1 observation (2,) [x, y] in meters.
+    z_led2 : jnp.ndarray
+        LED2 observation (2,) [x, y] in meters.
+    mask : bool
+        Observation validity flag.
+    config : EKFConfig
+        EKF configuration.
+    confidence : jnp.ndarray | None, optional
+        Confidence [led1_x, led1_y, led2_x, led2_y] (4,) in [0, 1]. If provided,
+        measurement noise is scaled per-dimension as R_i = base / clip(conf_i, min, 1).
+    pre_z_obs_full : jnp.ndarray | None, optional
+        Precomputed concatenated observation (4,).
+    pre_conf : jnp.ndarray | None, optional
+        Precomputed confidence (4,).
+    pre_led1_valid : bool | None, optional
+        Precomputed LED1 validity.
+    pre_led2_valid : bool | None, optional
+        Precomputed LED2 validity.
+    layout : StateLayout
+        State index mapping.
 
-    # Innovation (measurement residual)
-    innovation = measurement - predicted_measurement
-
-    # Wrap heading innovation to [-π, π]
-    wrapped_heading_innov = jnp.arctan2(jnp.sin(innovation[2]), jnp.cos(innovation[2]))
-    innovation = innovation.at[2].set(wrapped_heading_innov)
-
-    # Innovation covariance: S = H * P * H^T + R
-    innovation_covariance = H @ ekf_state.covariance @ H.T + measurement_noise
-
-    # Mahalanobis gating
-    mahalanobis_dist = mahalanobis_distance(innovation, innovation_covariance)
-    gated = mahalanobis_dist > gate_threshold
-
-    # Kalman gain: K = P * H^T * S^{-1}
-    K = kalman_gain(ekf_state.covariance, H, measurement_noise)
-
-    # State update: x = x + K * innovation (only if not gated)
-    updated_state = jnp.where(gated, ekf_state.state, ekf_state.state + K @ innovation)
-
-    # Covariance update using Joseph form for numerical stability: P = (I - K*H) @ P @ (I - K*H)^T + K @ R @ K^T
-    identity = jnp.eye(8)
-    I_KH = identity - K @ H
-    joseph_covariance = I_KH @ ekf_state.covariance @ I_KH.T + K @ measurement_noise @ K.T
-    updated_covariance = jnp.where(gated, ekf_state.covariance, joseph_covariance)
-
-    # Log-likelihood update (only if not gated)
-    log_det_S = jnp.linalg.slogdet(innovation_covariance)[1]
-    measurement_dim = 3
-    log_likelihood_update = -0.5 * (
-        measurement_dim * jnp.log(2.0 * jnp.pi) + log_det_S + mahalanobis_dist
-    )
-
-    updated_log_likelihood = jnp.where(
-        gated, ekf_state.log_likelihood, ekf_state.log_likelihood + log_likelihood_update
-    )
-
-    updated_ekf_state = EKFState(
-        state=updated_state,
-        covariance=updated_covariance,
-        log_likelihood=updated_log_likelihood,
-    )
-
-    return EKFResult(
-        state=updated_ekf_state,
-        innovation=innovation,
-        innovation_covariance=innovation_covariance,
-        kalman_gain=K,
-        gated=gated,
-    )
-
-
-def create_initial_ekf_state(
-    initial_state: State2D,
-    initial_covariance: jnp.ndarray,
-) -> EKFState:
-    """Create initial EKF state from State2D and covariance.
-
-    Args:
-        initial_state: Initial state estimate
-        initial_covariance: Initial covariance matrix
-
-    Returns:
-        Initial EKF state
+    Returns
+    -------
+    tuple[EKFState, float]
+        Updated state and log-likelihood.
     """
-    return EKFState(
-        state=state_to_array(initial_state),
-        covariance=initial_covariance,
-        log_likelihood=0.0,
-    )
+    m_pred, P_pred = state.mean, state.cov
 
+    # Confidence→R scaling via shared helper
+    from trodestrack.models.filter_common import confidence_to_R_diagonal
 
-@jax.jit
-def ekf_step(carry: EkfCarry, inp: EkfInput) -> Tuple[EkfCarry, EkfOutputs]:
-    """Functional EKF step for lax.scan forward pass.
+    # If no valid observation, return prediction unchanged with zero log-likelihood
+    def no_update(m, P):
+        return EKFState(mean=m, cov=P), 0.0
 
-    Args:
-        carry: Current EKF state (x, P)
-        inp: Input tuple (meas_struct, dt, imu_block, filter_cfg)
-
-    Returns:
-        Tuple of (new_carry, outputs) where:
-        - new_carry: Updated EKF state after filtering
-        - outputs: Filtered and predicted states/covariances
-    """
-    x, P = carry
-    meas_struct, dt, imu_block, filter_cfg = inp
-
-    # Extract filter configuration
-    velocity_damping = filter_cfg.get("velocity_damping", 0.1)
-    accel_noise_std = filter_cfg.get("accel_noise_std", 0.5)
-    gyro_noise_std = filter_cfg.get("gyro_noise_std", 0.1)
-    bias_drift_std = filter_cfg.get("bias_drift_std", 0.01)
-    position_noise_std = filter_cfg.get("position_noise_std", 1.0)
-    heading_noise_std = filter_cfg.get("heading_noise_std", 0.1)
-    _ = filter_cfg.get("gate_threshold", 9.21)  # Unused - thresholds auto-computed based on DoF
-
-    # Prediction step
-    # Extract IMU measurements (imu_block is guaranteed to be a valid array in our pipeline)
-    # If missing data is passed, it will be zeros which is handled correctly
-    accel = imu_block[:2]  # [ax, ay]
-    gyro = imu_block[2:]  # [gz]
-
-    # Predict state using existing JAX function
-    x_pred = _predict_state_jax(x, dt, accel, gyro, velocity_damping)
-
-    # Predict covariance using linearized dynamics
-    process_noise = compute_process_noise(dt, accel_noise_std, gyro_noise_std, bias_drift_std)
-    P_pred = predict_covariance(P, x, dt, accel, gyro, velocity_damping, process_noise)
-
-    # Measurement update step
-    # Extract measurements from meas_struct
-    position = meas_struct.get("position")
-    heading = meas_struct.get("heading")
-    confidence = meas_struct.get("confidence", 1.0)
-
-    # Create EKF state for measurement update
-    pred_ekf_state = EKFState(state=x_pred, covariance=P_pred, log_likelihood=0.0)
-
-    # Skip update if no measurements available
-    if position is None and heading is None:
-        # No measurement update - return prediction
-        x_filt = x_pred
-        P_filt = P_pred
-    else:
-        # Create measurement vector and noise
-        if position is not None and heading is not None:
-            measurement = jnp.concatenate([position, jnp.array([heading])])
-            has_heading = True
-        elif position is not None:
-            measurement = position
-            has_heading = False
-        else:
-            # Heading-only case (rare)
-            dummy_position = x_pred[:2]
-            measurement = jnp.concatenate([dummy_position, jnp.array([heading])])
-            has_heading = True
-            confidence = 0.01  # Very low confidence for dummy position
-
-        # Create measurement noise matrix
-        measurement_noise = create_measurement_noise(
-            position_noise_std,
-            confidence,
-            has_heading,
-            heading_noise_std if has_heading else None,
+    # If valid observation, perform update
+    def do_update(m, P):
+        # Prepare camera observations using helper
+        z_obs_full, obs_mask, led1_valid, led2_valid = _prepare_camera_observations(
+            z_led1, z_led2, pre_z_obs_full, pre_led1_valid, pre_led2_valid
         )
 
-        # Perform update
-        result = ekf_update(
-            pred_ekf_state,
-            measurement,
-            measurement_noise,
-            has_heading,
-            None,  # Auto-compute threshold based on DoF
-        )
+        # If no valid observations, return prediction with zero log-likelihood
+        def no_leds_update(m_in, P_in):
+            return EKFState(mean=m_in, cov=P_in), 0.0
 
-        # Extract filtered state and covariance
-        x_filt = result.state.state
-        P_filt = result.state.covariance
+        # If at least one LED valid, perform update (with optional IEKF)
+        def do_leds_update(m_in, P_in):
+            # Measurement function
+            def h(x):
+                return measurement_function(x, config.led_distance, layout)
 
-    # Create outputs
-    outputs = EkfOutputs(
-        x_filt=x_filt,
-        P_filt=P_filt,
-        x_pred=x_pred,
-        P_pred=P_pred,
-    )
+            # Jacobian
+            H = jacfwd(h)
 
-    # Create new carry state
-    new_carry = EkfCarry(x=x_filt, P=P_filt)
+            # IEKF: Iterate re-linearization around posterior
+            def iekf_step(carry, _):
+                """Single IEKF iteration using lifted subspace operator.
 
-    return new_carry, outputs
+                Uses exact 2D/4D mathematics without variance hacks:
+                - 4D path: both LEDs valid
+                - 2D path: single LED valid, lifted via selector matrix
 
+                All arrays maintain static 4D shapes for JAX compatibility.
+                """
+                m_iter, P_iter = carry
 
-# JAX-compatible measurement structure for lax.scan
-class MeasurementArrays(NamedTuple):
-    """Structured measurement arrays for JAX lax.scan compatibility.
+                # Re-compute Jacobian at current estimate
+                H4 = H(m_iter)  # (4, n)
+                z_pred_4 = h(m_iter)  # (4,)
 
-    All measurements use NaN to indicate missing values, and masks indicate validity.
-    """
+                # Innovation in full 4D space
+                # Zero out invalid LED components to avoid NaN propagation
+                innov_4_raw = z_obs_full - z_pred_4  # (4,)
+                innov_4 = jnp.where(obs_mask, innov_4_raw, 0.0)  # Zero invalid components
 
-    positions: ArrayLike  # Shape (n_frames, 2) - [x, y] positions
-    headings: ArrayLike  # Shape (n_frames,) - heading angles
-    confidences: ArrayLike  # Shape (n_frames,) - confidence values
-    position_mask: ArrayLike  # Shape (n_frames,) - True if position valid
-    heading_mask: ArrayLike  # Shape (n_frames,) - True if heading valid
+                # Confidence-scaled measurement noise
+                # R_i = R_base / conf_i for each dimension (shared helper)
+                conf_arg = pre_conf if pre_conf is not None else confidence
+                R_diag = confidence_to_R_diagonal(
+                    conf_arg, base=config.measurement_noise_pos, size=4
+                )
+                R4 = jnp.diag(R_diag)
 
+                # Innovation covariance (always 4×4)
+                S4 = H4 @ P_iter @ H4.T + R4
 
+                # Lifted inverse operator: v = S_eff⁻¹ @ innov_4
+                # This automatically handles 2D/4D based on LED validity
+                both_leds = led1_valid & led2_valid
+                only_led1 = led1_valid & (~led2_valid)
+                only_led2 = (~led1_valid) & led2_valid
 
+                v = apply_lifted_inverse(S4, innov_4, both_leds, only_led1, only_led2)
 
+                # Kalman update without forming K explicitly
+                # δx = (P H^T) @ v
+                PH_t = P_iter @ H4.T  # (n, 4)
+                delta_x = PH_t @ v  # (n,)
 
-@jax.jit
-def ekf_step_pytree(
-    carry: EkfCarry,
-    scan_input: Tuple[
-        ArrayLike,
-        ArrayLike,
-        ArrayLike,
-        ArrayLike,
-        ArrayLike,
-        ArrayLike,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-    ],
-) -> Tuple[EkfCarry, EkfOutputs]:
-    """Functional EKF step that accepts frame-wise PyTree inputs for lax.scan.
+                # Update mean
+                m_upd = m_iter + delta_x
 
-    Args:
-        carry: Current EKF state (x, P)
-        scan_input: Tuple of frame-wise inputs (position, heading, confidence, pos_valid,
-                   head_valid, imu_block, dt, + filter params)
+                # Wrap heading angle to (-π, π] after update
+                h_idx_local = get_heading_index(layout)
+                m_upd = m_upd.at[h_idx_local].set(wrap_angle(m_upd[h_idx_local]))
 
-    Returns:
-        Tuple of (new_carry, outputs)
-    """
-    x, P = carry
-    (
-        position,
-        heading,
-        confidence,
-        pos_valid,
-        head_valid,
-        imu_block,
-        dt,
-        velocity_damping,
-        accel_noise_std,
-        gyro_noise_std,
-        bias_drift_std,
-        position_noise_std,
-        heading_noise_std,
-        _gate_threshold,  # Unused - thresholds auto-computed based on DoF
-    ) = scan_input
+                # Joseph form covariance update using helper (vectorized with vmap)
+                P_upd = _compute_lifted_joseph_covariance(
+                    P_iter, H4, S4, both_leds, only_led1, only_led2
+                )
 
-    # Prediction step
-    accel = imu_block[:2]  # [ax, ay]
-    gyro = imu_block[2:]  # [gz]
+                return (m_upd, P_upd), (S4, innov_4, both_leds, only_led1, only_led2)
 
-    x_pred = _predict_state_jax(x, dt, accel, gyro, velocity_damping)
-
-    # Predict covariance using linearized dynamics
-    process_noise = compute_process_noise(dt, accel_noise_std, gyro_noise_std, bias_drift_std)
-    P_pred = predict_covariance(P, x, dt, accel, gyro, velocity_damping, process_noise)
-
-    # Measurement update
-    x_filt, P_filt = jax.lax.cond(
-        pos_valid,
-        lambda: _pytree_measurement_update(
-            x_pred,
-            P_pred,
-            position,
-            heading,
-            confidence,
-            head_valid,
-            position_noise_std,
-            heading_noise_std,
-        ),
-        lambda: (x_pred, P_pred),  # No update if no position measurement
-    )
-
-    # Create outputs
-    outputs = EkfOutputs(x_filt=x_filt, P_filt=P_filt, x_pred=x_pred, P_pred=P_pred)
-    new_carry = EkfCarry(x=x_filt, P=P_filt)
-
-    return new_carry, outputs
-
-
-def _pytree_measurement_update(
-    x_pred: ArrayLike,
-    P_pred: ArrayLike,
-    position: ArrayLike,
-    heading: float,
-    confidence: float,
-    head_valid: bool,
-    position_noise_std: float,
-    heading_noise_std: float,
-) -> Tuple[Array, Array]:
-    """Perform measurement update step for PyTree version using consolidated EKF path."""
-    # Create EKF state for consolidated update
-    ekf_state = EKFState(state=x_pred, covariance=P_pred, log_likelihood=0.0)
-
-    # Build measurement and noise using consolidated functions
-    c = jnp.clip(confidence, 1e-3, 1.0)
-
-    # Use JAX conditional for traced arrays
-    def update_with_heading():
-        # Position + heading measurement
-        measurement = jnp.concatenate([position, jnp.array([heading])])
-        measurement_noise = create_measurement_noise(
-            position_noise_std, c, has_heading=True, heading_noise_std=heading_noise_std
-        )
-        # Auto-compute gate threshold for 3 DoF
-        gate_threshold = chi_squared_threshold(3, p_value=0.01)
-        result = _ekf_update_position_heading(
-            ekf_state, measurement, measurement_noise, gate_threshold
-        )
-        return result.state.state, result.state.covariance
-
-    def update_position_only():
-        # Position-only measurement
-        measurement_noise = create_measurement_noise(position_noise_std, c, has_heading=False)
-        # Auto-compute gate threshold for 2 DoF
-        gate_threshold = chi_squared_threshold(2, p_value=0.01)
-        result = _ekf_update_position_only(ekf_state, position, measurement_noise, gate_threshold)
-        return result.state.state, result.state.covariance
-
-    return jax.lax.cond(head_valid, update_with_heading, update_position_only)
-
-
-
-
-
-
-class EKFFilter:
-    """Extended Kalman Filter for 2D tracking.
-
-    This class provides a stateful interface to the EKF algorithm with
-    configuration management and measurement processing.
-    """
-
-    def __init__(
-        self,
-        initial_state: State2D,
-        initial_covariance: ArrayLike,
-        velocity_damping: ArrayLike = 0.1,
-        accel_noise_std: ArrayLike = 0.5,
-        gyro_noise_std: ArrayLike = 0.1,
-        bias_drift_std: ArrayLike = 0.01,
-        position_noise_std: ArrayLike = 1.0,
-        heading_noise_std: ArrayLike = 0.1,
-    ):
-        """Initialize EKF filter.
-
-        Args:
-            initial_state: Initial state estimate
-            initial_covariance: Initial covariance matrix
-            velocity_damping: Velocity damping coefficient λ
-            accel_noise_std: Accelerometer noise std dev (m/s²)
-            gyro_noise_std: Gyroscope noise std dev (rad/s)
-            bias_drift_std: Bias drift std dev (per √s)
-            position_noise_std: Position measurement noise std dev (cm)
-            heading_noise_std: Heading measurement noise std dev (rad)
-
-        Note:
-            Gating thresholds are auto-computed based on measurement dimensionality.
-        """
-        self.ekf_state = create_initial_ekf_state(initial_state, initial_covariance)
-
-        # Process noise parameters
-        self.velocity_damping = velocity_damping
-        self.accel_noise_std = accel_noise_std
-        self.gyro_noise_std = gyro_noise_std
-        self.bias_drift_std = bias_drift_std
-
-        # Measurement noise parameters
-        self.position_noise_std = position_noise_std
-        self.heading_noise_std = heading_noise_std
-
-    def predict(
-        self,
-        dt: float,
-        accel: ArrayLike,
-        gyro: ArrayLike,
-    ) -> None:
-        """Perform prediction step.
-
-        Args:
-            dt: Time step (seconds)
-            accel: Accelerometer measurement [ax, ay] (m/s²)
-            gyro: Gyroscope measurement [gz] (rad/s)
-        """
-        self.ekf_state = ekf_predict(
-            self.ekf_state,
-            dt,
-            accel,
-            gyro,
-            self.velocity_damping,
-            self.accel_noise_std,
-            self.gyro_noise_std,
-            self.bias_drift_std,
-        )
-
-    def update(
-        self,
-        position: Optional[ArrayLike] = None,
-        heading: Optional[float] = None,
-        confidence: float = 1.0,
-    ) -> EKFResult:
-        """Perform measurement update step.
-
-        Args:
-            position: Position measurement [x, y] in cm (None if missing)
-            heading: Heading measurement in radians (None if missing)
-            confidence: Detection confidence [0, 1]
-
-        Returns:
-            EKF update result
-        """
-        # Skip update if no measurements available
-        if position is None and heading is None:
-            # Return no-update result
-            return EKFResult(
-                state=self.ekf_state,
-                innovation=jnp.array([]),
-                innovation_covariance=jnp.array([[]]),
-                kalman_gain=jnp.array([[]]),
-                gated=False,
+            # Run IEKF iterations
+            carry_init = (m_in, P_in)
+            (m_final, P_final), (S_all, innov_all, both_all, led1_all, led2_all) = lax.scan(
+                iekf_step, carry_init, jnp.arange(config.num_iter)
             )
 
-        # Create measurement vector
-        if position is not None and heading is not None:
-            measurement = jnp.concatenate([position, jnp.array([heading])])
-            has_heading = True
-        elif position is not None:
-            measurement = position
-            has_heading = False
-        else:
-            # Heading-only measurement (rare case)
-            # Create dummy position measurement with high noise
-            dummy_position = self.ekf_state.state[:2]
-            measurement = jnp.concatenate([dummy_position, jnp.array([heading])])
-            has_heading = True
-            confidence = 0.01  # Very low confidence for dummy position
+            # Extract final (last) iteration values
+            S_final = S_all[-1]
+            innov_final = innov_all[-1]
+            both_final = both_all[-1]
+            led1_final = led1_all[-1]
+            led2_final = led2_all[-1]
 
-        # Create measurement noise matrix
-        measurement_noise = create_measurement_noise(
-            self.position_noise_std,
-            confidence,
-            has_heading,
-            self.heading_noise_std if has_heading else None,
+            # Compute exact NIS and log-likelihood using lifted subspace operator
+            # No diagonal approximation - uses correct dimensionality (2D or 4D)
+            nis, log_lik = compute_nis_and_loglik(
+                innov_final, S_final, both_final, led1_final, led2_final
+            )
+
+            # Mahalanobis gating: reject if NIS exceeds χ² threshold
+            # Always compute gating decision (use lax.cond, not Python if)
+            def apply_gating():
+                """Apply Mahalanobis gating."""
+                # Determine measurement dimensionality for threshold
+                dof = lax.cond(
+                    both_final,
+                    lambda: 4,
+                    lambda: 2,  # Single LED
+                )
+                threshold = chi2_threshold(dof, config.mahalanobis_threshold_prob)
+
+                # Gate: accept if NIS < threshold, reject otherwise
+                def accept_measurement():
+                    return EKFState(mean=m_final, cov=P_final), log_lik
+
+                def reject_measurement():
+                    # Return prediction unchanged with zero log-likelihood
+                    return EKFState(mean=m_in, cov=P_in), 0.0
+
+                return lax.cond(nis < threshold, accept_measurement, reject_measurement)
+
+            def no_gating():
+                """Return update without gating."""
+                return EKFState(mean=m_final, cov=P_final), log_lik
+
+            # Use lax.cond to select gating vs no-gating path
+            return lax.cond(
+                config.use_mahalanobis_gating,
+                apply_gating,
+                no_gating,
+            )
+
+        # Conditional update based on whether we have any valid LEDs
+        return lax.cond(
+            led1_valid | led2_valid,
+            do_leds_update,
+            no_leds_update,
+            m,
+            P,
         )
 
-        # Perform update
-        result = ekf_update(
-            self.ekf_state,
-            measurement,
-            measurement_noise,
-            has_heading,
-            None,  # Auto-compute threshold based on measurement dimensionality
+    # Conditional update based on mask
+    return lax.cond(mask, do_update, no_update, m_pred, P_pred)
+
+
+def update_heading(
+    state: EKFState,
+    z_led1: jnp.ndarray,
+    z_led2: jnp.ndarray,
+    config: EKFConfig,
+    mask: bool,
+) -> tuple[EKFState, jnp.ndarray]:
+    """Apply 1D heading pseudo-measurement update from LED pair.
+
+    Parameters
+    ----------
+    state : EKFState
+        Current state (after position update).
+    z_led1 : jnp.ndarray
+        LED1 observation (2,) in meters.
+    z_led2 : jnp.ndarray
+        LED2 observation (2,) in meters.
+    config : EKFConfig
+        EKF configuration.
+    mask : bool
+        Camera validity flag (False skips update entirely).
+
+    Returns
+    -------
+    tuple[EKFState, jnp.ndarray]
+        Updated state and heading measurement log-likelihood (scalar).
+
+    Notes
+    -----
+    Uses large-R gating: invalid observations yield R=1e6 so K≈0, avoiding
+    branching in JAX while preventing spurious updates.
+    """
+    mask_bool = jnp.asarray(mask, dtype=bool)
+
+    def no_update(state_in: EKFState) -> tuple[EKFState, jnp.ndarray]:
+        return state_in, jnp.array(0.0, dtype=state_in.mean.dtype)
+
+    def do_update(state_in: EKFState) -> tuple[EKFState, jnp.ndarray]:
+        m, P = state_in.mean, state_in.cov
+
+        # Prepare heading measurement (shared preprocessing with UKF)
+        heading_obs, R_heading, use_heading = prepare_heading_measurement(z_led1, z_led2, config)
+
+        # 1D heading update
+        # Measurement function: h(x) = x[h_idx] (heading)
+        h_idx = get_heading_index(get_layout(config.state_mode))
+        h_pred = m[h_idx]
+
+        # Innovation with angle wrapping (replace NaN with 0 for gated case)
+        innov_raw = wrap_angle(heading_obs - h_pred)
+        innov = jnp.where(jnp.isfinite(innov_raw), innov_raw, 0.0)
+
+        # Jacobian row for heading index
+        n = m.shape[0]
+        H = jnp.zeros((1, n))
+        H = H.at[0, h_idx].set(1.0)
+
+        # Innovation covariance (scalar, but treat as 1x1 matrix)
+        S = H @ P @ H.T + jnp.array([[R_heading]])
+
+        # Kalman gain (n, 1)
+        K = psd_solve(S, H @ P).T
+
+        # Mean update
+        m_upd = m + (K @ jnp.array([[innov]])).ravel()
+        m_upd = m_upd.at[h_idx].set(wrap_angle(m_upd[h_idx]))  # Wrap after update
+
+        # Covariance update using Joseph form
+        R_mat = jnp.array([[R_heading]])
+        P_upd = joseph_update(P, K, H, R_mat)
+
+        # Log-likelihood (only meaningful if heading was used)
+        # For gated observations (R=1e6), this will be near zero
+        S_scalar = S[0, 0]  # Extract scalar from 1x1 matrix
+        log_lik = -0.5 * (jnp.log(2 * jnp.pi) + jnp.log(S_scalar) + innov**2 / S_scalar)
+
+        # Zero out log-likelihood if not used (for cleaner accounting)
+        log_lik = lax.select(use_heading, log_lik, 0.0)
+
+        return EKFState(m_upd, P_upd), log_lik
+
+    return lax.cond(mask_bool, do_update, no_update, state)
+
+
+# =============================================================================
+# Main EKF Filter
+# =============================================================================
+
+
+def extended_kalman_filter(
+    ekf_config: EKFConfig,
+    t_imu: np.ndarray,
+    U_imu: np.ndarray,
+    t_cam: np.ndarray,
+    Z_cam_led1: np.ndarray,
+    Z_cam_led2: np.ndarray,
+    mask_cam: np.ndarray,
+    initial_state: EKFState | None = None,
+    conf_cam: np.ndarray | None = None,
+) -> EKFResult:
+    """Run Extended Kalman Filter on a full trajectory.
+
+    Parameters
+    ----------
+    ekf_config : EKFConfig
+        EKF configuration.
+    t_imu : np.ndarray
+        IMU timestamps (N_imu,) in seconds.
+    U_imu : np.ndarray
+        IMU measurements [ω_z(rad/s), f_x(m/s^2), f_y(m/s^2)] (N_imu, 3).
+    t_cam : np.ndarray
+        Camera timestamps (N_cam,) in seconds.
+    Z_cam_led1 : np.ndarray
+        LED1 positions (N_cam, 2) in meters.
+    Z_cam_led2 : np.ndarray
+        LED2 positions (N_cam, 2) in meters.
+    mask_cam : np.ndarray
+        Camera validity mask (N_cam,), boolean.
+    initial_state : EKFState | None, optional
+        Optional initial state (auto-initialized if None).
+    conf_cam : np.ndarray | None, optional
+        Confidence scores (N_cam, 4) for [x1,y1,x2,y2] in [0, 1]. If provided,
+        measurement noise is scaled per-dimension.
+
+    Returns
+    -------
+    EKFResult
+        Filtered and predicted states at camera times, and log-likelihood.
+    """
+    # Convert to JAX arrays
+    t_imu_jax = jnp.array(t_imu)
+    U_imu_jax = jnp.array(U_imu)
+    t_cam_jax = jnp.array(t_cam)
+    Z_cam_led1_jax = jnp.array(Z_cam_led1)
+    Z_cam_led2_jax = jnp.array(Z_cam_led2)
+    mask_cam_jax = jnp.array(mask_cam)
+    # Precompute clipped confidences device-side for stable shapes
+    conf_cam_jax = None if conf_cam is None else jnp.clip(jnp.array(conf_cam), 1e-2, 1.0)
+
+    # Auto-detect LED spacing if not specified
+    # Store estimated value to return in result (immutability: do NOT mutate config)
+    estimated_led_distance: float | None = None
+    config_for_filter: EKFConfig
+
+    if ekf_config.led_distance is None:
+        estimated_led_distance = estimate_led_spacing(Z_cam_led1_jax, Z_cam_led2_jax, mask_cam_jax)
+        # Create new config with estimated spacing (do NOT mutate original)
+        config_dict = {k: v for k, v in ekf_config.__dict__.items()}
+        config_dict["led_distance"] = estimated_led_distance
+        config_for_filter = EKFConfig(**config_dict)
+    else:
+        # Use original config as-is
+        config_for_filter = ekf_config
+
+    # Initialize state
+    if initial_state is None:
+        initial_state = initialize_state(
+            Z_cam_led1_jax,
+            Z_cam_led2_jax,
+            mask_cam_jax,
+            dt_cam=jnp.mean(jnp.diff(t_cam_jax)),  # Keep as JAX scalar for JIT compatibility
+            led_distance=config_for_filter.led_distance,  # type: ignore[arg-type]
+            layout=get_layout(config_for_filter.state_mode),
         )
 
-        # Update internal state if not gated
-        if not result.gated:
-            self.ekf_state = result.state
+    n_cam = len(t_cam)
 
-        return result
+    # Resolve state layout once for this run
+    layout = get_layout(config_for_filter.state_mode)
 
-    def get_current_state(self) -> State2D:
-        """Get current state estimate as State2D object.
+    # Compute mean IMU timestep for fallback when imu_idx == 0
+    dt_imu_mean = jnp.mean(jnp.diff(t_imu_jax))  # Keep as JAX scalar for JIT compatibility
 
-        Returns:
-            Current state estimate
-        """
-        return array_to_state(self.ekf_state.state)
+    # Precompute IMU index arrays (host-side, using shared utility)
+    imu_index_arrays = compute_imu_index_arrays(t_imu, t_cam)
 
-    def get_current_covariance(self) -> Array:
-        """Get current covariance matrix.
+    # Precompute device-friendly measurement inputs per frame
+    led1_valid_arr = jnp.isfinite(Z_cam_led1_jax[:, 0])
+    led2_valid_arr = jnp.isfinite(Z_cam_led2_jax[:, 0])
+    z_obs_full_arr = jnp.concatenate([Z_cam_led1_jax, Z_cam_led2_jax], axis=1)  # (N_cam, 4)
+    conf4_arr = None if conf_cam_jax is None else conf_cam_jax  # already clipped if provided
 
-        Returns:
-            Current covariance matrix
-        """
-        return self.ekf_state.covariance
+    def filter_step(carry, t_idx):
+        """Single filtering step at camera frame t_idx."""
+        state_prev, log_lik_accum = carry
 
-    def get_log_likelihood(self) -> float:
-        """Get cumulative log-likelihood.
+        # Check if we have vision at this timestep (for blackout-aware Q)
+        has_vision_t = mask_cam_jax[t_idx]
 
-        Returns:
-            Cumulative log-likelihood
-        """
-        return float(self.ekf_state.log_likelihood)
+        # Propagate using IMU samples in this segment
+        def propagate_from_prev(state_in):
+            """Propagate from previous camera frame to current."""
+            # Get IMU indices for this interval
+            imu_indices = imu_index_arrays[t_idx]
+
+            # Predict forward using each IMU sample
+            def propagate_imu(state, imu_idx):
+                """Propagate state with single IMU measurement."""
+                # Skip invalid indices
+                is_valid = imu_idx >= 0
+
+                def do_propagate(s):
+                    # Get IMU sample and timestep
+                    u = U_imu_jax[imu_idx]
+                    # Compute dt (use mean when at first index)
+                    dt = lax.cond(
+                        imu_idx > 0,
+                        lambda: t_imu_jax[imu_idx] - t_imu_jax[imu_idx - 1],
+                        lambda: jnp.array(dt_imu_mean),
+                    )
+                    return predict_step(s, u, dt, config_for_filter, has_vision_t, layout=layout)
+
+                def no_propagate(s):
+                    return s
+
+                return lax.cond(is_valid, do_propagate, no_propagate, state), None
+
+            state_out, _ = lax.scan(propagate_imu, state_in, imu_indices)
+            return state_out
+
+        def no_propagate(state_in):
+            """First frame: no IMU propagation."""
+            return state_in
+
+        # Use lax.cond to handle first frame
+        state_pred = lax.cond(t_idx == 0, no_propagate, propagate_from_prev, state_prev)
+
+        # Position measurement update (returns state and log-likelihood)
+        state_after_pos, log_lik_pos = update_step(
+            state_pred,
+            Z_cam_led1_jax[t_idx],
+            Z_cam_led2_jax[t_idx],
+            mask_cam_jax[t_idx],
+            config_for_filter,
+            None if conf_cam_jax is None else conf_cam_jax[t_idx],
+            pre_z_obs_full=z_obs_full_arr[t_idx],
+            pre_conf=None if conf4_arr is None else conf4_arr[t_idx],
+            pre_led1_valid=led1_valid_arr[t_idx],
+            pre_led2_valid=led2_valid_arr[t_idx],
+            layout=layout,
+        )
+
+        # Heading measurement update (sequential after position)
+        # Only applied if use_heading_measurement=True (gated via large R otherwise)
+        state_after_heading, log_lik_heading = update_heading(
+            state_after_pos,
+            Z_cam_led1_jax[t_idx],
+            Z_cam_led2_jax[t_idx],
+            config_for_filter,
+            mask_cam_jax[t_idx],
+        )
+
+        # Zero-velocity update (ZUPT) for stationary detection (sequential after heading)
+        # Only applied if enable_zupt=True and velocity < threshold (gated via large R otherwise)
+        state_filt, log_lik_zupt = update_zupt(
+            state_after_heading,
+            config_for_filter,
+        )
+
+        # Total log-likelihood for this frame
+        log_lik_k = log_lik_pos + log_lik_heading + log_lik_zupt
+
+        # Store outputs
+        outputs = {
+            "filtered_mean": state_filt.mean,
+            "filtered_cov": state_filt.cov,
+            "predicted_mean": state_pred.mean,
+            "predicted_cov": state_pred.cov,
+        }
+
+        # Update carry with accumulated log-likelihood
+        carry = (state_filt, log_lik_accum + log_lik_k)
+
+        return carry, outputs
+
+    # Run filter over all camera frames
+    carry_init = (initial_state, 0.0)
+    (_, log_lik_total), outputs = lax.scan(filter_step, carry_init, jnp.arange(n_cam))
+
+    return EKFResult(
+        filtered_means=outputs["filtered_mean"],
+        filtered_covariances=outputs["filtered_cov"],
+        predicted_means=outputs["predicted_mean"],
+        predicted_covariances=outputs["predicted_cov"],
+        marginal_loglik=float(log_lik_total),
+        estimated_led_distance=estimated_led_distance,
+    )

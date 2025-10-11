@@ -1,0 +1,821 @@
+# TrodesTrack Troubleshooting Guide
+
+**Common filter failures, diagnostic steps, and solutions**
+
+This guide helps you identify and fix problems with Extended Kalman Filter (EKF) and Unscented Kalman Filter (UKF) tracking performance.
+
+---
+
+## 📋 Table of Contents
+
+1. [Quick Diagnostic Checklist](#quick-diagnostic-checklist)
+2. [Symptom Index](#symptom-index)
+3. [Common Problems](#common-problems)
+4. [Data Quality Issues](#data-quality-issues)
+5. [Filter Divergence](#filter-divergence)
+6. [Performance Issues](#performance-issues)
+7. [Advanced Debugging](#advanced-debugging)
+
+---
+
+## Quick Diagnostic Checklist
+
+Run through these checks first before diving into specific problems:
+
+### ✅ Data Sanity Checks
+
+```python
+# Check for NaN/Inf in inputs
+assert np.isfinite(sim['Z_cam_led1']).all(), "LED1 contains NaN/Inf"
+assert np.isfinite(sim['Z_cam_led2']).all(), "LED2 contains NaN/Inf"
+assert np.isfinite(sim['u_imu']).all(), "IMU contains NaN/Inf"
+
+# Check units (common mistake: pixels instead of meters)
+led_positions = sim['Z_cam_led1'][sim['mask_cam']]
+assert led_positions.max() < 10.0, "LED positions likely in pixels, not meters"
+
+# Check time alignment
+assert len(sim['t_cam_exp']) == len(sim['Z_cam_led1']), "Time/measurement mismatch"
+assert sim['t_imu'].min() <= sim['t_cam_exp'].min(), "IMU starts after camera"
+assert sim['t_imu'].max() >= sim['t_cam_exp'].max(), "IMU ends before camera"
+```
+
+### ✅ Configuration Sanity Checks
+
+```python
+cfg = EKFConfig()
+
+# Check process noise (should be positive)
+assert cfg.process_noise_pos > 0, "Process noise must be positive"
+assert cfg.process_noise_vel > 0, "Process noise must be positive"
+
+# Check measurement noise (should be small)
+assert cfg.measurement_noise_pos < 0.1, "Measurement noise too large (>10cm²)"
+
+# Check damping (should be reasonable)
+assert 0.0 <= cfg.damping_coeff <= 5.0, "Damping coefficient out of range"
+```
+
+### ✅ Generate QA Report
+
+```bash
+uv run python examples/08_qa_report_generation.py
+```
+
+**Check these metrics first:**
+1. **NEES histogram**: Should be centered around 8.0
+2. **Position RMSE**: Should be < 10 cm (ideally < 2 cm)
+3. **Innovation statistics**: Should be zero-mean
+4. **Trajectory plot**: Check for discontinuities or divergence
+
+---
+
+## Symptom Index
+
+Click on your symptom to jump to the solution:
+
+- [Filter diverges to infinity](#filter-diverges-to-infinity)
+- [Position estimate jitters/oscillates](#position-estimate-jitters)
+- [Heading estimate drifts continuously](#heading-drift)
+- [Filter lags behind true motion](#filter-lags-behind-motion)
+- [Position jumps at LED swaps](#led-swap-jumps)
+- [Large errors during occlusions](#occlusion-drift)
+- [Stationary rat drifts](#stationary-drift)
+- [Covariance grows unbounded](#covariance-explosion)
+- [Filter runs extremely slowly](#slow-performance)
+- [NEES inconsistent (< 6 or > 10)](#nees-inconsistency)
+- [NaN/Inf in filter output](#nan-inf-output)
+
+---
+
+## Common Problems
+
+### Filter Diverges to Infinity
+
+**Symptom:** Position estimates grow without bound (> 100 m).
+
+#### Diagnostic Steps
+
+1. **Check input units:**
+   ```python
+   # LED positions should be in meters, not pixels
+   print(f"LED1 max: {sim['Z_cam_led1'].max():.2f} m")
+   # Should be < 2 m for typical arena
+   ```
+
+2. **Check for NaN/Inf in inputs:**
+   ```python
+   assert np.isfinite(sim['u_imu']).all(), "IMU contains invalid values"
+   ```
+
+3. **Check initial state:**
+   ```python
+   x0, P0 = ekf_initialize_state(sim, cfg)
+   print(f"Initial position: {x0[:2]}")  # Should be in arena
+   print(f"Initial velocity: {x0[2:4]}")  # Should be < 2 m/s
+   ```
+
+#### Solutions
+
+**If LED positions are in pixels:**
+```python
+# Convert to meters using scale factor
+scale_m_per_pixel = 0.001  # Example: 1 mm per pixel
+sim['Z_cam_led1'] = sim['Z_cam_led1'] * scale_m_per_pixel
+sim['Z_cam_led2'] = sim['Z_cam_led2'] * scale_m_per_pixel
+```
+
+**If IMU units are wrong:**
+```python
+# Check conversion from raw to SI units (see PRD Section 5)
+# Gyro: raw * 0.061 * (π/180) = rad/s
+# Accel: raw * 0.000061 * 9.80665 = m/s²
+```
+
+**If covariance initialization is too small:**
+```python
+# Increase initial uncertainty
+x0, P0 = ekf_initialize_state(sim, cfg)
+P0 = P0 * 10.0  # Scale up initial covariance
+fwd = ekf_forward(x0, P0, cfg, sim)
+```
+
+---
+
+### Position Estimate Jitters
+
+**Symptom:** Position oscillates frame-to-frame instead of smooth tracking.
+
+#### Diagnostic Steps
+
+1. **Check measurement noise:**
+   ```python
+   # Plot raw LED observations
+   plt.plot(sim['Z_cam_led1'][:, 0], label='LED1 x')
+   plt.show()
+   # If raw data is jittery, increase measurement_noise_pos
+   ```
+
+2. **Check NEES:**
+   - If NEES >> 10: Filter is underconfident → trusts noisy measurements too much
+
+#### Solutions
+
+**Option 1: Increase measurement noise (trust camera less)**
+```python
+cfg = EKFConfig(
+    measurement_noise_pos=0.01**2  # Increase from 0.005² (1 cm vs 5 mm)
+)
+```
+
+**Option 2: Decrease process noise (smoother motion model)**
+```python
+cfg = EKFConfig(
+    process_noise_pos=0.005,  # Decrease from 0.02
+    process_noise_vel=0.5     # Decrease from 2.0
+)
+```
+
+**Option 3: Use smoother for offline analysis**
+```python
+from trodestrack.runtime.offline import rts_smoother
+
+# Smoother eliminates jitter by using future observations
+smoothed = rts_smoother(fwd['x'], fwd['P'], fwd['F'], fwd['Q'], cfg, sim)
+```
+
+**Option 4: Enable Mahalanobis gating (reject outliers)**
+```python
+cfg = EKFConfig(
+    use_mahalanobis_gating=True,
+    mahalanobis_threshold_prob=0.997
+)
+```
+
+---
+
+### Heading Drift
+
+**Symptom:** Heading estimate diverges from true heading, especially during straight-line motion.
+
+#### Root Cause
+
+**Gyro bias is unobservable during straight-line motion.** The filter cannot distinguish:
+- Constant heading with zero bias
+- Drifting heading with non-zero bias
+
+#### Diagnostic Steps
+
+1. **Check motion type:**
+   ```python
+   # Plot velocity angle vs heading
+   vel_angle = np.arctan2(sim['vy_truth'], sim['vx_truth'])
+   plt.plot(sim['theta_truth'], label='True heading')
+   plt.plot(vel_angle, label='Velocity heading')
+   # If these match → straight-line motion → bias unobservable
+   ```
+
+2. **Check bias convergence:**
+   ```python
+   # Plot gyro bias estimate
+   plt.plot(fwd['x'][:, 5])  # Index 5 = b_gz
+   # Should converge to truth during rotation, drift during straight line
+   ```
+
+#### Solutions
+
+**Option 1: Enable heading pseudo-measurements from dual LEDs**
+```python
+cfg = EKFConfig(
+    use_heading_measurement=True,     # Extract heading from LED orientation
+    led_distance=None,                # Auto-detect spacing
+    led_distance_tolerance=0.3,       # Reject if spacing > 30% off
+    adaptive_heading_noise=True       # Scale noise with geometry quality
+)
+```
+
+**Requirements:** LEDs must be rigidly attached with spacing ≥ 3 cm.
+
+**Option 2: Use velocity heading when confidence is high**
+```python
+# Built-in: When only one LED is visible, filter uses velocity heading
+# No configuration needed, but only helps during motion
+```
+
+**Option 3: Increase gyro bias process noise (allow faster adaptation)**
+```python
+cfg = EKFConfig(
+    process_noise_gyro_bias=1e-5  # Increase from 2e-6
+)
+```
+
+**Trade-off:** Faster adaptation → more noise in bias estimate.
+
+**Option 4: Use smoother (offline only)**
+```python
+# Smoother can correct past heading using future observations
+smoothed = rts_smoother(fwd['x'], fwd['P'], fwd['F'], fwd['Q'], cfg, sim)
+```
+
+---
+
+### Filter Lags Behind Motion
+
+**Symptom:** Position estimate is behind true position, especially during fast motion.
+
+#### Diagnostic Steps
+
+1. **Check velocity RMSE:**
+   - If velocity RMSE is high → filter can't track acceleration changes
+
+2. **Check NEES:**
+   - If NEES < 6 → filter is overconfident → trusts model too much
+
+#### Solutions
+
+**Option 1: Increase velocity process noise**
+```python
+cfg = EKFConfig(
+    process_noise_vel=5.0  # Increase from 2.0
+)
+```
+
+**Option 2: Decrease damping coefficient**
+```python
+cfg = EKFConfig(
+    damping_coeff=0.2  # Decrease from 0.5 (less friction)
+)
+```
+
+**Option 3: Increase measurement trust**
+```python
+cfg = EKFConfig(
+    measurement_noise_pos=0.0025**2  # Decrease from 0.005² (trust camera more)
+)
+```
+
+**Option 4: Use IEKF (iterated EKF)**
+```python
+cfg = EKFConfig(
+    num_iter=3  # Iterate update step for better linearization
+)
+```
+
+**Cost:** 3× slower per update.
+
+---
+
+### LED Swap Jumps
+
+**Symptom:** Position estimate jumps discontinuously when front/back LEDs are swapped.
+
+#### Root Cause
+
+LED swap detection failed → filter treats swapped LEDs as true observation → heading flips 180°.
+
+#### Diagnostic Steps
+
+1. **Check LED spacing:**
+   ```python
+   distances = np.linalg.norm(sim['Z_cam_led2'] - sim['Z_cam_led1'], axis=1)
+   print(f"Median LED spacing: {np.nanmedian(distances):.3f} m")
+   # Should be consistent (e.g., 4 cm ± 5 mm)
+   ```
+
+2. **Check for swap events:**
+   ```python
+   # Plot heading discontinuities
+   heading_diff = np.diff(fwd['x'][:, 4])  # Index 4 = θ
+   swap_frames = np.where(np.abs(heading_diff) > 2.0)[0]  # > 114° jump
+   print(f"Detected {len(swap_frames)} swap events")
+   ```
+
+#### Solutions
+
+**Option 1: Enable heading measurement (prevents swaps)**
+```python
+cfg = EKFConfig(
+    use_heading_measurement=True,     # Constrains heading to LED orientation
+    led_distance_tolerance=0.3        # Rejects inconsistent spacing
+)
+```
+
+**Option 2: Enable Mahalanobis gating (rejects swapped observations)**
+```python
+cfg = EKFConfig(
+    use_mahalanobis_gating=True,
+    mahalanobis_threshold_prob=0.997  # Tight gate
+)
+```
+
+**Option 3: Manual swap correction in preprocessing**
+```python
+# Detect and correct swaps before filtering
+swap_mask = detect_led_swaps(sim)
+sim['Z_cam_led1'][swap_mask], sim['Z_cam_led2'][swap_mask] = \
+    sim['Z_cam_led2'][swap_mask], sim['Z_cam_led1'][swap_mask]
+```
+
+**Option 4: Use mixture update (advanced, not yet implemented)**
+```python
+# Future feature: Test both hypotheses (swap vs no-swap) and select best
+```
+
+---
+
+### Occlusion Drift
+
+**Symptom:** Large position errors during camera dropouts (occlusions).
+
+#### Expected Behavior
+
+**PRD Target:** ≤ 20 cm drift after 5 seconds of occlusion (with realistic IMU noise).
+
+**Note:** Original PRD target of 15 cm is unrealistic with typical IMU drift rates (~3 cm/s).
+
+#### Diagnostic Steps
+
+1. **Check dropout duration:**
+   ```python
+   dropout_lengths = get_dropout_lengths(sim['mask_cam'])
+   print(f"Max dropout: {dropout_lengths.max():.1f} frames (~{dropout_lengths.max()/30:.1f}s)")
+   ```
+
+2. **Check IMU-only drift:**
+   ```python
+   # During dropout, filter relies on IMU only
+   # Check if IMU bias estimates are converged before dropout
+   bias_at_dropout = fwd['x'][dropout_start, 5:8]  # Gyro + accel biases
+   ```
+
+#### Solutions
+
+**Option 1: Enable adaptive process noise during dropout**
+```python
+cfg = EKFConfig(
+    adaptive_q_during_dropout=True,      # Inflate uncertainty during blackout
+    dropout_q_pos_multiplier=10.0,       # Position uncertainty 10×
+    dropout_q_vel_multiplier=10.0,       # Velocity uncertainty 10×
+    dropout_q_bias_multiplier=0.1        # Slow bias drift
+)
+```
+
+**Effect:** Filter becomes more uncertain → smoother can correct with future data.
+
+**Option 2: Use smoother (offline only)**
+```python
+# Smoother corrects dropout drift using future observations
+smoothed = rts_smoother(fwd['x'], fwd['P'], fwd['F'], fwd['Q'], cfg, sim)
+```
+
+**Example:** 5s dropout drift reduces from ~2 m (filter) to ~0.5 m (smoother).
+
+**Option 3: Increase IMU noise densities (if IMU is low quality)**
+```python
+cfg = EKFConfig(
+    imu_gyro_noise_density=0.0005,   # Increase from 0.0001
+    imu_accel_noise_density=0.02     # Increase from 0.005
+)
+```
+
+**Option 4: Pre-converge biases before critical period**
+```python
+# Ensure rat rotates for ≥ 5 seconds before occlusion
+# This allows gyro bias to converge
+```
+
+---
+
+### Stationary Drift
+
+**Symptom:** Position estimate drifts when rat is not moving.
+
+#### Root Cause
+
+IMU noise accumulates during stationary periods → small velocity estimates → position drift.
+
+#### Diagnostic Steps
+
+1. **Check velocity magnitude during stationary period:**
+   ```python
+   velocity_mag = np.linalg.norm(fwd['x'][:, 2:4], axis=1)
+   stationary_mask = velocity_mag < 0.05  # < 5 cm/s
+   drift = np.linalg.norm(np.diff(fwd['x'][stationary_mask, :2], axis=0), axis=1)
+   print(f"Mean drift during stationary: {drift.mean():.4f} m/frame")
+   ```
+
+#### Solutions
+
+**Option 1: Enable ZUPT (zero-velocity update)**
+```python
+cfg = EKFConfig(
+    enable_zupt=True,                      # Detect stationary periods
+    zupt_velocity_threshold=0.05,          # Trigger if |v| < 5 cm/s
+    zupt_measurement_noise=0.01**2         # Trust v=0 with 1 cm/s noise
+)
+```
+
+**Effect:** When velocity drops below threshold, filter applies `v = 0` constraint.
+
+**Option 2: Increase velocity damping**
+```python
+cfg = EKFConfig(
+    damping_coeff=1.0  # Increase from 0.5 (faster velocity decay)
+)
+```
+
+**Option 3: Decrease velocity process noise**
+```python
+cfg = EKFConfig(
+    process_noise_vel=0.5  # Decrease from 2.0 (trust low-velocity model)
+)
+```
+
+---
+
+### Covariance Explosion
+
+**Symptom:** Filter covariance grows unbounded (diagonal elements > 100 m²).
+
+#### Diagnostic Steps
+
+1. **Check process noise:**
+   ```python
+   print(f"Position Q: {cfg.process_noise_pos}")  # Should be < 1.0
+   print(f"Velocity Q: {cfg.process_noise_vel}")  # Should be < 10.0
+   ```
+
+2. **Check for measurement dropout:**
+   ```python
+   dropout_rate = 1.0 - sim['mask_cam'].mean()
+   print(f"Camera dropout rate: {dropout_rate * 100:.1f}%")
+   # If > 50%, covariance will grow
+   ```
+
+#### Solutions
+
+**Option 1: Decrease process noise**
+```python
+cfg = EKFConfig(
+    process_noise_pos=0.01,   # Decrease from 0.02
+    process_noise_vel=1.0     # Decrease from 2.0
+)
+```
+
+**Option 2: Enable adaptive Q (inflation during dropout only)**
+```python
+cfg = EKFConfig(
+    adaptive_q_during_dropout=True,      # Only inflate during blackout
+    dropout_q_pos_multiplier=5.0,        # Moderate inflation (was 10×)
+)
+```
+
+**Option 3: Check for filter divergence**
+```python
+# If covariance explodes AND position diverges → see "Filter Divergence"
+assert np.isfinite(fwd['P']).all(), "Covariance contains NaN/Inf"
+```
+
+---
+
+### Slow Performance
+
+**Symptom:** Filter takes > 1 second per frame (expected: ~0.4 ms per frame).
+
+#### Diagnostic Steps
+
+1. **Check JIT compilation:**
+   ```python
+   # First call is slow (compilation), second call is fast
+   import time
+   start = time.time()
+   fwd = ekf_forward(x0, P0, cfg, sim)  # First call: ~5 seconds
+   print(f"First call: {time.time() - start:.2f}s")
+
+   start = time.time()
+   fwd = ekf_forward(x0, P0, cfg, sim)  # Second call: ~0.01 seconds
+   print(f"Second call: {time.time() - start:.2f}s")
+   ```
+
+2. **Check iteration count (IEKF):**
+   ```python
+   print(f"IEKF iterations: {cfg.num_iter}")  # Should be 1 for standard EKF
+   ```
+
+3. **Check IMU sample count:**
+   ```python
+   print(f"IMU samples: {len(sim['u_imu'])}")  # Should be < 100k for 30-min session
+   ```
+
+#### Solutions
+
+**Option 1: Use EKF instead of UKF**
+```python
+# UKF is 1-5× slower due to sigma-point transforms
+from trodestrack.models.ekf import ekf_forward
+# Instead of:
+# from trodestrack.models.ukf import ukf_forward
+```
+
+**Option 2: Reduce IEKF iterations**
+```python
+cfg = EKFConfig(num_iter=1)  # Standard EKF (no iteration)
+```
+
+**Option 3: Downsample IMU data**
+```python
+# Use 200-500 Hz instead of 20 kHz
+# (already done in simulation by default)
+```
+
+**Option 4: Use GPU acceleration**
+```python
+import jax
+# Force GPU device
+jax.config.update('jax_platform_name', 'gpu')
+```
+
+**Expected speedup:** 5-10× on GPU for long sessions.
+
+---
+
+### NEES Inconsistency
+
+**Symptom:** NEES histogram is not centered around 8.0.
+
+See **[TUNING.md](TUNING.md)** for detailed parameter tuning guidance.
+
+**Quick fixes:**
+
+- **NEES < 6.0** → Increase `process_noise_pos` by 2-5×
+- **NEES > 10.0** → Decrease `process_noise_pos` by 2× OR increase `measurement_noise_pos` by 2×
+
+---
+
+### NaN/Inf Output
+
+**Symptom:** Filter returns NaN or Inf in state estimates or covariances.
+
+#### Diagnostic Steps
+
+1. **Check inputs:**
+   ```python
+   assert np.isfinite(sim['Z_cam_led1']).all()
+   assert np.isfinite(sim['Z_cam_led2']).all()
+   assert np.isfinite(sim['u_imu']).all()
+   ```
+
+2. **Check for extreme values:**
+   ```python
+   print(f"Max LED position: {np.nanmax(sim['Z_cam_led1'])}")  # Should be < 10 m
+   print(f"Max IMU gyro: {np.nanmax(sim['u_imu'][:, 0])}")     # Should be < 100 rad/s
+   ```
+
+3. **Check covariance:**
+   ```python
+   # NaN in covariance indicates numerical instability
+   print(f"Initial covariance condition number: {np.linalg.cond(P0)}")
+   # Should be < 1e10
+   ```
+
+#### Solutions
+
+**Option 1: Replace NaN with masked observations**
+```python
+# Replace NaN in LED positions with dummy values + mask=False
+nan_mask = ~np.isfinite(sim['Z_cam_led1'])
+sim['Z_cam_led1'][nan_mask] = 0.0
+sim['mask_cam'][nan_mask[:, 0]] = False
+```
+
+**Option 2: Increase numerical stability**
+```python
+# Joseph-form covariance updates (already enabled by default)
+# If still unstable, increase regularization:
+# (Not exposed in config, but internal diagonal_boost=1e-9)
+```
+
+**Option 3: Check for division by zero**
+```python
+# Ensure LED spacing > 0
+if cfg.led_distance is not None:
+    assert cfg.led_distance > 0.001, "LED spacing too small"
+```
+
+---
+
+## Data Quality Issues
+
+### LED Detection Failures
+
+**Symptom:** Many missing or low-confidence LED detections.
+
+#### Solutions
+
+1. **Increase measurement noise to account for uncertainty:**
+   ```python
+   cfg = EKFConfig(measurement_noise_pos=0.02**2)  # 2 cm noise
+   ```
+
+2. **Enable Mahalanobis gating to reject spurious detections:**
+   ```python
+   cfg = EKFConfig(use_mahalanobis_gating=True)
+   ```
+
+3. **Check camera calibration:**
+   - Verify homography matrix (if using pixel→meter conversion)
+   - Check lens distortion correction
+
+### IMU Saturation
+
+**Symptom:** IMU readings clipped at maximum sensor range.
+
+#### Diagnostic Steps
+
+```python
+# Check for saturation (depends on sensor range)
+gyro_max = np.abs(sim['u_imu'][:, 0]).max()
+accel_max = np.abs(sim['u_imu'][:, 1:3]).max()
+print(f"Max gyro: {gyro_max:.2f} rad/s")   # Typical limit: 2000°/s = 35 rad/s
+print(f"Max accel: {accel_max:.2f} m/s²")  # Typical limit: 16g = 157 m/s²
+```
+
+#### Solutions
+
+1. **Use higher-range IMU** (hardware change)
+2. **Increase IMU noise densities to model uncertainty:**
+   ```python
+   cfg = EKFConfig(
+       imu_gyro_noise_density=0.001,    # 10× increase
+       imu_accel_noise_density=0.05     # 10× increase
+   )
+   ```
+
+### Time Synchronization Issues
+
+**Symptom:** Filter performance varies with random seed (should be deterministic).
+
+#### Diagnostic Steps
+
+```python
+# Check timestamp alignment
+dt_cam = np.diff(sim['t_cam_exp'])
+print(f"Camera frame intervals: min={dt_cam.min():.4f}, max={dt_cam.max():.4f}s")
+# Should be consistent (~0.033s for 30 Hz)
+
+dt_imu = np.diff(sim['t_imu'])
+print(f"IMU sample intervals: min={dt_imu.min():.6f}, max={dt_imu.max():.6f}s")
+# Should be consistent (~0.005s for 200 Hz)
+```
+
+#### Solutions
+
+1. **Verify hardware sync** (SpikeGadgets provides hardware timestamp)
+2. **Interpolate missing timestamps** (if dropped frames)
+3. **Resample IMU to uniform rate** (if jittered sampling)
+
+---
+
+## Advanced Debugging
+
+### Enable Verbose Logging
+
+```python
+# Not yet implemented, but planned:
+# cfg = EKFConfig(verbose=True, log_level='DEBUG')
+```
+
+### Visualize Innovation Statistics
+
+```python
+from trodestrack.viz.video import create_diagnostic_video
+
+# Generate video with 9-panel diagnostics
+create_diagnostic_video(
+    sim=sim,
+    fwd=fwd,
+    output_path="debug_video.mp4",
+    fps=30,
+    speedup=1.0  # Real-time playback
+)
+```
+
+**Check these panels:**
+1. **Trajectory**: Discontinuities indicate swaps or divergence
+2. **Position error**: Should be < 5 cm most of the time
+3. **Velocity error**: Should be < 20 cm/s most of the time
+4. **Heading error**: Should be < 10° most of the time
+5. **NEES**: Should stay in [6, 10] envelope
+6. **Bias estimates**: Should converge during rotation
+
+### Run Integration Tests
+
+```bash
+# Run PRD acceptance tests
+uv run pytest tests/integration/test_prd_session.py -v
+```
+
+**Expected results:**
+- Position RMSE ≤ 2 cm ✓
+- Velocity RMSE ≤ 10 cm/s ✓
+- Heading RMSE ≤ 7° ✓
+- Throughput ≥ 10× realtime ✓
+
+### Compare EKF vs UKF
+
+```python
+# Run both filters on same data
+from trodestrack.models.ekf import ekf_forward
+from trodestrack.models.ukf import ukf_forward
+
+fwd_ekf = ekf_forward(x0, P0, cfg, sim)
+fwd_ukf = ukf_forward(x0, P0, cfg, sim)
+
+# Compare RMSE
+rmse_ekf = compute_position_rmse(fwd_ekf['x'][:, :2], sim['x_truth'][:, :2])
+rmse_ukf = compute_position_rmse(fwd_ukf['x'][:, :2], sim['x_truth'][:, :2])
+print(f"EKF RMSE: {rmse_ekf*100:.2f} cm")
+print(f"UKF RMSE: {rmse_ukf*100:.2f} cm")
+```
+
+**If UKF is much better:** Linearization error is significant → consider IEKF.
+
+---
+
+## Getting Help
+
+### Before Opening an Issue
+
+1. **Generate QA report** and attach to issue
+2. **Run diagnostic checklist** from top of this guide
+3. **Include configuration** (copy-paste `EKFConfig` settings)
+4. **Describe data source** (synthetic sim, real data, sensor specs)
+
+### Provide Minimal Reproducible Example
+
+```python
+# Minimal failing example
+from trodestrack.sim.simple import simulate_stationary, SimpleSimConfig
+from trodestrack.models.ekf import ekf_forward, EKFConfig, ekf_initialize_state
+
+config_sim = SimpleSimConfig(duration_s=5.0)
+sim = simulate_stationary(position=[0.5, 0.5], config=config_sim, seed=42)
+
+cfg = EKFConfig()  # Add your custom settings here
+x0, P0 = ekf_initialize_state(sim, cfg)
+fwd = ekf_forward(x0, P0, cfg, sim)
+
+# Describe the problem here
+print(f"Problem: Position RMSE is {compute_position_rmse(...):.4f} m (expected < 0.02)")
+```
+
+### Useful Resources
+
+- **[TUNING.md](TUNING.md)** - Parameter selection guide
+- **[PRD.md](PRD.md)** - Mathematical model and requirements
+- **[Examples](examples/README.md)** - Educational examples with expected outputs
+- **[GitHub Issues](https://github.com/yourusername/trodestrack/issues)** - Report bugs
+
+---
+
+**Still stuck?** Open an issue with your QA report and we'll help debug!

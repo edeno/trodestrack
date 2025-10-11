@@ -1,47 +1,50 @@
-"""
-Quality assurance module for tracking analysis.
+"""Quality assurance metrics, plotting, and reporting for tracking performance evaluation."""
 
-This module provides comprehensive QA capabilities including metrics computation,
-visualization, logging, and report generation for evaluating tracking performance.
-"""
-
-from .metrics import (
-    compute_rmse,
+from trodestrack.qa.metrics import (
+    chi2_bounds,
+    chi2_ci95,
+    compute_heading_error,
     compute_nees,
-    compute_position_nees,
-    compute_occlusion_drift,
-    evaluate_prd_compliance,
+    compute_nees_stats,
+    compute_nis,
+    compute_nis_stats,
+    compute_position_rmse,
+    compute_residual_autocorrelation,
+    compute_velocity_rmse,
+    within_envelope,
 )
-
-from .plots import (
-    plot_trajectory_comparison,
-    plot_velocity_and_heading,
-    plot_nees_analysis,
-    plot_bias_traces,
-    plot_measurement_residuals,
+from trodestrack.qa.plots import (
+    plot_covariance_ellipse,
+    plot_heading_error,
+    plot_nees_histogram,
+    plot_nis_histogram,
+    plot_position_error,
+    plot_residuals,
+    plot_velocity_error,
 )
-
-from .logging import QALogger, create_qa_session
-
-from .report import QAReportGenerator, generate_qa_report
+from trodestrack.qa.report import generate_qa_report
 
 __all__ = [
     # Metrics
-    "compute_rmse",
+    "compute_position_rmse",
+    "compute_velocity_rmse",
+    "compute_heading_error",
     "compute_nees",
-    "compute_position_nees",
-    "compute_occlusion_drift",
-    "evaluate_prd_compliance",
+    "compute_nees_stats",
+    "compute_nis",
+    "compute_nis_stats",
+    "compute_residual_autocorrelation",
+    "chi2_bounds",
+    "chi2_ci95",
+    "within_envelope",
     # Plots
-    "plot_trajectory_comparison",
-    "plot_velocity_and_heading",
-    "plot_nees_analysis",
-    "plot_bias_traces",
-    "plot_measurement_residuals",
-    # Logging
-    "QALogger",
-    "create_qa_session",
-    # Report generation
-    "QAReportGenerator",
+    "plot_residuals",
+    "plot_position_error",
+    "plot_velocity_error",
+    "plot_heading_error",
+    "plot_nees_histogram",
+    "plot_nis_histogram",
+    "plot_covariance_ellipse",
+    # Report
     "generate_qa_report",
 ]

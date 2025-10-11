@@ -1,690 +1,655 @@
-"""
-Quality assurance plotting functions for trajectory visualization and diagnostics.
+"""Quality assurance plotting utilities for filter diagnostics.
 
-This module provides comprehensive plotting capabilities for evaluating tracking
-performance, including trajectory plots, residual analysis, bias traces, and NEES
-consistency diagnostics.
+This module provides functions to visualize filter performance metrics:
+- Residual time series with confidence bands
+- Position and velocity error plots
+- NEES/NIS histograms with chi-squared bounds
+- Covariance ellipses for uncertainty visualization
+
+All plots follow Tufte/Gelman principles (minimal chartjunk, maximum data-ink ratio).
 """
+
+from __future__ import annotations
 
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
 import numpy as np
-import jax.numpy as jnp
-from typing import Optional, Dict, Tuple
-from pathlib import Path
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
+from matplotlib.patches import Ellipse
+from numpy.typing import NDArray
 
-from .metrics import compute_nees, compute_position_nees
+from trodestrack.qa.metrics import chi2_bounds
+from trodestrack.viz.styles import COLORS, apply_tufte_style
 
 
-def plot_trajectory_comparison(
-    estimated_states: jnp.ndarray,
-    ground_truth_states: jnp.ndarray,
-    timestamps: Optional[jnp.ndarray] = None,
-    occlusion_mask: Optional[jnp.ndarray] = None,
-    arena_bounds: Optional[Tuple[float, float, float, float]] = None,
-    title: str = "Trajectory Comparison",
-    save_path: Optional[Path] = None,
-    figsize: Tuple[float, float] = (12, 8),
-) -> plt.Figure:
+def plot_residuals(
+    t: NDArray[np.float64],
+    residuals: NDArray[np.float64],
+    ylabel: str = "Residuals",
+    confidence_std: float | None = None,
+    dim_labels: list[str] | None = None,
+) -> tuple[Figure, list[Axes]]:
+    """Plot residual time series with optional confidence bands.
+
+    Residuals are measurement innovations (observed − predicted). For a well-tuned
+    filter, residuals should be zero-mean white noise within confidence bounds.
+
+    Parameters
+    ----------
+    t : NDArray[np.float64]
+        Time vector (N,) in seconds.
+    residuals : NDArray[np.float64]
+        Residuals over time (N, D) where D is dimensionality.
+    ylabel : str, default "Residuals"
+        Y-axis label.
+    confidence_std : float | None, optional
+        If provided, plot ±confidence_std bands (e.g., 0.01 for ±1 cm).
+    dim_labels : list[str] | None, optional
+        Custom labels for each dimension (default auto-labels).
+
+    Returns
+    -------
+    tuple[Figure, list[Axes]]
+        Matplotlib Figure and list of Axes (length D).
+
+    Example:
+        >>> import numpy as np
+        >>> t = np.linspace(0, 10, 100)
+        >>> residuals = np.random.randn(100, 2) * 0.01  # 1cm noise
+        >>> fig, axes = plot_residuals(t, residuals, confidence_std=0.01)
+        >>> # Save or display
+        >>> fig.savefig("residuals.png", dpi=150, bbox_inches="tight")
+        >>> plt.close(fig)
+
+    Notes:
+        - Zero-mean residuals indicate unbiased filter
+        - Residuals within ±2σ bands ~95% of time indicates correct R tuning
+        - Correlated residuals (visible patterns) indicate Q too small or timing issues
     """
-    Plot estimated vs ground truth trajectories with occlusion periods highlighted.
+    if t.shape[0] != residuals.shape[0]:
+        raise ValueError(f"Shape mismatch: time {t.shape} vs residuals {residuals.shape}")
 
-    Args:
-        estimated_states: Shape (N, 8) estimated states [x, y, vx, vy, theta, ...]
-        ground_truth_states: Shape (N, 8) ground truth states
-        timestamps: Optional timestamps for trajectory
-        occlusion_mask: Optional mask where True = occluded
-        arena_bounds: Optional (x_min, x_max, y_min, y_max) for arena
-        title: Plot title
-        save_path: Optional path to save figure
-        figsize: Figure size
+    apply_tufte_style()
 
-    Returns:
-        Matplotlib figure object
-    """
-    fig, (ax_traj, ax_error) = plt.subplots(1, 2, figsize=figsize)
+    N, D = residuals.shape
 
-    # Extract positions
-    est_pos = np.array(estimated_states[:, :2])
-    gt_pos = np.array(ground_truth_states[:, :2])
+    # Default dimension labels for 2D position residuals
+    if dim_labels is None:
+        if D == 2:
+            dim_labels = ["X (m)", "Y (m)"]
+        elif D == 4:
+            dim_labels = ["LED1 X (m)", "LED1 Y (m)", "LED2 X (m)", "LED2 Y (m)"]
+        else:
+            dim_labels = [f"Dim {i + 1}" for i in range(D)]
 
-    # Main trajectory plot
-    ax_traj.plot(gt_pos[:, 0], gt_pos[:, 1], "k-", linewidth=2, label="Ground Truth", alpha=0.8)
-    ax_traj.plot(est_pos[:, 0], est_pos[:, 1], "r-", linewidth=1.5, label="Estimated", alpha=0.7)
+    # Create subplots: one per dimension, stacked vertically
+    fig, axes = plt.subplots(D, 1, figsize=(8, 2 * D), sharex=True, constrained_layout=True)
 
-    # Highlight occlusion periods
-    if occlusion_mask is not None:
-        occlusion_indices = np.where(occlusion_mask)[0]
-        if len(occlusion_indices) > 0:
-            ax_traj.scatter(
-                est_pos[occlusion_indices, 0],
-                est_pos[occlusion_indices, 1],
-                c="orange",
-                s=20,
-                alpha=0.6,
-                label="Occluded",
-                zorder=5,
+    # Handle single dimension case (axes is not a list)
+    if D == 1:
+        axes = [axes]
+
+    for i, ax in enumerate(axes):
+        # Plot residuals as line
+        ax.plot(t, residuals[:, i], color=COLORS["blue"], linewidth=0.8, alpha=0.7)
+
+        # Plot zero line (reference)
+        ax.axhline(0, color=COLORS["gray"], linewidth=0.5, linestyle="--", alpha=0.5)
+
+        # Plot confidence bands if requested
+        if confidence_std is not None:
+            ax.axhspan(
+                -confidence_std,
+                confidence_std,
+                color=COLORS["light_gray"],
+                alpha=0.3,
+                label=f"±{confidence_std:.3f} m",
             )
 
-    # Mark start and end points
-    ax_traj.scatter(
-        gt_pos[0, 0],
-        gt_pos[0, 1],
-        c="green",
-        s=100,
-        marker="o",
-        label="Start",
-        zorder=6,
-        edgecolors="black",
-    )
-    ax_traj.scatter(
-        gt_pos[-1, 0],
-        gt_pos[-1, 1],
-        c="red",
-        s=100,
-        marker="s",
-        label="End",
-        zorder=6,
-        edgecolors="black",
-    )
+        # Labels
+        ax.set_ylabel(dim_labels[i])
+        if i == D - 1:  # Only bottom subplot gets x-label
+            ax.set_xlabel("Time (s)")
 
-    # Arena bounds
-    if arena_bounds is not None:
-        x_min, x_max, y_min, y_max = arena_bounds
-        rect = patches.Rectangle(
-            (x_min, y_min),
-            x_max - x_min,
-            y_max - y_min,
-            linewidth=2,
-            edgecolor="blue",
-            facecolor="none",
+        # Legend only if confidence bands are shown
+        if confidence_std is not None and i == 0:
+            ax.legend(loc="upper right", fontsize=8)
+
+    return fig, axes
+
+
+def plot_position_error(
+    t: NDArray[np.float64],
+    positions_true: NDArray[np.float64],
+    positions_est: NDArray[np.float64],
+    mask: NDArray[np.bool_] | None = None,
+    prd_threshold_m: float | None = None,
+) -> tuple[Figure, Axes]:
+    """Plot Euclidean position error over time.
+
+    Parameters
+    ----------
+    t : NDArray[np.float64]
+        Time vector (N,) in seconds.
+    positions_true : NDArray[np.float64]
+        Ground truth positions (N, 2) in meters.
+    positions_est : NDArray[np.float64]
+        Estimated positions (N, 2) in meters.
+    mask : NDArray[np.bool_] | None, optional
+        Optional validity mask (N,). Only valid (True) entries plotted.
+    prd_threshold_m : float | None, optional
+        If provided, plot PRD requirement threshold (e.g., 0.02 for 2 cm).
+
+    Returns
+    -------
+    tuple[Figure, Axes]
+        Matplotlib Figure and Axes.
+
+    Example:
+        >>> import numpy as np
+        >>> t = np.linspace(0, 10, 100)
+        >>> pos_true = np.column_stack([t * 0.1, np.zeros(100)])
+        >>> pos_est = pos_true + np.random.randn(100, 2) * 0.01
+        >>> fig, ax = plot_position_error(t, pos_true, pos_est, prd_threshold_m=0.02)
+        >>> plt.close(fig)
+
+    Notes:
+        PRD requirement: position error ≤ 0.02 m (2 cm)
+    """
+    if positions_true.shape != positions_est.shape:
+        raise ValueError(
+            f"Shape mismatch: true {positions_true.shape} vs est {positions_est.shape}"
+        )
+
+    apply_tufte_style()
+
+    # Compute Euclidean error
+    errors = positions_true - positions_est
+    euclidean_error = np.linalg.norm(errors, axis=1)
+
+    # Apply mask if provided
+    if mask is not None:
+        t_plot = t[mask]
+        error_plot = euclidean_error[mask]
+    else:
+        t_plot = t
+        error_plot = euclidean_error
+
+    # Create plot
+    fig, ax = plt.subplots(figsize=(8, 3), constrained_layout=True)
+
+    # Plot error
+    ax.plot(t_plot, error_plot, color=COLORS["blue"], linewidth=1.0, label="Error")
+
+    # Plot PRD threshold if provided
+    if prd_threshold_m is not None:
+        ax.axhline(
+            prd_threshold_m,
+            color=COLORS["red"],
+            linewidth=1.0,
             linestyle="--",
-            label="Arena",
-        )
-        ax_traj.add_patch(rect)
-
-    ax_traj.set_xlabel("X Position (cm)")
-    ax_traj.set_ylabel("Y Position (cm)")
-    ax_traj.set_title("2D Trajectory")
-    ax_traj.legend()
-    ax_traj.grid(True, alpha=0.3)
-    ax_traj.set_aspect("equal")
-
-    # Position error over time
-    position_error = np.linalg.norm(est_pos - gt_pos, axis=1)
-
-    if timestamps is not None:
-        time_axis = np.array(timestamps)
-        ax_error.set_xlabel("Time (s)")
-    else:
-        time_axis = np.arange(len(position_error))
-        ax_error.set_xlabel("Frame")
-
-    ax_error.plot(time_axis, position_error, "b-", linewidth=1.5, alpha=0.8)
-
-    # Highlight occlusion periods
-    if occlusion_mask is not None:
-        ax_error.fill_between(
-            time_axis,
-            0,
-            position_error,
-            where=occlusion_mask,
-            alpha=0.3,
-            color="orange",
-            label="Occluded",
+            label=f"PRD threshold ({prd_threshold_m * 100:.0f} cm)",
         )
 
-    # PRD threshold line
-    ax_error.axhline(y=2.0, color="red", linestyle="--", alpha=0.7, label="PRD Threshold (2 cm)")
+    # Labels
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Position Error (m)")
+    ax.legend(loc="upper right")
 
-    ax_error.set_ylabel("Position Error (cm)")
-    ax_error.set_title("Position Error Over Time")
-    ax_error.legend()
-    ax_error.grid(True, alpha=0.3)
-
-    plt.suptitle(title, fontsize=14, fontweight="bold")
-    plt.tight_layout()
-
-    if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches="tight")
-
-    return fig
+    return fig, ax
 
 
-def plot_velocity_and_heading(
-    estimated_states: jnp.ndarray,
-    ground_truth_states: jnp.ndarray,
-    timestamps: Optional[jnp.ndarray] = None,
-    occlusion_mask: Optional[jnp.ndarray] = None,
-    title: str = "Velocity and Heading Comparison",
-    save_path: Optional[Path] = None,
-    figsize: Tuple[float, float] = (14, 10),
-) -> plt.Figure:
+def plot_velocity_error(
+    t: NDArray[np.float64],
+    velocities_true: NDArray[np.float64],
+    velocities_est: NDArray[np.float64],
+    mask: NDArray[np.bool_] | None = None,
+) -> tuple[Figure, Axes]:
+    """Plot Euclidean velocity error over time.
+
+    Parameters
+    ----------
+    t : NDArray[np.float64]
+        Time vector (N,) in seconds.
+    velocities_true : NDArray[np.float64]
+        Ground truth velocities (N, 2) in m/s.
+    velocities_est : NDArray[np.float64]
+        Estimated velocities (N, 2) in m/s.
+    mask : NDArray[np.bool_] | None, optional
+        Optional validity mask (N,). Only valid (True) entries plotted.
+
+    Returns
+    -------
+    tuple[Figure, Axes]
+        Matplotlib Figure and Axes.
+
+    Example:
+        >>> import numpy as np
+        >>> t = np.linspace(0, 10, 100)
+        >>> vel_true = np.column_stack([np.ones(100) * 0.1, np.zeros(100)])
+        >>> vel_est = vel_true + np.random.randn(100, 2) * 0.01
+        >>> fig, ax = plot_velocity_error(t, vel_true, vel_est)
+        >>> plt.close(fig)
+
+    Notes:
+        PRD requirement: velocity error ≤ 0.10 m/s (10 cm/s)
     """
-    Plot velocity and heading comparison over time.
-
-    Args:
-        estimated_states: Shape (N, 8) estimated states
-        ground_truth_states: Shape (N, 8) ground truth states
-        timestamps: Optional timestamps
-        occlusion_mask: Optional occlusion mask
-        title: Plot title
-        save_path: Optional save path
-        figsize: Figure size
-
-    Returns:
-        Matplotlib figure object
-    """
-    fig, axes = plt.subplots(2, 2, figsize=figsize)
-
-    if timestamps is not None:
-        time_axis = np.array(timestamps)
-        time_label = "Time (s)"
-    else:
-        time_axis = np.arange(len(estimated_states))
-        time_label = "Frame"
-
-    # Extract components
-    est_vel = np.array(estimated_states[:, 2:4])
-    gt_vel = np.array(ground_truth_states[:, 2:4])
-    est_heading = np.array(estimated_states[:, 4])
-    gt_heading = np.array(ground_truth_states[:, 4])
-
-    # Velocity magnitude
-    est_speed = np.linalg.norm(est_vel, axis=1)
-    gt_speed = np.linalg.norm(gt_vel, axis=1)
-
-    axes[0, 0].plot(time_axis, gt_speed, "k-", linewidth=2, label="Ground Truth", alpha=0.8)
-    axes[0, 0].plot(time_axis, est_speed, "r-", linewidth=1.5, label="Estimated", alpha=0.7)
-
-    if occlusion_mask is not None:
-        axes[0, 0].fill_between(
-            time_axis,
-            0,
-            np.max([gt_speed.max(), est_speed.max()]),
-            where=occlusion_mask,
-            alpha=0.2,
-            color="orange",
+    if velocities_true.shape != velocities_est.shape:
+        raise ValueError(
+            f"Shape mismatch: true {velocities_true.shape} vs est {velocities_est.shape}"
         )
 
-    axes[0, 0].set_xlabel(time_label)
-    axes[0, 0].set_ylabel("Speed (cm/s)")
-    axes[0, 0].set_title("Speed Over Time")
-    axes[0, 0].legend()
-    axes[0, 0].grid(True, alpha=0.3)
+    apply_tufte_style()
 
-    # Velocity error
-    vel_error = np.linalg.norm(est_vel - gt_vel, axis=1)
-    axes[0, 1].plot(time_axis, vel_error, "b-", linewidth=1.5, alpha=0.8)
-    axes[0, 1].axhline(
-        y=10.0, color="red", linestyle="--", alpha=0.7, label="PRD Threshold (10 cm/s)"
+    # Compute Euclidean error
+    errors = velocities_true - velocities_est
+    euclidean_error = np.linalg.norm(errors, axis=1)
+
+    # Apply mask if provided
+    if mask is not None:
+        t_plot = t[mask]
+        error_plot = euclidean_error[mask]
+    else:
+        t_plot = t
+        error_plot = euclidean_error
+
+    # Create plot
+    fig, ax = plt.subplots(figsize=(8, 3), constrained_layout=True)
+
+    # Plot error
+    ax.plot(t_plot, error_plot, color=COLORS["purple"], linewidth=1.0, label="Velocity Error")
+
+    # Labels
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Velocity Error (m/s)")
+    ax.legend(loc="upper right")
+
+    return fig, ax
+
+
+def plot_heading_error(
+    t: NDArray[np.float64],
+    headings_true: NDArray[np.float64],
+    headings_est: NDArray[np.float64],
+    mask: NDArray[np.bool_] | None = None,
+    prd_threshold_deg: float | None = None,
+) -> tuple[Figure, Axes]:
+    """Plot heading error over time with proper angle wrapping.
+
+    Parameters
+    ----------
+    t : NDArray[np.float64]
+        Time vector (N,) in seconds.
+    headings_true : NDArray[np.float64]
+        Ground truth headings (N,) in radians.
+    headings_est : NDArray[np.float64]
+        Estimated headings (N,) in radians.
+    mask : NDArray[np.bool_] | None, optional
+        Optional validity mask (N,). Only valid (True) entries plotted.
+    prd_threshold_deg : float | None, optional
+        If provided, plot PRD requirement threshold (degrees), e.g., 7.0.
+
+    Returns
+    -------
+    tuple[Figure, Axes]
+        Matplotlib Figure and Axes.
+
+    Example:
+        >>> import numpy as np
+        >>> t = np.linspace(0, 10, 100)
+        >>> heading_true = np.linspace(0, 2*np.pi, 100)
+        >>> heading_est = heading_true + np.random.randn(100) * 0.1
+        >>> fig, ax = plot_heading_error(t, heading_true, heading_est, prd_threshold_deg=7.0)
+        >>> plt.close(fig)
+
+    Notes:
+        PRD requirement: heading error ≤ 7.0 degrees
+        Angle wrapping ensures errors are in [-π, π] range.
+    """
+    if headings_true.shape != headings_est.shape:
+        raise ValueError(f"Shape mismatch: true {headings_true.shape} vs est {headings_est.shape}")
+
+    apply_tufte_style()
+
+    # Compute wrapped heading error (in [-π, π])
+    errors = headings_true - headings_est
+    errors_wrapped = np.arctan2(np.sin(errors), np.cos(errors))
+    errors_deg = np.rad2deg(np.abs(errors_wrapped))
+
+    # Apply mask if provided
+    if mask is not None:
+        t_plot = t[mask]
+        error_plot = errors_deg[mask]
+    else:
+        t_plot = t
+        error_plot = errors_deg
+
+    # Create plot
+    fig, ax = plt.subplots(figsize=(8, 3), constrained_layout=True)
+
+    # Plot error
+    ax.plot(t_plot, error_plot, color=COLORS["orange"], linewidth=1.0, label="Heading Error")
+
+    # Plot PRD threshold if provided
+    if prd_threshold_deg is not None:
+        ax.axhline(
+            prd_threshold_deg,
+            color=COLORS["red"],
+            linewidth=1.0,
+            linestyle="--",
+            label=f"PRD threshold ({prd_threshold_deg:.0f}°)",
+        )
+
+    # Labels
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Heading Error (degrees)")
+    ax.legend(loc="upper right")
+
+    return fig, ax
+
+
+def plot_nees_histogram(
+    nees: NDArray[np.float64],
+    state_dim: int,
+    confidence: float = 0.95,
+) -> tuple[Figure, Axes]:
+    """Plot NEES histogram with chi-squared confidence bounds.
+
+    NEES (Normalized Estimation Error Squared) should follow χ²(state_dim) for
+    a consistent filter. Bounds show expected range for the given confidence.
+
+    Parameters
+    ----------
+    nees : NDArray[np.float64]
+        NEES values (N,).
+    state_dim : int
+        State dimensionality (degrees of freedom for χ²).
+    confidence : float, default 0.95
+        Confidence level for χ² bounds.
+
+    Returns
+    -------
+    tuple[Figure, Axes]
+        Matplotlib Figure and Axes.
+
+    Example:
+        >>> import numpy as np
+        >>> np.random.seed(42)
+        >>> nees = np.random.chisquare(df=8, size=500)
+        >>> fig, ax = plot_nees_histogram(nees, state_dim=8, confidence=0.95)
+        >>> plt.close(fig)
+
+    Notes:
+        - Mean NEES should be approximately equal to state_dim
+        - ~95% of NEES values should fall within χ²(state_dim, 0.95) bounds
+        - NEES consistently above upper bound → filter overconfident (P too small)
+        - NEES consistently below lower bound → filter underconfident (P too large)
+    """
+    if nees.ndim != 1:
+        raise ValueError(f"Expected 1D NEES array, got shape {nees.shape}")
+
+    apply_tufte_style()
+
+    # Compute chi-squared bounds
+    lower, upper = chi2_bounds(df=state_dim, confidence=confidence)
+
+    # Create plot
+    fig, ax = plt.subplots(figsize=(7, 4), constrained_layout=True)
+
+    # Plot histogram
+    ax.hist(
+        nees,
+        bins=30,
+        color=COLORS["blue"],
+        alpha=0.6,
+        edgecolor="white",
+        linewidth=0.5,
+        label=f"NEES (n={len(nees)})",
     )
 
-    if occlusion_mask is not None:
-        axes[0, 1].fill_between(
-            time_axis, 0, vel_error, where=occlusion_mask, alpha=0.3, color="orange"
-        )
-
-    axes[0, 1].set_xlabel(time_label)
-    axes[0, 1].set_ylabel("Velocity Error (cm/s)")
-    axes[0, 1].set_title("Velocity Error Over Time")
-    axes[0, 1].legend()
-    axes[0, 1].grid(True, alpha=0.3)
-
-    # Heading comparison
-    axes[1, 0].plot(
-        time_axis, np.degrees(gt_heading), "k-", linewidth=2, label="Ground Truth", alpha=0.8
-    )
-    axes[1, 0].plot(
-        time_axis, np.degrees(est_heading), "r-", linewidth=1.5, label="Estimated", alpha=0.7
-    )
-
-    if occlusion_mask is not None:
-        y_min, y_max = axes[1, 0].get_ylim()
-        axes[1, 0].fill_between(
-            time_axis, y_min, y_max, where=occlusion_mask, alpha=0.2, color="orange"
-        )
-
-    axes[1, 0].set_xlabel(time_label)
-    axes[1, 0].set_ylabel("Heading (degrees)")
-    axes[1, 0].set_title("Heading Over Time")
-    axes[1, 0].legend()
-    axes[1, 0].grid(True, alpha=0.3)
-
-    # Heading error
-    heading_error = np.abs(np.degrees(_wrap_angle_difference(est_heading - gt_heading)))
-    axes[1, 1].plot(time_axis, heading_error, "g-", linewidth=1.5, alpha=0.8)
-    axes[1, 1].axhline(y=7.0, color="red", linestyle="--", alpha=0.7, label="PRD Threshold (7°)")
-
-    if occlusion_mask is not None:
-        axes[1, 1].fill_between(
-            time_axis, 0, heading_error, where=occlusion_mask, alpha=0.3, color="orange"
-        )
-
-    axes[1, 1].set_xlabel(time_label)
-    axes[1, 1].set_ylabel("Heading Error (degrees)")
-    axes[1, 1].set_title("Heading Error Over Time")
-    axes[1, 1].legend()
-    axes[1, 1].grid(True, alpha=0.3)
-
-    plt.suptitle(title, fontsize=14, fontweight="bold")
-    plt.tight_layout()
-
-    if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches="tight")
-
-    return fig
-
-
-def plot_nees_analysis(
-    estimated_states: jnp.ndarray,
-    ground_truth_states: jnp.ndarray,
-    covariances: jnp.ndarray,
-    timestamps: Optional[jnp.ndarray] = None,
-    title: str = "NEES Consistency Analysis",
-    save_path: Optional[Path] = None,
-    figsize: Tuple[float, float] = (14, 10),
-) -> plt.Figure:
-    """
-    Plot NEES consistency analysis including time series and histograms.
-
-    Args:
-        estimated_states: Shape (N, 8) estimated states
-        ground_truth_states: Shape (N, 8) ground truth states
-        covariances: Shape (N, 8, 8) covariance matrices
-        timestamps: Optional timestamps
-        title: Plot title
-        save_path: Optional save path
-        figsize: Figure size
-
-    Returns:
-        Matplotlib figure object
-    """
-    # Compute NEES metrics
-    full_nees = compute_nees(estimated_states, ground_truth_states, covariances)
-    pos_nees = compute_position_nees(estimated_states, ground_truth_states, covariances)
-
-    fig, axes = plt.subplots(2, 2, figsize=figsize)
-
-    if timestamps is not None:
-        time_axis = np.array(timestamps)
-        time_label = "Time (s)"
-    else:
-        time_axis = np.arange(len(estimated_states))
-        time_label = "Frame"
-
-    # Full state NEES over time
-    nees_values = full_nees["nees_values"]
-    expected_nees = full_nees["nees_expected"]
-
-    axes[0, 0].plot(time_axis, nees_values, "b-", linewidth=1.5, alpha=0.7, label="NEES")
-    axes[0, 0].axhline(
-        y=expected_nees,
-        color="red",
+    # Plot chi-squared bounds
+    ax.axvline(
+        lower,
+        color=COLORS["red"],
+        linewidth=1.5,
         linestyle="--",
-        linewidth=2,
-        label=f"Expected ({expected_nees:.0f})",
+        label=f"χ²({state_dim}, {confidence:.0%}) bounds",
     )
-    axes[0, 0].axhline(
-        y=full_nees["nees_mean"],
-        color="green",
+    ax.axvline(upper, color=COLORS["red"], linewidth=1.5, linestyle="--")
+
+    # Plot mean
+    mean_nees = float(np.mean(nees))
+    ax.axvline(
+        mean_nees,
+        color=COLORS["gray"],
+        linewidth=1.0,
         linestyle="-",
-        alpha=0.7,
-        label=f'Mean ({full_nees["nees_mean"]:.1f})',
+        label=f"Mean = {mean_nees:.2f}",
     )
 
-    # 95% confidence interval for chi-squared with 8 DOF
-    chi2_lower = 2.18  # 2.5th percentile
-    chi2_upper = 15.51  # 97.5th percentile
-    axes[0, 0].axhline(y=chi2_lower, color="orange", linestyle=":", alpha=0.7, label="95% CI")
-    axes[0, 0].axhline(y=chi2_upper, color="orange", linestyle=":", alpha=0.7)
+    # Labels
+    ax.set_xlabel("NEES")
+    ax.set_ylabel("Frequency")
+    ax.legend(loc="upper right")
 
-    axes[0, 0].set_xlabel(time_label)
-    axes[0, 0].set_ylabel("NEES Value")
-    axes[0, 0].set_title("Full State NEES Over Time (8-DOF)")
-    axes[0, 0].legend()
-    axes[0, 0].grid(True, alpha=0.3)
+    return fig, ax
 
-    # Position NEES over time
-    pos_nees_values = pos_nees["position_nees_values"]
-    pos_expected = pos_nees["position_nees_expected"]
 
-    axes[0, 1].plot(
-        time_axis, pos_nees_values, "g-", linewidth=1.5, alpha=0.7, label="Position NEES"
+def plot_nis_histogram(
+    nis: NDArray[np.float64],
+    measurement_dim: int,
+    confidence: float = 0.95,
+) -> tuple[Figure, Axes]:
+    """Plot NIS histogram with chi-squared confidence bounds.
+
+    NIS (Normalized Innovation Squared) should follow χ²(measurement_dim) for
+    a consistent filter. Bounds show expected range for the given confidence.
+
+    Parameters
+    ----------
+    nis : NDArray[np.float64]
+        NIS values (N,).
+    measurement_dim : int
+        Measurement dimensionality (degrees of freedom for χ²).
+    confidence : float, default 0.95
+        Confidence level for χ² bounds.
+
+    Returns
+    -------
+    tuple[Figure, Axes]
+        Matplotlib Figure and Axes.
+
+    Example:
+        >>> import numpy as np
+        >>> np.random.seed(42)
+        >>> nis = np.random.chisquare(df=4, size=500)
+        >>> fig, ax = plot_nis_histogram(nis, measurement_dim=4, confidence=0.95)
+        >>> plt.close(fig)
+
+    Notes:
+        - Mean NIS should be approximately equal to measurement_dim
+        - ~95% of NIS values should fall within χ²(measurement_dim, 0.95) bounds
+        - NIS consistently above upper bound → measurement noise R underestimated
+        - NIS consistently below lower bound → measurement noise R overestimated
+    """
+    if nis.ndim != 1:
+        raise ValueError(f"Expected 1D NIS array, got shape {nis.shape}")
+
+    apply_tufte_style()
+
+    # Compute chi-squared bounds
+    lower, upper = chi2_bounds(df=measurement_dim, confidence=confidence)
+
+    # Create plot
+    fig, ax = plt.subplots(figsize=(7, 4), constrained_layout=True)
+
+    # Plot histogram
+    ax.hist(
+        nis,
+        bins=30,
+        color=COLORS["orange"],
+        alpha=0.6,
+        edgecolor="white",
+        linewidth=0.5,
+        label=f"NIS (n={len(nis)})",
     )
-    axes[0, 1].axhline(
-        y=pos_expected,
-        color="red",
+
+    # Plot chi-squared bounds
+    ax.axvline(
+        lower,
+        color=COLORS["red"],
+        linewidth=1.5,
         linestyle="--",
-        linewidth=2,
-        label=f"Expected ({pos_expected:.0f})",
+        label=f"χ²({measurement_dim}, {confidence:.0%}) bounds",
     )
-    axes[0, 1].axhline(
-        y=pos_nees["position_nees_mean"],
-        color="blue",
+    ax.axvline(upper, color=COLORS["red"], linewidth=1.5, linestyle="--")
+
+    # Plot mean
+    mean_nis = float(np.mean(nis))
+    ax.axvline(
+        mean_nis,
+        color=COLORS["gray"],
+        linewidth=1.0,
         linestyle="-",
-        alpha=0.7,
-        label=f'Mean ({pos_nees["position_nees_mean"]:.1f})',
+        label=f"Mean = {mean_nis:.2f}",
     )
 
-    # 95% confidence interval for chi-squared with 2 DOF
-    chi2_2dof_lower = 0.051  # 2.5th percentile
-    chi2_2dof_upper = 7.378  # 97.5th percentile
-    axes[0, 1].axhline(y=chi2_2dof_lower, color="orange", linestyle=":", alpha=0.7, label="95% CI")
-    axes[0, 1].axhline(y=chi2_2dof_upper, color="orange", linestyle=":", alpha=0.7)
+    # Labels
+    ax.set_xlabel("NIS")
+    ax.set_ylabel("Frequency")
+    ax.legend(loc="upper right")
 
-    axes[0, 1].set_xlabel(time_label)
-    axes[0, 1].set_ylabel("Position NEES Value")
-    axes[0, 1].set_title("Position NEES Over Time (2-DOF)")
-    axes[0, 1].legend()
-    axes[0, 1].grid(True, alpha=0.3)
-
-    # Full state NEES histogram
-    axes[1, 0].hist(nees_values, bins=30, density=True, alpha=0.7, color="blue", label="Observed")
-
-    # Theoretical chi-squared distribution
-    x_theory = np.linspace(0, nees_values.max(), 100)
-    from scipy.stats import chi2
-
-    y_theory = chi2.pdf(x_theory, df=8)
-    axes[1, 0].plot(x_theory, y_theory, "r-", linewidth=2, label="Chi² (8-DOF)")
-
-    axes[1, 0].axvline(
-        x=expected_nees,
-        color="red",
-        linestyle="--",
-        alpha=0.7,
-        label=f"Expected ({expected_nees:.0f})",
-    )
-    axes[1, 0].axvline(
-        x=full_nees["nees_mean"],
-        color="green",
-        linestyle="-",
-        alpha=0.7,
-        label=f'Mean ({full_nees["nees_mean"]:.1f})',
-    )
-
-    axes[1, 0].set_xlabel("NEES Value")
-    axes[1, 0].set_ylabel("Density")
-    axes[1, 0].set_title("Full State NEES Distribution")
-    axes[1, 0].legend()
-    axes[1, 0].grid(True, alpha=0.3)
-
-    # Position NEES histogram
-    axes[1, 1].hist(
-        pos_nees_values, bins=30, density=True, alpha=0.7, color="green", label="Observed"
-    )
-
-    # Theoretical chi-squared distribution for 2-DOF
-    x_theory_2 = np.linspace(0, pos_nees_values.max(), 100)
-    y_theory_2 = chi2.pdf(x_theory_2, df=2)
-    axes[1, 1].plot(x_theory_2, y_theory_2, "r-", linewidth=2, label="Chi² (2-DOF)")
-
-    axes[1, 1].axvline(
-        x=pos_expected,
-        color="red",
-        linestyle="--",
-        alpha=0.7,
-        label=f"Expected ({pos_expected:.0f})",
-    )
-    axes[1, 1].axvline(
-        x=pos_nees["position_nees_mean"],
-        color="blue",
-        linestyle="-",
-        alpha=0.7,
-        label=f'Mean ({pos_nees["position_nees_mean"]:.1f})',
-    )
-
-    axes[1, 1].set_xlabel("Position NEES Value")
-    axes[1, 1].set_ylabel("Density")
-    axes[1, 1].set_title("Position NEES Distribution")
-    axes[1, 1].legend()
-    axes[1, 1].grid(True, alpha=0.3)
-
-    plt.suptitle(title, fontsize=14, fontweight="bold")
-    plt.tight_layout()
-
-    if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches="tight")
-
-    return fig
+    return fig, ax
 
 
-def plot_bias_traces(
-    estimated_states: jnp.ndarray,
-    ground_truth_states: Optional[jnp.ndarray] = None,
-    timestamps: Optional[jnp.ndarray] = None,
-    title: str = "IMU Bias Estimates",
-    save_path: Optional[Path] = None,
-    figsize: Tuple[float, float] = (12, 8),
-) -> plt.Figure:
+def plot_covariance_ellipse(
+    mean: NDArray[np.float64],
+    cov: NDArray[np.float64],
+    n_std: list[float] | None = None,
+    trajectory: NDArray[np.float64] | None = None,
+    color: str = "blue",
+    alpha: float = 0.3,
+) -> tuple[Figure, Axes]:
+    """Plot 2D covariance ellipse with optional trajectory overlay.
+
+    Visualizes position uncertainty as ellipses at 1σ, 2σ, 3σ levels (configurable).
+
+    Parameters
+    ----------
+    mean : NDArray[np.float64]
+        Mean position (2,) in meters.
+    cov : NDArray[np.float64]
+        Covariance matrix (2, 2) in m².
+    n_std : list[float] | None, optional
+        Sigma levels to plot; default [1, 2, 3].
+    trajectory : NDArray[np.float64] | None, optional
+        Optional trajectory to overlay (N, 2) in meters.
+    color : str, default "blue"
+        Ellipse color (matplotlib color name or hex).
+    alpha : float, default 0.3
+        Ellipse face transparency.
+
+    Returns
+    -------
+    tuple[Figure, Axes]
+        Matplotlib Figure and Axes.
+
+    Example:
+        >>> import numpy as np
+        >>> mean = np.array([0.5, 0.5])
+        >>> cov = np.array([[0.01, 0.005], [0.005, 0.02]])  # Correlated
+        >>> fig, ax = plot_covariance_ellipse(mean, cov, n_std=[1, 2])
+        >>> plt.close(fig)
+
+    Notes:
+        - Ellipse orientation shows correlation structure
+        - 1σ ellipse contains ~39% of probability mass (2D Gaussian)
+        - 2σ ellipse contains ~86% of probability mass
+        - 3σ ellipse contains ~99% of probability mass
+
+    Raises
+    ------
+    ValueError
+        If mean or cov are not 2D, or if cov is singular.
     """
-    Plot IMU bias estimates over time.
+    if mean.shape != (2,):
+        raise ValueError(f"Expected 2D mean, got shape {mean.shape}")
 
-    Args:
-        estimated_states: Shape (N, 8) estimated states [..., b_gz, b_ax, b_ay]
-        ground_truth_states: Optional ground truth states for comparison
-        timestamps: Optional timestamps
-        title: Plot title
-        save_path: Optional save path
-        figsize: Figure size
+    if cov.shape != (2, 2):
+        raise ValueError(f"Expected 2×2 covariance, got shape {cov.shape}")
 
-    Returns:
-        Matplotlib figure object
-    """
-    fig, axes = plt.subplots(2, 1, figsize=figsize)
+    if n_std is None:
+        n_std = [1, 2, 3]
 
-    if timestamps is not None:
-        time_axis = np.array(timestamps)
-        time_label = "Time (s)"
-    else:
-        time_axis = np.arange(len(estimated_states))
-        time_label = "Frame"
+    apply_tufte_style()
 
-    # Extract bias estimates
-    bias_gz = np.array(estimated_states[:, 5])  # Gyro z bias
-    bias_ax = np.array(estimated_states[:, 6])  # Accel x bias
-    bias_ay = np.array(estimated_states[:, 7])  # Accel y bias
+    # Create plot
+    fig, ax = plt.subplots(figsize=(6, 6), constrained_layout=True)
 
-    # Gyro bias
-    axes[0].plot(time_axis, bias_gz, "b-", linewidth=1.5, label="Estimated", alpha=0.8)
-
-    if ground_truth_states is not None:
-        gt_bias_gz = np.array(ground_truth_states[:, 5])
-        axes[0].plot(time_axis, gt_bias_gz, "k--", linewidth=2, label="Ground Truth", alpha=0.7)
-
-    axes[0].set_xlabel(time_label)
-    axes[0].set_ylabel("Gyro Z Bias (rad/s)")
-    axes[0].set_title("Gyroscope Z-axis Bias")
-    axes[0].legend()
-    axes[0].grid(True, alpha=0.3)
-
-    # Accelerometer biases
-    axes[1].plot(time_axis, bias_ax, "r-", linewidth=1.5, label="Accel X", alpha=0.8)
-    axes[1].plot(time_axis, bias_ay, "g-", linewidth=1.5, label="Accel Y", alpha=0.8)
-
-    if ground_truth_states is not None:
-        gt_bias_ax = np.array(ground_truth_states[:, 6])
-        gt_bias_ay = np.array(ground_truth_states[:, 7])
-        axes[1].plot(time_axis, gt_bias_ax, "k--", linewidth=2, label="GT Accel X", alpha=0.7)
-        axes[1].plot(time_axis, gt_bias_ay, "k:", linewidth=2, label="GT Accel Y", alpha=0.7)
-
-    axes[1].set_xlabel(time_label)
-    axes[1].set_ylabel("Accel Bias (m/s²)")
-    axes[1].set_title("Accelerometer X/Y Biases")
-    axes[1].legend()
-    axes[1].grid(True, alpha=0.3)
-
-    plt.suptitle(title, fontsize=14, fontweight="bold")
-    plt.tight_layout()
-
-    if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches="tight")
-
-    return fig
-
-
-def plot_measurement_residuals(
-    residuals: Dict[str, jnp.ndarray],
-    timestamps: Optional[jnp.ndarray] = None,
-    measurement_validity: Optional[Dict[str, jnp.ndarray]] = None,
-    title: str = "Measurement Residuals",
-    save_path: Optional[Path] = None,
-    figsize: Tuple[float, float] = (12, 10),
-) -> plt.Figure:
-    """
-    Plot measurement residuals over time.
-
-    Args:
-        residuals: Dictionary with 'position' and 'heading' residual arrays
-        timestamps: Optional timestamps
-        measurement_validity: Optional validity masks for measurements
-        title: Plot title
-        save_path: Optional save path
-        figsize: Figure size
-
-    Returns:
-        Matplotlib figure object
-    """
-    fig, axes = plt.subplots(2, 2, figsize=figsize)
-
-    if timestamps is not None:
-        time_axis = np.array(timestamps)
-        time_label = "Time (s)"
-    else:
-        # Use indices from residuals
-        if "position" in residuals:
-            time_axis = np.arange(len(residuals["position"]))
-        else:
-            time_axis = np.arange(100)  # fallback
-        time_label = "Frame"
-
-    # Position residuals
-    if "position" in residuals:
-        pos_residuals = np.array(residuals["position"])
-
-        if pos_residuals.ndim == 2 and pos_residuals.shape[1] >= 2:
-            # Separate x and y components
-            axes[0, 0].plot(
-                time_axis, pos_residuals[:, 0], "r-", linewidth=1.5, label="X residual", alpha=0.8
-            )
-            axes[0, 1].plot(
-                time_axis, pos_residuals[:, 1], "g-", linewidth=1.5, label="Y residual", alpha=0.8
-            )
-
-            # Mark invalid measurements
-            if measurement_validity and "position" in measurement_validity:
-                invalid_mask = ~measurement_validity["position"]
-                if np.any(invalid_mask):
-                    axes[0, 0].scatter(
-                        time_axis[invalid_mask],
-                        pos_residuals[invalid_mask, 0],
-                        c="red",
-                        s=20,
-                        alpha=0.5,
-                        label="Invalid",
-                    )
-                    axes[0, 1].scatter(
-                        time_axis[invalid_mask],
-                        pos_residuals[invalid_mask, 1],
-                        c="red",
-                        s=20,
-                        alpha=0.5,
-                        label="Invalid",
-                    )
-        else:
-            # Single residual magnitude
-            axes[0, 0].plot(
-                time_axis, pos_residuals, "b-", linewidth=1.5, label="Position residual", alpha=0.8
-            )
-
-        axes[0, 0].set_xlabel(time_label)
-        axes[0, 0].set_ylabel("X Position Residual (cm)")
-        axes[0, 0].set_title("X Position Residual")
-        axes[0, 0].legend()
-        axes[0, 0].grid(True, alpha=0.3)
-
-        axes[0, 1].set_xlabel(time_label)
-        axes[0, 1].set_ylabel("Y Position Residual (cm)")
-        axes[0, 1].set_title("Y Position Residual")
-        axes[0, 1].legend()
-        axes[0, 1].grid(True, alpha=0.3)
-
-    # Heading residuals
-    if "heading" in residuals:
-        heading_residuals = np.array(residuals["heading"])
-        heading_residuals_deg = np.degrees(heading_residuals)
-
-        axes[1, 0].plot(
-            time_axis,
-            heading_residuals_deg,
-            "purple",
-            linewidth=1.5,
-            label="Heading residual",
-            alpha=0.8,
+    # Plot trajectory if provided
+    if trajectory is not None:
+        ax.plot(
+            trajectory[:, 0],
+            trajectory[:, 1],
+            color=COLORS["gray"],
+            linewidth=0.8,
+            alpha=0.5,
+            label="Trajectory",
         )
 
-        # Mark invalid measurements
-        if measurement_validity and "heading" in measurement_validity:
-            invalid_mask = ~measurement_validity["heading"]
-            if np.any(invalid_mask):
-                axes[1, 0].scatter(
-                    time_axis[invalid_mask],
-                    heading_residuals_deg[invalid_mask],
-                    c="red",
-                    s=20,
-                    alpha=0.5,
-                    label="Invalid",
-                )
+    # Compute eigenvalues and eigenvectors for ellipse orientation
+    eigenvalues, eigenvectors = np.linalg.eigh(cov)
 
-        axes[1, 0].set_xlabel(time_label)
-        axes[1, 0].set_ylabel("Heading Residual (degrees)")
-        axes[1, 0].set_title("Heading Residual")
-        axes[1, 0].legend()
-        axes[1, 0].grid(True, alpha=0.3)
+    # Sort by eigenvalue (largest first)
+    order = eigenvalues.argsort()[::-1]
+    eigenvalues = eigenvalues[order]
+    eigenvectors = eigenvectors[:, order]
 
-    # Combined residual magnitude
-    if "position" in residuals:
-        pos_residuals = np.array(residuals["position"])
-        if pos_residuals.ndim == 2:
-            residual_mag = np.linalg.norm(pos_residuals, axis=1)
-        else:
-            residual_mag = np.abs(pos_residuals)
+    # Check for singular covariance
+    if np.any(eigenvalues <= 0):
+        raise ValueError(f"Singular or negative covariance matrix (eigenvalues: {eigenvalues})")
 
-        axes[1, 1].plot(
-            time_axis, residual_mag, "blue", linewidth=1.5, label="Position magnitude", alpha=0.8
+    # Ellipse angle (orientation of major axis)
+    angle_rad = np.arctan2(eigenvectors[1, 0], eigenvectors[0, 0])
+    angle_deg = np.rad2deg(angle_rad)
+
+    # Plot ellipses at each sigma level
+    color_rgba = plt.matplotlib.colors.to_rgba(
+        color if color in COLORS else COLORS.get(color, color)
+    )
+
+    for i, n in enumerate(n_std):
+        # Ellipse width and height (2 * n * sqrt(eigenvalue))
+        width = 2 * n * np.sqrt(eigenvalues[0])
+        height = 2 * n * np.sqrt(eigenvalues[1])
+
+        # Create ellipse patch
+        ellipse = Ellipse(
+            xy=tuple(mean),
+            width=width,
+            height=height,
+            angle=angle_deg,
+            facecolor=color_rgba,
+            edgecolor=color_rgba[:3] + (1.0,),  # Solid edge
+            alpha=alpha / (i + 1),  # Fade outer ellipses
+            linewidth=1.0,
+            label=f"{n}σ" if i == 0 else None,
         )
+        ax.add_patch(ellipse)
 
-    if "heading" in residuals:
-        heading_residuals = np.array(residuals["heading"])
-        heading_mag = np.abs(heading_residuals)
+    # Plot mean
+    ax.plot(mean[0], mean[1], "o", color=COLORS["red"], markersize=6, label="Mean", zorder=10)
 
-        # Scale to be comparable with position (rough heuristic)
-        heading_mag_scaled = heading_mag * 10  # 10 cm per radian roughly
-        axes[1, 1].plot(
-            time_axis,
-            heading_mag_scaled,
-            "purple",
-            linewidth=1.5,
-            label="Heading magnitude (scaled)",
-            alpha=0.8,
-        )
+    # Labels
+    ax.set_xlabel("X (m)")
+    ax.set_ylabel("Y (m)")
+    ax.set_aspect("equal", adjustable="box")
+    ax.legend(loc="upper right")
 
-    axes[1, 1].set_xlabel(time_label)
-    axes[1, 1].set_ylabel("Residual Magnitude")
-    axes[1, 1].set_title("Combined Residual Magnitudes")
-    axes[1, 1].legend()
-    axes[1, 1].grid(True, alpha=0.3)
+    # Auto-scale to show ellipses
+    # Extend limits to 4σ to ensure 3σ ellipse is visible
+    margin = 4 * np.sqrt(max(eigenvalues))
+    ax.set_xlim(mean[0] - margin, mean[0] + margin)
+    ax.set_ylim(mean[1] - margin, mean[1] + margin)
 
-    plt.suptitle(title, fontsize=14, fontweight="bold")
-    plt.tight_layout()
-
-    if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches="tight")
-
-    return fig
-
-
-def _wrap_angle_difference(angle_diff: np.ndarray) -> np.ndarray:
-    """Wrap angle difference to [-π, π] range."""
-    return np.remainder(angle_diff + np.pi, 2 * np.pi) - np.pi
+    return fig, ax
