@@ -358,10 +358,11 @@
   - [x] `trodestrack smooth` (src/trodestrack/cli/smooth.py, 5 tests passing)
   - [x] `trodestrack online` (src/trodestrack/cli/online.py, 5 tests passing)
   - [x] `trodestrack report` (already done - see M4)
-- [ ] Verify reproducibility:
-  - [ ] Deterministic RNG seeding
-  - [ ] Version pinning via `uv.lock`
-  - [ ] CI: mypy + ruff + pytest
+- [x] Verify reproducibility: **[VERIFIED: 2025-10-11]**
+  - [x] Deterministic RNG seeding (all sim functions accept `seed` parameter)
+  - [x] Version pinning via `uv.lock` (253KB lock file present)
+  - [x] CI: mypy + ruff + pytest (.github/workflows/ci.yml includes all checks)
+  - [x] Reproducibility tests (tests/test_reproducibility.py, 14 tests passing)
 
 ### 📦 Deliverables
 
