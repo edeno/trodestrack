@@ -317,7 +317,6 @@
 ### 🧭 Documentation
 
 - [ ] README: Quickstart with synthetic + example dataset
-- [ ] API Reference via MkDocs or Sphinx
 - [ ] Tuning Guide with NEES-based diagnostics
 - [ ] Troubleshooting Guide (common filter failures)
 - [x] **Examples folder refactored with comprehensive pedagogical demos** (2025-10-11)
