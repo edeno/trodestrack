@@ -26,14 +26,17 @@ from trodestrack.models.ukf import (
     unscented_kalman_filter,
     update_heading,
 )
-from trodestrack.qa.metrics import compute_nees, compute_position_rmse, compute_velocity_rmse
+from trodestrack.qa.metrics import (
+    compute_nees,
+    compute_position_rmse,
+    compute_velocity_rmse,
+)
 from trodestrack.sim.simple import (
     SimpleSimConfig,
     simulate_circular,
     simulate_constant_velocity,
     simulate_stationary,
 )
-
 
 # =============================================================================
 # Fixtures

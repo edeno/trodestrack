@@ -7,6 +7,7 @@ Development notes and debugging history for trodestrack project.
 ### Summary
 
 Implemented PDF report generation for comprehensive filter diagnostics (Milestone 4):
+
 - Multi-page PDF with summary statistics, plots, and configuration
 - Integration with qa/metrics.py and qa/plots.py modules
 - Professional formatting with PRD threshold comparisons
@@ -15,10 +16,12 @@ Implemented PDF report generation for comprehensive filter diagnostics (Mileston
 ### Implementation Details
 
 **Files Created:**
+
 - `src/trodestrack/qa/report.py` (382 lines, 1 main function + 2 helpers)
 - `tests/qa/test_report.py` (313 lines, 7 tests)
 
 **Function Implemented:**
+
 - `generate_qa_report()` - Multi-page PDF report generator
   - Page 1: Summary statistics with PRD thresholds
   - Page 2: Position error time series
@@ -30,24 +33,28 @@ Implemented PDF report generation for comprehensive filter diagnostics (Mileston
 **Key Features:**
 
 **PDF Generation:**
+
 - Uses matplotlib's `PdfPages` for multi-page PDF creation
 - Proper metadata (title, author, subject, keywords)
 - Automatic figure cleanup to prevent memory leaks
 - US Letter size (8.5 × 11 inches)
 
 **Summary Statistics:**
+
 - Position/velocity/heading RMSE with PRD threshold comparisons
 - NEES/NIS consistency checks with chi-squared bounds
 - Filter configuration display with smart value formatting
 - Monospace font for aligned text output
 
 **Validation:**
+
 - Comprehensive shape checking for all input arrays
 - PDF path validation (parent directory must exist)
 - Clear error messages with context
 - Proper handling of optional parameters (NIS, config)
 
 **Code Quality:**
+
 - PRD constants defined at module level (DRY principle)
 - Private helper functions for summary page and trajectory plot
 - Type hints complete (mypy clean)
@@ -56,6 +63,7 @@ Implemented PDF report generation for comprehensive filter diagnostics (Mileston
 ### Test Coverage
 
 **7 tests covering:**
+
 - Basic report creation with minimal inputs
 - Optional parameters (NIS, config)
 - Different trajectory types (circular motion)
@@ -71,11 +79,13 @@ Implemented PDF report generation for comprehensive filter diagnostics (Mileston
 **Review Status:** APPROVE WITH COMMENTS
 
 **Addressed Issues:**
+
 1. Removed unused `covariances` parameter (API matches implementation)
 2. Added PRD constants at module level (PRD_POSITION_RMSE_M, PRD_VELOCITY_RMSE_MS, PRD_HEADING_MAE_DEG)
 3. Updated summary page to use PRD constants (maintainable, DRY)
 
 **Quality Metrics:**
+
 - Type safety: mypy clean (0 errors)
 - Code style: ruff clean, black formatted
 - Documentation: Complete with examples and PRD references
@@ -84,12 +94,14 @@ Implemented PDF report generation for comprehensive filter diagnostics (Mileston
 ### Integration
 
 **Imports:**
+
 - `compute_*` functions from `qa/metrics.py`
 - `plot_*` functions from `qa/plots.py`
 - `COLORS`, `apply_tufte_style` from `viz/styles.py`
 - `PdfPages` from `matplotlib.backends.backend_pdf`
 
-**Exports (qa/__init__.py):**
+**Exports (qa/**init**.py):**
+
 ```python
 from trodestrack.qa import generate_qa_report
 ```
@@ -160,6 +172,7 @@ generate_qa_report(
 ### Summary
 
 Implemented comprehensive visualization tools for filter diagnostics (Milestone 4):
+
 - Residual time series with confidence bands
 - Position and velocity error plots with PRD thresholds
 - NEES/NIS histograms with chi-squared bounds
@@ -168,10 +181,12 @@ Implemented comprehensive visualization tools for filter diagnostics (Milestone 
 ### Implementation Details
 
 **Files Created:**
+
 - `src/trodestrack/qa/plots.py` (534 lines, 6 functions)
 - `tests/qa/test_plots.py` (337 lines, 21 tests)
 
 **Functions Implemented:**
+
 1. `plot_residuals()` - Multi-dimensional residual time series with confidence bands
 2. `plot_position_error()` - Euclidean position error with PRD threshold line
 3. `plot_velocity_error()` - Euclidean velocity error
@@ -182,17 +197,20 @@ Implemented comprehensive visualization tools for filter diagnostics (Milestone 
 ### Key Features
 
 **Style & Consistency:**
+
 - Follows Tufte/Gelman principles (minimal chartjunk, maximum data-ink ratio)
 - Uses ColorBrewer palette from `viz/styles.py` (color-blind safe)
 - Consistent with existing visualization patterns
 - SI units throughout (meters, m/s, radians)
 
 **Mathematical Correctness:**
+
 - Covariance ellipse: Eigenvalue decomposition for proper rotation and scaling
 - Chi-squared bounds: Integrates with `qa/metrics.chi2_bounds()`
 - Singular covariance handling: Raises clear error for rank-deficient matrices
 
 **User Experience:**
+
 - Clear default labels with dimension-specific customization
 - Optional confidence bands and PRD threshold lines
 - Validity mask support for dropout handling
@@ -201,6 +219,7 @@ Implemented comprehensive visualization tools for filter diagnostics (Milestone 
 ### Test Coverage
 
 **21 tests covering:**
+
 - Basic plot creation and structure
 - Confidence bands and PRD thresholds
 - Shape validation and error handling
@@ -215,6 +234,7 @@ Implemented comprehensive visualization tools for filter diagnostics (Milestone 
 **Review Status:** APPROVE WITH COMMENTS (all critical issues addressed)
 
 **Fixed Issues:**
+
 1. Type hint compatibility (3 mypy warnings):
    - Line 313: Cast `np.mean(nees)` to `float()`
    - Line 394: Cast `np.mean(nis)` to `float()`
@@ -222,6 +242,7 @@ Implemented comprehensive visualization tools for filter diagnostics (Milestone 
 2. Module exports: Added all plot functions to `qa/__init__.py`
 
 **Quality Metrics:**
+
 - Type safety: mypy clean (0 errors)
 - Code style: ruff clean, black formatted
 - Documentation: NumPy-style docstrings with examples
@@ -230,11 +251,13 @@ Implemented comprehensive visualization tools for filter diagnostics (Milestone 
 ### Integration
 
 **Imports:**
+
 - `chi2_bounds` from `qa/metrics.py`
 - `COLORS`, `apply_tufte_style` from `viz/styles.py`
 - Matplotlib patches (Ellipse) for covariance visualization
 
-**Exports (qa/__init__.py):**
+**Exports (qa/**init**.py):**
+
 ```python
 from trodestrack.qa import (
     plot_residuals,
@@ -249,22 +272,26 @@ from trodestrack.qa import (
 ### Usage Examples
 
 **Residual plot with confidence:**
+
 ```python
 fig, axes = plot_residuals(t, residuals, confidence_std=0.01)
 fig.savefig("residuals.png", dpi=150, bbox_inches="tight")
 ```
 
 **Position error with PRD threshold:**
+
 ```python
 fig, ax = plot_position_error(t, pos_true, pos_est, prd_threshold_m=0.02)
 ```
 
 **NEES consistency check:**
+
 ```python
 fig, ax = plot_nees_histogram(nees, state_dim=8, confidence=0.95)
 ```
 
 **Covariance ellipse:**
+
 ```python
 fig, ax = plot_covariance_ellipse(mean, cov, n_std=[1, 2, 3], trajectory=trajectory)
 ```
@@ -281,6 +308,7 @@ fig, ax = plot_covariance_ellipse(mean, cov, n_std=[1, 2, 3], trajectory=traject
 ### Summary
 
 Implemented comprehensive performance benchmark tests for PRD §4.3-4.4 requirements:
+
 - Offline smoother throughput (≥10× realtime on CPU)
 - Online EKF latency (≤33 ms per frame on CPU)
 
@@ -289,6 +317,7 @@ Implemented comprehensive performance benchmark tests for PRD §4.3-4.4 requirem
 **File:** `tests/benchmark/test_throughput.py` (271 lines, 2 tests)
 
 **Test 1: Offline Smoother Throughput**
+
 - Benchmarks complete pipeline (filter + RTS smoother) on 30-minute session
 - PRD requirement: ≥10× realtime
 - **Achieved: 45.3× realtime** (39.76s processing time for 1800s session)
@@ -296,6 +325,7 @@ Implemented comprehensive performance benchmark tests for PRD §4.3-4.4 requirem
 - Runtime: ~45-60 seconds
 
 **Test 2: Online EKF Latency**
+
 - Measures amortized per-frame latency over full 30-minute session
 - PRD requirement: ≤33 ms per frame (30 Hz camera)
 - **Achieved: 0.39 ms per frame** (21.08s total for 54,000 frames)
@@ -305,6 +335,7 @@ Implemented comprehensive performance benchmark tests for PRD §4.3-4.4 requirem
 ### Configuration
 
 **Production EKF Config:**
+
 - Position noise: 0.001, Velocity noise: 0.5, Heading noise: 0.02
 - Gyro bias RW: 2e-6, Accel bias RW: 2e-4
 - Measurement noise: 0.005² (5mm camera)
@@ -314,6 +345,7 @@ Implemented comprehensive performance benchmark tests for PRD §4.3-4.4 requirem
 - Adaptive dropout Q: disabled (prevents covariance explosion)
 
 **Simulation Config:**
+
 - Duration: 30 minutes (1800s)
 - IMU rate: 200 Hz (downsampled from 20 kHz)
 - Camera rate: 30 Hz
@@ -324,12 +356,14 @@ Implemented comprehensive performance benchmark tests for PRD §4.3-4.4 requirem
 ### Code Review Fixes
 
 **Blocking Issues Fixed:**
+
 1. Added `benchmark` pytest marker to `pyproject.toml`
 2. Removed unused `TYPE_CHECKING` import (F401 ruff error)
 3. Fixed extraneous f-strings without placeholders (F541)
 4. Fixed black formatting (line breaks in assertions)
 
 **Quality Improvements:**
+
 1. Added type hint: `**overrides: Any` on `get_production_ekf_config()`
 2. Updated runtime estimates in docstrings (2-3 min → 45-60s)
 3. Added smoother covariance validation:
@@ -338,6 +372,7 @@ Implemented comprehensive performance benchmark tests for PRD §4.3-4.4 requirem
    - Positive-definiteness check (diagonal > 0)
 
 **Deferred to Future:**
+
 - Consolidate duplicated `get_production_ekf_config()` (also in `test_prd_session.py`)
 - Add GPU benchmark variant (PRD §4.3 requires ≥50× realtime on GPU)
 - Add p99 latency measurement (current test measures mean)
@@ -346,18 +381,21 @@ Implemented comprehensive performance benchmark tests for PRD §4.3-4.4 requirem
 ### Validation
 
 **Linting:**
+
 ```bash
 uv run ruff check tests/benchmark/ && uv run black --check tests/benchmark/
 # All checks passed! ✓
 ```
 
 **Tests:**
+
 ```bash
 uv run pytest tests/benchmark/test_throughput.py -v -m benchmark
 # 2/2 PASSED in 91.31s
 ```
 
 **Marker Selection:**
+
 ```bash
 pytest -m "not benchmark"  # Exclude long-running benchmarks
 pytest -m benchmark        # Run only benchmarks
@@ -366,11 +404,13 @@ pytest -m benchmark        # Run only benchmarks
 ### Notes
 
 **Performance Margins:**
+
 - Offline smoother exceeds target by 4.5× (45.3× vs 10× required)
 - Online EKF exceeds target by 85× (0.39ms vs 33ms required)
 - Both metrics have substantial headroom for future feature additions
 
 **Platform:**
+
 - Benchmarked on M-series Mac (Apple Silicon)
 - CPU-only measurements (no JAX GPU backend)
 - Results may vary on Intel/AMD platforms
@@ -386,12 +426,14 @@ Fixed critical type contract violation where simple simulators (`simulate_statio
 ### Missing Fields
 
 The SimOut contract (defined in `sim/utils.py`) requires these fields:
+
 - `led1_truth_cam`: Ground truth LED1 positions before noise/swaps/reflections
 - `led2_truth_cam`: Ground truth LED2 positions before noise/swaps/reflections
 - `swap_applied`: Boolean mask indicating which frames had swaps applied
 - `led_reflection_applied`: Boolean mask indicating which frames had reflections applied
 
 Simple simulators were only returning a subset of SimOut keys, causing:
+
 1. Type violations (TypedDict contract broken)
 2. Downstream code expecting these fields would fail at runtime
 3. Special-case handling needed throughout the codebase
@@ -399,6 +441,7 @@ Simple simulators were only returning a subset of SimOut keys, causing:
 ### Fix Implementation
 
 **simulate_stationary:**
+
 ```python
 led1_truth_cam = np.column_stack([position[0] * np.ones(T_cam), position[1] * np.ones(T_cam)])
 led2_truth_cam = np.full((T_cam, 2), np.nan)  # No LED2 in stationary
@@ -407,6 +450,7 @@ led_reflection_applied = np.zeros(T_cam, dtype=bool)
 ```
 
 **simulate_constant_velocity:**
+
 ```python
 led1_truth_cam = np.column_stack([x_cam, y_cam])  # Moving LED1
 led2_truth_cam = np.full((T_cam, 2), np.nan)  # No LED2 in const velocity
@@ -415,6 +459,7 @@ led_reflection_applied = np.zeros(T_cam, dtype=bool)
 ```
 
 **simulate_circular (DUAL LEDS):**
+
 ```python
 led1_truth_cam = np.column_stack([x_cam - dx, y_cam - dy])  # Back LED
 led2_truth_cam = np.column_stack([x_cam + dx, y_cam + dy])  # Front LED
@@ -427,16 +472,19 @@ led_reflection_applied = np.zeros(T_cam, dtype=bool)
 ### Why This Matters
 
 **Type Safety:**
+
 - SimOut is a TypedDict contract that all simulators must fulfill
 - Missing keys cause runtime errors when accessed
 - Type checkers (mypy) can't catch this at compile time (duck typing)
 
 **Downstream Assumptions:**
+
 - Filter tests may compute differences: `Z_cam - led*_truth_cam`
 - Artifact analysis relies on `swap_applied` and `led_reflection_applied` masks
 - Without these fields, downstream code needs special-case handling
 
 **Contract Compliance:**
+
 - Simple sims are "minimal" but must still comply with the full SimOut contract
 - Artifact masks are all `False` (no artifacts applied) - this is correct behavior
 - Enables consistent processing without checking simulator type
@@ -444,11 +492,13 @@ led_reflection_applied = np.zeros(T_cam, dtype=bool)
 ### Testing Results
 
 **All Tests Passing:**
+
 - ✅ 36/36 simple sim tests
 - ✅ 170/170 broader tests (sim + ekf + smoother)
 - ✅ Test expectations updated to check for new fields
 
 **Key Verification:**
+
 - All simple simulators now return complete SimOut dicts
 - No special-case handling needed downstream
 - Type contract fully satisfied
@@ -467,11 +517,13 @@ Fixed two critical bugs in `runtime/offline.py` that would have caused runtime f
 ### Root Cause Analysis
 
 **Import Bug:**
+
 - During shared filter core refactor (commit 35b2c64), `dynamics_function`, `psd_solve`, `symmetrize` were moved to `filter_common.py`
 - `offline.py` imports were not updated → would cause `AttributeError` at runtime
 - Caught by user review before any runtime execution
 
 **UKF Noise Parity Bug:**
+
 - EKF RTS smoother (lines 322-343) includes: `Q_total = Q_k + G @ Q_u @ G.T`
 - UKF sigma-point smoother (line 624) only had: `Q_k = Q_rate * dt`
 - Missing term caused UKF smoother to have lower process noise than forward filter
@@ -480,6 +532,7 @@ Fixed two critical bugs in `runtime/offline.py` that would have caused runtime f
 ### Fix Implementation
 
 **Import Fix:**
+
 ```python
 # Before (BROKEN):
 from trodestrack.models.ekf import (
@@ -495,6 +548,7 @@ from trodestrack.models.filter_common import (
 ```
 
 **UKF Noise Parity Fix:**
+
 ```python
 # Added to propagate_one_imu() in sigma_point_smoother:
 if n == 8:
@@ -512,17 +566,20 @@ else:
 ### Test Tolerance Adjustment
 
 **Stationary Scenario Numerical Reality:**
+
 - Filter RMSE: 0.018960 m (1.90 cm)
 - Smoother RMSE: 0.018990 m (1.90 cm)
 - Difference: 0.000030 m (30 µm = 0.03 mm)
 
 **Why Smoother Can Show Tiny Degradation:**
+
 1. Camera measurements are excellent (high confidence, low noise)
 2. Filter already has near-optimal estimates
 3. Backward pass adds numerical error accumulation
 4. Difference is smaller than a grain of sand (30 µm)
 
 **Test Tolerance Updated:**
+
 - Old: `rmse_smoother <= rmse_filter + 1e-5` (10 µm tolerance)
 - New: `rmse_smoother <= rmse_filter + 5e-5` (50 µm tolerance)
 - Rationale: Accounts for backward pass numerical jitter in excellent-measurement scenarios
@@ -530,11 +587,13 @@ else:
 ### Testing Results
 
 **All Tests Passing:**
+
 - ✅ 7/7 offline smoother tests (including UKF sigma-point)
 - ✅ 27/27 runtime + UKF accuracy tests
 - ✅ No regressions in any test suite
 
 **Key Verification:**
+
 - Import fix prevents runtime AttributeError
 - Noise parity ensures UKF smoother uses same noise model as filter
 - Tolerance adjustment allows for numerical reality of backward smoothing
@@ -542,6 +601,7 @@ else:
 ### Next Steps
 
 Remaining user-identified issues to address:
+
 1. Mirror blackout/bias-freeze knobs in UKF smoother
 2. Provide conservative vs aggressive UKF presets (alpha=1e-3 vs sqrt(3))
 3. Enable Mahalanobis gating in production configs
@@ -560,12 +620,14 @@ Synthesized all review documents (REVIEW.md, REVIEW2.md, REVIEW3.md, UX_REVIEW.m
 **Overall Status:** ✅ Code is in excellent shape with only 2 critical issues blocking merge.
 
 **Ratings:**
+
 - Code Quality: 8.5/10 (APPROVE)
 - UX Quality: 9/10 (EXCELLENT)
 - Test Coverage: 347 tests passing, comprehensive
 - Type Safety: 100% in core modules
 
 **P0 Blockers from REVIEW.md:** ALL COMPLETE ✅
+
 - P0.1: SI Unit Standardization (commit 99c70cb)
 - P0.2: Generalized χ² Envelopes (commit ab0c75d)
 - P0.3: UKF Heading Measurement (commit cb5fa85)
@@ -577,22 +639,26 @@ Synthesized all review documents (REVIEW.md, REVIEW2.md, REVIEW3.md, UX_REVIEW.m
 **New Critical Issues from REVIEW2.md:** ✅ BOTH FIXED (2025-10-10)
 
 ### CR-1: JIT Test Doesn't Actually JIT - ✅ FIXED
+
 **File:** `tests/filters/test_ekf_heading_measurement.py:482`
 **Problem:** Test claimed to verify JIT compatibility but didn't actually call `@jax.jit`
 **Fix:** Updated test to document that the filter uses `lax.scan` internally (already JIT-compatible). Top-level function has NumPy preprocessing that shouldn't be JIT-compiled.
 **Result:** Test passes, accurately reflects JIT design.
 
 ### CR-2: UKF Partial-Observation Covariance Bug - ✅ FIXED
+
 **Files:** `src/trodestrack/models/ukf.py:596`, `src/trodestrack/models/filter_common.py`
 **Problem:** UKF computed Kalman gain from full 4×4 innovation covariance even when only 1 LED was valid, causing spurious covariance reduction for missing observations (overconfidence).
 **Root Cause:** Unlike EKF, UKF applied zeroed innovations but still updated covariance in full 4D space.
 **Fix:**
+
 - Extracted `make_led_selector()` and `apply_lifted_inverse()` to `filter_common.py` (shared with EKF)
 - Updated UKF to use lifted subspace approach: compute in active 2D/4D subspace, lift back to 4D
 - Created comprehensive test suite in `tests/filters/test_ukf_partial_observations.py` (5 tests)
 **Result:** UKF now correctly handles single-LED observations without becoming overconfident.
 
 **Additional Fixes:**
+
 - Fixed `float(jnp.mean(...))` calls in EKF and UKF that broke JIT compatibility (lines 876, 890 in ekf.py; 891, 905 in ukf.py)
 - Updated `initialize_state()` type hint to accept `float | jnp.ndarray` for dt_cam parameter
 
@@ -605,6 +671,7 @@ Synthesized all review documents (REVIEW.md, REVIEW2.md, REVIEW3.md, UX_REVIEW.m
 **Ready for:** Milestone 4 - Integration & QA
 
 **P1 (High Priority - ~15 hours):**
+
 1. QI-1: Fix visualization type errors (47 mypy errors in viz/video.py)
 2. QI-2: Resolve TODO comment in offline.py:105-110
 3. QI-3: Complete docstring coverage for helper functions
@@ -614,11 +681,13 @@ Synthesized all review documents (REVIEW.md, REVIEW2.md, REVIEW3.md, UX_REVIEW.m
 7. UE-1: Create quickstart guide (examples/00_quickstart.py)
 
 **P2 (Medium Priority - ~15 hours):**
+
 - Code refactoring (extract IEKF, vectorize loops)
 - Progress indicators for long operations
 - CLI implementation (Milestone 5)
 
 **P3 (Nice-to-Have - ~10 hours):**
+
 - Typed result dataclasses
 - Configuration diff helpers
 - Result summary methods
@@ -658,6 +727,7 @@ Synthesized all review documents (REVIEW.md, REVIEW2.md, REVIEW3.md, UX_REVIEW.m
 ### Review Agent Performance
 
 Both review agents (code-reviewer and ux-reviewer) performed excellently:
+
 - Thorough analysis of entire codebase
 - Specific, actionable recommendations
 - Clear prioritization and effort estimates
@@ -783,12 +853,14 @@ Fixed critical mathematical issue in UKF where log-likelihood used diagonal S ap
 **Mathematical Correctness:**
 
 **Before (Diagonal Approximation):**
+
 ```python
 log_lik_per_dim = -0.5 * (log(2π) + log(diag(S)) + innov²/diag(S))
 log_lik = sum(mask * log_lik_per_dim)  # WRONG: ignores cross-covariance
 ```
 
 **After (Exact Multivariate):**
+
 ```python
 # 4D case (both LEDs):
 L = cholesky(S₄)
@@ -819,6 +891,7 @@ loglik = -0.5(logdet + nis + 2·log(2π))
 - ✅ Improved filter consistency (NEES more realistic)
 
 **Files Modified:**
+
 - [src/trodestrack/models/ukf.py](src/trodestrack/models/ukf.py) - Added helpers (lines 267-347), rewrote update (lines 551-631)
 - [tests/filters/test_ukf_accuracy.py](tests/filters/test_ukf_accuracy.py) - Relaxed NEES threshold (line 181)
 
@@ -878,6 +951,7 @@ Implemented camera confidence scaling for EKF and UKF, addressing critical PRD v
 - Huge-R masking (1e10) could be replaced with 2D/4D subspace projection
 
 **Files Modified:**
+
 - [src/trodestrack/models/ekf.py](src/trodestrack/models/ekf.py) - API + wiring (lines 1363, 1401, 1511)
 - [src/trodestrack/models/ukf.py](src/trodestrack/models/ukf.py) - API + implementation (lines 423, 451-456, 502-503, 684, 727, 852)
 - [tests/filters/test_ekf_confidence_integration.py](tests/filters/test_ekf_confidence_integration.py) - New test suite (257 lines)
@@ -923,6 +997,7 @@ Created comprehensive robustness test suite (`tests/filters/test_robustness.py`)
 - Bias estimates remain stable even with high dropout rates (25% correlated)
 
 **Files Modified:**
+
 - `tests/filters/test_robustness.py` (new, 400 lines, 8 tests)
 - `TASKS.md` (M3 robustness tests now ✅)
 
@@ -1094,6 +1169,7 @@ Implemented iterative Extended Kalman Smoother (IEKS) with blackout-aware Q/R sc
 **Why This Works:**
 
 The smoother has access to vision *after* the gap, which provides strong constraints:
+
 - Forward filter only has vision *before* gap → unconstrained drift
 - Backward smoother has vision *after* gap → can pull estimates back toward truth
 - Blackout-aware Q scaling makes the gap "tight" so the backward pull is effective
@@ -1102,6 +1178,7 @@ The smoother has access to vision *after* the gap, which provides strong constra
 **Remaining Gap to Theory (1.08× vs 1.0×):**
 
 The 8% excess over theory (0.54m vs 0.50m) likely comes from:
+
 - Discretization effects in IMU integration (Euler method)
 - Small nonlinearity in dynamics (damping, heading wrapping)
 - Coupling between position and velocity errors
@@ -1122,6 +1199,7 @@ The 8% excess over theory (0.54m vs 0.50m) likely comes from:
 **Visualization:**
 
 Created diagnostic video comparing filter vs IEKS smoother:
+
 - **File**: `output/dropout_smoother_comparison.mp4`
 - **Script**: `examples/06_dropout_smoother_comparison.py`
 - Shows side-by-side comparison of:
@@ -1179,6 +1257,7 @@ The 0.15m drift requirement is **fundamentally unrealistic** with current sensor
 **RTS Smoother Validation:**
 
 Tested offline smoothing on the same 5s dropout scenario:
+
 - **Online (EKF filter)**: 1.67m drift
 - **Offline (RTS smoother)**: 0.71m drift (2.4x improvement!)
 - **Theoretical floor**: ~0.46m (white noise limit)
@@ -1187,6 +1266,7 @@ Tested offline smoothing on the same 5s dropout scenario:
 **Key Insight:** RTS smoother approaches theoretical floor (0.71m vs 0.46m = 1.5x), while online filter is 3.6x above theory. Smoother uses vision before AND after the gap to constrain estimates, drastically reducing error accumulation.
 
 **To achieve 0.15m offline:**
+
 - Reduce IMU accel noise density from 0.05 → 0.017 m/s²/√Hz (~3x reduction)
 - OR: Add constant-speed pseudo-measurements during dropout
 - OR: Implement ZUPT (if rat is stationary)
@@ -2127,6 +2207,7 @@ See git history for:
 - Rat IMU simulation with realistic OU dynamics
 - Test suite for stationary, constant velocity, circular, and dropout scenarios
 - NIS/NEES consistency diagnostics
+
 ## 2025-10-10 — Layout wiring, smoke tests, and test timings
 
 - StateLayout threaded through EKF/UKF and offline smoothers

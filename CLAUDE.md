@@ -91,6 +91,7 @@ uv run black --check src/ tests/
 **Pre-commit Hooks:**
 
 The following hooks run automatically on commit:
+
 - `black` - Code formatting
 - `ruff` - Linting and import sorting (with auto-fix)
 - `ruff-format` - Additional formatting checks

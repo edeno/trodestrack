@@ -15,11 +15,7 @@ from __future__ import annotations
 import jax.numpy as jnp
 import pytest
 
-from trodestrack.models.ekf import (
-    EKFConfig,
-    EKFState,
-    update_step,
-)
+from trodestrack.models.ekf import EKFConfig, EKFState, update_step
 from trodestrack.models.state_layout import LAYOUT_2D_FULL
 
 

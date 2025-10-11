@@ -25,17 +25,14 @@ PRD Reference:
 
 from __future__ import annotations
 
-import jax.numpy as jnp
-import numpy as np
 from unittest.mock import patch
 
-from trodestrack.models.ekf import (
-    EKFConfig,
-    EKFResult,
-)
+import jax.numpy as jnp
+import numpy as np
+
+from trodestrack.models.ekf import EKFConfig, EKFResult
 from trodestrack.models.ukf import UKFConfig, UKFResult
 from trodestrack.runtime.offline import rts_smoother, sigma_point_smoother
-
 
 # =============================================================================
 # Mock Dynamics for Testing

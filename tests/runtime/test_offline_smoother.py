@@ -17,15 +17,13 @@ References:
 
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
 from trodestrack.models.ukf import UKFConfig, unscented_kalman_filter
 from trodestrack.qa.metrics import compute_position_rmse
 from trodestrack.runtime.offline import rts_smoother, sigma_point_smoother
 from trodestrack.sim.simple import SimOut, simulate_circular, simulate_stationary
-
-
-import pytest
 
 
 class TestRTSSmoother:

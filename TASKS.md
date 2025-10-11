@@ -296,11 +296,18 @@
   - [x] Exported in qa/**init**.py
   - [x] Type hints complete (mypy clean)
   - [x] Code quality checks passed (ruff, black)
-- [ ] Add CLI command:
+- [x] Add CLI command: **[COMPLETE: 2025-10-11]**
 
   ```bash
   trodestrack report --run run1/ --pdf report.pdf
   ```
+
+  - [x] Main entry point (`src/trodestrack/__init__.py::main()`)
+  - [x] Report subcommand (`src/trodestrack/cli/report.py`)
+  - [x] Comprehensive test suite (`tests/cli/test_report_command.py`, 4 tests passing)
+  - [x] Shape validation for input arrays
+  - [x] Warning for missing measurement_dim.txt
+  - [x] Code reviewed and approved with quality fixes
 
 ### 📈 Deliverables
 

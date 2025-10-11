@@ -244,8 +244,9 @@ class TestJosephFormIntegration:
         # This is an integration test - will be validated when we update the code
         # For now, we'll test that the joseph_update function exists and has
         # the correct signature
-        from trodestrack.models.ekf import joseph_update
         import inspect
+
+        from trodestrack.models.ekf import joseph_update
 
         sig = inspect.signature(joseph_update)
         params = list(sig.parameters.keys())
@@ -302,4 +303,5 @@ class TestCholeskyPreferred:
         x = psd_solve(A, b)
 
         # Result should be finite
+        assert jnp.all(jnp.isfinite(x))
         assert jnp.all(jnp.isfinite(x))

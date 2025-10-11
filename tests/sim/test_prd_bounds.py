@@ -13,18 +13,17 @@ import numpy as np
 import pytest
 
 from trodestrack.qa.metrics import (
+    compute_heading_error,
     compute_position_rmse,
     compute_velocity_rmse,
-    compute_heading_error,
 )
+from trodestrack.sim.rat_imu import RatIMUSimConfig, simulate_rat_imu
 from trodestrack.sim.simple import (
-    simulate_stationary,
-    simulate_constant_velocity,
-    simulate_circular,
     SimpleSimConfig,
+    simulate_circular,
+    simulate_constant_velocity,
+    simulate_stationary,
 )
-from trodestrack.sim.rat_imu import simulate_rat_imu, RatIMUSimConfig
-
 
 # =============================================================================
 # PRD Requirements (from PRD.md Section 4) - All in SI units

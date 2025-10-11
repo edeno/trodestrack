@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import numpy as np
 import jax.numpy as jnp
+import numpy as np
 
-from trodestrack.models.state_layout import get_layout
+from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
 from trodestrack.models.filter_common import initialize_state, measurement_function
-from trodestrack.models.ekf import extended_kalman_filter, EKFConfig
-from trodestrack.models.ukf import unscented_kalman_filter, UKFConfig
+from trodestrack.models.state_layout import get_layout
+from trodestrack.models.ukf import UKFConfig, unscented_kalman_filter
 
 
 def test_initialize_state_vision_only_layout() -> None:

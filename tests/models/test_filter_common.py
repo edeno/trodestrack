@@ -5,14 +5,13 @@ from __future__ import annotations
 import jax.numpy as jnp
 
 from trodestrack.models.ekf import EKFConfig, EKFState
-from trodestrack.models.ukf import UKFConfig, UKFState
-
 from trodestrack.models.filter_common import (
     FilterCoreConfig,
     FilterState,
     initialize_state,
     update_zupt,
 )
+from trodestrack.models.ukf import UKFConfig, UKFState
 
 
 def test_filter_core_config_defaults_match_existing_configs() -> None:

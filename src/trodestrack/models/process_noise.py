@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from typing import Any, Optional
+
 import jax.numpy as jnp
 
 from trodestrack.models.state_layout import LAYOUT_REGISTRY
-from typing import Any, Optional
 
 
 def build_Q_rate(config: Any, n: int, dtype=jnp.float32) -> jnp.ndarray:
@@ -192,4 +193,5 @@ def assemble_Q(
                 Q = Q.at[:, idx].set(Q[:, idx] * freeze_factor)
 
     # Symmetrize for numerical hygiene
+    return 0.5 * (Q + Q.T)
     return 0.5 * (Q + Q.T)

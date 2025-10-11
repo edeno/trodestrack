@@ -4,8 +4,8 @@ This module contains host-side helper functions used by both filters and smoothe
 to avoid code duplication.
 """
 
-import numpy as np
 import jax.numpy as jnp
+import numpy as np
 
 
 def compute_imu_index_arrays(t_imu: np.ndarray, t_cam: np.ndarray) -> jnp.ndarray:

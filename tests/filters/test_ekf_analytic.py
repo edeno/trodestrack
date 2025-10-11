@@ -17,11 +17,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from trodestrack.models.ekf import (
-    EKFConfig,
-    extended_kalman_filter,
-    initialize_state,
-)
+from trodestrack.models.ekf import EKFConfig, extended_kalman_filter, initialize_state
 from trodestrack.qa.metrics import compute_nees, compute_position_rmse
 from trodestrack.sim.simple import (
     SimpleSimConfig,
@@ -29,7 +25,6 @@ from trodestrack.sim.simple import (
     simulate_constant_velocity,
     simulate_stationary,
 )
-
 
 # =============================================================================
 # Fixtures

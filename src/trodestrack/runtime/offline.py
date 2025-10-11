@@ -127,7 +127,7 @@ def rts_smoother(
     mask_cam_jax = jnp.array(mask_cam) if mask_cam is not None else None
 
     # Resolve state layout once for this smoother run
-    from trodestrack.models.state_layout import get_layout, get_heading_index
+    from trodestrack.models.state_layout import get_heading_index, get_layout
 
     layout = get_layout(ekf_config.state_mode)
 
@@ -420,7 +420,7 @@ def sigma_point_smoother(
     imu_index_arrays = compute_imu_index_arrays(t_imu, t_cam)
 
     # Resolve state layout once for this smoother run
-    from trodestrack.models.state_layout import get_layout, get_heading_index
+    from trodestrack.models.state_layout import get_heading_index, get_layout
 
     layout = get_layout(ukf_config.state_mode)
 

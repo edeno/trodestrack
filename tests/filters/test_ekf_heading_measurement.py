@@ -11,12 +11,16 @@ Tests verify:
 
 from __future__ import annotations
 
+import jax.numpy as jnp
 import numpy as np
 import pytest
 
-import jax.numpy as jnp
-
-from trodestrack.models.ekf import EKFConfig, EKFState, extended_kalman_filter, update_heading
+from trodestrack.models.ekf import (
+    EKFConfig,
+    EKFState,
+    extended_kalman_filter,
+    update_heading,
+)
 from trodestrack.qa.metrics import compute_heading_rmse
 from trodestrack.sim.rat_imu import RatIMUSimConfig, simulate_rat_imu
 
