@@ -445,7 +445,7 @@ def update_step(
                 m_upd = m_iter + delta_x
 
                 # Wrap heading angle to (-π, π] after update
-                h_idx_local = get_heading_index(get_layout(config.state_mode))
+                h_idx_local = get_heading_index(layout)
                 m_upd = m_upd.at[h_idx_local].set(wrap_angle(m_upd[h_idx_local]))
 
                 # Joseph form covariance update using helper (vectorized with vmap)

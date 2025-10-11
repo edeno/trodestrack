@@ -13,11 +13,14 @@ Usage:
         --output-dir run1/
 
 Output files:
-    run1/smoothed_means.txt: Smoothed state estimates (N_cam, 8)
-    run1/smoothed_covariances.txt: Smoothed covariances (N_cam, 8, 8) flattened
-    run1/filtered_means.txt: Filter state estimates (N_cam, 8)
-    run1/filtered_covariances.txt: Filter covariances (N_cam, 8, 8) flattened
+    run1/smoothed_means.txt: Smoothed state estimates (N_cam, n)
+    run1/smoothed_covariances.txt: Smoothed covariances (N_cam, n, n) flattened
+    run1/filtered_means.txt: Filter state estimates (N_cam, n)
+    run1/filtered_covariances.txt: Filter covariances (N_cam, n, n) flattened
     run1/marginal_loglik.txt: Marginal log-likelihood (scalar)
+
+Note:
+    n is the state dimension (default: 8 for standard 2D tracking with biases)
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ from pathlib import Path
 
 import numpy as np
 
+from trodestrack.cli.utils import load_data_file
 from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
 from trodestrack.runtime.offline import rts_smoother
 
@@ -193,50 +197,6 @@ producing lower-variance trajectories than forward filtering alone.
     )
 
     parser.set_defaults(func=run_smooth)
-
-
-def load_data_file(
-    path: Path, name: str, expected_shape: tuple[int, ...] | None = None
-) -> np.ndarray:
-    """Load a data file with validation.
-
-    Parameters
-    ----------
-    path : Path
-        Path to data file.
-    name : str
-        Descriptive name for error messages.
-    expected_shape : tuple[int, ...] | None, optional
-        Expected shape (None to skip validation).
-
-    Returns
-    -------
-    np.ndarray
-        Loaded numpy array.
-
-    Raises
-    ------
-    SystemExit
-        If file doesn't exist or has wrong shape.
-    """
-    if not path.exists():
-        print(f"Error: {name} file not found: {path}", file=sys.stderr)
-        sys.exit(1)
-
-    try:
-        data = np.loadtxt(path)
-    except Exception as e:
-        print(f"Error loading {name} from {path}: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    if expected_shape is not None and data.shape != expected_shape:
-        print(
-            f"Error: {name} has shape {data.shape}, expected {expected_shape}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    return data
 
 
 def run_smooth(args: argparse.Namespace) -> None:
@@ -407,11 +367,15 @@ def run_smooth(args: argparse.Namespace) -> None:
         f.write(f"  Output samples: {n_cam}\n")
         f.write(f"  State dimension: {smoother_result.smoothed_means.shape[1]}\n")
 
+    # Derive state dimension from results
+    n_state = smoother_result.smoothed_means.shape[1]
+    n_cov_flat = n_state * n_state
+
     print("\nOutput files:")
-    print(f"  smoothed_means.txt: Smoothed state estimates ({n_cam}, 8)")
-    print(f"  smoothed_covariances.txt: Smoothed covariances ({n_cam}, 64)")
-    print(f"  filtered_means.txt: Filter state estimates ({n_cam}, 8)")
-    print(f"  filtered_covariances.txt: Filter covariances ({n_cam}, 64)")
+    print(f"  smoothed_means.txt: Smoothed state estimates ({n_cam}, {n_state})")
+    print(f"  smoothed_covariances.txt: Smoothed covariances ({n_cam}, {n_cov_flat})")
+    print(f"  filtered_means.txt: Filter state estimates ({n_cam}, {n_state})")
+    print(f"  filtered_covariances.txt: Filter covariances ({n_cam}, {n_cov_flat})")
     print("  marginal_loglik.txt: Marginal log-likelihood (scalar)")
     print("  metadata.txt: Run configuration and metadata")
     print("\nSmoothing complete!")
