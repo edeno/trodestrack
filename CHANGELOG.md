@@ -2,6 +2,66 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-10 - Throughput Benchmark Tests (Milestone 4)
+
+**Added:**
+- **Throughput Benchmark Tests** (`tests/benchmark/test_throughput.py`, 271 lines, 2 tests)
+  - Test 1: Offline smoother throughput ≥10× realtime (PRD §4.3)
+    - **Result: 45.3× realtime** (39.76s for 30-minute session)
+    - Validates complete pipeline (filter + RTS smoother)
+    - Includes covariance validation (shape, finiteness, positive-definiteness)
+  - Test 2: Online EKF latency ≤33 ms per frame (PRD §4.4)
+    - **Result: 0.39 ms per frame** (21.08s for 54,000 frames)
+    - Measures amortized latency over 30-minute session
+    - Exceeds requirement by 85× (0.39 ms vs 33 ms target)
+  - Both tests use realistic 30-minute sessions (200 Hz IMU, 30 Hz camera)
+  - Production EKF configuration with adaptive dropout handling
+  - Runtime: ~45-60 seconds per test (M-series Mac)
+
+**Configuration:**
+- Added `benchmark` pytest marker to `pyproject.toml`
+  - Enables selective execution: `pytest -m benchmark` or `pytest -m "not benchmark"`
+  - Separates long-running benchmarks from unit tests
+
+**Implementation Details:**
+- `get_production_ekf_config()`: Shared helper for consistent benchmark settings
+  - Type hint: `**overrides: Any` for parameter safety
+  - Matches integration test configuration (adaptive dropout disabled)
+- Comprehensive validation checks:
+  - Smoother: shape, finiteness, positive-definiteness (diagonal > 0)
+  - Filter: shape, finiteness checks
+- Informative console output:
+  - Session duration, processing time, speedup/latency metrics
+  - PRD requirement comparison with pass/fail status
+  - Human-readable units (minutes, milliseconds)
+
+**Code Quality:**
+- Black formatting: ✅ All checks passed
+- Ruff linting: ✅ No violations (fixed F401, F541 errors)
+- Type hints: Complete with `Any` import for `**overrides`
+- Docstrings: Updated runtime estimates (45-60s, measured on M-series Mac)
+
+**Verification:**
+- `uv run pytest tests/benchmark/test_throughput.py -v -m benchmark` (2/2 PASSED in 91.31s)
+- Code reviewed and approved after addressing 6 blocking/quality issues
+
+**Performance Margins:**
+- Offline smoother: 4.5× better than requirement (45.3× vs 10×)
+- Online EKF: 85× better than requirement (0.39 ms vs 33 ms)
+- Substantial headroom for future feature additions
+
+**Task Progress:**
+- ✅ Milestone 4: Throughput benchmarks complete (TASKS.md lines 276-278)
+- 🔴 Remaining M4: QA visualization tools (not started)
+
+**Future Enhancements:**
+- Consolidate duplicated `get_production_ekf_config()` to shared module
+- Add GPU benchmark variant (PRD §4.3 requires ≥50× realtime on GPU)
+- Add p99 latency measurement (current test measures mean)
+- Add performance regression tracking (baseline JSON storage)
+
+---
+
 ### Session: 2025-10-10 - Integration Test Suite (Milestone 4)
 
 **Added:**

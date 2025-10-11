@@ -2,6 +2,107 @@
 
 Development notes and debugging history for trodestrack project.
 
+## 2025-10-10 - Throughput Benchmark Tests Implemented
+
+### Summary
+
+Implemented comprehensive performance benchmark tests for PRD §4.3-4.4 requirements:
+- Offline smoother throughput (≥10× realtime on CPU)
+- Online EKF latency (≤33 ms per frame on CPU)
+
+### Implementation Details
+
+**File:** `tests/benchmark/test_throughput.py` (271 lines, 2 tests)
+
+**Test 1: Offline Smoother Throughput**
+- Benchmarks complete pipeline (filter + RTS smoother) on 30-minute session
+- PRD requirement: ≥10× realtime
+- **Achieved: 45.3× realtime** (39.76s processing time for 1800s session)
+- Validates smoother output shape, finiteness, and positive-definiteness
+- Runtime: ~45-60 seconds
+
+**Test 2: Online EKF Latency**
+- Measures amortized per-frame latency over full 30-minute session
+- PRD requirement: ≤33 ms per frame (30 Hz camera)
+- **Achieved: 0.39 ms per frame** (21.08s total for 54,000 frames)
+- Exceeds requirement by 85× (0.39 ms vs 33 ms target)
+- Runtime: ~45-60 seconds
+
+### Configuration
+
+**Production EKF Config:**
+- Position noise: 0.001, Velocity noise: 0.5, Heading noise: 0.02
+- Gyro bias RW: 2e-6, Accel bias RW: 2e-4
+- Measurement noise: 0.005² (5mm camera)
+- IMU noise densities: gyro 0.001, accel 0.05
+- Damping coefficient: 0.4, LED distance: 0.04m
+- Heading measurement: enabled
+- Adaptive dropout Q: disabled (prevents covariance explosion)
+
+**Simulation Config:**
+- Duration: 30 minutes (1800s)
+- IMU rate: 200 Hz (downsampled from 20 kHz)
+- Camera rate: 30 Hz
+- Dropout probability: 5% with 0.8 correlation
+- Camera noise: 5mm
+- Arena: 1.0m × 1.0m
+
+### Code Review Fixes
+
+**Blocking Issues Fixed:**
+1. Added `benchmark` pytest marker to `pyproject.toml`
+2. Removed unused `TYPE_CHECKING` import (F401 ruff error)
+3. Fixed extraneous f-strings without placeholders (F541)
+4. Fixed black formatting (line breaks in assertions)
+
+**Quality Improvements:**
+1. Added type hint: `**overrides: Any` on `get_production_ekf_config()`
+2. Updated runtime estimates in docstrings (2-3 min → 45-60s)
+3. Added smoother covariance validation:
+   - Shape check: (N_cam, 8, 8)
+   - Finiteness check
+   - Positive-definiteness check (diagonal > 0)
+
+**Deferred to Future:**
+- Consolidate duplicated `get_production_ekf_config()` (also in `test_prd_session.py`)
+- Add GPU benchmark variant (PRD §4.3 requires ≥50× realtime on GPU)
+- Add p99 latency measurement (current test measures mean)
+- Add performance regression tracking (baseline JSON storage)
+
+### Validation
+
+**Linting:**
+```bash
+uv run ruff check tests/benchmark/ && uv run black --check tests/benchmark/
+# All checks passed! ✓
+```
+
+**Tests:**
+```bash
+uv run pytest tests/benchmark/test_throughput.py -v -m benchmark
+# 2/2 PASSED in 91.31s
+```
+
+**Marker Selection:**
+```bash
+pytest -m "not benchmark"  # Exclude long-running benchmarks
+pytest -m benchmark        # Run only benchmarks
+```
+
+### Notes
+
+**Performance Margins:**
+- Offline smoother exceeds target by 4.5× (45.3× vs 10× required)
+- Online EKF exceeds target by 85× (0.39ms vs 33ms required)
+- Both metrics have substantial headroom for future feature additions
+
+**Platform:**
+- Benchmarked on M-series Mac (Apple Silicon)
+- CPU-only measurements (no JAX GPU backend)
+- Results may vary on Intel/AMD platforms
+
+---
+
 ## 2025-10-10 - SimOut Contract Violation Fixed in Simple Simulators
 
 ### Summary
