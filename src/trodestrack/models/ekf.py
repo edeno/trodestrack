@@ -34,7 +34,7 @@ from typing import NamedTuple
 
 import jax.numpy as jnp
 import numpy as np
-from jax import jacfwd, lax, vmap
+from jax import Array, jacfwd, lax, vmap
 
 from trodestrack.models.filter_common import (
     FilterCoreConfig,
@@ -230,7 +230,7 @@ def _prepare_camera_observations(
     pre_z_obs_full: jnp.ndarray | None,
     pre_led1_valid: bool | None,
     pre_led2_valid: bool | None,
-) -> tuple[jnp.ndarray, jnp.ndarray, bool, bool]:
+) -> tuple[jnp.ndarray, jnp.ndarray, Array, Array]:
     """Prepare camera observations for EKF update.
 
     Parameters
@@ -253,14 +253,20 @@ def _prepare_camera_observations(
         ``z_obs_full`` is (4,) and ``obs_mask`` is (4,) boolean mask.
     """
     # Check which LEDs are valid (use precomputed if provided)
-    led1_valid = pre_led1_valid if pre_led1_valid is not None else jnp.isfinite(z_led1[0])
-    led2_valid = pre_led2_valid if pre_led2_valid is not None else jnp.isfinite(z_led2[0])
+    led1_valid = jnp.asarray(
+        pre_led1_valid if pre_led1_valid is not None else jnp.isfinite(z_led1[0]),
+        dtype=bool,
+    )
+    led2_valid = jnp.asarray(
+        pre_led2_valid if pre_led2_valid is not None else jnp.isfinite(z_led2[0]),
+        dtype=bool,
+    )
 
     # Build observation vector (use precomputed if provided)
     z_obs_full = pre_z_obs_full if pre_z_obs_full is not None else jnp.concatenate([z_led1, z_led2])
 
     # Construct observation mask
-    obs_mask = jnp.array([led1_valid, led1_valid, led2_valid, led2_valid])
+    obs_mask = jnp.array([led1_valid, led1_valid, led2_valid, led2_valid], dtype=bool)
 
     return z_obs_full, obs_mask, led1_valid, led2_valid
 

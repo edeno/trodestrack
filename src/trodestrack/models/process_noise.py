@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Optional, cast
+
+from jax import Array
 
 import jax.numpy as jnp
 
 from trodestrack.models.filter_common import symmetrize
-from trodestrack.models.state_layout import LAYOUT_REGISTRY
+from trodestrack.models.state_layout import LAYOUT_REGISTRY, get_heading_index
 
 
 def build_Q_rate(config: Any, n: int, dtype=jnp.float32) -> jnp.ndarray:
@@ -58,7 +60,8 @@ def build_Q_rate(config: Any, n: int, dtype=jnp.float32) -> jnp.ndarray:
         diag = diag.at[layout.heading_idx].set(config.process_noise_heading)
     else:
         # 3D orientation (Euler or quaternion)
-        for idx in layout.heading_idx:
+        heading_indices = cast(tuple[int, ...], layout.heading_idx)
+        for idx in heading_indices:
             diag = diag.at[idx].set(config.process_noise_heading)
 
     # Gyro bias noise
@@ -72,7 +75,7 @@ def build_Q_rate(config: Any, n: int, dtype=jnp.float32) -> jnp.ndarray:
     return jnp.diag(diag)
 
 
-def build_input_noise_cov(config: Any, dt: float, dtype=jnp.float32) -> jnp.ndarray:
+def build_input_noise_cov(config: Any, dt: float | Array, dtype=jnp.float32) -> jnp.ndarray:
     """IMU input noise covariance from noise densities.
 
     Parameters
@@ -89,8 +92,9 @@ def build_input_noise_cov(config: Any, dt: float, dtype=jnp.float32) -> jnp.ndar
     jnp.ndarray
         Qu (3, 3) for [ω_z(rad/s), f_x(m/s^2), f_y(m/s^2)].
     """
-    sg = (config.imu_gyro_noise_density * jnp.sqrt(dt)) ** 2
-    sa = (config.imu_accel_noise_density * jnp.sqrt(dt)) ** 2
+    dt_arr = jnp.asarray(dt, dtype=dtype)
+    sg = (config.imu_gyro_noise_density * jnp.sqrt(dt_arr)) ** 2
+    sa = (config.imu_accel_noise_density * jnp.sqrt(dt_arr)) ** 2
 
     Qu = jnp.diag(jnp.array([sg, sa, sa], dtype=dtype))
     return symmetrize(Qu)
@@ -98,11 +102,11 @@ def build_input_noise_cov(config: Any, dt: float, dtype=jnp.float32) -> jnp.ndar
 
 def assemble_Q(
     config: Any,
-    theta: float,
-    dt: float,
+    theta: float | Array,
+    dt: float | Array,
     n: int,
     *,
-    has_vision: bool,
+    has_vision: bool | Array,
     dtype=jnp.float32,
     G_override: Optional[jnp.ndarray] = None,
     Qu_override: Optional[jnp.ndarray] = None,
@@ -197,13 +201,16 @@ def assemble_Q(
 
             # For 2D heading, use scalar heading_idx; for 3D, skip IMU mapping for now
             if layout.has_heading_2d:
+                pos_pair = (layout.pos_idx[0], layout.pos_idx[1])
+                vel_pair = (layout.vel_idx[0], layout.vel_idx[1])
+                theta_idx = get_heading_index(layout)
                 G = build_G_matrix_generic(
                     n,
                     jnp.asarray(theta, dtype=dtype),
                     jnp.asarray(dt, dtype=dtype),
-                    pos_idx=layout.pos_idx[:2],
-                    vel_idx=layout.vel_idx[:2],
-                    theta_idx=layout.heading_idx,
+                    pos_idx=pos_pair,
+                    vel_idx=vel_pair,
+                    theta_idx=theta_idx,
                     dtype=dtype,
                 )
                 Q = Q_rate + G @ Qu @ G.T

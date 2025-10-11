@@ -10,8 +10,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import NamedTuple
 
+import numpy as np
+
 import jax.numpy as jnp
-from jax import lax
+from jax import Array, lax
 from jax.scipy.linalg import cho_factor, cho_solve
 
 from trodestrack.models.state_layout import StateLayout, get_heading_index, get_layout
@@ -927,7 +929,9 @@ def prepare_heading_measurement(
 # =============================================================================
 
 
-def compute_imu_index_arrays(t_imu: jnp.ndarray, t_cam: jnp.ndarray) -> jnp.ndarray:
+def compute_imu_index_arrays(
+    t_imu: np.ndarray | jnp.ndarray, t_cam: np.ndarray | jnp.ndarray
+) -> jnp.ndarray:
     """Build padded index arrays for IMU samples between camera frames.
 
     Parameters
@@ -948,9 +952,10 @@ def compute_imu_index_arrays(t_imu: jnp.ndarray, t_cam: jnp.ndarray) -> jnp.ndar
     Host-side precomputation using NumPy avoids dynamic loop unrolling inside JIT.
     For each frame i, finds IMU indices in the half-open interval (t_cam[i-1], t_cam[i]].
     """
-    import numpy as np
+    t_imu_np = np.asarray(t_imu)
+    t_cam_np = np.asarray(t_cam)
 
-    n_cam = len(t_cam)
+    n_cam = len(t_cam_np)
     all_indices = []
 
     # First pass: collect all valid index arrays to find max length
@@ -960,7 +965,7 @@ def compute_imu_index_arrays(t_imu: jnp.ndarray, t_cam: jnp.ndarray) -> jnp.ndar
             valid_indices = np.array([], dtype=np.int32)
         else:
             # Find IMU samples in (t_prev, t_current]
-            mask = (t_imu > t_cam[i - 1]) & (t_imu <= t_cam[i])
+            mask = (t_imu_np > t_cam_np[i - 1]) & (t_imu_np <= t_cam_np[i])
             valid_indices = np.nonzero(mask)[0]
 
         all_indices.append(valid_indices)
@@ -985,7 +990,7 @@ def compute_imu_index_arrays(t_imu: jnp.ndarray, t_cam: jnp.ndarray) -> jnp.ndar
 # =============================================================================
 
 
-def build_G_matrix(theta: float, dt: float) -> jnp.ndarray:
+def build_G_matrix(theta: float | Array, dt: float | Array) -> jnp.ndarray:
     """IMU input noise propagation matrix G for standard 8-state model.
 
     Parameters
@@ -1008,8 +1013,11 @@ def build_G_matrix(theta: float, dt: float) -> jnp.ndarray:
     - vₖ₊₁ = vₖ + R(θ)(f − b_a) dt → ∂v/∂f = R(θ) dt
     - pₖ₊₁ = pₖ + v dt + 0.5 R(θ)(f − b_a) dt² → ∂p/∂f = R(θ) 0.5 dt²
     """
+    theta_arr = jnp.asarray(theta)
+    dt_arr = jnp.asarray(dt)
+
     # 2D rotation matrix R(θ)
-    c, s = jnp.cos(theta), jnp.sin(theta)
+    c, s = jnp.cos(theta_arr), jnp.sin(theta_arr)
     R_2d = jnp.array([[c, -s], [s, c]])
 
     # Initialize G matrix: state (8) × input (3)
@@ -1018,21 +1026,21 @@ def build_G_matrix(theta: float, dt: float) -> jnp.ndarray:
     G = jnp.zeros((8, 3))
 
     # Heading depends on gyro: ∂θ/∂ω_z = dt
-    G = G.at[4, 0].set(dt)
+    G = G.at[4, 0].set(dt_arr)
 
     # Velocity depends on accelerometer via rotation: ∂v/∂f = R(θ) * dt
-    G = G.at[2:4, 1:3].set(R_2d * dt)
+    G = G.at[2:4, 1:3].set(R_2d * dt_arr)
 
     # Position depends on accelerometer: ∂p/∂f = R(θ) * 0.5 * dt²
-    G = G.at[0:2, 1:3].set(R_2d * (0.5 * dt * dt))
+    G = G.at[0:2, 1:3].set(R_2d * (0.5 * dt_arr * dt_arr))
 
     return G
 
 
 def build_G_matrix_generic(
     n: int,
-    theta: float,
-    dt: float,
+    theta: float | Array,
+    dt: float | Array,
     *,
     pos_idx: tuple[int, int] = (0, 1),
     vel_idx: tuple[int, int] = (2, 3),
@@ -1070,21 +1078,23 @@ def build_G_matrix_generic(
     are ignored.
     """
     G = jnp.zeros((n, 3), dtype=dtype)
-    c, s = jnp.cos(theta), jnp.sin(theta)
+    theta_arr = jnp.asarray(theta, dtype=dtype)
+    dt_arr = jnp.asarray(dt, dtype=dtype)
+    c, s = jnp.cos(theta_arr), jnp.sin(theta_arr)
     R_2d = jnp.array([[c, -s], [s, c]], dtype=dtype)
 
     # Heading
     if 0 <= theta_idx < n:
-        G = G.at[theta_idx, 0].set(dt)
+        G = G.at[theta_idx, 0].set(dt_arr)
 
     # Velocity
     vx_i, vy_i = vel_idx
     if 0 <= vx_i < n and 0 <= vy_i < n:
-        G = G.at[vx_i : vy_i + 1, 1:3].set(R_2d * dt)
+        G = G.at[vx_i : vy_i + 1, 1:3].set(R_2d * dt_arr)
 
     # Position
     px_i, py_i = pos_idx
     if 0 <= px_i < n and 0 <= py_i < n:
-        G = G.at[px_i : py_i + 1, 1:3].set(R_2d * (0.5 * dt * dt))
+        G = G.at[px_i : py_i + 1, 1:3].set(R_2d * (0.5 * dt_arr * dt_arr))
 
     return G

@@ -30,7 +30,7 @@ from trodestrack.viz.components import (
     TrailArtist,
 )
 from trodestrack.viz.styles import COLORS, apply_tufte_style
-from trodestrack.viz.utils import prepare_video_data
+from trodestrack.viz.utils import VideoData, prepare_video_data
 
 log = logging.getLogger(__name__)
 
@@ -106,7 +106,7 @@ def create_diagnostic_video(
 
     # Prepare interpolated data at video frame times
     log.info(f"Preparing video data (fps={fps}, speedup={speedup:.1f}x)...")
-    video_data = prepare_video_data(sim_data, fps=fps, speedup=speedup)
+    video_data: VideoData = prepare_video_data(sim_data, fps=fps, speedup=speedup)
     n_frames = video_data["n_frames"]
     log.info(f"  {n_frames} frames to render ({n_frames / fps:.1f}s video)")
 
@@ -183,12 +183,6 @@ def create_diagnostic_video(
     # =========================================================================
     # Column 3: Filter diagnostics (only if filter provided)
     # =========================================================================
-    ax_residuals = None
-    ax_vel_error = None
-    ax_heading_error = None
-    ax_bias = None
-    ax_nees = None
-
     if filter_results is not None:
         # Row 0: Measurement residuals
         ax_residuals = fig.add_subplot(gs[0, 2])
@@ -318,8 +312,8 @@ def create_diagnostic_video(
     event_times: dict[str, list[float]] = {"led_swap": [], "long_dropout": []}
 
     for frame_idx in range(n_frames):
-        t = video_data["t_video"][frame_idx]
-        cam_idx = video_data["cam_idx"][frame_idx]
+        t = float(video_data["t_video"][frame_idx])
+        cam_idx = int(video_data["cam_idx"][frame_idx])
 
         led1_pos = sim_data["Z_cam_led1"][cam_idx]
         led2_pos = sim_data["Z_cam_led2"][cam_idx]
@@ -335,8 +329,8 @@ def create_diagnostic_video(
 
             # Check 2: LED vector direction (catches reflection/labeling swaps)
             # Get body state for this frame
-            state = video_data["X_truth"][frame_idx]
-            theta = state[4]  # heading angle
+            state = np.asarray(video_data["X_truth"][frame_idx])
+            theta = float(state[4])  # heading angle
             body_x_axis = np.array([np.cos(theta), np.sin(theta)])
             led_vector = led1_pos - led2_pos  # Vector from LED2 to LED1
 
@@ -352,8 +346,8 @@ def create_diagnostic_video(
         if not (led1_visible or led2_visible):
             # Only mark start of dropout sequence (avoid many markers)
             if frame_idx == 0 or (
-                sim_data["mask_led1"][video_data["cam_idx"][frame_idx - 1]]
-                or sim_data["mask_led2"][video_data["cam_idx"][frame_idx - 1]]
+                sim_data["mask_led1"][int(video_data["cam_idx"][frame_idx - 1])]
+                or sim_data["mask_led2"][int(video_data["cam_idx"][frame_idx - 1])]
             ):
                 event_times["long_dropout"].append(t)
 
@@ -483,10 +477,10 @@ def create_diagnostic_video(
             Empty list (blitting is disabled; return value is ignored).
         """
         # Get data for this frame
-        t = video_data["t_video"][frame_idx]
-        state = video_data["X_truth"][frame_idx]  # [x, y, vx, vy, θ]
-        imu = video_data["U_imu"][frame_idx]  # [gyro, accel_x, accel_y]
-        cam_idx = video_data["cam_idx"][frame_idx]
+        t = float(video_data["t_video"][frame_idx])
+        state = np.asarray(video_data["X_truth"][frame_idx])  # [x, y, vx, vy, θ]
+        imu = np.asarray(video_data["U_imu"][frame_idx])  # [gyro, accel_x, accel_y]
+        cam_idx = int(video_data["cam_idx"][frame_idx])
 
         # Extract state components
         x, y, vx, vy, theta = state
@@ -575,25 +569,38 @@ def create_diagnostic_video(
             imu_panel.update(t, t_raw=t_imu_window, imu_raw=imu_raw, imu_truth=imu_truth)
         else:
             # Fallback to interpolated single sample if no raw data in window
-            imu_dict = {"gyro": imu[0], "accel_x": imu[1], "accel_y": imu[2]}
+            imu_dict = {
+                "gyro": float(imu[0]),
+                "accel_x": float(imu[1]),
+                "accel_y": float(imu[2]),
+            }
             imu_panel.update(t, imu_data=imu_dict)
 
         # Camera panel with latency readout
         # Compute latency: t_cam_obs - t_cam_exp (observation - exposure lag)
         t_cam_exp = sim_data["t_cam_exp"][cam_idx]
         t_cam_obs = sim_data["t_cam_obs"][cam_idx]
-        latency_ms = (t_cam_obs - t_cam_exp) * 1000  # Convert to milliseconds
+        latency_ms = float((t_cam_obs - t_cam_exp) * 1000)  # Convert to milliseconds
 
         camera_panel.update(led1_visible, conf1, led2_visible, conf2, latency_ms)
 
         # Filter overlay (if provided)
-        if filter_artist is not None and filter_results is not None:
+        if (
+            filter_artist is not None
+            and residual_panel is not None
+            and state_error_panel is not None
+            and bias_panel is not None
+            and nees_panel is not None
+            and filter_results is not None
+        ):
             # ================================================================
             # Get filter estimates and ground truth at current camera frame
             # ================================================================
-            x_est = filter_results.filtered_means[cam_idx]  # [x, y, vx, vy, θ, b_gz, b_ax, b_ay]
-            P_est = filter_results.filtered_covariances[cam_idx]  # 8x8 covariance
-            x_pred = filter_results.predicted_means[cam_idx]
+            x_est = np.asarray(
+                filter_results.filtered_means[cam_idx]
+            )  # [x, y, vx, vy, θ, b_gz, b_ax, b_ay]
+            P_est = np.asarray(filter_results.filtered_covariances[cam_idx])  # 8x8 covariance
+            x_pred = np.asarray(filter_results.predicted_means[cam_idx])
 
             # Ground truth at camera time
             x_truth, y_truth, vx_truth, vy_truth, theta_truth = state
@@ -601,7 +608,7 @@ def create_diagnostic_video(
             # ================================================================
             # 1. Update filter position artist with uncertainty ellipse
             # ================================================================
-            filter_artist.update(x_est[0], x_est[1], P_est)
+            filter_artist.update(float(x_est[0]), float(x_est[1]), P_est)
 
             # ================================================================
             # 2. Compute and update measurement residuals (innovations)
@@ -623,7 +630,7 @@ def create_diagnostic_video(
                 np.linalg.norm(led2_pos - led2_pred) * 100 if led2_visible else np.nan
             )  # cm
 
-            residual_panel.update(t, resid_led1, resid_led2)
+            residual_panel.update(t, float(resid_led1), float(resid_led2))
 
             # ================================================================
             # 3. Compute and update state estimation errors
@@ -639,7 +646,12 @@ def create_diagnostic_video(
             error_heading_rad = wrap_angle(x_est[4] - theta_truth)
             error_heading_deg = np.degrees(error_heading_rad)
 
-            state_error_panel.update(t, error_vx, error_vy, error_heading_deg)
+            state_error_panel.update(
+                t,
+                float(error_vx),
+                float(error_vy),
+                float(error_heading_deg),
+            )
 
             # ================================================================
             # 4. Update bias estimates (show filter learning IMU biases)
@@ -648,7 +660,12 @@ def create_diagnostic_video(
             accel_bias_x = x_est[6]  # m/s²
             accel_bias_y = x_est[7]  # m/s²
 
-            bias_panel.update(t, gyro_bias, accel_bias_x, accel_bias_y)
+            bias_panel.update(
+                t,
+                float(gyro_bias),
+                float(accel_bias_x),
+                float(accel_bias_y),
+            )
 
             # ================================================================
             # 5. Compute and update NEES (filter consistency metric)

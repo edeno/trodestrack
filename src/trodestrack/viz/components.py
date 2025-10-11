@@ -7,8 +7,9 @@ an update() method to modify appearance for each video frame.
 from __future__ import annotations
 
 from collections import deque
-from typing import Any
+from typing import Any, Deque
 
+from jax import Array
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.collections import LineCollection
@@ -954,7 +955,7 @@ class FilterArtist:
         )
         ax.add_patch(self.uncertainty_ellipse)
 
-    def update(self, x_pred: float, y_pred: float, P: np.ndarray) -> list[Any]:
+    def update(self, x_pred: float, y_pred: float, P: np.ndarray | Array) -> list[Any]:
         """Update filter prediction and uncertainty.
 
         Args:
@@ -969,14 +970,15 @@ class FilterArtist:
             ValueError: If P is not shape (8, 8)
         """
         # Validate input shape
-        if P.shape != (8, 8):
-            raise ValueError(f"Expected P shape (8, 8), got {P.shape}")
+        P_np = np.asarray(P)
+        if P_np.shape != (8, 8):
+            raise ValueError(f"Expected P shape (8, 8), got {P_np.shape}")
 
         # Update marker position
         self.pred_marker.set_data([x_pred], [y_pred])
 
         # Compute covariance ellipse (95% confidence for 2D: χ²(2, 0.05) = 5.991)
-        P_pos = P[:2, :2]
+        P_pos = P_np[:2, :2]
         eigenvalues, eigenvectors = np.linalg.eigh(P_pos)
 
         # Ensure eigenvalues are positive (numerical stability)
@@ -1019,9 +1021,9 @@ class ResidualPanelArtist:
         self.window_frames = int(window_s * fps)
 
         # Buffers for time series
-        self.time_buffer = deque(maxlen=self.window_frames)
-        self.resid_led1_buffer = deque(maxlen=self.window_frames)
-        self.resid_led2_buffer = deque(maxlen=self.window_frames)
+        self.time_buffer: Deque[float] = deque(maxlen=self.window_frames)
+        self.resid_led1_buffer: Deque[float] = deque(maxlen=self.window_frames)
+        self.resid_led2_buffer: Deque[float] = deque(maxlen=self.window_frames)
 
         # Initialize lines
         (self.line_led1,) = ax.plot(
@@ -1102,9 +1104,9 @@ class StateErrorPanelArtist:
 
         # Velocity error panel (show both components for directional insight)
         self.ax_vel = ax_vel
-        self.time_buffer_vel = deque(maxlen=self.window_frames)
-        self.error_vx_buffer = deque(maxlen=self.window_frames)
-        self.error_vy_buffer = deque(maxlen=self.window_frames)
+        self.time_buffer_vel: Deque[float] = deque(maxlen=self.window_frames)
+        self.error_vx_buffer: Deque[float] = deque(maxlen=self.window_frames)
+        self.error_vy_buffer: Deque[float] = deque(maxlen=self.window_frames)
 
         (self.line_vx,) = ax_vel.plot(
             [], [], color=COLORS["red"], linewidth=1.5, label="vx error", alpha=0.8
@@ -1129,8 +1131,8 @@ class StateErrorPanelArtist:
 
         # Heading error panel
         self.ax_heading = ax_heading
-        self.time_buffer_heading = deque(maxlen=self.window_frames)
-        self.error_heading_buffer = deque(maxlen=self.window_frames)
+        self.time_buffer_heading: Deque[float] = deque(maxlen=self.window_frames)
+        self.error_heading_buffer: Deque[float] = deque(maxlen=self.window_frames)
 
         (self.line_heading,) = ax_heading.plot(
             [], [], color=COLORS["purple"], linewidth=1.5, label="Heading error", alpha=0.8
@@ -1213,10 +1215,10 @@ class BiasEstimatePanelArtist:
         self.window_frames = int(window_s * fps)
 
         # Buffers
-        self.time_buffer = deque(maxlen=self.window_frames)
-        self.gyro_bias_buffer = deque(maxlen=self.window_frames)
-        self.accel_bias_x_buffer = deque(maxlen=self.window_frames)
-        self.accel_bias_y_buffer = deque(maxlen=self.window_frames)
+        self.time_buffer: Deque[float] = deque(maxlen=self.window_frames)
+        self.gyro_bias_buffer: Deque[float] = deque(maxlen=self.window_frames)
+        self.accel_bias_x_buffer: Deque[float] = deque(maxlen=self.window_frames)
+        self.accel_bias_y_buffer: Deque[float] = deque(maxlen=self.window_frames)
 
         # Lines (use distinct colors for each bias)
         (self.line_gyro,) = ax.plot(
@@ -1310,8 +1312,8 @@ class NEESPanelArtist:
         self.state_dim = state_dim
 
         # Buffers
-        self.time_buffer = deque(maxlen=self.window_frames)
-        self.nees_buffer = deque(maxlen=self.window_frames)
+        self.time_buffer: Deque[float] = deque(maxlen=self.window_frames)
+        self.nees_buffer: Deque[float] = deque(maxlen=self.window_frames)
 
         # NEES line
         (self.line_nees,) = ax.plot(
@@ -1319,7 +1321,7 @@ class NEESPanelArtist:
         )
 
         # Chi-squared 95% confidence bounds (from scipy)
-        from scipy.stats import chi2
+        from scipy.stats import chi2  # type: ignore[import]
 
         self.chi2_lower = chi2.ppf(0.025, df=state_dim)
         self.chi2_upper = chi2.ppf(0.975, df=state_dim)

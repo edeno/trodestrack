@@ -37,7 +37,7 @@ from typing import NamedTuple
 
 import jax.numpy as jnp
 import numpy as np
-from jax import lax, vmap
+from jax import Array, lax, vmap
 
 from trodestrack.models.filter_common import (
     FilterCoreConfig,
@@ -370,7 +370,7 @@ def _prepare_ukf_camera_observations(
     pre_z_obs_full: jnp.ndarray | None,
     pre_led1_valid: bool | None,
     pre_led2_valid: bool | None,
-) -> tuple[jnp.ndarray, bool, bool]:
+) -> tuple[jnp.ndarray, Array, Array]:
     """Prepare camera observations for UKF update.
 
     Parameters
@@ -394,8 +394,14 @@ def _prepare_ukf_camera_observations(
         the sigma-point transform.
     """
     # Check which LEDs are valid (use precomputed if provided)
-    led1_valid = pre_led1_valid if pre_led1_valid is not None else jnp.isfinite(z_led1[0])
-    led2_valid = pre_led2_valid if pre_led2_valid is not None else jnp.isfinite(z_led2[0])
+    led1_valid = jnp.asarray(
+        pre_led1_valid if pre_led1_valid is not None else jnp.isfinite(z_led1[0]),
+        dtype=bool,
+    )
+    led2_valid = jnp.asarray(
+        pre_led2_valid if pre_led2_valid is not None else jnp.isfinite(z_led2[0]),
+        dtype=bool,
+    )
 
     # Build observation vector (replace NaN with 0 to avoid propagation)
     if pre_z_obs_full is not None:

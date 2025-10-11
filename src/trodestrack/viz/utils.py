@@ -2,14 +2,31 @@
 
 from __future__ import annotations
 
+from typing import Any, TypedDict
+
 import numpy as np
+from numpy.typing import NDArray
 
 from trodestrack.sim.utils import SimOut, interp_angle
 
 
-def prepare_video_data(
-    sim_data: SimOut, fps: int = 30, speedup: float = 1.0
-) -> dict[str, np.ndarray | int]:
+FloatArray = NDArray[np.floating[Any]]
+IntArray = NDArray[np.integer[Any]]
+
+
+class VideoData(TypedDict):
+    t_video: FloatArray
+    X_truth: FloatArray
+    U_imu: FloatArray
+    bias_gyro: FloatArray
+    bias_accel_x: FloatArray
+    bias_accel_y: FloatArray
+    cam_idx: IntArray
+    fps: int
+    n_frames: int
+
+
+def prepare_video_data(sim_data: SimOut, fps: int = 30, speedup: float = 1.0) -> VideoData:
     """Interpolate simulation data to video frame times.
 
     Handles differing sampling rates for IMU (e.g., 200 Hz), camera (e.g., 30 Hz),
