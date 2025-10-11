@@ -187,12 +187,11 @@ def test_tier0_circular_ekf_heading():
     heading_rmse_rad = compute_heading_rmse(result["heading_truth"], result["heading_est"])
     heading_rmse_deg = np.rad2deg(heading_rmse_rad)
 
-    print(f"\nCircular Heading RMSE: {heading_rmse_deg:.3f}° " f"(PRD: <={PRD_HEADING_RMSE_DEG}°)")
+    print(f"\nCircular Heading RMSE: {heading_rmse_deg:.3f}° (PRD: <={PRD_HEADING_RMSE_DEG}°)")
 
-    assert heading_rmse_deg <= PRD_HEADING_RMSE_DEG, (
-        f"Heading RMSE {heading_rmse_deg:.3f}° exceeds PRD requirement "
-        f"of {PRD_HEADING_RMSE_DEG}°"
-    )
+    assert (
+        heading_rmse_deg <= PRD_HEADING_RMSE_DEG
+    ), f"Heading RMSE {heading_rmse_deg:.3f}° exceeds PRD requirement of {PRD_HEADING_RMSE_DEG}°"
 
 
 # =============================================================================
@@ -227,9 +226,9 @@ def test_tier3_rat_imu_ekf_position():
 
     print(f"\nRat IMU Position RMSE: {pos_rmse_m:.4f} m (PRD: <={PRD_POSITION_RMSE_M} m)")
 
-    assert pos_rmse_m <= PRD_POSITION_RMSE_M, (
-        f"Position RMSE {pos_rmse_m:.4f} m exceeds PRD requirement " f"of {PRD_POSITION_RMSE_M} m"
-    )
+    assert (
+        pos_rmse_m <= PRD_POSITION_RMSE_M
+    ), f"Position RMSE {pos_rmse_m:.4f} m exceeds PRD requirement of {PRD_POSITION_RMSE_M} m"
 
 
 @pytest.mark.slow
@@ -294,10 +293,9 @@ def test_tier3_rat_imu_ekf_heading():
 
     print(f"\nRat IMU Heading RMSE: {heading_rmse_deg:.3f}° (PRD: <={PRD_HEADING_RMSE_DEG}°)")
 
-    assert heading_rmse_deg <= PRD_HEADING_RMSE_DEG, (
-        f"Heading RMSE {heading_rmse_deg:.3f}° exceeds PRD requirement "
-        f"of {PRD_HEADING_RMSE_DEG}°"
-    )
+    assert (
+        heading_rmse_deg <= PRD_HEADING_RMSE_DEG
+    ), f"Heading RMSE {heading_rmse_deg:.3f}° exceeds PRD requirement of {PRD_HEADING_RMSE_DEG}°"
 
 
 # =============================================================================

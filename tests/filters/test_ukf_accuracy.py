@@ -155,8 +155,8 @@ def test_ukf_stationary_rejects_imu_drift(sim_config, ukf_config):
     vel_rmse = compute_velocity_rmse(result.filtered_means[:, 2:4], truth_vel)
 
     # Check PRD requirements (slightly relaxed for UKF vs EKF differences)
-    assert pos_rmse <= 0.025, f"Position RMSE {pos_rmse*100:.2f} cm exceeds 2.5 cm"
-    assert vel_rmse <= 0.10, f"Velocity RMSE {vel_rmse*100:.1f} cm/s exceeds 10 cm/s"
+    assert pos_rmse <= 0.025, f"Position RMSE {pos_rmse * 100:.2f} cm exceeds 2.5 cm"
+    assert vel_rmse <= 0.10, f"Velocity RMSE {vel_rmse * 100:.1f} cm/s exceeds 10 cm/s"
 
     # NEES consistency check
     # Extract biases at camera times
@@ -240,8 +240,8 @@ def test_ukf_constant_velocity_tracking(sim_config, ukf_config):
     vel_rmse = compute_velocity_rmse(result.filtered_means[:, 2:4], truth_vel)
 
     # Check PRD requirements (slightly relaxed for UKF vs EKF differences)
-    assert pos_rmse <= 0.025, f"Position RMSE {pos_rmse*100:.2f} cm exceeds 2.5 cm"
-    assert vel_rmse <= 0.10, f"Velocity RMSE {vel_rmse*100:.1f} cm/s exceeds 10 cm/s"
+    assert pos_rmse <= 0.025, f"Position RMSE {pos_rmse * 100:.2f} cm exceeds 2.5 cm"
+    assert vel_rmse <= 0.10, f"Velocity RMSE {vel_rmse * 100:.1f} cm/s exceeds 10 cm/s"
     # Note: Heading convergence requires dual-LED observations or persistent motion
     # Single-LED stationary tracking with OU motion has poor heading observability
     # Skip heading assertion for this scenario
@@ -301,9 +301,9 @@ def test_ukf_circular_motion_bias_convergence(sim_config, ukf_config):
     bias_rmse_late = np.sqrt(np.mean(bias_error_late**2))
 
     # Check requirements
-    assert pos_rmse <= 0.02, f"Position RMSE {pos_rmse*100:.2f} cm exceeds 2 cm"
+    assert pos_rmse <= 0.02, f"Position RMSE {pos_rmse * 100:.2f} cm exceeds 2 cm"
     # Bias should converge to within 0.01 rad/s (1% of typical gyro range)
-    assert bias_rmse_late <= 0.01, f"Gyro bias RMSE {bias_rmse_late*1000:.2f} mrad/s too large"
+    assert bias_rmse_late <= 0.01, f"Gyro bias RMSE {bias_rmse_late * 1000:.2f} mrad/s too large"
 
 
 # =============================================================================
@@ -358,7 +358,7 @@ def test_ukf_vs_ekf_accuracy_stationary(sim_config, ukf_config, ekf_config):
     # For nearly-linear stationary case, they should be very close
     assert (
         ukf_rmse <= ekf_rmse * 1.1
-    ), f"UKF RMSE {ukf_rmse*100:.2f} cm worse than EKF {ekf_rmse*100:.2f} cm"
+    ), f"UKF RMSE {ukf_rmse * 100:.2f} cm worse than EKF {ekf_rmse * 100:.2f} cm"
 
 
 def test_ukf_vs_ekf_accuracy_circular(sim_config, ukf_config, ekf_config):
@@ -427,7 +427,7 @@ def test_ukf_vs_ekf_accuracy_circular(sim_config, ukf_config, ekf_config):
     # Allow 15% tolerance since both filters are good and differences are small
     assert (
         ukf_pos_rmse <= ekf_pos_rmse * 1.15
-    ), f"UKF pos RMSE {ukf_pos_rmse*100:.2f} cm worse than EKF {ekf_pos_rmse*100:.2f} cm"
+    ), f"UKF pos RMSE {ukf_pos_rmse * 100:.2f} cm worse than EKF {ekf_pos_rmse * 100:.2f} cm"
     assert (
         ukf_heading_rmse <= ekf_heading_rmse * 1.15
     ), f"UKF heading RMSE {np.degrees(ukf_heading_rmse):.1f}° worse than EKF {np.degrees(ekf_heading_rmse):.1f}°"

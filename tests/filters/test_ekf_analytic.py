@@ -666,5 +666,5 @@ def test_ekf_long_dropout_drift(ekf_config):
     # Diagnostic: Print actual drift for tracking tuning progress
     print(f"\n  Dropout drift: {drift_cm:.1f} cm (PRD target: 15 cm, current: 150 cm bound)")
     print(
-        f"  Bias convergence: gyro error = {bias_gyro_error*1000:.1f} millirad/s (target: near 0)"
+        f"  Bias convergence: gyro error = {bias_gyro_error * 1000:.1f} millirad/s (target: near 0)"
     )

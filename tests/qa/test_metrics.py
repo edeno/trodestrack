@@ -398,11 +398,11 @@ def test_within_envelope_basic():
 
     # With 95% confidence, expect ~95% within bounds
     pct = within_envelope(values, df=df, confidence=0.95)
-    assert 0.93 < pct < 0.97, f"Expected ~95%, got {pct*100:.1f}%"
+    assert 0.93 < pct < 0.97, f"Expected ~95%, got {pct * 100:.1f}%"
 
     # With 99% confidence, expect ~99% within bounds
     pct_99 = within_envelope(values, df=df, confidence=0.99)
-    assert 0.97 < pct_99 < 1.0, f"Expected ~99%, got {pct_99*100:.1f}%"
+    assert 0.97 < pct_99 < 1.0, f"Expected ~99%, got {pct_99 * 100:.1f}%"
     assert pct_99 > pct, "99% envelope should contain more values than 95%"
 
 

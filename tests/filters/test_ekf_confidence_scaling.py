@@ -79,9 +79,9 @@ def test_high_confidence_pulls_mean_more(ekf_config, initial_state):
     dist_high = jnp.linalg.norm(state_high.mean[:2] - jnp.array([0.52, 0.5]))
     dist_low = jnp.linalg.norm(state_low.mean[:2] - jnp.array([0.52, 0.5]))
 
-    assert dist_high < dist_low, (
-        f"High confidence should be closer to observation: " f"{dist_high:.6f} vs {dist_low:.6f}"
-    )
+    assert (
+        dist_high < dist_low
+    ), f"High confidence should be closer to observation: {dist_high:.6f} vs {dist_low:.6f}"
 
 
 def test_zero_confidence_smaller_update_than_high(ekf_config, initial_state):

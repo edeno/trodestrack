@@ -97,7 +97,7 @@ def create_diagnostic_video(
     log.info(f"Preparing video data (fps={fps}, speedup={speedup:.1f}x)...")
     video_data = prepare_video_data(sim_data, fps=fps, speedup=speedup)
     n_frames = video_data["n_frames"]
-    log.info(f"  {n_frames} frames to render ({n_frames/fps:.1f}s video)")
+    log.info(f"  {n_frames} frames to render ({n_frames / fps:.1f}s video)")
 
     # Create figure with 16:9 aspect ratio (standard for video)
     # Following Tufte's small multiples: use consistent grid for maximum information density
@@ -435,8 +435,7 @@ def create_diagnostic_video(
         )
     # Overall title (includes frame rate for temporal context)
     title_str = (
-        f"Diagnostic Video | {config.duration_s:.0f}s simulation | "
-        f"{speedup:.1f}x speed | {fps} fps"
+        f"Diagnostic Video | {config.duration_s:.0f}s simulation | {speedup:.1f}x speed | {fps} fps"
     )
     fig.suptitle(title_str, fontsize=11, fontweight="normal", y=0.98)
 

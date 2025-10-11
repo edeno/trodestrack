@@ -369,10 +369,9 @@ class TestDragPhysicalRealism:
             # Higher drag -> more decay
             decay_fraction = speed_final / v0
             # With drag_fwd, expect significant decay over 3s
-            assert decay_fraction < 0.8, (
-                f"{description}: Should have significant decay: "
-                f"decay_fraction={decay_fraction:.3f}"
-            )
+            assert (
+                decay_fraction < 0.8
+            ), f"{description}: Should have significant decay: decay_fraction={decay_fraction:.3f}"
 
     def test_anisotropic_drag_energy_dissipation(self):
         """Verify anisotropic drag dissipates energy correctly."""

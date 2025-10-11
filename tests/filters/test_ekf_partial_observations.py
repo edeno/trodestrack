@@ -165,10 +165,9 @@ def test_update_covariance_reduction_dual_vs_single():
     dual_pos_var = jnp.trace(state_dual.cov[:2, :2])
     single_pos_var = jnp.trace(state_single.cov[:2, :2])
 
-    assert dual_pos_var < single_pos_var, (
-        f"Dual-LED variance {dual_pos_var} should be less than "
-        f"single-LED variance {single_pos_var}"
-    )
+    assert (
+        dual_pos_var < single_pos_var
+    ), f"Dual-LED variance {dual_pos_var} should be less than single-LED variance {single_pos_var}"
 
 
 def test_update_no_extreme_artifacts(ekf_config, initial_state):

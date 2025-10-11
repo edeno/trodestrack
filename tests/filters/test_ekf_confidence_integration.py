@@ -95,7 +95,7 @@ def test_low_confidence_increases_uncertainty() -> None:
     # Low confidence should result in >2x larger position variance
     assert var_low > 2.0 * var_high, (
         f"Low confidence should increase variance: "
-        f"high={var_high:.6f}, low={var_low:.6f}, ratio={var_low/var_high:.2f}"
+        f"high={var_high:.6f}, low={var_low:.6f}, ratio={var_low / var_high:.2f}"
     )
 
 

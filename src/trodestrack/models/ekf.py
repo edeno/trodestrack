@@ -112,8 +112,6 @@ class EKFResult(NamedTuple):
 # =============================================================================
 # Utility Functions
 # =============================================================================
-# NOTE: make_led_selector() and apply_lifted_inverse() are now imported
-# from filter_common.py to share with UKF
 
 
 def estimate_led_spacing(
