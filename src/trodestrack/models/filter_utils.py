@@ -43,28 +43,31 @@ def compute_imu_index_arrays(t_imu: np.ndarray, t_cam: np.ndarray) -> jnp.ndarra
         >>> # Frame 1: [0, 1] (IMU at 0.005, 0.010)
         >>> # Frame 2: [2, 3] (IMU at 0.015, 0.020)
     """
-    # Compute max IMU samples per frame
-    cuts = np.searchsorted(t_imu, t_cam)
-    counts = np.diff(np.r_[0, cuts])
-    max_imu_per_frame = int(counts.max())
-
     n_cam = len(t_cam)
     all_indices = []
 
+    # First pass: collect all valid index arrays to find max length
     for i in range(n_cam):
         if i == 0:
             # First frame: no IMU propagation
-            indices = np.full(max_imu_per_frame, -1, dtype=np.int32)
+            valid_indices = np.array([], dtype=np.int32)
         else:
             # Find IMU samples in (t_prev, t_current]
             mask = (t_imu > t_cam[i - 1]) & (t_imu <= t_cam[i])
             valid_indices = np.nonzero(mask)[0]
 
-            # Pad to max length
-            indices = np.full(max_imu_per_frame, -1, dtype=np.int32)
-            indices[: len(valid_indices)] = valid_indices
+        all_indices.append(valid_indices)
 
-        all_indices.append(indices)
+    # Compute max length from actual data
+    max_imu_per_frame = max(len(idx) for idx in all_indices)
+
+    # Second pass: pad all arrays to max length
+    padded_indices = []
+    for valid_indices in all_indices:
+        indices = np.full(max_imu_per_frame, -1, dtype=np.int32)
+        if len(valid_indices) > 0:
+            indices[: len(valid_indices)] = valid_indices
+        padded_indices.append(indices)
 
     # Convert to JAX array for device use
-    return jnp.array(all_indices, dtype=jnp.int32)
+    return jnp.array(padded_indices, dtype=jnp.int32)

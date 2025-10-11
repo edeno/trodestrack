@@ -159,10 +159,9 @@ def rts_smoother(
         imu_indices = imu_index_arrays[t_idx + 1]
 
         # Blackout-aware noise scaling
-        # Check if either frame k or k+1 is in blackout
-        in_blackout = (mask_cam_jax is not None) and (
-            (~mask_cam_jax[t_idx]) | (~mask_cam_jax[t_idx + 1])
-        )
+        # Use target-frame rule to match forward filter behavior
+        # Apply blackout scaling based on vision availability at target frame (t_idx+1)
+        in_blackout = (mask_cam_jax is not None) and (~mask_cam_jax[t_idx + 1])
 
         def propagate_one_imu(carry, imu_idx):
             """Propagate through one IMU sample."""
@@ -443,10 +442,9 @@ def sigma_point_smoother(
         imu_indices = imu_index_arrays[t_idx + 1]
 
         # Blackout-aware noise scaling (mirrors EKF RTS smoother)
-        # Check if either frame k or k+1 is in blackout
-        in_blackout = (mask_cam_jax is not None) and (
-            (~mask_cam_jax[t_idx]) | (~mask_cam_jax[t_idx + 1])
-        )
+        # Use target-frame rule to match forward filter behavior
+        # Apply blackout scaling based on vision availability at target frame (t_idx+1)
+        in_blackout = (mask_cam_jax is not None) and (~mask_cam_jax[t_idx + 1])
 
         # Compute cross-covariance between filtered[k] and predicted[k+1]
         # by propagating sigma points through all IMU steps.

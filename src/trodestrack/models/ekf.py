@@ -34,7 +34,7 @@ from typing import NamedTuple
 
 import jax.numpy as jnp
 import numpy as np
-from jax import jacfwd, lax
+from jax import jacfwd, lax, vmap
 
 from trodestrack.models.filter_common import (
     FilterCoreConfig,
@@ -192,6 +192,96 @@ def predict_step(
     return EKFState(mean=m_pred, cov=P_pred)
 
 
+# =============================================================================
+# Update Step Helpers
+# =============================================================================
+
+
+def _prepare_camera_observations(
+    z_led1: jnp.ndarray,
+    z_led2: jnp.ndarray,
+    pre_z_obs_full: jnp.ndarray | None,
+    pre_led1_valid: bool | None,
+    pre_led2_valid: bool | None,
+) -> tuple[jnp.ndarray, jnp.ndarray, bool, bool]:
+    """Prepare camera observations for update step.
+
+    Checks LED validity and constructs observation vector and mask.
+
+    Args:
+        z_led1: LED1 observation [x, y]
+        z_led2: LED2 observation [x, y]
+        pre_z_obs_full: Precomputed concatenated observations (optional)
+        pre_led1_valid: Precomputed LED1 validity (optional)
+        pre_led2_valid: Precomputed LED2 validity (optional)
+
+    Returns:
+        Tuple of (z_obs_full, obs_mask, led1_valid, led2_valid)
+            - z_obs_full: (4,) concatenated observations
+            - obs_mask: (4,) validity mask
+            - led1_valid: LED1 validity flag
+            - led2_valid: LED2 validity flag
+    """
+    # Check which LEDs are valid (use precomputed if provided)
+    led1_valid = pre_led1_valid if pre_led1_valid is not None else jnp.isfinite(z_led1[0])
+    led2_valid = pre_led2_valid if pre_led2_valid is not None else jnp.isfinite(z_led2[0])
+
+    # Build observation vector (use precomputed if provided)
+    z_obs_full = pre_z_obs_full if pre_z_obs_full is not None else jnp.concatenate([z_led1, z_led2])
+
+    # Construct observation mask
+    obs_mask = jnp.array([led1_valid, led1_valid, led2_valid, led2_valid])
+
+    return z_obs_full, obs_mask, led1_valid, led2_valid
+
+
+def _compute_lifted_joseph_covariance(
+    P_iter: jnp.ndarray,
+    H4: jnp.ndarray,
+    S4: jnp.ndarray,
+    both_leds: bool,
+    only_led1: bool,
+    only_led2: bool,
+) -> jnp.ndarray:
+    """Compute Joseph-form covariance update using lifted subspace operator.
+
+    Uses the alternative formulation:
+        P⁺ = P - PH^T S^{-1} HP
+
+    which is equivalent to the standard Joseph form but works naturally with
+    the lifted subspace operator.
+
+    Args:
+        P_iter: Current covariance (n, n)
+        H4: Measurement Jacobian (4, n)
+        S4: Innovation covariance (4, 4)
+        both_leds: Both LEDs valid flag
+        only_led1: Only LED1 valid flag
+        only_led2: Only LED2 valid flag
+
+    Returns:
+        Updated covariance (n, n)
+    """
+    HP = H4 @ P_iter  # (4, n)
+    PH_t = P_iter @ H4.T  # (n, 4)
+
+    # Vectorized application of lifted inverse to columns of HP
+    # Uses vmap for cleaner, more JAX-idiomatic code
+    def apply_inv_to_col(col: jnp.ndarray) -> jnp.ndarray:
+        """Apply S_eff⁻¹ to a column vector."""
+        return apply_lifted_inverse(S4, col, both_leds, only_led1, only_led2)
+
+    # Vectorize over columns (axis 1)
+    inv_S_HP = vmap(apply_inv_to_col, in_axes=1, out_axes=1)(HP)  # (4, n)
+
+    # Complete Joseph form
+    PH_t_inv_S_HP = PH_t @ inv_S_HP  # (n, n)
+    P_upd = P_iter - PH_t_inv_S_HP
+    P_upd = symmetrize(P_upd)
+
+    return P_upd
+
+
 def update_step(
     state: EKFState,
     z_led1: jnp.ndarray,
@@ -242,21 +332,9 @@ def update_step(
 
     # If valid observation, perform update
     def do_update(m, P):
-        # Check which LEDs are valid (use precomputed if provided)
-        led1_valid = pre_led1_valid if pre_led1_valid is not None else jnp.isfinite(z_led1[0])
-        led2_valid = pre_led2_valid if pre_led2_valid is not None else jnp.isfinite(z_led2[0])
-
-        # Build observation vector and mask (use precomputed if provided)
-        z_obs_full = (
-            pre_z_obs_full if pre_z_obs_full is not None else jnp.concatenate([z_led1, z_led2])
-        )
-        obs_mask = jnp.array(
-            [
-                led1_valid,
-                led1_valid,
-                led2_valid,
-                led2_valid,
-            ]
+        # Prepare camera observations using helper
+        z_obs_full, obs_mask, led1_valid, led2_valid = _prepare_camera_observations(
+            z_led1, z_led2, pre_z_obs_full, pre_led1_valid, pre_led2_valid
         )
 
         # If no valid observations, return prediction with zero log-likelihood
@@ -314,9 +392,8 @@ def update_step(
 
                 # Kalman update without forming K explicitly
                 # δx = (P H^T) @ v
-                n = m_iter.shape[0]
                 PH_t = P_iter @ H4.T  # (n, 4)
-                delta_x = PH_t @ v  # (8,)
+                delta_x = PH_t @ v  # (n,)
 
                 # Update mean
                 m_upd = m_iter + delta_x
@@ -325,23 +402,10 @@ def update_step(
                 h_idx_local = get_heading_index(get_layout(config.state_mode))
                 m_upd = m_upd.at[h_idx_local].set(wrap_angle(m_upd[h_idx_local]))
 
-                # Joseph form covariance update via alternative formulation
-                # P⁺ = P - PH^T S^{-1} HP (equivalent to (I - KH)P(I - KH)^T + KRK^T)
-                # This formulation works naturally with the lifted subspace operator
-                HP = H4 @ P_iter  # (4, n)
-
-                def apply_inv_to_col(col_idx):
-                    """Apply S_eff⁻¹ to column of HP."""
-                    col = HP[:, col_idx]
-                    return apply_lifted_inverse(S4, col, both_leds, only_led1, only_led2)
-
-                # Stack inverse-transformed columns
-                inv_S_HP = jnp.stack([apply_inv_to_col(i) for i in range(n)], axis=1)  # (4, n)
-
-                # Complete Joseph form
-                PH_t_inv_S_HP = PH_t @ inv_S_HP  # (n, n)
-                P_upd = P_iter - PH_t_inv_S_HP
-                P_upd = symmetrize(P_upd)
+                # Joseph form covariance update using helper (vectorized with vmap)
+                P_upd = _compute_lifted_joseph_covariance(
+                    P_iter, H4, S4, both_leds, only_led1, only_led2
+                )
 
                 return (m_upd, P_upd), (S4, innov_4, both_leds, only_led1, only_led2)
 

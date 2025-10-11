@@ -349,6 +349,50 @@ def predict_step(
     return UKFState(mean=m_pred, cov=P_pred)
 
 
+# =============================================================================
+# Update Step Helpers
+# =============================================================================
+
+
+def _prepare_ukf_camera_observations(
+    z_led1: jnp.ndarray,
+    z_led2: jnp.ndarray,
+    pre_z_obs_full: jnp.ndarray | None,
+    pre_led1_valid: bool | None,
+    pre_led2_valid: bool | None,
+) -> tuple[jnp.ndarray, bool, bool]:
+    """Prepare camera observations for UKF update step.
+
+    UKF version replaces NaN with 0 to avoid propagation through sigma point transforms.
+
+    Args:
+        z_led1: LED1 observation [x, y]
+        z_led2: LED2 observation [x, y]
+        pre_z_obs_full: Precomputed concatenated observations (optional)
+        pre_led1_valid: Precomputed LED1 validity (optional)
+        pre_led2_valid: Precomputed LED2 validity (optional)
+
+    Returns:
+        Tuple of (z_obs_full, led1_valid, led2_valid)
+            - z_obs_full: (4,) concatenated observations (NaN → 0)
+            - led1_valid: LED1 validity flag
+            - led2_valid: LED2 validity flag
+    """
+    # Check which LEDs are valid (use precomputed if provided)
+    led1_valid = pre_led1_valid if pre_led1_valid is not None else jnp.isfinite(z_led1[0])
+    led2_valid = pre_led2_valid if pre_led2_valid is not None else jnp.isfinite(z_led2[0])
+
+    # Build observation vector (replace NaN with 0 to avoid propagation)
+    if pre_z_obs_full is not None:
+        z_obs_full = pre_z_obs_full
+    else:
+        z_led1_clean = jnp.where(jnp.isfinite(z_led1), z_led1, 0.0)
+        z_led2_clean = jnp.where(jnp.isfinite(z_led2), z_led2, 0.0)
+        z_obs_full = jnp.concatenate([z_led1_clean, z_led2_clean])
+
+    return z_obs_full, led1_valid, led2_valid
+
+
 def update_step(
     state: UKFState,
     z_led1: jnp.ndarray,
@@ -397,17 +441,10 @@ def update_step(
 
     # If valid observation, perform update
     def do_update(m, P):
-        # Check which LEDs are valid (use precomputed if provided)
-        led1_valid = pre_led1_valid if pre_led1_valid is not None else jnp.isfinite(z_led1[0])
-        led2_valid = pre_led2_valid if pre_led2_valid is not None else jnp.isfinite(z_led2[0])
-
-        # Build observation vector (replace NaN with 0 to avoid propagation)
-        if pre_z_obs_full is not None:
-            z_obs_full = pre_z_obs_full
-        else:
-            z_led1_clean = jnp.where(jnp.isfinite(z_led1), z_led1, 0.0)
-            z_led2_clean = jnp.where(jnp.isfinite(z_led2), z_led2, 0.0)
-            z_obs_full = jnp.concatenate([z_led1_clean, z_led2_clean])
+        # Prepare camera observations using helper
+        z_obs_full, led1_valid, led2_valid = _prepare_ukf_camera_observations(
+            z_led1, z_led2, pre_z_obs_full, pre_led1_valid, pre_led2_valid
+        )
 
         # If no valid LEDs, skip update
         def no_leds_update(m_in, P_in):
