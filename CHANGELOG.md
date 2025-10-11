@@ -2,6 +2,72 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-10 - QA Plotting Utilities (Milestone 4)
+
+**Added:**
+- **QA Plotting Module** (`src/trodestrack/qa/plots.py`, 534 lines, 6 functions)
+  - `plot_residuals()` - Multi-dimensional residual time series with optional confidence bands
+    - Supports 2D position, 4D dual-LED, or arbitrary dimension residuals
+    - Optional ±σ confidence bands for whiteness checks
+    - Custom dimension labels and ylabel
+  - `plot_position_error()` - Euclidean position error over time
+    - Optional PRD threshold line (default: 0.02 m = 2 cm)
+    - Validity mask support for dropout periods
+  - `plot_velocity_error()` - Euclidean velocity error over time
+    - Validity mask support for dropout periods
+  - `plot_nees_histogram()` - NEES distribution with chi-squared bounds
+    - Chi-squared confidence intervals (default: 95%)
+    - Mean NEES vertical line for quick assessment
+    - State dimensionality configurable (2, 4, 5, 8, etc.)
+  - `plot_nis_histogram()` - NIS distribution with chi-squared bounds
+    - Chi-squared confidence intervals (default: 95%)
+    - Mean NIS vertical line for quick assessment
+    - Measurement dimensionality configurable (2, 4, etc.)
+  - `plot_covariance_ellipse()` - 2D uncertainty ellipses at multiple sigma levels
+    - Eigenvalue decomposition for proper rotation and scaling
+    - Configurable sigma levels (default: [1, 2, 3])
+    - Optional trajectory overlay
+    - Singular covariance detection with clear error messages
+
+**Comprehensive Test Suite** (`tests/qa/test_plots.py`, 337 lines, 21 tests):
+- Basic plot creation and structure validation
+- Confidence bands and PRD threshold rendering
+- Shape validation and error handling
+- Custom labels and parameters
+- Edge cases: singular covariance, validity masks, 1D arrays
+- Integration test: full QA workflow combining all plot types
+- All 21 tests passing
+
+**Code Quality:**
+- Type hints: mypy clean (0 errors, 100% coverage)
+- Code style: ruff clean, black formatted
+- Documentation: NumPy-style docstrings with examples and notes
+- Integration: Uses `chi2_bounds` from `qa/metrics.py`, `COLORS` from `viz/styles.py`
+
+**API Updates:**
+- Added plot function exports to `qa/__init__.py`
+- Users can now `from trodestrack.qa import plot_residuals` (etc.)
+- Consistent return type: `tuple[Figure, Axes]` or `tuple[Figure, list[Axes]]`
+
+**Features:**
+- Tufte/Gelman visualization principles (minimal chartjunk, clean layouts)
+- Color-blind safe ColorBrewer palette
+- SI units throughout (meters, m/s, radians)
+- PRD compliance: threshold lines for acceptance criteria visualization
+- Proper handling of NaN, dropouts, and singular covariances
+
+**Mathematical Correctness:**
+- Covariance ellipse geometry verified (eigenvalue decomposition)
+- Chi-squared bounds verified against scipy.stats.chi2
+- All geometric transformations tested (rotation, scaling, aspect ratio)
+
+**Task Progress:**
+- ✅ Milestone 4: `qa/plots.py` complete (TASKS.md line 284)
+- ✅ Code reviewed and approved (APPROVE WITH COMMENTS)
+- 🔴 Remaining M4: `qa/report.py` and CLI command (not started)
+
+---
+
 ### Session: 2025-10-10 - Throughput Benchmark Tests (Milestone 4)
 
 **Added:**

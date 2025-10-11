@@ -281,7 +281,11 @@
 
 - [x] `qa/metrics.py` – RMSE, NEES, NIS computations
   - [x] Comprehensive test suite (33 tests, 92% coverage)
-- [ ] `qa/plots.py` – residuals, NEES histograms, covariance ellipses
+- [x] `qa/plots.py` – residuals, NEES histograms, covariance ellipses **[CODE_REVIEWED: 2025-10-10]**
+  - [x] Comprehensive test suite (21 tests, all passing)
+  - [x] All functions exported in qa/**init**.py
+  - [x] Type hints complete (mypy clean)
+  - [x] Code quality checks passed (ruff, black)
 - [ ] `qa/report.py` – summary PDF of metrics, configuration, and plots
 - [ ] Add CLI command:
 

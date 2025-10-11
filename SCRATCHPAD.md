@@ -2,6 +2,127 @@
 
 Development notes and debugging history for trodestrack project.
 
+## 2025-10-10 - QA Plotting Utilities Implemented
+
+### Summary
+
+Implemented comprehensive visualization tools for filter diagnostics (Milestone 4):
+- Residual time series with confidence bands
+- Position and velocity error plots with PRD thresholds
+- NEES/NIS histograms with chi-squared bounds
+- Covariance ellipses for uncertainty visualization
+
+### Implementation Details
+
+**Files Created:**
+- `src/trodestrack/qa/plots.py` (534 lines, 6 functions)
+- `tests/qa/test_plots.py` (337 lines, 21 tests)
+
+**Functions Implemented:**
+1. `plot_residuals()` - Multi-dimensional residual time series with confidence bands
+2. `plot_position_error()` - Euclidean position error with PRD threshold line
+3. `plot_velocity_error()` - Euclidean velocity error
+4. `plot_nees_histogram()` - NEES distribution with chi-squared bounds
+5. `plot_nis_histogram()` - NIS distribution with chi-squared bounds
+6. `plot_covariance_ellipse()` - 2D uncertainty ellipses (1σ, 2σ, 3σ)
+
+### Key Features
+
+**Style & Consistency:**
+- Follows Tufte/Gelman principles (minimal chartjunk, maximum data-ink ratio)
+- Uses ColorBrewer palette from `viz/styles.py` (color-blind safe)
+- Consistent with existing visualization patterns
+- SI units throughout (meters, m/s, radians)
+
+**Mathematical Correctness:**
+- Covariance ellipse: Eigenvalue decomposition for proper rotation and scaling
+- Chi-squared bounds: Integrates with `qa/metrics.chi2_bounds()`
+- Singular covariance handling: Raises clear error for rank-deficient matrices
+
+**User Experience:**
+- Clear default labels with dimension-specific customization
+- Optional confidence bands and PRD threshold lines
+- Validity mask support for dropout handling
+- Comprehensive error messages for shape mismatches
+
+### Test Coverage
+
+**21 tests covering:**
+- Basic plot creation and structure
+- Confidence bands and PRD thresholds
+- Shape validation and error handling
+- Custom labels and parameters
+- Edge cases (singular covariance, masks)
+- Integration workflow (all plots together)
+
+**All tests passing** (verified with pytest, mypy, ruff, black)
+
+### Code Review Results
+
+**Review Status:** APPROVE WITH COMMENTS (all critical issues addressed)
+
+**Fixed Issues:**
+1. Type hint compatibility (3 mypy warnings):
+   - Line 313: Cast `np.mean(nees)` to `float()`
+   - Line 394: Cast `np.mean(nis)` to `float()`
+   - Line 502: Convert `mean` array to `tuple(mean)` for Ellipse
+2. Module exports: Added all plot functions to `qa/__init__.py`
+
+**Quality Metrics:**
+- Type safety: mypy clean (0 errors)
+- Code style: ruff clean, black formatted
+- Documentation: NumPy-style docstrings with examples
+- Test coverage: 21/21 passing
+
+### Integration
+
+**Imports:**
+- `chi2_bounds` from `qa/metrics.py`
+- `COLORS`, `apply_tufte_style` from `viz/styles.py`
+- Matplotlib patches (Ellipse) for covariance visualization
+
+**Exports (qa/__init__.py):**
+```python
+from trodestrack.qa import (
+    plot_residuals,
+    plot_position_error,
+    plot_velocity_error,
+    plot_nees_histogram,
+    plot_nis_histogram,
+    plot_covariance_ellipse,
+)
+```
+
+### Usage Examples
+
+**Residual plot with confidence:**
+```python
+fig, axes = plot_residuals(t, residuals, confidence_std=0.01)
+fig.savefig("residuals.png", dpi=150, bbox_inches="tight")
+```
+
+**Position error with PRD threshold:**
+```python
+fig, ax = plot_position_error(t, pos_true, pos_est, prd_threshold_m=0.02)
+```
+
+**NEES consistency check:**
+```python
+fig, ax = plot_nees_histogram(nees, state_dim=8, confidence=0.95)
+```
+
+**Covariance ellipse:**
+```python
+fig, ax = plot_covariance_ellipse(mean, cov, n_std=[1, 2, 3], trajectory=trajectory)
+```
+
+### Next Steps
+
+- `qa/report.py` - PDF report generation (next task in Milestone 4)
+- CLI command: `trodestrack report --run run1/ --pdf report.pdf`
+
+---
+
 ## 2025-10-10 - Throughput Benchmark Tests Implemented
 
 ### Summary
