@@ -125,35 +125,32 @@ def simulate_stationary(
     """Simulate stationary rat with no motion.
 
     Ground truth: constant position, zero velocity, constant heading.
-    IMU measures: specific force (f = a - g) in body frame + noise + bias.
-        For level-mounted IMU with no motion: f_x = f_y ≈ 0 (gravity is along Z).
-    Camera measures: fixed position + noise.
+    IMU measures specific force f = a − g in body frame; for a level-mounted
+    IMU without motion, f_x ≈ f_y ≈ 0 (gravity is along Z). The camera measures
+    fixed position with Gaussian noise and optional dropouts.
 
-    Args:
-        config: Simulation configuration
-        position: Initial position [x, y] in meters (default: [0.5, 0.5])
-        heading: Heading angle in radians (default: 0.0)
-        seed: Random seed for reproducibility
+    Parameters
+    ----------
+    config : SimpleSimConfig, optional
+        Simulation configuration (defaults used if None).
+    position : np.ndarray | None, optional
+        Initial position [x, y] (m). Default [0.5, 0.5].
+    heading : float, default 0.0
+        Heading angle (rad).
+    seed : int, default 0
+        Random seed for reproducibility.
 
-    Returns:
-        Dictionary with same structure as simulate_rat_imu():
-        - t_imu: IMU timestamps (N_imu,)
-        - t_cam_exp: Camera exposure times (N_cam,)
-        - t_cam_obs: Camera observation times (N_cam,)
-        - X_truth: State [x, y, vx, vy, θ] (N_imu, 5)
-        - U_imu: IMU [ω_z, a_x, a_y] (N_imu, 3)
-        - Z_cam_led1: Camera observations [x, y] (N_cam, 2)
-        - mask_cam: Valid detection mask (N_cam,)
-        - bias_gyro: Constant gyro bias (scalar)
-        - bias_accel_x: Constant accel X bias (scalar)
-        - bias_accel_y: Constant accel Y bias (scalar)
-        - config: Simulation config object
+    Returns
+    -------
+    SimOut
+        Simulation output dict; keys include `t_imu` (N_imu,), `t_cam_exp` (N_cam,),
+        `X_truth` (N_imu, 5) [x, y, vx, vy, θ], `U_imu` (N_imu, 3) [ω_z, a_x, a_y],
+        `Z_cam_led1` (N_cam, 2), `mask_cam` (N_cam,), biases, and metadata.
 
-    Note:
-        This simulation is ideal for testing:
-        - Measurement update logic
-        - Steady-state covariance
-        - Bias estimation with no motion
+    Notes
+    -----
+    Useful for testing measurement updates, steady-state covariance, and bias
+    estimation in the absence of motion.
     """
     if config is None:
         config = SimpleSimConfig()
@@ -269,26 +266,30 @@ def simulate_constant_velocity(
 ) -> SimOut:
     """Simulate constant velocity motion (straight line).
 
-    Ground truth: linear trajectory, constant velocity, constant heading.
-    IMU measures: specific force (f = a - g) in body frame + noise + bias.
-        For level-mounted IMU with constant velocity: f_x = f_y ≈ 0 (no acceleration, gravity along Z).
-    Camera measures: moving position + noise.
+    Ground truth: x(t) = x0 + v t with constant heading aligned to velocity.
+    For a level-mounted IMU with constant velocity, specific force in the body
+    plane is near zero (gravity along Z).
 
-    Args:
-        config: Simulation configuration
-        initial_position: Starting position [x, y] in meters (default: [0.1, 0.1])
-        velocity: Constant velocity [vx, vy] in m/s (default: [0.2, 0.1])
-        seed: Random seed for reproducibility
+    Parameters
+    ----------
+    config : SimpleSimConfig, optional
+        Simulation configuration (defaults used if None).
+    initial_position : np.ndarray | None, optional
+        Starting position [x, y] (m). Default [0.1, 0.1].
+    velocity : np.ndarray | None, optional
+        Constant velocity [vx, vy] (m/s). Default [0.2, 0.1].
+    seed : int, default 0
+        Random seed.
 
-    Returns:
-        Dictionary with same structure as simulate_rat_imu()
+    Returns
+    -------
+    SimOut
+        Simulation output dict (same structure as simulate_rat_imu()).
 
-    Note:
-        This simulation is ideal for testing:
-        - Prediction step (constant velocity model)
-        - Position integration
-        - Time alignment between IMU and camera
-        - Covariance propagation without process noise
+    Notes
+    -----
+    Useful for testing prediction, position integration, IMU-camera alignment,
+    and covariance propagation in low-acceleration regimes.
     """
     if config is None:
         config = SimpleSimConfig()
@@ -412,34 +413,32 @@ def simulate_circular(
 ) -> SimOut:
     """Simulate circular motion with constant angular velocity.
 
-    Ground truth: circular trajectory, tangential velocity, rotating heading.
-    IMU measures: specific force (f = a - g) in body frame + noise + bias.
-        For level-mounted IMU: f = centripetal acceleration rotated to body frame (gravity is along Z).
-    Camera measures: moving position on circle + noise.
+    Ground truth follows x(t)=x_c+r cos(ωt), y(t)=y_c+r sin(ωt), heading θ(t)=ωt+π/2
+    (tangent). IMU measures specific force f=a−g; with level mounting, f is the
+    centripetal acceleration rotated to body frame (gravity along Z).
 
-    Args:
-        config: Simulation configuration
-        center: Circle center [x, y] in meters (default: [0.5, 0.5])
-        radius: Circle radius in meters (default: 0.3 m)
-        angular_velocity: Angular velocity in rad/s (default: 1.0 rad/s = 57.3°/s)
-        seed: Random seed for reproducibility
+    Parameters
+    ----------
+    config : SimpleSimConfig, optional
+        Simulation configuration.
+    center : np.ndarray | None, optional
+        Circle center [x, y] (m). Default [0.5, 0.5].
+    radius : float, default 0.3
+        Circle radius (m).
+    angular_velocity : float, default 1.0
+        Angular velocity ω (rad/s).
+    seed : int, default 0
+        Random seed.
 
-    Returns:
-        Dictionary with same structure as simulate_rat_imu()
+    Returns
+    -------
+    SimOut
+        Simulation output dict (same structure as simulate_rat_imu()).
 
-    Note:
-        This simulation is ideal for testing:
-        - Gyroscope integration (heading changes)
-        - Centripetal acceleration handling
-        - Heading measurement from velocity
-        - Nonlinear dynamics (circular motion)
-
-        Kinematics:
-            x(t) = x_c + r*cos(ωt)
-            y(t) = y_c + r*sin(ωt)
-            θ(t) = ωt + π/2  (tangent to circle)
-            v = rω (tangential speed)
-            a_c = v²/r = rω² (centripetal acceleration toward center)
+    Notes
+    -----
+    Useful for testing gyro integration, centripetal acceleration handling,
+    heading observability, and NIS/NEES behavior under curved motion.
     """
     if config is None:
         config = SimpleSimConfig()

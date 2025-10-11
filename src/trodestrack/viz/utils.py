@@ -12,32 +12,34 @@ def prepare_video_data(
 ) -> dict[str, np.ndarray | int]:
     """Interpolate simulation data to video frame times.
 
-    Handles different sampling rates:
-    - IMU: typically 200+ Hz
-    - Camera: typically 30 Hz
-    - Video: target fps (e.g., 30 fps)
+    Handles differing sampling rates for IMU (e.g., 200 Hz), camera (e.g., 30 Hz),
+    and target video frame rate.
 
-    Args:
-        sim_data: Simulation output dictionary
-        fps: Target video frame rate (frames per second)
-        speedup: Playback speed multiplier (>1 = faster, <1 = slower)
+    Parameters
+    ----------
+    sim_data : SimOut
+        Simulation output dictionary (from sim module).
+    fps : int, default 30
+        Target video frame rate (frames per second).
+    speedup : float, default 1.0
+        Playback speed multiplier (>1 = faster, <1 = slower).
 
-    Returns:
-        Dictionary with interpolated data at video frame times:
-            t_video: (n_frames,) Video frame timestamps
-            X_truth: (n_frames, 5) Ground truth state [x, y, vx, vy, θ]
-            U_imu: (n_frames, 3) IMU measurements [gyro, accel_x, accel_y]
-            bias_gyro: (n_frames,) Gyro bias
-            bias_accel_x: (n_frames,) Accel X bias
-            bias_accel_y: (n_frames,) Accel Y bias
-            cam_idx: (n_frames,) Indices into camera arrays (nearest-neighbor)
-            fps: Target fps
-            n_frames: Total number of frames
+    Returns
+    -------
+    dict
+        Interpolated data at video frame times with keys:
+        - t_video: (n_frames,) timestamps
+        - X_truth: (n_frames, 5) [x, y, vx, vy, θ]
+        - U_imu: (n_frames, 3) [ω_z, a_x, a_y]
+        - bias_gyro, bias_accel_x, bias_accel_y: (n_frames,)
+        - cam_idx: (n_frames,) nearest camera indices
+        - fps: int, n_frames: int
 
-    Note:
-        - Position/velocity: linear interpolation
-        - Heading: angle-aware interpolation (wraps at ±π)
-        - Camera events (dropouts, swaps): nearest-neighbor (discrete)
+    Notes
+    -----
+    - Position/velocity: linear interpolation
+    - Heading: unwrap → interp → rewrap
+    - Camera events (dropouts, swaps): nearest-neighbor
     """
     # Determine video timeline using arange (not linspace) to avoid off-by-one
     # linspace includes endpoint, giving n_frames-1 intervals → wrong fps

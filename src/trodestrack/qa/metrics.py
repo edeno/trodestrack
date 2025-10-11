@@ -26,13 +26,19 @@ def compute_position_rmse(
 ) -> float:
     """Compute root mean square error for 2D position estimates.
 
-    Args:
-        positions_true: Ground truth positions, shape (N, 2) in meters
-        positions_est: Estimated positions, shape (N, 2) in meters
-        mask: Optional validity mask, shape (N,). Only valid (True) entries used.
+    Parameters
+    ----------
+    positions_true : NDArray[np.float64]
+        Ground truth positions (N, 2) in meters.
+    positions_est : NDArray[np.float64]
+        Estimated positions (N, 2) in meters.
+    mask : NDArray[np.bool_] | None, optional
+        Optional validity mask (N,). Only True entries used.
 
-    Returns:
-        RMSE in meters
+    Returns
+    -------
+    float
+        RMSE in meters.
 
     Example:
         >>> true_pos = np.array([[0.0, 0.0], [1.0, 1.0]])
@@ -82,13 +88,19 @@ def compute_velocity_rmse(
 ) -> float:
     """Compute root mean square error for 2D velocity estimates.
 
-    Args:
-        velocities_true: Ground truth velocities, shape (N, 2) in m/s
-        velocities_est: Estimated velocities, shape (N, 2) in m/s
-        mask: Optional validity mask, shape (N,). Only valid (True) entries used.
+    Parameters
+    ----------
+    velocities_true : NDArray[np.float64]
+        Ground truth velocities (N, 2) in m/s.
+    velocities_est : NDArray[np.float64]
+        Estimated velocities (N, 2) in m/s.
+    mask : NDArray[np.bool_] | None, optional
+        Optional validity mask (N,). Only True entries used.
 
-    Returns:
-        RMSE in m/s
+    Returns
+    -------
+    float
+        RMSE in m/s.
 
     Example:
         >>> true_vel = np.array([[0.10, 0.0], [0.10, 0.0]])
@@ -131,12 +143,17 @@ def compute_heading_error(
 ) -> float:
     """Compute mean absolute heading error with proper angle wrapping.
 
-    Args:
-        headings_true: Ground truth headings, shape (N,) in radians
-        headings_est: Estimated headings, shape (N,) in radians
+    Parameters
+    ----------
+    headings_true : NDArray[np.float64]
+        Ground truth headings (N,) in radians.
+    headings_est : NDArray[np.float64]
+        Estimated headings (N,) in radians.
 
-    Returns:
-        Mean absolute error in radians
+    Returns
+    -------
+    float
+        Mean absolute error in radians.
 
     Example:
         >>> true_heading = np.array([0.0, np.pi/2, np.pi])
@@ -167,12 +184,17 @@ def compute_heading_rmse(
 ) -> float:
     """Compute root mean square heading error with proper angle wrapping.
 
-    Args:
-        headings_true: Ground truth headings, shape (N,) in radians
-        headings_est: Estimated headings, shape (N,) in radians
+    Parameters
+    ----------
+    headings_true : NDArray[np.float64]
+        Ground truth headings (N,) in radians.
+    headings_est : NDArray[np.float64]
+        Estimated headings (N,) in radians.
 
-    Returns:
-        Root mean square error in radians
+    Returns
+    -------
+    float
+        Root mean square error in radians.
 
     Example:
         >>> true_heading = np.array([0.0, np.pi/2, np.pi])
@@ -339,14 +361,20 @@ def compute_nis_stats(
     measurement_dim: int,
     confidence: float = 0.95,
 ) -> dict[str, float]:
-    """Compute summary statistics for NIS consistency check.
+    """Summary statistics for NIS consistency check.
 
-    Args:
-        nis: NIS values per timestep, shape (N,)
-        measurement_dim: Dimension of measurement (degrees of freedom for chi-squared)
-        confidence: Confidence level for chi-squared bounds (default: 0.95 for 95% CI)
+    Parameters
+    ----------
+    nis : NDArray[np.float64]
+        NIS values per timestep (N,).
+    measurement_dim : int
+        Measurement dimension (degrees of freedom for χ²).
+    confidence : float, default 0.95
+        Confidence level for χ² bounds.
 
-    Returns:
+    Returns
+    -------
+    dict[str, float]
         Dictionary with keys:
         - mean: Mean NIS (should be ~measurement_dim for consistent filter)
         - std: Standard deviation
@@ -388,7 +416,7 @@ def compute_residual_autocorrelation(
     residuals: NDArray[np.float64],
     max_lag: int = 10,
 ) -> NDArray[np.float64]:
-    """Compute autocorrelation function (ACF) of residuals to check whiteness.
+    """Autocorrelation function (ACF) of residuals to check whiteness.
 
     For a well-tuned filter, residuals should be white noise (uncorrelated over time).
     Non-zero autocorrelation indicates:
@@ -396,12 +424,17 @@ def compute_residual_autocorrelation(
     - Timing offset between sensors
     - Unmodeled dynamics or correlations
 
-    Args:
-        residuals: Residual time series, shape (N,) or (N, M) for multivariate
-        max_lag: Maximum lag to compute (default: 10)
+    Parameters
+    ----------
+    residuals : NDArray[np.float64]
+        Residual time series, shape (N,) or (N, M) for multivariate.
+    max_lag : int, default 10
+        Maximum lag to compute.
 
-    Returns:
-        Autocorrelation values for lags 0 to max_lag, shape (max_lag+1,) or (M, max_lag+1)
+    Returns
+    -------
+    NDArray[np.float64]
+        Autocorrelation values for lags 0..max_lag, shape (max_lag+1,) or (M, max_lag+1).
 
     Example:
         >>> import numpy as np
@@ -504,14 +537,19 @@ def compute_nees_stats(
 
 
 def chi2_bounds(df: int, confidence: float = 0.95) -> tuple[float, float]:
-    """Compute confidence interval for chi-squared distribution.
+    """Confidence interval for chi-squared distribution.
 
-    Args:
-        df: Degrees of freedom (measurement/state dimensionality)
-        confidence: Confidence level (default: 0.95 for 95% CI)
+    Parameters
+    ----------
+    df : int
+        Degrees of freedom (measurement/state dimensionality).
+    confidence : float, default 0.95
+        Confidence level.
 
-    Returns:
-        Tuple of (lower_bound, upper_bound) for the confidence interval
+    Returns
+    -------
+    tuple[float, float]
+        (lower_bound, upper_bound) for the confidence interval.
 
     Example:
         >>> lower, upper = chi2_bounds(df=2, confidence=0.95)
@@ -579,15 +617,21 @@ def within_envelope(
     df: int,
     confidence: float = 0.95,
 ) -> float:
-    """Compute percentage of values within chi-squared confidence envelope.
+    """Percentage of values within χ² confidence envelope.
 
-    Args:
-        values: Array of chi-squared-distributed values (e.g., NEES or NIS), shape (N,)
-        df: Degrees of freedom (measurement/state dimensionality)
-        confidence: Confidence level (default: 0.95 for 95% CI)
+    Parameters
+    ----------
+    values : NDArray[np.float64]
+        Values distributed approximately as χ² (e.g., NEES or NIS) (N,).
+    df : int
+        Degrees of freedom (measurement/state dimensionality).
+    confidence : float, default 0.95
+        Confidence level.
 
-    Returns:
-        Percentage of values within bounds, in range [0.0, 1.0]
+    Returns
+    -------
+    float
+        Fraction in [0.0, 1.0] within the envelope.
 
     Example:
         >>> import numpy as np
@@ -620,24 +664,27 @@ def compute_dropout_drift(
     t: NDArray[np.float64],
     min_duration_s: float = 5.0,
 ) -> dict[str, float | None]:
-    """Compute position drift during first contiguous dropout block.
+    """Position drift during first contiguous dropout block.
 
     Measures how far the filter drifts during camera occlusion, which is a
     critical PRD requirement: drift should be ≤0.20 m (20 cm) after 5s dropout
     (updated from 0.15 m based on physical IMU drift limits ~3 cm/s).
 
-    Args:
-        positions: Estimated positions over time, shape (N, 2) in meters
-        valid_mask: Camera validity mask, shape (N,). False = dropout
-        t: Timestamps, shape (N,) in seconds
-        min_duration_s: Minimum dropout duration to analyze (default: 5.0s)
+    Parameters
+    ----------
+    positions : NDArray[np.float64]
+        Estimated positions (N, 2) in meters.
+    valid_mask : NDArray[np.bool_]
+        Camera validity mask (N,), False indicates dropout.
+    t : NDArray[np.float64]
+        Timestamps (N,) in seconds.
+    min_duration_s : float, default 5.0
+        Minimum dropout duration to analyze (s).
 
-    Returns:
-        Dictionary with keys:
-        - drift_m: Euclidean drift from start to end of dropout in meters (None if no dropout found)
-        - duration_s: Duration of dropout in seconds (None if no dropout found)
-        - start_idx: Index where dropout starts (None if no dropout found)
-        - end_idx: Index where dropout ends (None if no dropout found)
+    Returns
+    -------
+    dict[str, float | None]
+        Dict with keys: 'drift_m', 'duration_s', 'start_idx', 'end_idx'.
 
     Example:
         >>> # Simulate 10s trajectory with 5s dropout at t=3-8s

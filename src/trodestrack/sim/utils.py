@@ -97,11 +97,15 @@ class SimOut(TypedDict):
 def wrap_angle(a: float | np.ndarray) -> float | np.ndarray:
     """Wrap angle to (-π, π].
 
-    Args:
-        a: Angle(s) in radians
+    Parameters
+    ----------
+    a : float or np.ndarray
+        Angle(s) in radians.
 
-    Returns:
-        Wrapped angle(s) in range (-π, π]
+    Returns
+    -------
+    float or np.ndarray
+        Wrapped angle(s) in range (-π, π].
 
     Example:
         >>> wrap_angle(3.5 * np.pi)
@@ -113,15 +117,21 @@ def wrap_angle(a: float | np.ndarray) -> float | np.ndarray:
 def interp_angle(t_new: np.ndarray, t_old: np.ndarray, angles: np.ndarray) -> np.ndarray:
     """Interpolate wrapped angles using unwrap → interp → rewrap.
 
-    Prevents jumps at ±π discontinuity by unwrapping before interpolation.
+    Prevents jumps at ±π by unwrapping before interpolation and rewrapping.
 
-    Args:
-        t_new: Query timestamps
-        t_old: Sample timestamps
-        angles: Angle values at t_old (wrapped to [-π, π])
+    Parameters
+    ----------
+    t_new : np.ndarray
+        Query timestamps.
+    t_old : np.ndarray
+        Sample timestamps.
+    angles : np.ndarray
+        Angle values at ``t_old`` (wrapped to [-π, π]).
 
-    Returns:
-        Interpolated angles at t_new (wrapped to [-π, π])
+    Returns
+    -------
+    np.ndarray
+        Interpolated angles at ``t_new`` (wrapped to [-π, π]).
 
     Example:
         >>> t_old = np.array([0.0, 1.0, 2.0])
@@ -141,17 +151,22 @@ def interp_angle(t_new: np.ndarray, t_old: np.ndarray, angles: np.ndarray) -> np
 
 
 def density_to_sample_std(noise_density: float, dt: float) -> float:
-    """Convert white noise density (units / √Hz) to discrete-time sample std.
+    """Convert white noise density (units/√Hz) to per-sample std.
 
-    For white noise with power spectral density S₀ (units² / Hz),
-    the discrete-time variance is S₀ / Δt, so std = √(S₀ / Δt).
+    For white noise with spectral density S₀ (units²/Hz), discrete-time
+    variance is S₀/Δt, so std = √(S₀/Δt).
 
-    Args:
-        noise_density: Noise density in units / √Hz
-        dt: Sampling period in seconds
+    Parameters
+    ----------
+    noise_density : float
+        Noise density (units/√Hz).
+    dt : float
+        Sampling period (s).
 
-    Returns:
-        Per-sample standard deviation
+    Returns
+    -------
+    float
+        Per-sample standard deviation (units).
 
     Example:
         >>> density_to_sample_std(0.01, 0.005)  # 0.01 rad/s/√Hz at 200 Hz
@@ -166,19 +181,26 @@ def rw_step(
     dt: float,
     rng: np.random.Generator,
 ) -> float | np.ndarray:
-    """Random-walk increment for bias with density (units / √s).
+    """Random-walk increment for bias with density (units/√s).
 
     Implements discrete-time random walk:
-        bias_{t+1} = bias_t + N(0, rw_density² × dt)
+    bias_{t+1} = bias_t + N(0, rw_density² × dt)
 
-    Args:
-        bias: Current bias value (scalar or array)
-        rw_density: Random walk density in units / √s
-        dt: Time step in seconds
-        rng: NumPy random generator
+    Parameters
+    ----------
+    bias : float or np.ndarray
+        Current bias value.
+    rw_density : float
+        Random-walk density (units/√s).
+    dt : float
+        Time step (s).
+    rng : np.random.Generator
+        Random number generator.
 
-    Returns:
-        Updated bias value
+    Returns
+    -------
+    float or np.ndarray
+        Updated bias value.
 
     Example:
         >>> rng = np.random.default_rng(42)
@@ -201,16 +223,21 @@ def confidence_to_noise_scale(
 ) -> np.ndarray:
     """Map confidence scores to measurement noise scale.
 
-    Uses inverse square root scaling to increase noise for low confidence:
-        σ(c) = σ_base / √(ε + c)
+    Uses inverse square-root scaling: σ(c) = σ_base / √(ε + c).
 
-    Args:
-        confidence: Confidence scores in [0, 1]
-        base_std: Base measurement noise std at full confidence
-        epsilon: Small constant to prevent division by zero
+    Parameters
+    ----------
+    confidence : np.ndarray
+        Confidence scores in [0, 1].
+    base_std : float
+        Base measurement noise std at full confidence (units).
+    epsilon : float, default 0.01
+        Small constant to avoid division by zero.
 
-    Returns:
-        Noise scale factors (multiply by standard normal samples)
+    Returns
+    -------
+    np.ndarray
+        Noise scale factors (same shape as ``confidence``).
 
     Example:
         >>> conf = np.array([1.0, 0.5, 0.1])
@@ -234,21 +261,29 @@ def ou_step(
     dt: float,
     rng: np.random.Generator,
 ) -> float:
-    """Ornstein-Uhlenbeck process step (mean-reverting stochastic process).
+    """Ornstein-Uhlenbeck process step (mean-reverting).
 
-    Implements discrete-time OU process:
-        dx = (mean - x) / tau × dt + sigma × √dt × N(0, 1)
+    Discrete-time update: dx = (mean − x)/τ · dt + σ√dt · N(0,1).
 
-    Args:
-        x: Current value
-        mean: Long-term mean (equilibrium value)
-        tau: Time constant (relaxation time in seconds)
-        sigma: Noise intensity (units / √s)
-        dt: Time step in seconds
-        rng: NumPy random generator
+    Parameters
+    ----------
+    x : float
+        Current value.
+    mean : float
+        Long-term mean (equilibrium).
+    tau : float
+        Time constant τ (s).
+    sigma : float
+        Noise intensity σ (units/√s).
+    dt : float
+        Time step (s).
+    rng : np.random.Generator
+        Random number generator.
 
-    Returns:
-        Updated value
+    Returns
+    -------
+    float
+        Updated value.
 
     Note:
         For tau → ∞, this reduces to Brownian motion.

@@ -51,29 +51,40 @@ def create_diagnostic_video(
 ) -> Path | tuple[Path, Any, Any]:
     """Generate diagnostic video from simulation data with optional filter overlay.
 
-    Creates multi-panel video showing:
-    - Arena view (rat, LEDs, trail, HUD)
-    - IMU time series (gyro, accel X, accel Y)
-    - Camera status (confidence bars)
-    - Innovation residuals (if filter_results provided)
-    - Filter prediction overlay (if filter_results provided)
+    Creates multi-panel video showing arena view, IMU time series, camera status,
+    and optionally filter overlays and diagnostics.
 
-    Args:
-        sim_data: Simulation output dictionary from simulate_rat_imu()
-        output_path: Output video file path (e.g., "debug.mp4")
-        filter_results: Optional EKF filter results to overlay on visualization
-        led_distance: LED front-back spacing in meters (default: 0.04 = 4cm)
-        fps: Video frame rate (frames per second)
-        speedup: Playback speed multiplier (>1 faster, <1 slower)
-        time_window_s: Time window for scrolling plots (seconds)
-        trail_length_s: Length of fading trail (seconds)
-        dpi: Figure resolution (dots per inch)
-        codec: Video codec (default: "h264")
-        bitrate: Video bitrate in kbps
-        return_animation: If True, return (path, anim, fig) for testing (default: False)
+    Parameters
+    ----------
+    sim_data : SimOut
+        Simulation output from ``simulate_rat_imu``.
+    output_path : str or Path
+        Output video file path (e.g., "debug.mp4").
+    filter_results : EKFResult or None, optional
+        If provided, overlays filter predictions and diagnostics.
+    led_distance : float, default 0.04
+        LED spacing (m) for drawing LED markers.
+    fps : int, default 30
+        Video frame rate.
+    speedup : float, default 1.0
+        Playback speed multiplier (>1 faster, <1 slower).
+    time_window_s : float, default 2.0
+        Time window for scrolling plots (s).
+    trail_length_s : float, default 1.5
+        Length of fading trail (s).
+    dpi : int, default 100
+        Figure resolution.
+    codec : str, default "h264"
+        Video codec.
+    bitrate : int, default 2000
+        Video bitrate (kbps).
+    return_animation : bool, default False
+        If True, return tuple (path, anim, fig) for testing.
 
-    Returns:
-        Path to created video file, or (path, anim, fig) if return_animation=True
+    Returns
+    -------
+    Path or tuple[Path, Any, Any]
+        Path to created video file, or (path, anim, fig) if return_animation=True.
 
     Example:
         >>> from trodestrack.sim.rat_imu import simulate_rat_imu, RatIMUSimConfig

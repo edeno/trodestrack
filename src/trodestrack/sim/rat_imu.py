@@ -45,8 +45,7 @@ from .utils import (
 def compute_gravity_in_tilted_frame(
     tilt_roll_rad: float, tilt_pitch_rad: float, gravity: float
 ) -> tuple[float, float]:
-    """
-    Compute gravity components in IMU frame with small roll/pitch tilt.
+    """Gravity components in IMU frame with small roll/pitch tilt.
 
     In 2D planar motion (yaw only), the IMU is nominally level (z-up).
     Small mounting errors cause roll/pitch tilt, projecting gravity
@@ -60,17 +59,23 @@ def compute_gravity_in_tilted_frame(
         g_x = g * sin(θ_p)
         g_y = -g * sin(θ_r) * cos(θ_p)
 
-    Args:
-        tilt_roll_rad: Roll tilt angle in radians (rotation about x-axis)
-        tilt_pitch_rad: Pitch tilt angle in radians (rotation about y-axis)
-        gravity: Gravity magnitude in m/s²
+    Parameters
+    ----------
+    tilt_roll_rad : float
+        Roll tilt angle (rad) about x-axis.
+    tilt_pitch_rad : float
+        Pitch tilt angle (rad) about y-axis.
+    gravity : float
+        Gravity magnitude g (m/s^2).
 
-    Returns:
-        (g_x, g_y): Gravity components in tilted IMU frame (m/s²)
+    Returns
+    -------
+    tuple[float, float]
+        (g_x, g_y) components (m/s^2) in the tilted IMU x-y plane.
 
-    Note:
-        For small angles (~2-5°), these are approximately:
-        g_x ≈ g * θ_p, g_y ≈ -g * θ_r
+    Notes
+    -----
+    For small angles: g_x ≈ g θ_p, g_y ≈ −g θ_r cos(θ_p).
     """
     cos_p = np.cos(tilt_pitch_rad)
     sin_p = np.sin(tilt_pitch_rad)
@@ -456,49 +461,23 @@ class RatIMUSimConfig:
 
 
 def simulate_rat_imu(config: Optional[RatIMUSimConfig] = None, seed: int = 0) -> SimOut:
-    """
-    Simulate ground truth trajectory, IMU measurements, and camera observations.
+    """Simulate ground truth trajectory, IMU measurements, and camera observations.
 
-    Args:
-        config: Simulation configuration (uses defaults if None)
-        seed: Random seed for reproducibility
+    Parameters
+    ----------
+    config : RatIMUSimConfig, optional
+        Simulation configuration (uses defaults if None).
+    seed : int, default 0
+        Random seed.
 
-    Returns:
-        Dictionary containing:
-            # Time arrays
-            t_imu: (T_imu,) IMU timestamps in seconds
-            t_cam_exp: (T_cam,) Camera exposure timestamps
-                       **USE THIS as measurement timestamp in your filter**
-            t_cam_obs: (T_cam,) Camera observation arrival times (exp + latency)
-                       Only needed for simulating queues/processing delays
-
-            # Ground truth at IMU rate
-            X_truth: (T_imu, 5) [x, y, vx, vy, θ] in world frame
-            yaw_rate_truth: (T_imu,) True yaw rate (rad/s) - for validation
-            accel_world_truth: (T_imu, 2) True INERTIAL accel [ax, ay] in world frame
-            accel_body_truth: (T_imu, 2) True INERTIAL accel [ax, ay] in body frame
-
-            # IMU measurements (body frame)
-            U_imu: (T_imu, 3) [ω_z, f_x, f_y] gyro (rad/s) + SPECIFIC FORCE (m/s²)
-                               Accelerometer measures: f = a_body - g_body (NOT inertial accel!)
-            bias_gyro: (T_imu,) gyroscope bias (rad/s)
-            bias_accel_x: (T_imu,) x-axis accelerometer bias (m/s²)
-            bias_accel_y: (T_imu,) y-axis accelerometer bias (m/s²)
-
-            # Camera measurements
-            Z_cam_led1: (T_cam, 2) LED1 position [x, y] in meters (NaN if dropped)
-            Z_cam_led2: (T_cam, 2) LED2 position [x, y] in meters (NaN if dropped/unused)
-            led1_truth_cam: (T_cam, 2) Ground truth LED1 positions (before swaps/noise)
-            led2_truth_cam: (T_cam, 2) Ground truth LED2 positions (before swaps/noise)
-            swap_applied: (T_cam,) boolean, True where LED labels were swapped
-            confidence_led1: (T_cam,) confidence scores 0-1 (if use_confidence=True)
-            confidence_led2: (T_cam,) confidence scores 0-1 (if use_confidence=True)
-            mask_cam: (T_cam,) boolean, True where either LED is valid (union, backward compat)
-            mask_led1: (T_cam,) boolean, True where LED1 is valid (independent dropout)
-            mask_led2: (T_cam,) boolean, True where LED2 is valid (independent dropout)
-
-            # Metadata
-            config: RatIMUSimConfig used for this simulation
+    Returns
+    -------
+    SimOut
+        Dictionary-like output with time arrays (t_imu, t_cam_exp, t_cam_obs),
+        ground truth channels (X_truth (T_imu,5), yaw_rate_truth, accel_world_truth,
+        accel_body_truth), IMU measurements (U_imu (T_imu,3) = [ω_z(rad/s), f_x, f_y]
+        with biases), and camera measurements (Z_cam_led1/2 (T_cam,2), masks, confidences),
+        plus metadata (config).
     """
     if config is None:
         config = RatIMUSimConfig()
