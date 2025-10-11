@@ -353,11 +353,11 @@
 
 ### 🧱 Packaging
 
-- [ ] Ensure `pyproject.toml` entry point → `trodestrack:main`
-- [ ] Implement CLI subcommands:
-  - [ ] `trodestrack smooth`
-  - [ ] `trodestrack online`
-  - [ ] `trodestrack report`
+- [x] Ensure `pyproject.toml` entry point → `trodestrack:main` (already configured)
+- [x] Implement CLI subcommands: **[COMPLETE: 2025-10-11]**
+  - [x] `trodestrack smooth` (src/trodestrack/cli/smooth.py, 5 tests passing)
+  - [x] `trodestrack online` (src/trodestrack/cli/online.py, 5 tests passing)
+  - [x] `trodestrack report` (already done - see M4)
 - [ ] Verify reproducibility:
   - [ ] Deterministic RNG seeding
   - [ ] Version pinning via `uv.lock`

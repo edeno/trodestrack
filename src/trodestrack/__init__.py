@@ -20,6 +20,16 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # Run offline smoothing on sensor data (best accuracy)
+  trodestrack smooth --imu-timestamps t_imu.txt --imu-measurements U_imu.txt \\
+                     --camera-timestamps t_cam.txt --led1-positions led1.txt \\
+                     --output-dir run1/
+
+  # Run online filtering only (faster, lower latency)
+  trodestrack online --imu-timestamps t_imu.txt --imu-measurements U_imu.txt \\
+                     --camera-timestamps t_cam.txt --led1-positions led1.txt \\
+                     --output-dir run1/
+
   # Generate QA report from filter results
   trodestrack report --run run1/ --pdf report.pdf
 
@@ -45,9 +55,13 @@ For more information, visit: https://github.com/yourusername/trodestrack
     )
 
     # Import and register subcommands
+    from trodestrack.cli.online import add_online_parser
     from trodestrack.cli.report import add_report_parser
+    from trodestrack.cli.smooth import add_smooth_parser
 
     add_report_parser(subparsers)
+    add_smooth_parser(subparsers)
+    add_online_parser(subparsers)
 
     # Parse arguments
     args = parser.parse_args()
