@@ -72,7 +72,7 @@ def plot_residuals(
         elif D == 4:
             dim_labels = ["LED1 X (m)", "LED1 Y (m)", "LED2 X (m)", "LED2 Y (m)"]
         else:
-            dim_labels = [f"Dim {i+1}" for i in range(D)]
+            dim_labels = [f"Dim {i + 1}" for i in range(D)]
 
     # Create subplots: one per dimension, stacked vertically
     fig, axes = plt.subplots(D, 1, figsize=(8, 2 * D), sharex=True, constrained_layout=True)
@@ -172,7 +172,7 @@ def plot_position_error(
             color=COLORS["red"],
             linewidth=1.0,
             linestyle="--",
-            label=f"PRD threshold ({prd_threshold_m*100:.0f} cm)",
+            label=f"PRD threshold ({prd_threshold_m * 100:.0f} cm)",
         )
 
     # Labels

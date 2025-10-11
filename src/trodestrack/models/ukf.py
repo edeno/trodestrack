@@ -67,20 +67,20 @@ from trodestrack.models.state_layout import StateLayout, get_heading_index, get_
 class UKFConfig(FilterCoreConfig):
     """Unscented Kalman filter configuration extending FilterCoreConfig.
 
-    The default configuration uses alpha=sqrt(3) (aggressive spread) which was
-    empirically tuned for the trodestrack use case. For more conservative behavior
-    or better numerical stability, use UKFConfig.conservative() preset.
+    Parameters
+    ----------
+    alpha : float, default 1.732
+        Sigma-point spread parameter. Smaller (e.g., 1e-3) is more conservative;
+        larger (≈√3) captures stronger nonlinearities.
+    beta : float, default 2.0
+        Prior knowledge parameter (2 is optimal for Gaussian priors).
+    kappa : float, default 1.0
+        Secondary scaling parameter.
 
-    Sigma-point parameters:
-        alpha: Controls sigma-point spread. Typical values:
-            - 1e-3 (conservative): sigma points very close to mean, numerically safe
-            - sqrt(3) ≈ 1.732 (aggressive): wider spread, can capture more nonlinearity
-        beta: Prior knowledge parameter (2 = Gaussian optimal)
-        kappa: Secondary scaling parameter (often 0 or 1)
-
-    References:
-        - Julier & Uhlmann (2004): "Unscented Filtering and Nonlinear Estimation"
-        - Särkkä (2013): "Bayesian Filtering and Smoothing", Chapter 5
+    Notes
+    -----
+    Use ``UKFConfig.conservative()`` for numerically safer presets, or
+    ``UKFConfig.aggressive()`` for stronger nonlinearity capture.
     """
 
     alpha: float = 1.732  # sqrt(3), Sigma-point spread
@@ -139,13 +139,20 @@ UKFState = FilterState
 class UKFResult(NamedTuple):
     """UKF filtering result.
 
-    Attributes:
-        filtered_means: Filtered state means at camera times (N_cam, 8)
-        filtered_covariances: Filtered covariances at camera times (N_cam, 8, 8)
-        predicted_means: Predicted state means at camera times (N_cam, 8)
-        predicted_covariances: Predicted covariances at camera times (N_cam, 8, 8)
-        marginal_loglik: Marginal log-likelihood of observations
-        estimated_led_distance: Auto-detected LED spacing (m), None if explicit
+    Attributes
+    ----------
+    filtered_means : jnp.ndarray
+        Filtered state means at camera times (N_cam, n).
+    filtered_covariances : jnp.ndarray
+        Filtered covariances at camera times (N_cam, n, n).
+    predicted_means : jnp.ndarray
+        Predicted state means at camera times (N_cam, n).
+    predicted_covariances : jnp.ndarray
+        Predicted covariances at camera times (N_cam, n, n).
+    marginal_loglik : float
+        Sum of per-frame Gaussian log-likelihoods.
+    estimated_led_distance : float | None
+        Auto-detected LED spacing (m), or None if explicitly provided.
     """
 
     filtered_means: jnp.ndarray  # (N_cam, n)
@@ -162,34 +169,23 @@ class UKFResult(NamedTuple):
 
 
 def compute_sigma_points(mean: jnp.ndarray, cov: jnp.ndarray, n: int, lamb: float) -> jnp.ndarray:
-    """Compute (2n+1) sigma points for unscented transform.
+    """Compute (2n+1) sigma points for the unscented transform.
 
-    Generates symmetric sigma points around mean using Cholesky decomposition
-    of the covariance matrix scaled by (n + lambda).
+    Parameters
+    ----------
+    mean : jnp.ndarray
+        State mean (n,).
+    cov : jnp.ndarray
+        State covariance (n, n), PSD.
+    n : int
+        State dimension.
+    lamb : float
+        UKF lambda parameter (α²(n+κ) − n).
 
-    Args:
-        mean: State mean (n,)
-        cov: State covariance (n, n) - must be positive definite
-        n: State dimension
-        lamb: Lambda parameter from UKF hyperparameters
-
-    Returns:
-        sigma_points: (2n+1, n) array where:
-            - sigma_points[0] = mean (central point)
-            - sigma_points[1:n+1] = mean + sqrt((n+λ)·P) columns
-            - sigma_points[n+1:] = mean - sqrt((n+λ)·P) columns
-
-    Example:
-        For 8-D state, generates 17 sigma points:
-        >>> mean = jnp.zeros(8)
-        >>> cov = jnp.eye(8)
-        >>> sigmas = compute_sigma_points(mean, cov, 8, 1.0)
-        >>> sigmas.shape
-        (17, 8)
-
-    Note:
-        Uses Cholesky decomposition for numerical stability.
-        If cov is not positive definite, Cholesky will raise an error.
+    Returns
+    -------
+    jnp.ndarray
+        Sigma points (2n+1, n) with central point at index 0.
     """
     # Compute Cholesky decomposition: P = L @ L.T
     # Add small regularization for numerical stability
@@ -211,32 +207,29 @@ def compute_sigma_points(mean: jnp.ndarray, cov: jnp.ndarray, n: int, lamb: floa
 def compute_weights(
     n: int, alpha: float, beta: float, lamb: float
 ) -> tuple[jnp.ndarray, jnp.ndarray]:
-    """Compute weights for reconstructing mean and covariance from sigma points.
+    """Compute unscented weights for mean and covariance.
 
-    Weights differ for mean vs covariance reconstruction to incorporate
-    higher-order moment information (via beta parameter).
+    Parameters
+    ----------
+    n : int
+        State dimension.
+    alpha : float
+        Spread parameter.
+    beta : float
+        Prior knowledge parameter.
+    lamb : float
+        Lambda = α²(n + κ) − n.
 
-    Args:
-        n: State dimension
-        alpha: Spread parameter
-        beta: Prior knowledge parameter (2 = Gaussian optimal)
-        lamb: Lambda = alpha² * (n + kappa) - n
+    Returns
+    -------
+    tuple[jnp.ndarray, jnp.ndarray]
+        ``(w_mean, w_cov)`` each of shape (2n+1,).
 
-    Returns:
-        Tuple of (w_mean, w_cov) where:
-            w_mean: (2n+1,) weights for computing mean
-            w_cov: (2n+1,) weights for computing covariance
-
-    Formulas (Särkkä 5.77):
-        w_mean[0] = lambda / (n + lambda)
-        w_mean[i] = 1 / (2 * (n + lambda))  for i > 0
-
-        w_cov[0] = lambda / (n + lambda) + (1 - alpha² + beta)
-        w_cov[i] = 1 / (2 * (n + lambda))  for i > 0
-
-    Note:
-        Different weights for mean/covariance allow incorporating
-        higher-order information without additional sigma points.
+    Notes
+    -----
+    Särkkä Eq. (5.77):
+    w₀^m = λ/(n+λ),  wᵢ^m = 1/(2(n+λ)),
+    w₀^c = λ/(n+λ) + (1 − α² + β),  wᵢ^c = 1/(2(n+λ)).
     """
     factor = 1.0 / (2.0 * (n + lamb))
 
@@ -261,14 +254,19 @@ def compute_weights(
 
 
 def _outer_product_batch(x: jnp.ndarray, y: jnp.ndarray) -> jnp.ndarray:
-    """Compute batched outer products for covariance reconstruction.
+    """Batched outer products for covariance reconstruction.
 
-    Args:
-        x: (N, n) array
-        y: (N, m) array
+    Parameters
+    ----------
+    x : jnp.ndarray
+        Array (N, n).
+    y : jnp.ndarray
+        Array (N, m).
 
-    Returns:
-        outer_products: (N, n, m) array where result[i] = x[i][:, None] @ y[i][None, :]
+    Returns
+    -------
+    jnp.ndarray
+        Outer products (N, n, m) with ``result[i] = x[i][:, None] @ y[i][None, :]``.
     """
     return vmap(lambda a, b: jnp.atleast_2d(a).T @ jnp.atleast_2d(b), 0, 0)(x, y)
 
@@ -287,23 +285,27 @@ def predict_step(
     *,
     layout: StateLayout,
 ) -> UKFState:
-    """UKF prediction step using IMU measurement via unscented transform.
+    """UKF prediction step using IMU via unscented transform.
 
-    Args:
-        state: Current state
-        u_imu: IMU measurement [ω_z, f_x, f_y]
-        dt_imu: IMU timestep
-        config: UKF configuration
+    Parameters
+    ----------
+    state : UKFState
+        Current state.
+    u_imu : jnp.ndarray
+        IMU input [ω_z(rad/s), f_x(m/s^2), f_y(m/s^2)] (3,).
+    dt_imu : float
+        IMU timestep (s).
+    config : UKFConfig
+        UKF configuration.
+    has_vision : bool, default True
+        Whether vision is available at the current frame (for Q scaling).
+    layout : StateLayout
+        State index mapping.
 
-    Returns:
-        Predicted state with mean and covariance
-
-    Algorithm:
-        1. Compute lambda and weights from hyperparameters
-        2. Generate sigma points around current mean
-        3. Propagate each sigma point through dynamics
-        4. Reconstruct predicted mean and covariance from transformed points
-        5. Add process noise Q
+    Returns
+    -------
+    UKFState
+        Predicted state with mean and covariance.
     """
     m, P = state.mean, state.cov
     n = len(m)  # State dimension (8)
@@ -361,22 +363,27 @@ def _prepare_ukf_camera_observations(
     pre_led1_valid: bool | None,
     pre_led2_valid: bool | None,
 ) -> tuple[jnp.ndarray, bool, bool]:
-    """Prepare camera observations for UKF update step.
+    """Prepare camera observations for UKF update.
 
-    UKF version replaces NaN with 0 to avoid propagation through sigma point transforms.
+    Parameters
+    ----------
+    z_led1 : jnp.ndarray
+        LED1 observation (2,) [x, y] in meters.
+    z_led2 : jnp.ndarray
+        LED2 observation (2,) [x, y] in meters.
+    pre_z_obs_full : jnp.ndarray | None
+        Optional precomputed concatenated observations (4,).
+    pre_led1_valid : bool | None
+        Optional precomputed LED1 validity.
+    pre_led2_valid : bool | None
+        Optional precomputed LED2 validity.
 
-    Args:
-        z_led1: LED1 observation [x, y]
-        z_led2: LED2 observation [x, y]
-        pre_z_obs_full: Precomputed concatenated observations (optional)
-        pre_led1_valid: Precomputed LED1 validity (optional)
-        pre_led2_valid: Precomputed LED2 validity (optional)
-
-    Returns:
-        Tuple of (z_obs_full, led1_valid, led2_valid)
-            - z_obs_full: (4,) concatenated observations (NaN → 0)
-            - led1_valid: LED1 validity flag
-            - led2_valid: LED2 validity flag
+    Returns
+    -------
+    tuple[jnp.ndarray, bool, bool]
+        ``(z_obs_full, led1_valid, led2_valid)`` where ``z_obs_full`` is (4,)
+        and NaNs have been replaced with zeros to avoid propagating NaNs through
+        the sigma-point transform.
     """
     # Check which LEDs are valid (use precomputed if provided)
     led1_valid = pre_led1_valid if pre_led1_valid is not None else jnp.isfinite(z_led1[0])
@@ -406,29 +413,35 @@ def update_step(
     pre_led1_valid: bool | None = None,
     pre_led2_valid: bool | None = None,
 ) -> tuple[UKFState, float]:
-    """UKF measurement update step using camera observations via unscented transform.
+    """UKF measurement update using camera observations.
 
-    Args:
-        state: Predicted state
-        z_led1: LED1 observation [x, y] in meters
-        z_led2: LED2 observation [x, y] in meters
-        mask: Observation validity flag
-        config: UKF configuration
-        confidence: Confidence scores [led1_x, led1_y, led2_x, led2_y] (4,)
-            Range: [0, 1], where 1.0 = high confidence
-            If None, defaults to 1.0 (high confidence)
-            Measurement noise is scaled as: R_eff = R_base / clip(conf, min, 1.0)
-            NOTE: Current implementation uses diagonal R approximation (see issue)
+    Parameters
+    ----------
+    state : UKFState
+        Predicted state.
+    z_led1 : jnp.ndarray
+        LED1 observation (2,) [x, y] in meters.
+    z_led2 : jnp.ndarray
+        LED2 observation (2,) [x, y] in meters.
+    mask : bool
+        Observation validity flag.
+    config : UKFConfig
+        UKF configuration.
+    confidence : jnp.ndarray | None, optional
+        Confidence [x1,y1,x2,y2] (4,) in [0, 1] for per-dimension R scaling.
+    pre_z_obs_full : jnp.ndarray | None, optional
+        Precomputed concatenated observation (4,).
+    pre_conf : jnp.ndarray | None, optional
+        Precomputed confidence (4,).
+    pre_led1_valid : bool | None, optional
+        Precomputed LED1 validity.
+    pre_led2_valid : bool | None, optional
+        Precomputed LED2 validity.
 
-    Returns:
-        Tuple of (updated_state, log_likelihood)
-
-    Algorithm:
-        1. Generate sigma points around predicted mean
-        2. Transform sigma points through measurement function
-        3. Reconstruct predicted observation mean and covariance
-        4. Compute cross-covariance between state and observations
-        5. Kalman update using cross-covariance
+    Returns
+    -------
+    tuple[UKFState, float]
+        Updated state and log-likelihood.
     """
     m_pred, P_pred = state.mean, state.cov
 
@@ -602,32 +615,25 @@ def update_heading(
     config: UKFConfig,
     mask: bool,
 ) -> tuple[UKFState, float]:
-    """Apply 1D heading pseudo-measurement update from LED pair (UKF version).
+    """Apply 1D heading pseudo-measurement update (UKF variant).
 
-    Sequential update after position update. Uses large-R gating pattern
-    for JAX compatibility (no branching), same as EKF. The camera mask is
-    respected to prevent stale heading updates during vision dropouts.
+    Parameters
+    ----------
+    state : UKFState
+        Current state (after position update).
+    z_led1 : jnp.ndarray
+        LED1 observation (2,) in meters.
+    z_led2 : jnp.ndarray
+        LED2 observation (2,) in meters.
+    config : UKFConfig
+        UKF configuration.
+    mask : bool
+        Camera validity flag (False skips update entirely).
 
-    Args:
-        state: Current state (after position update)
-        z_led1: LED1 observation (2,) in meters
-        z_led2: LED2 observation (2,) in meters
-        config: UKF configuration
-        mask: Camera validity flag (False skips update entirely)
-
-    Returns:
-        Updated state and heading measurement log-likelihood
-
-    Algorithm:
-        1. Compute heading observation: θ_obs = arctan2(dy, dx)
-        2. Check validity: both LEDs visible + spacing within tolerance
-        3. Gate via large R: R = R_base (valid) or R = 1e6 (invalid)
-        4. Apply 1D unscented update
-        5. Wrap heading after update
-
-    Note:
-        Always performs update (JAX-friendly). Invalid observations are
-        gated via R=1e6 → K≈0 → no actual update.
+    Returns
+    -------
+    tuple[UKFState, float]
+        Updated state and heading measurement log-likelihood (scalar).
     """
     mask_bool = jnp.asarray(mask, dtype=bool)
 
@@ -713,39 +719,34 @@ def unscented_kalman_filter(
     initial_state: UKFState | None = None,
     conf_cam: np.ndarray | None = None,
 ) -> UKFResult:
-    """Run Unscented Kalman Filter on full trajectory.
+    """Run Unscented Kalman Filter on a full trajectory.
 
-    Processes IMU data at high rate and updates with camera observations.
-    Uses sigma-point transforms for prediction and measurement updates.
+    Parameters
+    ----------
+    ukf_config : UKFConfig
+        UKF configuration.
+    t_imu : np.ndarray
+        IMU timestamps (N_imu,) in seconds.
+    U_imu : np.ndarray
+        IMU measurements [ω_z(rad/s), f_x(m/s^2), f_y(m/s^2)] (N_imu, 3).
+    t_cam : np.ndarray
+        Camera timestamps (N_cam,) in seconds.
+    Z_cam_led1 : np.ndarray
+        LED1 positions (N_cam, 2) in meters.
+    Z_cam_led2 : np.ndarray
+        LED2 positions (N_cam, 2) in meters.
+    mask_cam : np.ndarray
+        Camera validity mask (N_cam,), boolean.
+    initial_state : UKFState | None, optional
+        Optional initial state (auto-initialized if None).
+    conf_cam : np.ndarray | None, optional
+        Confidence scores (N_cam, 4) for [x1,y1,x2,y2] in [0, 1] for per-dimension
+        R scaling.
 
-    Algorithm:
-        1. Initialize state from camera observations (reuse EKF initialization)
-        2. For each camera frame:
-            a. Predict using IMU between previous and current frame (unscented)
-            b. Update with camera observation (unscented)
-        3. Return filtered estimates at camera times
-
-    Args:
-        ukf_config: UKF configuration
-        t_imu: IMU timestamps (N_imu,)
-        U_imu: IMU measurements [ω_z, f_x, f_y] (N_imu, 3)
-        t_cam: Camera timestamps (N_cam,)
-        Z_cam_led1: LED1 observations (N_cam, 2) in meters
-        Z_cam_led2: LED2 observations (N_cam, 2) in meters
-        mask_cam: Camera validity mask (N_cam,)
-        initial_state: Optional initial state (if None, auto-initialize)
-        conf_cam: Camera confidence scores (N_cam, 4) for [led1_x, led1_y, led2_x, led2_y]
-            Range: [0, 1], where 1.0 = high confidence
-            If None, defaults to 1.0 (high confidence, backward compatible)
-            Measurement noise is scaled as: R_eff = R_base / clip(conf, min, 1.0)
-            PRD requirement: "DLC confidence → measurement noise scaling" (Section 13)
-
-    Returns:
-        UKF filtering result with states at camera times
-
-    Note:
-        Reuses EKF's initialize_state for compatibility.
-        UKF and EKF should produce similar initial states.
+    Returns
+    -------
+    UKFResult
+        Filtered and predicted states at camera times, and log-likelihood.
     """
     # Convert to JAX arrays
     t_imu_jax = jnp.array(t_imu)

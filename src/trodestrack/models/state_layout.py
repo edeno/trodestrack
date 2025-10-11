@@ -88,8 +88,20 @@ class StateLayout:
 def get_heading_index(layout: "StateLayout") -> int:
     """Return the 2D heading index, raising for non-2D layouts.
 
-    This helper centralizes the assumption that EKF/UKF in this repository
-    currently operate on 2D heading states for measurement and wrapping.
+    Parameters
+    ----------
+    layout : StateLayout
+        State layout describing index mapping.
+
+    Returns
+    -------
+    int
+        Index of heading state θ in 2D layouts.
+
+    Raises
+    ------
+    NotImplementedError
+        If ``layout`` does not use a single-angle 2D heading.
     """
     if isinstance(layout.heading_idx, int):
         return layout.heading_idx
@@ -246,28 +258,22 @@ Use this to get the appropriate layout from a configuration string:
 
 
 def get_layout(mode: str) -> StateLayout:
-    """Get StateLayout for a given tracking mode.
+    """Get ``StateLayout`` for a given tracking mode.
 
-    Args:
-        mode: Tracking mode string, one of:
-            - "2d_full": Standard 2D tracking with IMU biases (8D)
-            - "vision_only": Camera-only tracking without biases (5D)
-            - "imu_only": IMU-only tracking (same as 2d_full, 8D)
-            - "2d_cam_3d_imu": 2D camera + 3D IMU for vertical motion (10D)
-            - "3d_euler": Full 3D with Euler angles (15D)
-            - "3d_quat": Full 3D with quaternions (16D)
+    Parameters
+    ----------
+    mode : str
+        One of {"2d_full", "vision_only", "imu_only", "2d_cam_3d_imu",
+        "3d_euler", "3d_quat"}.
 
-    Returns:
-        StateLayout instance with explicit dimension mapping
+    Returns
+    -------
+    StateLayout
+        Layout instance with explicit dimension mapping.
 
-    Raises:
-        KeyError: If mode is not recognized
-
-    Example:
-        >>> layout = get_layout("vision_only")
-        >>> layout.n
-        5
-        >>> layout.has_biases
-        False
+    Raises
+    ------
+    KeyError
+        If ``mode`` is not recognized.
     """
     return LAYOUT_REGISTRY[mode]

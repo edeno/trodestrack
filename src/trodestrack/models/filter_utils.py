@@ -11,37 +11,23 @@ import numpy as np
 def compute_imu_index_arrays(t_imu: np.ndarray, t_cam: np.ndarray) -> jnp.ndarray:
     """Build padded index arrays for IMU samples between camera frames.
 
-    IMPORTANT: This is a HOST-SIDE precomputation, NOT JIT-traced.
-    The function uses NumPy for the host-side loop to avoid JAX tracing surprises,
-    then converts the final result to JAX for device use.
+    Parameters
+    ----------
+    t_imu : np.ndarray
+        IMU timestamps (N_imu,) in seconds.
+    t_cam : np.ndarray
+        Camera timestamps (N_cam,) in seconds.
 
-    This approach:
-    - Avoids dynamic loop unrolling inside JIT (which would lock in n_cam)
-    - Precomputes index arrays once rather than recomputing per filter call
-    - Uses NumPy during construction to avoid device churn
-    - Returns JAX array for seamless integration with JIT-compiled code
+    Returns
+    -------
+    jnp.ndarray
+        Index array (N_cam, max_imu_per_frame) of IMU indices; -1 indicates padding
+        (no IMU sample). Returned as a JAX array for device use.
 
-    Algorithm:
-        For each camera frame i:
-        - If i == 0: no IMU propagation (return all -1 padding)
-        - Else: find IMU indices where t_imu in (t_cam[i-1], t_cam[i]]
-        - Pad to max_imu_per_frame with -1 for invalid indices
-
-    Args:
-        t_imu: IMU timestamps (N_imu,) as NumPy array
-        t_cam: Camera timestamps (N_cam,) as NumPy array
-
-    Returns:
-        jnp.ndarray: (N_cam, max_imu_per_frame) array of IMU indices
-            where -1 indicates padding (no IMU sample)
-
-    Example:
-        >>> t_imu = np.array([0.0, 0.005, 0.010, 0.015, 0.020])
-        >>> t_cam = np.array([0.0, 0.010, 0.020])
-        >>> indices = compute_imu_index_arrays(t_imu, t_cam)
-        >>> # Frame 0: [-1, -1] (no propagation)
-        >>> # Frame 1: [0, 1] (IMU at 0.005, 0.010)
-        >>> # Frame 2: [2, 3] (IMU at 0.015, 0.020)
+    Notes
+    -----
+    Host-side precomputation using NumPy avoids dynamic loop unrolling inside JIT.
+    For each frame i, finds IMU indices in the half-open interval (t_cam[i-1], t_cam[i]].
     """
     n_cam = len(t_cam)
     all_indices = []

@@ -63,7 +63,18 @@ from trodestrack.models.state_layout import StateLayout, get_heading_index, get_
 
 @dataclass
 class EKFConfig(FilterCoreConfig):
-    """EKF configuration extending the shared FilterCoreConfig."""
+    """EKF configuration extending the shared FilterCoreConfig.
+
+    Notes
+    -----
+    Inherits all parameters from :class:`FilterCoreConfig`. Adds
+    ``num_iter`` for iterated EKF (IEKF).
+
+    Parameters
+    ----------
+    num_iter : int, default 1
+        Number of inner IEKF iterations per measurement update.
+    """
 
     num_iter: int = 1
 
@@ -74,13 +85,20 @@ EKFState = FilterState
 class EKFResult(NamedTuple):
     """EKF filtering result.
 
-    Attributes:
-        filtered_means: Filtered state means at camera times (N_cam, 8)
-        filtered_covariances: Filtered covariances at camera times (N_cam, 8, 8)
-        predicted_means: Predicted state means at camera times (N_cam, 8)
-        predicted_covariances: Predicted covariances at camera times (N_cam, 8, 8)
-        marginal_loglik: Marginal log-likelihood of observations
-        estimated_led_distance: Auto-detected LED spacing (m), None if explicit
+    Attributes
+    ----------
+    filtered_means : jnp.ndarray
+        Filtered state means at camera times (N_cam, n).
+    filtered_covariances : jnp.ndarray
+        Filtered covariances at camera times (N_cam, n, n).
+    predicted_means : jnp.ndarray
+        Predicted state means at camera times (N_cam, n).
+    predicted_covariances : jnp.ndarray
+        Predicted covariances at camera times (N_cam, n, n).
+    marginal_loglik : float
+        Sum of per-frame Gaussian log-likelihoods.
+    estimated_led_distance : float | None
+        Auto-detected LED spacing (m), or None if explicitly provided.
     """
 
     filtered_means: jnp.ndarray  # (N_cam, n)
@@ -105,19 +123,19 @@ def estimate_led_spacing(
 ) -> float:
     """Estimate LED spacing from camera observations.
 
-    Computes median distance between LED1 and LED2 across all valid
-    dual-LED observations.
+    Parameters
+    ----------
+    Z_cam_led1 : jnp.ndarray
+        LED1 positions (N_cam, 2) in meters.
+    Z_cam_led2 : jnp.ndarray
+        LED2 positions (N_cam, 2) in meters.
+    mask_cam : jnp.ndarray
+        Camera validity mask (N_cam,), boolean.
 
-    Args:
-        Z_cam_led1: LED1 observations (N_cam, 2) in meters
-        Z_cam_led2: LED2 observations (N_cam, 2) in meters
-        mask_cam: Camera validity mask (N_cam,)
-
-    Returns:
-        Median LED spacing in meters
-
-    Note:
-        Returns 0.04 m (4 cm) as fallback if no valid dual-LED observations.
+    Returns
+    -------
+    float
+        Median LED spacing (m). Falls back to 0.04 m if no valid dual-LED frames.
     """
     # Find frames where both LEDs are visible
     led1_valid = jnp.isfinite(Z_cam_led1).all(axis=1)
@@ -148,15 +166,26 @@ def predict_step(
 ) -> EKFState:
     """EKF prediction step using IMU measurement.
 
-    Args:
-        state: Current state
-        u_imu: IMU measurement [ω_z, f_x, f_y]
-        dt_imu: IMU timestep
-        config: EKF configuration
-        has_vision: Whether camera measurements are available (for blackout-aware Q)
+    Parameters
+    ----------
+    state : EKFState
+        Current state (mean (n,), cov (n, n)).
+    u_imu : jnp.ndarray
+        IMU input [ω_z(rad/s), f_x(m/s^2), f_y(m/s^2)] (3,).
+    dt_imu : float
+        IMU timestep (s).
+    config : EKFConfig
+        EKF configuration.
+    has_vision : bool, default True
+        Whether a camera measurement is available at the current frame (for
+        blackout-aware Q scaling).
+    layout : StateLayout
+        State index mapping.
 
-    Returns:
-        Predicted state
+    Returns
+    -------
+    EKFState
+        Predicted state.
     """
     m, P = state.mean, state.cov
 
@@ -204,23 +233,26 @@ def _prepare_camera_observations(
     pre_led1_valid: bool | None,
     pre_led2_valid: bool | None,
 ) -> tuple[jnp.ndarray, jnp.ndarray, bool, bool]:
-    """Prepare camera observations for update step.
+    """Prepare camera observations for EKF update.
 
-    Checks LED validity and constructs observation vector and mask.
+    Parameters
+    ----------
+    z_led1 : jnp.ndarray
+        LED1 observation (2,) [x, y] in meters.
+    z_led2 : jnp.ndarray
+        LED2 observation (2,) [x, y] in meters.
+    pre_z_obs_full : jnp.ndarray | None
+        Optional precomputed concatenated observations (4,).
+    pre_led1_valid : bool | None
+        Optional precomputed LED1 validity.
+    pre_led2_valid : bool | None
+        Optional precomputed LED2 validity.
 
-    Args:
-        z_led1: LED1 observation [x, y]
-        z_led2: LED2 observation [x, y]
-        pre_z_obs_full: Precomputed concatenated observations (optional)
-        pre_led1_valid: Precomputed LED1 validity (optional)
-        pre_led2_valid: Precomputed LED2 validity (optional)
-
-    Returns:
-        Tuple of (z_obs_full, obs_mask, led1_valid, led2_valid)
-            - z_obs_full: (4,) concatenated observations
-            - obs_mask: (4,) validity mask
-            - led1_valid: LED1 validity flag
-            - led2_valid: LED2 validity flag
+    Returns
+    -------
+    tuple[jnp.ndarray, jnp.ndarray, bool, bool]
+        ``(z_obs_full, obs_mask, led1_valid, led2_valid)`` where
+        ``z_obs_full`` is (4,) and ``obs_mask`` is (4,) boolean mask.
     """
     # Check which LEDs are valid (use precomputed if provided)
     led1_valid = pre_led1_valid if pre_led1_valid is not None else jnp.isfinite(z_led1[0])
@@ -243,24 +275,32 @@ def _compute_lifted_joseph_covariance(
     only_led1: bool,
     only_led2: bool,
 ) -> jnp.ndarray:
-    """Compute Joseph-form covariance update using lifted subspace operator.
+    """Joseph-form covariance update using lifted subspace operator.
 
-    Uses the alternative formulation:
-        P⁺ = P - PH^T S^{-1} HP
+    Parameters
+    ----------
+    P_iter : jnp.ndarray
+        Prior covariance (n, n).
+    H4 : jnp.ndarray
+        Measurement Jacobian (4, n).
+    S4 : jnp.ndarray
+        Innovation covariance (4, 4).
+    both_leds : bool
+        Both LEDs valid flag.
+    only_led1 : bool
+        Only LED1 valid flag.
+    only_led2 : bool
+        Only LED2 valid flag.
 
-    which is equivalent to the standard Joseph form but works naturally with
-    the lifted subspace operator.
+    Returns
+    -------
+    jnp.ndarray
+        Posterior covariance (n, n).
 
-    Args:
-        P_iter: Current covariance (n, n)
-        H4: Measurement Jacobian (4, n)
-        S4: Innovation covariance (4, 4)
-        both_leds: Both LEDs valid flag
-        only_led1: Only LED1 valid flag
-        only_led2: Only LED2 valid flag
-
-    Returns:
-        Updated covariance (n, n)
+    Notes
+    -----
+    Implements P⁺ = P − P Hᵀ S⁻¹ H P. The lifted inverse ensures the correct
+    active subspace (2D vs 4D) is used when only one LED is visible.
     """
     HP = H4 @ P_iter  # (4, n)
     PH_t = P_iter @ H4.T  # (n, 4)
@@ -298,28 +338,36 @@ def update_step(
 ) -> tuple[EKFState, float]:
     """EKF measurement update step using camera observations.
 
-    Supports iterated EKF (IEKF) via config.num_iter parameter.
-    Supports confidence-scaled measurement noise (e.g., from DLC).
+    Parameters
+    ----------
+    state : EKFState
+        Predicted state.
+    z_led1 : jnp.ndarray
+        LED1 observation (2,) [x, y] in meters.
+    z_led2 : jnp.ndarray
+        LED2 observation (2,) [x, y] in meters.
+    mask : bool
+        Observation validity flag.
+    config : EKFConfig
+        EKF configuration.
+    confidence : jnp.ndarray | None, optional
+        Confidence [led1_x, led1_y, led2_x, led2_y] (4,) in [0, 1]. If provided,
+        measurement noise is scaled per-dimension as R_i = base / clip(conf_i, min, 1).
+    pre_z_obs_full : jnp.ndarray | None, optional
+        Precomputed concatenated observation (4,).
+    pre_conf : jnp.ndarray | None, optional
+        Precomputed confidence (4,).
+    pre_led1_valid : bool | None, optional
+        Precomputed LED1 validity.
+    pre_led2_valid : bool | None, optional
+        Precomputed LED2 validity.
+    layout : StateLayout
+        State index mapping.
 
-    Args:
-        state: Predicted state
-        z_led1: LED1 observation [x, y] in meters
-        z_led2: LED2 observation [x, y] in meters
-        mask: Observation validity flag
-        config: EKF configuration
-        confidence: Confidence scores [led1_x, led1_y, led2_x, led2_y] (4,)
-            Range: [0, 1], where 1.0 = high confidence
-            If None, defaults to 1.0 (high confidence)
-            Measurement noise is scaled as: R_eff = R_base / clip(conf, min, 1.0)
-
-    Returns:
-        Tuple of (updated_state, log_likelihood)
-
-    Notes:
-        Confidence scaling follows: R_i = R_base / conf_i (clipped to [min, 1.0])
-        - High confidence (→1.0): R ≈ R_base (trust measurement)
-        - Low confidence (→0): R → large (distrust measurement)
-        - Minimum confidence prevents R → ∞
+    Returns
+    -------
+    tuple[EKFState, float]
+        Updated state and log-likelihood.
     """
     m_pred, P_pred = state.mean, state.cov
 
@@ -483,30 +531,28 @@ def update_heading(
 ) -> tuple[EKFState, jnp.ndarray]:
     """Apply 1D heading pseudo-measurement update from LED pair.
 
-    Sequential update after position update. Uses large-R gating pattern
-    for JAX compatibility (no branching) and respects the camera mask to
-    prevent updates during vision dropouts.
+    Parameters
+    ----------
+    state : EKFState
+        Current state (after position update).
+    z_led1 : jnp.ndarray
+        LED1 observation (2,) in meters.
+    z_led2 : jnp.ndarray
+        LED2 observation (2,) in meters.
+    config : EKFConfig
+        EKF configuration.
+    mask : bool
+        Camera validity flag (False skips update entirely).
 
-    Args:
-        state: Current state (after position update)
-        z_led1: LED1 observation (2,) in meters
-        z_led2: LED2 observation (2,) in meters
-        config: EKF configuration
-        mask: Camera validity flag (False skips update entirely)
+    Returns
+    -------
+    tuple[EKFState, jnp.ndarray]
+        Updated state and heading measurement log-likelihood (scalar).
 
-    Returns:
-        Updated state and heading measurement log-likelihood
-
-    Algorithm:
-        1. Compute heading observation: θ_obs = arctan2(dy, dx)
-        2. Check validity: both LEDs visible + spacing within tolerance
-        3. Gate via large R: R = R_base (valid) or R = 1e6 (invalid)
-        4. Apply 1D Kalman update with Joseph form
-        5. Wrap heading after update
-
-    Note:
-        Always performs update (JAX-friendly). Invalid observations are
-        gated via R=1e6 → K≈0 → no actual update.
+    Notes
+    -----
+    Uses large-R gating: invalid observations yield R=1e6 so K≈0, avoiding
+    branching in JAX while preventing spurious updates.
     """
     mask_bool = jnp.asarray(mask, dtype=bool)
 
@@ -576,34 +622,34 @@ def extended_kalman_filter(
     initial_state: EKFState | None = None,
     conf_cam: np.ndarray | None = None,
 ) -> EKFResult:
-    """Run Extended Kalman Filter on full trajectory.
+    """Run Extended Kalman Filter on a full trajectory.
 
-    Processes IMU data at high rate and updates with camera observations.
+    Parameters
+    ----------
+    ekf_config : EKFConfig
+        EKF configuration.
+    t_imu : np.ndarray
+        IMU timestamps (N_imu,) in seconds.
+    U_imu : np.ndarray
+        IMU measurements [ω_z(rad/s), f_x(m/s^2), f_y(m/s^2)] (N_imu, 3).
+    t_cam : np.ndarray
+        Camera timestamps (N_cam,) in seconds.
+    Z_cam_led1 : np.ndarray
+        LED1 positions (N_cam, 2) in meters.
+    Z_cam_led2 : np.ndarray
+        LED2 positions (N_cam, 2) in meters.
+    mask_cam : np.ndarray
+        Camera validity mask (N_cam,), boolean.
+    initial_state : EKFState | None, optional
+        Optional initial state (auto-initialized if None).
+    conf_cam : np.ndarray | None, optional
+        Confidence scores (N_cam, 4) for [x1,y1,x2,y2] in [0, 1]. If provided,
+        measurement noise is scaled per-dimension.
 
-    Algorithm:
-        1. Initialize state from camera observations
-        2. For each camera frame:
-            a. Predict using IMU between previous and current frame
-            b. Update with camera observation (if valid)
-        3. Return filtered estimates at camera times
-
-    Args:
-        ekf_config: EKF configuration
-        t_imu: IMU timestamps (N_imu,)
-        U_imu: IMU measurements [ω_z, f_x, f_y] (N_imu, 3)
-        t_cam: Camera timestamps (N_cam,)
-        Z_cam_led1: LED1 observations (N_cam, 2) in meters
-        Z_cam_led2: LED2 observations (N_cam, 2) in meters
-        mask_cam: Camera validity mask (N_cam,)
-        initial_state: Optional initial state (if None, auto-initialize)
-        conf_cam: Camera confidence scores (N_cam, 4) for [led1_x, led1_y, led2_x, led2_y]
-            Range: [0, 1], where 1.0 = high confidence
-            If None, defaults to 1.0 (high confidence, backward compatible)
-            Measurement noise is scaled as: R_eff = R_base / clip(conf, min, 1.0)
-            PRD requirement: "DLC confidence → measurement noise scaling" (Section 13)
-
-    Returns:
-        EKF filtering result with states at camera times
+    Returns
+    -------
+    EKFResult
+        Filtered and predicted states at camera times, and log-likelihood.
     """
     # Convert to JAX arrays
     t_imu_jax = jnp.array(t_imu)

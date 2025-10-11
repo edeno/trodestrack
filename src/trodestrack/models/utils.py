@@ -6,44 +6,27 @@ import jax.numpy as jnp
 
 
 def build_G_matrix(theta: float, dt: float) -> jnp.ndarray:
-    """Build IMU input noise propagation matrix (G) for standard 8-state model.
+    """IMU input noise propagation matrix G for standard 8-state model.
 
-    Constructs the Jacobian ∂f/∂u that maps IMU measurement noise
-    into state space for process noise covariance calculation:
-        Q_total = Q_process + G @ Q_imu @ G.T
+    Parameters
+    ----------
+    theta : float
+        Heading angle (rad).
+    dt : float
+        Time step (s).
 
-    Args:
-        theta: Current heading angle in radians
-        dt: Time step in seconds
+    Returns
+    -------
+    jnp.ndarray
+        G matrix (8, 3) mapping IMU noise [ω_z, f_x, f_y] to state.
 
-    Returns:
-        G matrix, shape (8, 3) mapping IMU noise [ω_z, f_x, f_y] to state
-
-    State vector: [x, y, vx, vy, θ, b_gz, b_ax, b_ay]
-    Input vector: [ω_z, f_x, f_y]
-
-    Dynamics dependencies:
-        - θ_{k+1} = θ_k + (ω_z - b_gz) * dt
-          → ∂θ/∂ω_z = dt
-
-        - v_{k+1} = v_k + R(θ)(f - b_a) * dt
-          → ∂v/∂f = R(θ) * dt
-
-        - p_{k+1} = p_k + v * dt + 0.5 * R(θ)(f - b_a) * dt²
-          → ∂p/∂f = R(θ) * 0.5 * dt²
-
-    where R(θ) is the 2D rotation matrix.
-
-    Example:
-        >>> import jax.numpy as jnp
-        >>> G = build_G_matrix(theta=0.0, dt=0.005)
-        >>> G.shape
-        (8, 3)
-        >>> G[4, 0]  # θ depends on ω_z with gain dt
-        0.005
-        >>> G[0:2, 1:3]  # position depends on force with gain 0.5*dt²
-        array([[1.25e-05, 0.00e+00],
-               [0.00e+00, 1.25e-05]])
+    Notes
+    -----
+    State: [x, y, vx, vy, θ, b_gz, b_ax, b_ay]. Input: [ω_z, f_x, f_y].
+    Dependencies:
+    - θₖ₊₁ = θₖ + (ω_z − b_gz) dt  → ∂θ/∂ω_z = dt
+    - vₖ₊₁ = vₖ + R(θ)(f − b_a) dt → ∂v/∂f = R(θ) dt
+    - pₖ₊₁ = pₖ + v dt + 0.5 R(θ)(f − b_a) dt² → ∂p/∂f = R(θ) 0.5 dt²
     """
     # 2D rotation matrix R(θ)
     c, s = jnp.cos(theta), jnp.sin(theta)
@@ -76,12 +59,35 @@ def build_G_matrix_generic(
     theta_idx: int = 4,
     dtype=jnp.float32,
 ) -> jnp.ndarray:
-    """Generic IMU input noise mapping G for arbitrary state layouts.
+    """Generic IMU input noise mapping G for arbitrary layouts.
 
-    - Places ∂θ/∂ω_z = dt at theta_idx
-    - Places ∂v/∂f = R(θ)·dt at vel_idx
-    - Places ∂p/∂f = R(θ)·0.5·dt² at pos_idx
-    Missing indices (out of bounds) are ignored.
+    Parameters
+    ----------
+    n : int
+        State dimension.
+    theta : float
+        Heading angle (rad).
+    dt : float
+        Time step (s).
+    pos_idx : tuple[int, int], default (0, 1)
+        Position indices (x, y).
+    vel_idx : tuple[int, int], default (2, 3)
+        Velocity indices (vx, vy).
+    theta_idx : int, default 4
+        Heading index.
+    dtype : jnp.dtype, default jnp.float32
+        Array dtype.
+
+    Returns
+    -------
+    jnp.ndarray
+        G matrix (n, 3).
+
+    Notes
+    -----
+    Places ∂θ/∂ω_z = dt at ``theta_idx``, ∂v/∂f = R(θ)·dt at ``vel_idx``,
+    and ∂p/∂f = R(θ)·0.5·dt² at ``pos_idx``. Missing/out-of-bounds indices
+    are ignored.
     """
     G = jnp.zeros((n, 3), dtype=dtype)
     c, s = jnp.cos(theta), jnp.sin(theta)

@@ -240,7 +240,7 @@ def compute_nees(
 
     if covariances_est.shape != (N, D, D):
         raise ValueError(
-            f"Covariance shape mismatch: expected ({N}, {D}, {D}), " f"got {covariances_est.shape}"
+            f"Covariance shape mismatch: expected ({N}, {D}, {D}), got {covariances_est.shape}"
         )
 
     nees = np.zeros(N)
@@ -661,8 +661,7 @@ def compute_dropout_drift(
     """
     if positions.shape[0] != valid_mask.shape[0] or positions.shape[0] != t.shape[0]:
         raise ValueError(
-            f"Shape mismatch: positions {positions.shape}, "
-            f"mask {valid_mask.shape}, time {t.shape}"
+            f"Shape mismatch: positions {positions.shape}, mask {valid_mask.shape}, time {t.shape}"
         )
 
     # Find contiguous dropout blocks

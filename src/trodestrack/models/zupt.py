@@ -7,20 +7,24 @@ from trodestrack.models.state_layout import LAYOUT_REGISTRY
 
 
 def H_vel(n: int, dtype=jnp.float32) -> jnp.ndarray:
-    """Build a 2xN selector that picks [vx, vy] from the state using StateLayout.
+    """Selector matrix picking [vx, vy] from the state.
 
-    Uses StateLayout to find velocity indices for the given state dimension,
-    making ZUPT work correctly for 5D, 8D, 10D, 15D, and 16D states.
+    Parameters
+    ----------
+    n : int
+        State dimension.
+    dtype : jnp.dtype, default jnp.float32
+        Array dtype.
 
-    Args:
-        n: State dimension
-        dtype: JAX dtype for arrays
+    Returns
+    -------
+    jnp.ndarray
+        H matrix (2, n) selecting the first two velocity components.
 
-    Returns:
-        H matrix (2, n) selecting first two velocity components
-
-    Note:
-        Falls back to indices [2, 3] if no layout is found (legacy compatibility).
+    Notes
+    -----
+    Uses StateLayout to find indices where available; falls back to legacy
+    indices [2, 3] if no matching layout is found.
     """
     # Find layout for this dimension
     layout = None
@@ -45,21 +49,29 @@ def H_vel(n: int, dtype=jnp.float32) -> jnp.ndarray:
 
 
 def zupt_model(config: object, state_mean: jnp.ndarray, n: int, dtype=jnp.float32):
-    """Construct a branchless zero-velocity measurement model (H, R, y).
+    """Branchless zero-velocity measurement model (H, R, y).
 
-    - Innovation y = -[vx, vy]
-    - H selects the velocity components using StateLayout
-    - R is set to `zupt_measurement_noise` when stationary and very large otherwise
-    - Stationarity check is branchless (lax.select) and respects `enable_zupt` flag
+    Parameters
+    ----------
+    config : object
+        Filter configuration with ZUPT settings.
+    state_mean : jnp.ndarray
+        Current state estimate (n,).
+    n : int
+        State dimension.
+    dtype : jnp.dtype, default jnp.float32
+        Array dtype.
 
-    Args:
-        config: Filter configuration
-        state_mean: Current state estimate
-        n: State dimension
-        dtype: JAX dtype for arrays
+    Returns
+    -------
+    tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]
+        ``(H, R, innovation)`` where H is (2, n), R is (2, 2) ((m/s)^2), and
+        innovation is (2,) = −[vx, vy].
 
-    Returns:
-        Tuple of (H, R, innovation) for ZUPT measurement
+    Notes
+    -----
+    Stationarity check uses ``lax.select`` to avoid branching and respects
+    ``enable_zupt``. ``R`` is small when stationary and 1e6 otherwise.
     """
     # Find layout for this dimension to get velocity indices
     layout = None

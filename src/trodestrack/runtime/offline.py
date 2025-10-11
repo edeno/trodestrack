@@ -36,12 +36,18 @@ from trodestrack.models.ukf import UKFConfig, UKFResult
 class SmootherResult(NamedTuple):
     """Smoother result (both EKF and UKF).
 
-    Attributes:
-        smoothed_means: Smoothed state means at camera times (N_cam, n)
-        smoothed_covariances: Smoothed covariances at camera times (N_cam, n, n)
-        marginal_loglik: Marginal log-likelihood from filter
+    Attributes
+    ----------
+    smoothed_means : jnp.ndarray
+        Smoothed state means at camera times (N_cam, n).
+    smoothed_covariances : jnp.ndarray
+        Smoothed covariances at camera times (N_cam, n, n).
+    marginal_loglik : float
+        Marginal log-likelihood from filter.
 
-    where n is the state dimension (8 for standard 2D, 12 for future 3D, etc.)
+    Notes
+    -----
+    n is the state dimension (8 for standard 2D, 10+ for extended layouts).
     """
 
     smoothed_means: jnp.ndarray  # (N_cam, n)
@@ -68,44 +74,30 @@ def rts_smoother(
     num_iter: int = 1,
     mask_cam: np.ndarray | None = None,
 ) -> SmootherResult:
-    """Run RTS (Rauch-Tung-Striebel) smoother on EKF filter output.
+    """Run RTS (Rauch-Tung-Striebel) smoother on EKF output.
 
-    The RTS smoother performs a backward pass over the filtered estimates,
-    incorporating information from future measurements to refine each state
-    estimate. This produces smoothed estimates with lower variance than
-    the forward filter alone.
+    Parameters
+    ----------
+    filter_result : EKFResult
+        Output from :func:`trodestrack.models.ekf.extended_kalman_filter`.
+    ekf_config : EKFConfig
+        EKF configuration (for dynamics and Q assembly).
+    t_imu : np.ndarray
+        IMU timestamps (N_imu,) in seconds.
+    U_imu : np.ndarray
+        IMU measurements [ω_z(rad/s), f_x(m/s^2), f_y(m/s^2)] (N_imu, 3).
+    t_cam : np.ndarray
+        Camera timestamps (N_cam,) in seconds.
+    num_iter : int, default 1
+        Number of IEKS iterations; 1 yields standard RTS.
+    mask_cam : np.ndarray | None, optional
+        Camera validity mask (N_cam,). If provided, applies blackout-aware noise scaling.
 
-    Supports iterative smoothing (IEKS): relinearize around previous smoothed
-    trajectory for improved handling of nonlinearities.
-
-    Algorithm (Särkkä 2013, Algorithm 8.2 + iterative extension):
-        For iteration i = 1...num_iter:
-            For k = N-1, ..., 1:
-                1. Predict forward from k to k+1 (around x_smooth^(i-1)): m_pred, P_pred
-                2. Compute smoother gain: G_k = P_k @ F_k^T @ P_pred^{-1}
-                3. Smooth state: m_smooth[k] = m_filt[k] + G_k @ (m_smooth[k+1] - m_pred)
-                4. Smooth cov: P_smooth[k] = P_filt[k] + G_k @ (P_smooth[k+1] - P_pred) @ G_k^T
-
-    Args:
-        filter_result: Output from extended_kalman_filter()
-        ekf_config: EKF configuration
-        t_imu: IMU timestamps (N_imu,) - needed to compute prediction
-        U_imu: IMU measurements [ω_z, f_x, f_y] (N_imu, 3)
-        t_cam: Camera timestamps (N_cam,)
-        num_iter: Number of IEKS iterations (default 1 = standard RTS)
-        mask_cam: Camera mask (N_cam,) - if provided, applies blackout-aware noise scaling
-
-    Returns:
-        SmootherResult with smoothed means and covariances
-
-    Note:
-        The smoother runs backward in time, starting from the last filtered
-        estimate (which equals the last smoothed estimate by definition).
-        State dimension is derived from filter_result.filtered_means.shape[1].
-
-        Blackout-aware Q/R scaling (when mask_cam is provided):
-        - During vision blackouts, reduces accel bias RW noise and IMU input noise
-        - Helps tighten how hard post-gap vision "pulls" backward through gaps
+    Returns
+    -------
+    SmootherResult
+        Smoothed means and covariances at camera times; log-likelihood copied
+        from the forward EKF pass.
     """
     # Convert to JAX arrays
     t_imu_jax = jnp.array(t_imu)
@@ -145,15 +137,21 @@ def rts_smoother(
     ):
         """Predict from frame t_idx to t_idx+1 using IMU.
 
-        This replicates the filter's prediction logic to get m_pred, P_pred, and G.
+        Parameters
+        ----------
+        t_idx : int
+            Time index k.
+        x_k : jnp.ndarray
+            State at time k (n,).
+        P_k : jnp.ndarray
+            Covariance at time k (n, n).
+        x_k_lin : jnp.ndarray
+            Linearization point at time k (for IEKS) (n,).
 
-        Args:
-            t_idx: Time index
-            x_k: State at time k (for RTS update)
-            P_k: Covariance at time k
-            x_k_lin: Linearization point trajectory at time k (for IEKS)
-
-        Returns: (m_pred, P_pred, G) where G is the smoother gain matrix.
+        Returns
+        -------
+        tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]
+            ``(m_pred, P_pred, G)`` with shapes (n,), (n, n), (n, n).
         """
         # Get IMU indices for interval [t_idx, t_idx+1)
         imu_indices = imu_index_arrays[t_idx + 1]
@@ -256,11 +254,15 @@ def rts_smoother(
     def run_one_rts_iteration(lin_means: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
         """Run one RTS backward pass.
 
-        Args:
-            lin_means: Linearization trajectory (N_cam, n)
+        Parameters
+        ----------
+        lin_means : jnp.ndarray
+            Linearization trajectory (N_cam, n).
 
-        Returns:
-            smoothed_means, smoothed_covs: Updated estimates
+        Returns
+        -------
+        tuple[jnp.ndarray, jnp.ndarray]
+            ``(smoothed_means, smoothed_covs)`` each with shapes (N_cam, n) and (N_cam, n, n).
         """
         # Initial condition: smoothed[N-1] = filtered[N-1]
         _, (smoothed_means_iter, smoothed_covs_iter) = lax.scan(
@@ -353,18 +355,28 @@ def sigma_point_smoother(
     t_cam: np.ndarray,
     mask_cam: np.ndarray | None = None,
 ) -> SmootherResult:
-    """Run sigma-point (RTS-like) smoother on UKF filter output.
+    """Run sigma-point (RTS-like) smoother on UKF output.
 
-    The sigma-point smoother uses the unscented transform to predict forward
-    and then applies the RTS backward smoothing equations. This avoids
-    computing Jacobians while still achieving accurate smoothing.
+    Parameters
+    ----------
+    filter_result : UKFResult
+        Output from :func:`trodestrack.models.ukf.unscented_kalman_filter`.
+    ukf_config : UKFConfig
+        UKF configuration (for dynamics and Q assembly).
+    t_imu : np.ndarray
+        IMU timestamps (N_imu,) in seconds.
+    U_imu : np.ndarray
+        IMU measurements [ω_z(rad/s), f_x(m/s^2), f_y(m/s^2)] (N_imu, 3).
+    t_cam : np.ndarray
+        Camera timestamps (N_cam,) in seconds.
+    mask_cam : np.ndarray | None, optional
+        Camera validity mask (N_cam,). If provided, applies blackout-aware noise scaling.
 
-    Algorithm (Särkkä 2013, modified for sigma points):
-        For k = N-1, ..., 1:
-            1. Predict forward using sigma points: m_pred, P_pred, cross_cov
-            2. Compute smoother gain: G_k = cross_cov @ P_pred^{-1}
-            3. Smooth state: m_smooth[k] = m_filt[k] + G_k @ (m_smooth[k+1] - m_pred)
-            4. Smooth cov: P_smooth[k] = P_filt[k] + G_k @ (P_smooth[k+1] - P_pred) @ G_k^T
+    Returns
+    -------
+    SmootherResult
+        Smoothed means and covariances at camera times; log-likelihood copied
+        from the forward UKF pass.
 
     Args:
         filter_result: Output from unscented_kalman_filter()

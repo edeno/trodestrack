@@ -259,12 +259,12 @@ def _create_summary_page(
     text_lines.append("=" * 60)
     text_lines.append("")
     text_lines.append(
-        f"Position RMSE:    {pos_rmse*100:.2f} cm    "
-        f"(PRD req: ≤{PRD_POSITION_RMSE_M*100:.1f} cm)"
+        f"Position RMSE:    {pos_rmse * 100:.2f} cm    "
+        f"(PRD req: ≤{PRD_POSITION_RMSE_M * 100:.1f} cm)"
     )
     text_lines.append(
-        f"Velocity RMSE:    {vel_rmse*100:.2f} cm/s  "
-        f"(PRD req: ≤{PRD_VELOCITY_RMSE_MS*100:.1f} cm/s)"
+        f"Velocity RMSE:    {vel_rmse * 100:.2f} cm/s  "
+        f"(PRD req: ≤{PRD_VELOCITY_RMSE_MS * 100:.1f} cm/s)"
     )
     text_lines.append(
         f"Heading MAE:      {np.rad2deg(heading_mae):.2f}°     "

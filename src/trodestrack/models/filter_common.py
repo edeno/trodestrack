@@ -1,4 +1,9 @@
-"""Shared configuration, state containers, and helpers for Kalman filters."""
+"""Shared configuration, state containers, and helpers for Kalman filters.
+
+This module provides common dataclasses, utilities, and math helpers used by
+both EKF and UKF implementations. All public functions use NumPy-style
+docstrings and include array shapes and physical units where applicable.
+"""
 
 from __future__ import annotations
 
@@ -14,7 +19,74 @@ from trodestrack.models.state_layout import StateLayout, get_heading_index, get_
 
 @dataclass
 class FilterCoreConfig:
-    """Parameters common to EKF and UKF implementations."""
+    """Core filter configuration shared by EKF and UKF.
+
+    Parameters
+    ----------
+    process_noise_pos : float
+        Position random-walk spectral density (m^2/s^3) used in Q.
+    process_noise_vel : float
+        Velocity random-walk spectral density ((m/s)^2/s).
+    process_noise_heading : float
+        Heading random-walk spectral density (rad^2/s).
+    process_noise_gyro_bias : float
+        Gyro bias random-walk spectral density ((rad/s)^2/s).
+    process_noise_accel_bias : float
+        Accelerometer bias random-walk spectral density ((m/s^2)^2/s).
+
+    measurement_noise_pos : float
+        Per-dimension position measurement noise variance (m^2).
+    measurement_noise_heading : float
+        Heading measurement noise variance (rad^2).
+
+    imu_gyro_noise_density : float
+        IMU gyro noise density (rad/s/√Hz) used during blackout adjustments.
+    imu_accel_noise_density : float
+        IMU accel noise density (m/s^2/√Hz) used during blackout adjustments.
+
+    damping_coeff : float
+        Linear velocity damping coefficient (1/s) in dynamics model.
+    led_distance : float | None
+        Nominal LED spacing (m). If None, spacing is estimated from data.
+
+    use_mahalanobis_gating : bool
+        Enable χ²-based outlier rejection on measurement updates.
+    mahalanobis_threshold_prob : float
+        Probability mass for χ² threshold (e.g., 0.997 ≈ 3σ).
+
+    use_heading_measurement : bool
+        Enable heading pseudo-measurement from LED geometry.
+    led_distance_tolerance : float
+        Relative tolerance for observed LED spacing vs expected (fraction).
+    adaptive_heading_noise : bool
+        If True, scales heading R by (expected/observed spacing)^2.
+
+    adaptive_q_during_dropout : bool
+        If True, increase position/velocity Q during vision dropouts.
+    dropout_q_pos_multiplier : float
+        Multiplier on position Q during dropout.
+    dropout_q_vel_multiplier : float
+        Multiplier on velocity Q during dropout.
+    dropout_q_bias_multiplier : float
+        Multiplier on bias Q during dropout (often < 1 to freeze biases).
+    freeze_bias_during_blackout : bool
+        If True, set bias Q≈0 during dropout to prevent drift.
+    reduce_imu_noise_during_blackout : bool
+        If True, scale IMU input noise when vision is absent.
+    blackout_imu_noise_scale : float
+        Scale applied to IMU noise during blackout when enabled.
+
+    enable_zupt : bool
+        Enable zero-velocity pseudo-measurements when nearly stationary.
+    zupt_velocity_threshold : float
+        Speed threshold (m/s) below which ZUPT applies.
+    zupt_measurement_noise : float
+        ZUPT measurement noise variance ((m/s)^2).
+
+    state_mode : str
+        State layout key, e.g. "2d_full" (8D), "vision_only" (5D), or
+        "2d_cam_3d_imu" (10D).
+    """
 
     process_noise_pos: float = 0.02
     process_noise_vel: float = 2.0
@@ -56,20 +128,55 @@ class FilterCoreConfig:
 
 
 class FilterState(NamedTuple):
-    """Kalman filter state comprising mean vector and covariance matrix."""
+    """Kalman filter state comprising mean vector and covariance matrix.
+
+    Attributes
+    ----------
+    mean : jnp.ndarray
+        State mean (n,). Units depend on layout; typically
+        [x(m), y(m), vx(m/s), vy(m/s), θ(rad), b_gz(rad/s), b_ax(m/s^2), b_ay(m/s^2)].
+    cov : jnp.ndarray
+        State covariance (n, n).
+    """
 
     mean: jnp.ndarray
     cov: jnp.ndarray
 
 
 def symmetrize(matrix: jnp.ndarray) -> jnp.ndarray:
-    """Enforce numerical symmetry on a covariance matrix."""
+    """Enforce numerical symmetry on a square matrix.
+
+    Parameters
+    ----------
+    matrix : jnp.ndarray
+        Input matrix (n, n).
+
+    Returns
+    -------
+    jnp.ndarray
+        Symmetrized matrix (n, n): 0.5·(A + Aᵀ).
+    """
 
     return 0.5 * (matrix + jnp.swapaxes(matrix, -1, -2))
 
 
 def psd_solve(matrix: jnp.ndarray, rhs: jnp.ndarray, diagonal_boost: float = 1e-9) -> jnp.ndarray:
-    """Solve matrix @ x = rhs for PSD matrices via Cholesky factorisation."""
+    """Solve A x = b for PSD matrices via Cholesky factorization.
+
+    Parameters
+    ----------
+    matrix : jnp.ndarray
+        Positive semi-definite matrix A (k, k).
+    rhs : jnp.ndarray
+        Right-hand side b. Shape (k,) or (k, m).
+    diagonal_boost : float, optional
+        Small value added to diag(A) to improve numerical stability.
+
+    Returns
+    -------
+    jnp.ndarray
+        Solution x with shape matching rhs.
+    """
 
     stabilized = symmetrize(matrix) + diagonal_boost * jnp.eye(matrix.shape[-1])
     chol, lower = cho_factor(stabilized, lower=True)
@@ -82,7 +189,30 @@ def joseph_update(
     H: jnp.ndarray,
     R: jnp.ndarray,
 ) -> jnp.ndarray:
-    """Joseph-form covariance update that preserves PSD and symmetry."""
+    """Joseph-form covariance update that preserves PSD and symmetry.
+
+    Parameters
+    ----------
+    cov_prior : jnp.ndarray
+        Prior covariance P⁻ (n, n).
+    gain : jnp.ndarray
+        Kalman gain K (n, k).
+    H : jnp.ndarray
+        Measurement Jacobian H (k, n).
+    R : jnp.ndarray
+        Measurement noise covariance R (k, k).
+
+    Returns
+    -------
+    jnp.ndarray
+        Posterior covariance P⁺ (n, n).
+
+    Notes
+    -----
+    Uses the numerically stable Joseph form:
+
+    P⁺ = (I − K H) P⁻ (I − K H)ᵀ + K R Kᵀ
+    """
 
     n = cov_prior.shape[0]
     identity = jnp.eye(n)
@@ -91,34 +221,42 @@ def joseph_update(
 
 
 def wrap_angle(theta: jnp.ndarray) -> jnp.ndarray:
-    """Wrap angles to (-π, π] to avoid discontinuities."""
+    """Wrap angles to (-π, π] to avoid discontinuities.
+
+    Parameters
+    ----------
+    theta : jnp.ndarray
+        Angle(s) in radians, arbitrary shape.
+
+    Returns
+    -------
+    jnp.ndarray
+        Wrapped angle(s), same shape as input.
+    """
 
     return jnp.arctan2(jnp.sin(theta), jnp.cos(theta))
 
 
 def chi2_threshold(dof: int, prob: float) -> jnp.ndarray:
-    """Closed-form χ² thresholds for common degrees of freedom and probabilities.
+    """Closed-form χ² thresholds for common degrees of freedom.
 
-    Supports dof ∈ {2, 4} (single-LED and dual-LED measurements) and
-    prob ∈ {0.95, 0.975, 0.99, 0.997} (common gating thresholds).
+    Parameters
+    ----------
+    dof : int
+        Degrees of freedom, {2, 4} for single-LED vs dual-LED measurements.
+    prob : float
+        Probability mass for threshold, one of {0.95, 0.975, 0.99, 0.997}.
 
-    Args:
-        dof: Degrees of freedom (2 or 4)
-        prob: Probability threshold (0.95, 0.975, 0.99, or 0.997)
+    Returns
+    -------
+    jnp.ndarray
+        χ² threshold value (scalar).
 
-    Returns:
-        χ² threshold value for the given (dof, prob) pair
-
-    Reference:
-        Chi-squared distribution quantiles from scipy.stats.chi2.ppf()
-        - dof=2: Mahalanobis distance² for single LED (x, y)
-        - dof=4: Mahalanobis distance² for dual LEDs (x1, y1, x2, y2)
-
-    Example:
-        >>> chi2_threshold(2, 0.997)  # ~3σ for single LED
-        11.618
-        >>> chi2_threshold(4, 0.95)   # 95% CI for dual LEDs
-        9.488
+    Notes
+    -----
+    Values match ``scipy.stats.chi2.ppf(prob, dof)`` for the listed pairs.
+    - dof=2: Mahalanobis distance² for single LED (x, y)
+    - dof=4: Mahalanobis distance² for dual LEDs (x1, y1, x2, y2)
     """
     # Thresholds for dof=2 (single LED)
     threshold_2 = lax.select(
@@ -160,10 +298,37 @@ def dynamics_function(
     damping: float,
     layout: StateLayout,
 ) -> jnp.ndarray:
-    """Integrate constant-acceleration dynamics with linear damping (layout-aware).
+    """Constant-acceleration dynamics with linear damping (layout-aware).
 
-    Supports 2D heading layouts. For layouts with additional dimensions
-    (e.g., 10D with vz, b_az), those extra components are propagated as identity.
+    Parameters
+    ----------
+    state : jnp.ndarray
+        State vector (n,). Typical 2D layout: [x(m), y(m), vx(m/s), vy(m/s), θ(rad), ...].
+    imu : jnp.ndarray
+        IMU specific force and yaw rate [ω_z(rad/s), f_x(m/s^2), f_y(m/s^2)] (3,).
+    dt : float
+        Time step (s).
+    damping : float
+        Linear velocity damping coefficient (1/s).
+    layout : StateLayout
+        State index mapping.
+
+    Returns
+    -------
+    jnp.ndarray
+        Next state (n,).
+
+    Notes
+    -----
+    Uses body→world rotation R(θ) and updates
+
+    vₖ₊₁ = vₖ + (R f − γ vₖ) dt
+
+    pₖ₊₁ = pₖ + vₖ dt + 1/2 (R f − γ vₖ) dt²
+
+    θₖ₊₁ = θₖ + (ω_z − b_gz) dt
+
+    Unused layout components are propagated as identity.
     """
 
     # Extract indices (2D heading only)
@@ -213,7 +378,22 @@ def dynamics_function(
 def measurement_function(
     state: jnp.ndarray, led_distance: float, layout: StateLayout
 ) -> jnp.ndarray:
-    """Project state into dual-LED measurement space (layout-aware)."""
+    """Project state into dual-LED measurement space (layout-aware).
+
+    Parameters
+    ----------
+    state : jnp.ndarray
+        State (n,).
+    led_distance : float
+        LED spacing (m).
+    layout : StateLayout
+        State index mapping.
+
+    Returns
+    -------
+    jnp.ndarray
+        Measurement vector (4,) ordered as [x1, y1, x2, y2] in meters.
+    """
 
     h_idx = get_heading_index(layout)
     px = state[layout.pos_idx[0]]
@@ -227,23 +407,18 @@ def measurement_function(
 def make_led_selector(only_led1: bool, only_led2: bool) -> jnp.ndarray:
     """Create 2×4 selector matrix for single-LED observations.
 
-    Extracts the active 2D subspace from 4D measurement space.
-    Measurement layout: [led1_x, led1_y, led2_x, led2_y]
+    Parameters
+    ----------
+    only_led1 : bool
+        True if only LED1 is valid.
+    only_led2 : bool
+        True if only LED2 is valid.
 
-    Args:
-        only_led1: True if only LED1 is valid
-        only_led2: True if only LED2 is valid
-
-    Returns:
-        M: 2×4 selector matrix
-            - LED1-only: rows [1,0,0,0] and [0,1,0,0]
-            - LED2-only: rows [0,0,1,0] and [0,0,0,1]
-
-    Examples:
-        >>> M = make_led_selector(only_led1=True, only_led2=False)
-        >>> M.shape
-        (2, 4)
-        >>> M @ jnp.array([x1, y1, x2, y2])  # Extracts [x1, y1]
+    Returns
+    -------
+    jnp.ndarray
+        Selector matrix ``M`` (2, 4) such that ``M @ [x1,y1,x2,y2]`` extracts
+        the active LED's 2D subspace.
     """
     # LED1 selector: picks first 2 dimensions
     M_led1 = jnp.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]])
@@ -262,40 +437,31 @@ def apply_lifted_inverse(
     only_led1: bool,
     only_led2: bool,
 ) -> jnp.ndarray:
-    """Apply effective inverse S⁻¹ to 4D vector with lifted subspace operator.
+    """Apply effective inverse in active subspace then lift to 4D.
 
-    This computes x = S_eff⁻¹ @ w where S_eff is either:
-    - Full 4×4 innovation covariance (both LEDs valid)
-    - Lifted 2×2 subspace (only one LED valid)
+    Parameters
+    ----------
+    S4 : jnp.ndarray
+        Innovation covariance in full space (4, 4).
+    w4 : jnp.ndarray
+        Vector to multiply (4,).
+    both_leds : bool
+        True if both LEDs are valid (4D update).
+    only_led1 : bool
+        True if only LED1 is valid (2D update).
+    only_led2 : bool
+        True if only LED2 is valid (2D update).
 
-    The key insight: compute in active subspace, then lift back to 4D.
-    This avoids large variance hacks while keeping static shapes for JAX.
+    Returns
+    -------
+    jnp.ndarray
+        Result x = S_eff⁻¹ @ w in 4D with static shape (4,).
 
-    Args:
-        S4: Innovation covariance (4, 4)
-        w4: Vector to multiply (4,)
-        both_leds: True if both LEDs are valid
-        only_led1: True if only LED1 is valid
-        only_led2: True if only LED2 is valid
+    Notes
+    -----
+    For single-LED updates, compute in the 2D active subspace and lift:
 
-    Returns:
-        x4: Result of S_eff⁻¹ @ w4 (4,) with static shape
-
-    Algorithm:
-        - Both LEDs: x4 = solve(S4, w4)
-        - Single LED: x4 = M2ᵀ @ solve(M2 @ S4 @ M2ᵀ, M2 @ w4)
-          where M2 is 2×4 selector for active LED
-
-    References:
-        - Matrix cookbook: subspace projections
-        - Lifted Kalman filtering for partial observations
-
-    Examples:
-        >>> S = jnp.eye(4) * 0.01  # Innovation covariance
-        >>> innov = jnp.array([0.1, 0.2, nan, nan])  # Only LED1 valid
-        >>> x = apply_lifted_inverse(S, innov, False, True, False)
-        >>> x[:2]  # Should be ~[10, 20] (scaled by 1/0.01)
-        >>> x[2:]  # Should be [0, 0] (lifted from 2D subspace)
+    x₄ = Mᵀ · (M S₄ Mᵀ)⁻¹ · (M w₄)
     """
     # 4D path: both LEDs valid
     x4_full = psd_solve(S4, w4)
@@ -322,19 +488,30 @@ def initialize_state(
 ) -> FilterState:
     """Bootstrap filter state from early LED observations.
 
-    Args:
-        led1_obs: LED1 observations (N, 2)
-        led2_obs: LED2 observations (N, 2)
-        mask: Observation validity mask (N,)
-        dt_cam: Camera frame interval in seconds (can be float or JAX scalar for JIT)
-        led_distance: LED spacing in meters
+    Parameters
+    ----------
+    led1_obs : jnp.ndarray
+        LED1 observations (N, 2) in meters.
+    led2_obs : jnp.ndarray
+        LED2 observations (N, 2) in meters.
+    mask : jnp.ndarray
+        Observation validity mask (N,), boolean.
+    dt_cam : float or jnp.ndarray
+        Camera frame interval (s). JAX scalar allowed for JIT.
+    led_distance : float, default 0.04
+        LED spacing (m) used to infer heading when both LEDs visible.
+    layout : StateLayout, optional
+        State mapping; defaults to "2d_full" if not provided.
 
-    Returns:
-        Initial filter state with mean and covariance
+    Returns
+    -------
+    FilterState
+        Initial mean (n,) and covariance (n, n).
 
-    Note:
-        If no valid observations exist (all NaN), initializes at origin with
-        large uncertainty. This allows prediction-only filtering to proceed.
+    Notes
+    -----
+    If all observations are invalid, initializes near the origin with large
+    uncertainty, allowing prediction-only filtering to proceed.
     """
 
     # Find frames with valid mask AND finite LED observations
@@ -466,7 +643,20 @@ def update_zupt(
     state: FilterState,
     config: FilterCoreConfig,
 ) -> tuple[FilterState, jnp.ndarray]:
-    """Apply zero-velocity pseudo-measurement when stationary."""
+    """Apply zero-velocity pseudo-measurement when nearly stationary.
+
+    Parameters
+    ----------
+    state : FilterState
+        Current state.
+    config : FilterCoreConfig
+        ZUPT parameters in config.
+
+    Returns
+    -------
+    tuple[FilterState, jnp.ndarray]
+        Updated state and log-likelihood (scalar).
+    """
 
     from trodestrack.models.zupt import zupt_model
 
@@ -505,9 +695,22 @@ def confidence_to_R_diagonal(
 ) -> jnp.ndarray:
     """Map confidence scores to per-dimension measurement noise.
 
-    Returns a length-`size` vector of diagonal entries for R.
-    - If `confidence` is None → all entries = base
-    - Else R_i = base / clip(conf_i, clip_min, 1.0)
+    Parameters
+    ----------
+    confidence : jnp.ndarray or None
+        Confidence per measurement dimension, shape (size,) in [0, 1].
+        If None, no scaling is applied.
+    base : float
+        Base variance per dimension (units^2).
+    size : int
+        Number of measurement dimensions.
+    clip_min : float, default 1e-2
+        Lower bound for confidence to avoid division by zero.
+
+    Returns
+    -------
+    jnp.ndarray
+        Diagonal entries of R (size,), where R_i = base / clip(conf_i, clip_min, 1).
     """
     if confidence is None:
         return jnp.full(size, base)
@@ -516,37 +719,31 @@ def confidence_to_R_diagonal(
 
 
 def gaussian_log_likelihood(innovation: jnp.ndarray, covariance: jnp.ndarray) -> jnp.ndarray:
-    """Compute Gaussian log-likelihood of innovation with numerical stability.
+    """Gaussian log-likelihood of an innovation with stability tweaks.
 
-    Computes log p(y | mu, Sigma) where y ~ N(mu, Sigma)
-    and innovation = y - mu.
+    Parameters
+    ----------
+    innovation : jnp.ndarray
+        Innovation vector v (k,).
+    covariance : jnp.ndarray
+        Innovation covariance S (k, k).
 
-    Stability features:
-        - Adds small jitter to covariance diagonal for near-singular matrices
-        - Checks sign from slogdet to detect numerical issues
-        - Uses Cholesky decomposition when feasible via psd_solve
+    Returns
+    -------
+    jnp.ndarray
+        Log-likelihood log p(v | 0, S) (scalar).
 
-    Args:
-        innovation: Innovation vector (k,)
-        covariance: Innovation covariance (k, k)
-
-    Returns:
-        Log-likelihood (scalar)
-
-    Formula:
-        log_prob = -0.5 * (k*log(2π) + log(det(S)) + v^T S^{-1} v)
-
-    Notes:
-        - If determinant is negative or zero (numerical error), adds jitter
-        - Jitter = 1e-8 * trace(S) / k added to diagonal
-        - This prevents divergence for near-singular covariances
+    Notes
+    -----
+    Computes ``-0.5 * (k log(2π) + log det S + vᵀ S⁻¹ v)`` with small diagonal
+    jitter to improve conditioning.
     """
     k = innovation.shape[0]
 
     # Add small jitter to diagonal for numerical stability
     # Scale by mean diagonal value to be adaptive
     jitter = 1e-8 * jnp.trace(covariance) / k
-    S_stable = covariance + jnp.eye(k) * jitter
+    S_stable = symmetrize(covariance) + jnp.eye(k) * jitter
 
     # Log determinant using slogdet (more stable than det)
     sign, logdet = jnp.linalg.slogdet(S_stable)
@@ -555,7 +752,7 @@ def gaussian_log_likelihood(innovation: jnp.ndarray, covariance: jnp.ndarray) ->
     # If sign <= 0, increase jitter and recompute
     def add_more_jitter():
         jitter_large = 1e-6 * jnp.trace(covariance) / k
-        S_jittered = covariance + jnp.eye(k) * jitter_large
+        S_jittered = symmetrize(covariance) + jnp.eye(k) * jitter_large
         sign_j, logdet_j = jnp.linalg.slogdet(S_jittered)
         return logdet_j
 
@@ -580,34 +777,38 @@ def compute_nis_and_loglik(
     only_led1: bool,
     only_led2: bool,
 ) -> tuple[jnp.ndarray, jnp.ndarray]:
-    """Compute exact NIS and log-likelihood for 2D or 4D measurement.
+    """Exact NIS and log-likelihood in active measurement subspace.
 
-    Uses Cholesky decomposition for numerical stability and computes
-    statistics in the active measurement subspace (2D or 4D).
+    Parameters
+    ----------
+    innov4 : jnp.ndarray
+        Innovation in 4D measurement space (4,) [x1,y1,x2,y2] (m).
+    S4 : jnp.ndarray
+        Innovation covariance in 4D (4, 4) (m^2).
+    both_leds : bool
+        True if both LEDs valid → 4D.
+    only_led1 : bool
+        True if only LED1 valid → 2D.
+    only_led2 : bool
+        True if only LED2 valid → 2D.
 
-    Args:
-        innov4: Innovation vector (4,) in full measurement space
-        S4: Innovation covariance (4, 4)
-        both_leds: True if both LEDs valid (4D measurement)
-        only_led1: True if only LED1 valid (2D measurement)
-        only_led2: True if only LED2 valid (2D measurement)
+    Returns
+    -------
+    tuple[jnp.ndarray, jnp.ndarray]
+        ``(nis, log_likelihood)`` scalars.
 
-    Returns:
-        Tuple of (nis, log_likelihood):
-            - nis: Normalized Innovation Squared (scalar)
-            - log_likelihood: Gaussian log-likelihood (scalar)
-
-    Notes:
-        - 4D case: Uses full innovation covariance
-        - 2D case: Projects to active subspace via selector matrix
-        - Both return exact statistics (no diagonal approximation)
-        - NIS follows χ²(k) where k=2 or 4 depending on measurement dim
+    Notes
+    -----
+    Uses Cholesky-based solves. For 2D cases, projects via selector matrix
+    before computing statistics, ensuring exact results without diagonal
+    approximations.
     """
     from jax.scipy.linalg import cho_solve
 
     # 4D branch: both LEDs valid
     def compute_4d():
-        L4 = jnp.linalg.cholesky(S4 + 1e-9 * jnp.eye(4))
+        S4s = symmetrize(S4)
+        L4 = jnp.linalg.cholesky(S4s + 1e-9 * jnp.eye(4))
         x4 = cho_solve((L4, True), innov4)
         nis = jnp.dot(innov4, x4)
         logdet = 2.0 * jnp.sum(jnp.log(jnp.diag(L4)))
@@ -617,7 +818,7 @@ def compute_nis_and_loglik(
     # 2D branch: single LED valid
     def compute_2d():
         M2 = make_led_selector(only_led1, only_led2)  # (2, 4)
-        S2 = M2 @ S4 @ M2.T  # (2, 2)
+        S2 = M2 @ symmetrize(S4) @ M2.T  # (2, 2)
         innov2 = M2 @ innov4  # (2,)
 
         L2 = jnp.linalg.cholesky(S2 + 1e-9 * jnp.eye(2))
@@ -636,38 +837,30 @@ def prepare_heading_measurement(
     z_led2: jnp.ndarray,
     config: FilterCoreConfig,
 ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-    """Prepare heading pseudo-measurement from LED pair geometry.
+    """Prepare heading pseudo-measurement from LED geometry.
 
-    Computes heading observation from LED positions and determines
-    measurement noise with optional adaptive scaling. Handles validity
-    checks and spacing tolerance.
+    Parameters
+    ----------
+    z_led1 : jnp.ndarray
+        LED1 observation (2,) [x, y] in meters.
+    z_led2 : jnp.ndarray
+        LED2 observation (2,) [x, y] in meters.
+    config : FilterCoreConfig
+        Heading measurement configuration.
 
-    This is the common preprocessing logic shared by EKF and UKF
-    heading update functions. The actual Kalman update (EKF vs UKF)
-    happens after this preprocessing.
+    Returns
+    -------
+    tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]
+        ``(heading_obs, R_heading, use_heading)`` where
+        ``heading_obs`` is in radians, ``R_heading`` is variance (rad^2), and
+        ``use_heading`` is a boolean JAX scalar.
 
-    Args:
-        z_led1: LED1 observation (2,) in meters [x, y]
-        z_led2: LED2 observation (2,) in meters [x, y]
-        config: Filter configuration with heading measurement parameters
-
-    Returns:
-        Tuple of (heading_obs, R_heading, use_heading):
-            - heading_obs: Observed heading angle in radians
-            - R_heading: Measurement noise (small if valid, 1e6 if gated)
-            - use_heading: Boolean flag indicating if measurement is valid
-
-    Algorithm:
-        1. Check LED validity (both finite)
-        2. Compute heading: arctan2(dy, dx)
-        3. Check spacing tolerance (if led_distance specified)
-        4. Adaptive noise scaling: R ∝ (expected/observed)²
-        5. Gate invalid observations: R = 1e6 → no update
-
-    Notes:
-        - Returns R=1e6 for invalid observations (branchless gating)
-        - heading_obs always computed (may be NaN if invalid)
-        - Adaptive noise helps when LED spacing varies due to camera angle
+    Notes
+    -----
+    Computes θ_obs = arctan2(dy, dx). If both LEDs are valid and the observed
+    spacing is within the tolerance of the expected spacing, returns a small
+    ``R_heading`` (possibly adapted by spacing ratio). Otherwise, returns a
+    large ``R_heading`` (1e6) which effectively gates out the update.
     """
     # Check LED validity
     led1_valid = jnp.isfinite(z_led1).all()

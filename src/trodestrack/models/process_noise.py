@@ -8,29 +8,27 @@ from trodestrack.models.state_layout import LAYOUT_REGISTRY
 
 
 def build_Q_rate(config: Any, n: int, dtype=jnp.float32) -> jnp.ndarray:
-    """Diagonal process noise rate Q_rate using StateLayout for dimension-agnostic construction.
+    """Diagonal process noise-rate matrix Q_rate (dimension-agnostic).
 
-    Uses StateLayout abstraction to map noise parameters to correct state indices,
-    eliminating hardcoded dimension assumptions.
+    Parameters
+    ----------
+    config : Any
+        Filter configuration with ``process_noise_*`` parameters.
+    n : int
+        State dimension.
+    dtype : jnp.dtype, default jnp.float32
+        Array dtype.
 
-    Args:
-        config: Filter configuration with process_noise_* parameters
-        n: State dimension
-        dtype: JAX dtype for arrays
+    Returns
+    -------
+    jnp.ndarray
+        Diagonal matrix Q_rate (n, n) with entries mapped via StateLayout.
 
-    Returns:
-        Diagonal Q_rate matrix (n, n)
-
-    Supported dimensions:
-        - 5D: Vision-only [x, y, vx, vy, θ]
-        - 8D: 2D full or IMU-only [x, y, vx, vy, θ, b_gz, b_ax, b_ay]
-        - 10D: 2D camera + 3D IMU [x, y, vx, vy, vz, θ, b_gz, b_ax, b_ay, b_az]
-        - 15D: 3D Euler [x, y, z, vx, vy, vz, roll, pitch, yaw, biases...]
-        - 16D: 3D Quaternion [x, y, z, vx, vy, vz, qw, qx, qy, qz, biases...]
-
-    Note:
-        If n doesn't match any known layout, falls back to uniform process_noise_pos
-        for all dimensions (conservative but suboptimal).
+    Notes
+    -----
+    Supported layouts include 5D (vision-only), 8D (2D full), 10D (2D cam + 3D IMU),
+    etc. If ``n`` does not match any known layout, falls back to a uniform
+    diagonal with ``process_noise_pos``.
     """
     # Try to find matching layout
     layout = None
@@ -74,7 +72,22 @@ def build_Q_rate(config: Any, n: int, dtype=jnp.float32) -> jnp.ndarray:
 
 
 def build_input_noise_cov(config: Any, dt: float, dtype=jnp.float32) -> jnp.ndarray:
-    """IMU input noise covariance Qu from density params (per-sample variance)."""
+    """IMU input noise covariance from noise densities.
+
+    Parameters
+    ----------
+    config : Any
+        Filter configuration with IMU noise densities.
+    dt : float
+        Sample period (s).
+    dtype : jnp.dtype, default jnp.float32
+        Array dtype.
+
+    Returns
+    -------
+    jnp.ndarray
+        Qu (3, 3) for [ω_z(rad/s), f_x(m/s^2), f_y(m/s^2)].
+    """
     sg = (config.imu_gyro_noise_density * jnp.sqrt(dt)) ** 2
     sa = (config.imu_accel_noise_density * jnp.sqrt(dt)) ** 2
     return jnp.diag(jnp.array([sg, sa, sa], dtype=dtype))
@@ -91,12 +104,37 @@ def assemble_Q(
     G_override: Optional[jnp.ndarray] = None,
     Qu_override: Optional[jnp.ndarray] = None,
 ) -> jnp.ndarray:
-    """Assemble total process noise Q = Q_rate*dt (+ blackout scaling) + G Qu G^T.
+    """Assemble total process noise matrix.
 
-    - Applies adaptive Q scaling during vision dropout (pos/vel/bias multipliers)
-    - Applies reduced IMU input noise during dropout when configured
-    - Optionally freezes bias RW during dropout by zeroing bias rows/cols
-    - Returns symmetrized matrix for numerical safety
+    Parameters
+    ----------
+    config : Any
+        Filter configuration.
+    theta : float
+        Heading angle (rad), used for IMU input mapping.
+    dt : float
+        Time step (s).
+    n : int
+        State dimension.
+    has_vision : bool
+        Whether vision is available (affects dropout scaling).
+    dtype : jnp.dtype, default jnp.float32
+        Array dtype.
+    G_override : jnp.ndarray | None, optional
+        Optional precomputed input mapping matrix G (n, 3).
+    Qu_override : jnp.ndarray | None, optional
+        Optional IMU input covariance (3, 3).
+
+    Returns
+    -------
+    jnp.ndarray
+        Total process noise Q (n, n), symmetrized.
+
+    Notes
+    -----
+    Q = Q_rate·dt (+ blackout scaling) + G Qu Gᵀ.
+    Applies optional blackout scaling for pos/vel/bias components and IMU input
+    noise reduction, and can freeze biases by zeroing corresponding rows/cols.
     """
     # Base random-walk diffusion (time-scaled)
     Q_rate = build_Q_rate(config, n, dtype=dtype) * jnp.asarray(dt, dtype=dtype)
@@ -193,5 +231,4 @@ def assemble_Q(
                 Q = Q.at[:, idx].set(Q[:, idx] * freeze_factor)
 
     # Symmetrize for numerical hygiene
-    return 0.5 * (Q + Q.T)
     return 0.5 * (Q + Q.T)
