@@ -99,8 +99,8 @@ heading_truth = interp_angle(t_cam, t_truth, X_truth[:, 4])
 print("\n[Step 2/6] Running EKF - Fusion (Vision + IMU)...")
 
 ekf_config_fusion = EKFConfig(
-    process_noise_pos=0.02,
-    process_noise_vel=2.0,
+    process_noise_pos=0.001,  # Updated from 0.02 (20×)
+    process_noise_vel=0.5,  # Updated from 2.0 (4×)
     process_noise_heading=0.02,
     process_noise_gyro_bias=2e-6,
     process_noise_accel_bias=2e-4,
