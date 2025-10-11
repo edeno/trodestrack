@@ -247,11 +247,14 @@ def main() -> None:
     # Generate Plot
     # -------------------------------------------------------------------------
     print("\nGenerating plots...")
+    from pathlib import Path
+
     fig = plot_simple_simulations(sim_stat, sim_vel, sim_circ)
-    fig.savefig("01_simple_simulations.png", dpi=150)
+    output_path = Path(__file__).parent / "01_simple_simulations.png"
+    fig.savefig(output_path, dpi=150)
     plt.close(fig)
 
-    print("   → 01_simple_simulations.png")
+    print(f"   → {output_path}")
 
     # -------------------------------------------------------------------------
     # Summary Statistics
