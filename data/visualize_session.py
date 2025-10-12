@@ -20,9 +20,6 @@ from typing import Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.animation import FFMpegWriter, FuncAnimation
-from matplotlib.patches import Circle
-
 from load_arthur_session import (
     SessionData,
     convert_meters_to_pixels,
@@ -30,6 +27,8 @@ from load_arthur_session import (
     load_arthur_session,
     load_video_frame,
 )
+from matplotlib.animation import FFMpegWriter, FuncAnimation
+from matplotlib.patches import Circle
 
 
 def find_nearest_index(timestamps: np.ndarray, target_time: float) -> int:
