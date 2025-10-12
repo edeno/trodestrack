@@ -8,17 +8,17 @@ docstrings and include array shapes and physical units where applicable.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import NamedTuple
+from typing import ClassVar, NamedTuple
 
 import jax.numpy as jnp
 import numpy as np
-from jax import Array, lax
+from jax import Array, lax, tree_util
 from jax.scipy.linalg import cho_factor, cho_solve
 
 from trodestrack.models.state_layout import StateLayout, get_heading_index, get_layout
 
 
-@dataclass
+@dataclass(frozen=True)
 class FilterCoreConfig:
     """Core filter configuration shared by EKF and UKF.
 
@@ -126,6 +126,48 @@ class FilterCoreConfig:
     # State layout mode (controls state dimension and index mapping)
     # Supported for 2D paths: "2d_full" (8D), "vision_only" (5D), "2d_cam_3d_imu" (10D)
     state_mode: str = "2d_full"
+
+    # PyTree support: treat `state_mode` as static auxiliary data.
+    _TREE_STATIC_FIELDS: ClassVar[tuple[str, ...]] = ("state_mode",)
+
+    def tree_flatten(self):
+        """Flatten config for JAX PyTree registration."""
+        field_names = list(self.__dataclass_fields__.keys())
+        children = []
+        static_data = {"cls": self.__class__}
+
+        for name in field_names:
+            if name.startswith("_"):
+                continue
+            value = getattr(self, name)
+            if name in self._TREE_STATIC_FIELDS:
+                static_data[name] = value
+            else:
+                children.append(value)
+
+        return tuple(children), static_data
+
+    @classmethod
+    def tree_unflatten(cls, static_data, children):
+        """Reconstruct config from PyTree children."""
+        target_cls = static_data.get("cls", cls)
+        field_names = list(target_cls.__dataclass_fields__.keys())
+        child_iter = iter(children)
+        static_fields = getattr(target_cls, "_TREE_STATIC_FIELDS", ())
+
+        kwargs = {}
+        for name in field_names:
+            if name.startswith("_"):
+                continue
+            if name in static_fields:
+                kwargs[name] = static_data[name]
+            else:
+                kwargs[name] = next(child_iter)
+
+        return target_cls(**kwargs)
+
+
+tree_util.register_pytree_node_class(FilterCoreConfig)
 
 
 class FilterState(NamedTuple):

@@ -37,7 +37,7 @@ from typing import NamedTuple
 
 import jax.numpy as jnp
 import numpy as np
-from jax import lax, vmap
+from jax import lax, tree_util, vmap
 
 from trodestrack.models.filter_common import (
     FilterCoreConfig,
@@ -62,7 +62,7 @@ from trodestrack.models.state_layout import StateLayout, get_heading_index, get_
 # =============================================================================
 
 
-@dataclass
+@dataclass(frozen=True)
 class UKFConfig(FilterCoreConfig):
     """Unscented Kalman filter configuration extending FilterCoreConfig.
 
@@ -138,6 +138,9 @@ class UKFConfig(FilterCoreConfig):
             >>> config = UKFConfig.aggressive(use_heading_measurement=True)
         """
         return cls(alpha=1.732, beta=2.0, kappa=1.0, **kwargs)
+
+
+tree_util.register_pytree_node_class(UKFConfig)
 
 
 UKFState = FilterState

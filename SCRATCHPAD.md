@@ -191,3 +191,29 @@ Successfully added 5 filter integration tests in `tests/sim/test_rat_imu_gravity
 - ✅ Indices already correct - no code changes needed
 - ✅ Comprehensive test coverage added (17/17 pass)
 - ✅ Verified compatibility with M5 process_noise changes
+
+---
+
+### Milestone M6 In Progress (2025-10-13)
+
+**Task:** Performance tightening via `jax.jit` wrapping and buffer donation
+
+**Recon Discovery:**
+- Hot path resides in `src/trodestrack/models/ekf.py::extended_kalman_filter`; currently pure Python wrapper around a `lax.scan` without `jax.jit`.
+- RTS smoother in `src/trodestrack/runtime/offline.py::rts_smoother` similarly performs a backward `lax.scan` without compilation.
+- Both preprocess numpy inputs to JAX arrays on every call; opportunity to stage a jitted inner function fed with already-converted arrays and a static `StateLayout`.
+- IMU propagation inner loop leverages `compute_imu_index_arrays` (host precomputed) + nested `lax.scan`; donating the large output buffers (`filtered_mean`, `filtered_cov`, etc.) should reduce allocations during scan.
+- Config dataclasses (`FilterCoreConfig` / `EKFConfig`) are accessed inside the scan; plan: keep high-level Python config but feed jitted core with a lightweight PyTree of numeric parameters while treating `layout` as `static_argnames=("layout",)`.
+
+**Next Steps:**
+1. Draft benchmark-style pytest that encodes ≥20% speedup expectation once JIT/donation applied (will initially fail).
+2. Introduce internal `_extended_kalman_filter_jit` and `_rts_smoother_jit` functions compiled with `jax.jit(static_argnames=("layout",))` and donated outputs.
+3. Re-run throughput benchmark after implementation to validate speedup; document delta in `CHANGELOG.md`.
+
+**Implementation Notes (2025-10-13):**
+- Added `tests/models/test_jit_wrappers.py` to lock in JIT metadata (`layout`, config statics, donation).
+- Registered `FilterCoreConfig`, `EKFConfig`, and `UKFConfig` as JAX pytrees (frozen dataclasses) and treat configs + iteration counts as static args in the new `_extended_kalman_filter_jit` / `_rts_smoother_jit`.
+- Core filter (`extended_kalman_filter`) and smoother (`rts_smoother`) now delegate to compiled kernels; IMU propagation/donated carries remain inside `lax.scan`.
+- Cleaned up runtime branching: `lax.cond` for validity checks, JAX booleans for blackout gating, static loop counts handled via `num_iter` static arg.
+- Validated via targeted suites: `tests/models/test_jit_wrappers.py`, `tests/models/test_dynamics_3d_imu.py`, `tests/sim/test_rat_imu_gravity.py`, and full `tests/runtime` smoother battery (warnings only about non-usable donated buffers).
+- Outstanding: capture throughput delta (≥20% speedup) before closing the benchmark acceptance item.

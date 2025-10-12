@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import jacfwd, lax, vmap
@@ -30,6 +31,7 @@ from trodestrack.models.filter_common import (
     symmetrize,
 )
 from trodestrack.models.process_noise import assemble_Q
+from trodestrack.models.state_layout import StateLayout, get_heading_index, get_layout
 from trodestrack.models.ukf import UKFConfig, UKFResult
 
 # =============================================================================
@@ -59,9 +61,148 @@ class SmootherResult(NamedTuple):
     marginal_loglik: float
 
 
+RTS_SMOOTHER_STATIC_ARGNAMES = ("layout", "ekf_config", "num_iter")
+RTS_SMOOTHER_DONATE_ARGNUMS = (0,)
+
+
 # =============================================================================
 # Helper Functions
 # =============================================================================
+
+
+def _rts_smoother_impl(
+    lin_means_init: jnp.ndarray,
+    filtered_means: jnp.ndarray,
+    filtered_covs: jnp.ndarray,
+    t_imu_jax: jnp.ndarray,
+    U_imu_jax: jnp.ndarray,
+    mask_cam_jax: jnp.ndarray,
+    mask_is_provided: bool,
+    imu_index_arrays: jnp.ndarray,
+    dt_imu_mean: jnp.ndarray,
+    *,
+    num_iter: int,
+    ekf_config: EKFConfig,
+    layout: StateLayout,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Core RTS smoother staged under ``jax.jit``."""
+    n_cam = filtered_means.shape[0]
+    n = filtered_means.shape[1]
+
+    def f(x, u, dt):
+        return dynamics_function(x, u, dt, ekf_config.damping_coeff, layout)
+
+    F_jac = jacfwd(f, argnums=0)
+    has_mask = jnp.asarray(mask_is_provided, dtype=bool)
+
+    def predict_between_frames(
+        t_idx: int,
+        x_k: jnp.ndarray,
+        P_k: jnp.ndarray,
+        x_k_lin: jnp.ndarray,
+    ):
+        imu_indices = imu_index_arrays[t_idx + 1]
+        in_blackout = has_mask & (~mask_cam_jax[t_idx + 1])
+
+        def propagate_one_imu(carry, imu_idx):
+            x_in, P_in, F_accum, x_lin_in = carry
+            is_valid = imu_idx >= 0
+
+            def do_propagate(state_cov_F_lin):
+                x_s, P_s, F_prev, x_lin_s = state_cov_F_lin
+                u = U_imu_jax[imu_idx]
+                dt = lax.cond(
+                    imu_idx > 0,
+                    lambda: t_imu_jax[imu_idx] - t_imu_jax[imu_idx - 1],
+                    lambda: dt_imu_mean,
+                )
+
+                x_pred = f(x_s, u, dt)
+                F_k = F_jac(x_lin_s, u, dt)
+
+                dtype = x_s.dtype
+                h_idx = get_heading_index(layout)
+                theta = x_s[h_idx] if n > h_idx else jnp.asarray(0.0, dtype=dtype)
+                Q_total = assemble_Q(
+                    ekf_config,
+                    theta=theta,
+                    dt=dt,
+                    n=n,
+                    has_vision=jnp.logical_not(in_blackout),
+                    dtype=dtype,
+                )
+
+                P_pred = F_k @ P_s @ F_k.T + Q_total
+                P_pred = symmetrize(P_pred)
+                F_new = F_k @ F_prev
+                x_lin_pred = f(x_lin_s, u, dt)
+
+                return (x_pred, P_pred, F_new, x_lin_pred), None
+
+            def no_propagate(state_cov_F_lin):
+                return state_cov_F_lin, None
+
+            return lax.cond(
+                is_valid,
+                do_propagate,
+                no_propagate,
+                (x_in, P_in, F_accum, x_lin_in),
+            )
+
+        F_init = jnp.eye(n)
+        (x_pred, P_pred, F_total, _), _ = lax.scan(
+            propagate_one_imu, (x_k, P_k, F_init, x_k_lin), imu_indices
+        )
+
+        G = psd_solve(P_pred, F_total @ P_k).T
+        return x_pred, P_pred, G
+
+    def smoother_step(carry, args):
+        smoothed_mean_next, smoothed_cov_next = carry
+        t, filtered_mean, filtered_cov, lin_mean = args
+
+        m_pred, P_pred, G = predict_between_frames(t, filtered_mean, filtered_cov, lin_mean)
+
+        smoothed_mean = filtered_mean + G @ (smoothed_mean_next - m_pred)
+        smoothed_cov = filtered_cov + G @ (smoothed_cov_next - P_pred) @ G.T
+        smoothed_cov = symmetrize(smoothed_cov)
+
+        return (smoothed_mean, smoothed_cov), (smoothed_mean, smoothed_cov)
+
+    def run_one_iteration(lin_means_current: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+        (_, (smoothed_means_iter, smoothed_covs_iter)) = lax.scan(
+            smoother_step,
+            (filtered_means[-1], filtered_covs[-1]),
+            (
+                jnp.arange(n_cam - 1),
+                filtered_means[:-1],
+                filtered_covs[:-1],
+                lin_means_current[:-1],
+            ),
+            reverse=True,
+        )
+
+        smoothed_means_iter = jnp.vstack([smoothed_means_iter, filtered_means[-1][None, ...]])
+        smoothed_covs_iter = jnp.vstack([smoothed_covs_iter, filtered_covs[-1][None, ...]])
+
+        return smoothed_means_iter, smoothed_covs_iter
+
+    lin_means = lin_means_init
+    smoothed_means = filtered_means
+    smoothed_covs = filtered_covs
+
+    for _ in range(num_iter):
+        smoothed_means, smoothed_covs = run_one_iteration(lin_means)
+        lin_means = smoothed_means
+
+    return smoothed_means, smoothed_covs
+
+
+_rts_smoother_jit = jax.jit(
+    _rts_smoother_impl,
+    static_argnames=RTS_SMOOTHER_STATIC_ARGNAMES,
+    donate_argnums=RTS_SMOOTHER_DONATE_ARGNUMS,
+)
 
 
 # =============================================================================
@@ -107,203 +248,36 @@ def rts_smoother(
     t_imu_jax = jnp.array(t_imu)
     U_imu_jax = jnp.array(U_imu)
 
-    # Extract filter outputs and derive state dimension from data
-    filtered_means = filter_result.filtered_means  # (N_cam, n)
-    filtered_covs = filter_result.filtered_covariances  # (N_cam, n, n)
-    n_cam = len(t_cam)
-    n = filtered_means.shape[1]  # Derive state dimension from data
+    filtered_means = filter_result.filtered_means
+    filtered_covs = filter_result.filtered_covariances
 
-    # Compute mean IMU dt for fallback
-    dt_imu_mean = float(jnp.mean(jnp.diff(t_imu_jax)))
-
-    # Precompute IMU index arrays (host-side, using shared utility)
+    dt_imu_mean = jnp.mean(jnp.diff(t_imu_jax))
     imu_index_arrays = compute_imu_index_arrays(t_imu, t_cam)
 
-    # Convert mask_cam to JAX if provided
-    mask_cam_jax = jnp.array(mask_cam) if mask_cam is not None else None
-
-    # Resolve state layout once for this smoother run
-    from trodestrack.models.state_layout import get_heading_index, get_layout
+    mask_is_provided = mask_cam is not None
+    if mask_is_provided:
+        mask_cam_jax = jnp.array(mask_cam, dtype=bool)
+    else:
+        mask_cam_jax = jnp.ones(filtered_means.shape[0], dtype=bool)
 
     layout = get_layout(ekf_config.state_mode)
 
-    # Compute Jacobian of dynamics
-    def f(x, u, dt):
-        return dynamics_function(x, u, dt, ekf_config.damping_coeff, layout)
+    lin_scratch = filtered_means.copy()
 
-    F_jac = jacfwd(f, argnums=0)
-
-    def predict_between_frames(
-        t_idx: int,
-        x_k: jnp.ndarray,
-        P_k: jnp.ndarray,
-        x_k_lin: jnp.ndarray,
-    ):
-        """Predict from frame t_idx to t_idx+1 using IMU.
-
-        Parameters
-        ----------
-        t_idx : int
-            Time index k.
-        x_k : jnp.ndarray
-            State at time k (n,).
-        P_k : jnp.ndarray
-            Covariance at time k (n, n).
-        x_k_lin : jnp.ndarray
-            Linearization point at time k (for IEKS) (n,).
-
-        Returns
-        -------
-        tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]
-            ``(m_pred, P_pred, G)`` with shapes (n,), (n, n), (n, n).
-        """
-        # Get IMU indices for interval [t_idx, t_idx+1)
-        imu_indices = imu_index_arrays[t_idx + 1]
-
-        # Blackout-aware noise scaling
-        # Use target-frame rule to match forward filter behavior
-        # Apply blackout scaling based on vision availability at target frame (t_idx+1)
-        in_blackout = (mask_cam_jax is not None) and (~mask_cam_jax[t_idx + 1])
-
-        def propagate_one_imu(carry, imu_idx):
-            """Propagate through one IMU sample."""
-            x_in, P_in, F_accum, x_lin_in = carry
-
-            # Skip invalid indices
-            is_valid = imu_idx >= 0
-
-            def do_propagate(state_cov_F_lin):
-                x_s, P_s, F_prev, x_lin_s = state_cov_F_lin
-                # Get IMU sample and dt
-                u = U_imu_jax[imu_idx]
-                dt = lax.cond(
-                    imu_idx > 0,
-                    lambda: t_imu_jax[imu_idx] - t_imu_jax[imu_idx - 1],
-                    lambda: jnp.array(dt_imu_mean),
-                )
-
-                # Predict mean (propagate actual state)
-                x_pred = f(x_s, u, dt)
-
-                # Compute Jacobian around linearization point (IEKS)
-                F_k = F_jac(x_lin_s, u, dt)
-
-                dtype = x_s.dtype
-                h_idx = get_heading_index(layout)
-                theta = x_s[h_idx] if n > h_idx else jnp.asarray(0.0, dtype=dtype)
-                Q_total = assemble_Q(
-                    ekf_config,
-                    theta=theta,
-                    dt=dt,
-                    n=n,
-                    has_vision=jnp.logical_not(in_blackout),
-                    dtype=dtype,
-                )
-
-                P_pred = F_k @ P_s @ F_k.T + Q_total
-                P_pred = symmetrize(P_pred)
-
-                # Accumulate Jacobian: F_total = F_new @ F_prev
-                F_new = F_k @ F_prev
-
-                # Propagate linearization trajectory
-                x_lin_pred = f(x_lin_s, u, dt)
-
-                return x_pred, P_pred, F_new, x_lin_pred
-
-            def no_propagate(state_cov_F_lin):
-                return state_cov_F_lin
-
-            return (
-                lax.cond(is_valid, do_propagate, no_propagate, (x_in, P_in, F_accum, x_lin_in)),
-                None,
-            )
-
-        # Scan through all IMU samples in this interval
-        # Initialize with identity Jacobian (dimension n)
-        F_init = jnp.eye(n)
-        (x_pred, P_pred, F_total, _), _ = lax.scan(
-            propagate_one_imu, (x_k, P_k, F_init, x_k_lin), imu_indices
-        )
-
-        # Compute smoother gain: G = P_k @ F_total^T @ P_pred^{-1}
-        G = psd_solve(P_pred, F_total @ P_k).T
-
-        return x_pred, P_pred, G
-
-    def smoother_step(carry, args):
-        """Single backward smoothing step.
-
-        Parameters
-        ----------
-        carry : tuple[jnp.ndarray, jnp.ndarray]
-            ``(smoothed_mean_next, smoothed_cov_next)`` at time k+1.
-        args : tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
-            ``(t, filtered_mean_k, filtered_cov_k, lin_mean_k)`` at time k.
-
-        Returns
-        -------
-        tuple[tuple[jnp.ndarray, jnp.ndarray], tuple[jnp.ndarray, jnp.ndarray]]
-            Updated carry and smoothed estimates at time k.
-        """
-        smoothed_mean_next, smoothed_cov_next = carry
-        t, filtered_mean, filtered_cov, lin_mean = args
-
-        # Predict from k to k+1 and get smoother gain
-        # Linearize around lin_mean (IEKS) but update using filtered_mean (RTS)
-        m_pred, P_pred, G = predict_between_frames(t, filtered_mean, filtered_cov, lin_mean)
-
-        # Smooth mean and covariance
-        smoothed_mean = filtered_mean + G @ (smoothed_mean_next - m_pred)
-        smoothed_cov = filtered_cov + G @ (smoothed_cov_next - P_pred) @ G.T
-        smoothed_cov = symmetrize(smoothed_cov)
-
-        return (smoothed_mean, smoothed_cov), (smoothed_mean, smoothed_cov)
-
-    def run_one_rts_iteration(lin_means: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
-        """Run one RTS backward pass.
-
-        Parameters
-        ----------
-        lin_means : jnp.ndarray
-            Linearization trajectory (N_cam, n).
-
-        Returns
-        -------
-        tuple[jnp.ndarray, jnp.ndarray]
-            ``(smoothed_means, smoothed_covs)`` each with shapes (N_cam, n) and (N_cam, n, n).
-        """
-        # Initial condition: smoothed[N-1] = filtered[N-1]
-        _, (smoothed_means_iter, smoothed_covs_iter) = lax.scan(
-            smoother_step,
-            (filtered_means[-1], filtered_covs[-1]),
-            (
-                jnp.arange(n_cam - 1),
-                filtered_means[:-1],
-                filtered_covs[:-1],
-                lin_means[:-1],
-            ),
-            reverse=True,
-        )
-
-        # Concatenate with final frame (smoothed[-1] = filtered[-1])
-        smoothed_means_iter = jnp.vstack([smoothed_means_iter, filtered_means[-1][None, ...]])
-        smoothed_covs_iter = jnp.vstack([smoothed_covs_iter, filtered_covs[-1][None, ...]])
-
-        return smoothed_means_iter, smoothed_covs_iter
-
-    # Iterative EKS (IEKS): relinearize around previous smoothed trajectory
-    # Initialize linearization trajectory with filtered estimates
-    lin_means = filtered_means
-
-    for _iter_idx in range(num_iter):
-        smoothed_means, smoothed_covs = run_one_rts_iteration(lin_means)
-
-        # Update linearization trajectory for next iteration
-        lin_means = smoothed_means
-
-        # Optional: check convergence (early stopping if RMSE change < 1%)
-        # Not implemented here to keep JAX-friendly (would need conditional break)
+    smoothed_means, smoothed_covs = _rts_smoother_jit(
+        lin_scratch,
+        filtered_means,
+        filtered_covs,
+        t_imu_jax,
+        U_imu_jax,
+        mask_cam_jax,
+        mask_is_provided,
+        imu_index_arrays,
+        dt_imu_mean,
+        num_iter=num_iter,
+        ekf_config=ekf_config,
+        layout=layout,
+    )
 
     return SmootherResult(
         smoothed_means=smoothed_means,

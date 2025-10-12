@@ -32,9 +32,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import NamedTuple
 
+import jax
 import jax.numpy as jnp
 import numpy as np
-from jax import jacfwd, lax
+from jax import jacfwd, lax, tree_util
 
 from trodestrack.models.filter_common import (
     FilterCoreConfig,
@@ -61,7 +62,7 @@ from trodestrack.models.state_layout import StateLayout, get_heading_index, get_
 # =============================================================================
 
 
-@dataclass
+@dataclass(frozen=True)
 class EKFConfig(FilterCoreConfig):
     """EKF configuration extending the shared FilterCoreConfig.
 
@@ -77,6 +78,9 @@ class EKFConfig(FilterCoreConfig):
     """
 
     num_iter: int = 1
+
+
+tree_util.register_pytree_node_class(EKFConfig)
 
 
 EKFState = FilterState
@@ -117,6 +121,135 @@ class EKFComputationResult(NamedTuple):
     predicted_means: jnp.ndarray
     predicted_covariances: jnp.ndarray
     marginal_loglik: jnp.ndarray
+
+
+EXTENDED_KALMAN_FILTER_STATIC_ARGNAMES = ("layout", "config_for_filter")
+EXTENDED_KALMAN_FILTER_DONATE_ARGNUMS = (0,)
+
+
+def _extended_kalman_filter_impl(
+    initial_state: EKFState,
+    t_imu_jax: jnp.ndarray,
+    U_imu_jax: jnp.ndarray,
+    t_cam_jax: jnp.ndarray,
+    Z_cam_led1_jax: jnp.ndarray,
+    Z_cam_led2_jax: jnp.ndarray,
+    mask_cam_jax: jnp.ndarray,
+    conf_cam_jax: jnp.ndarray | None,
+    imu_index_arrays: jnp.ndarray,
+    dt_imu_mean: jnp.ndarray,
+    *,
+    config_for_filter: EKFConfig,
+    layout: StateLayout,
+) -> EKFComputationResult:
+    """Core EKF implementation staged under ``jax.jit``."""
+    n_cam = int(t_cam_jax.shape[0])
+
+    camera_model = CameraPositionModel(
+        led_distance=config_for_filter.led_distance,  # type: ignore[arg-type]
+        measurement_noise_base=config_for_filter.measurement_noise_pos,
+        layout=layout,
+        z_led1_all=Z_cam_led1_jax,
+        z_led2_all=Z_cam_led2_jax,
+        conf_all=conf_cam_jax,
+        confidence_clip_min=1e-2,
+    )
+
+    heading_model = HeadingPseudoModel(
+        config=config_for_filter,
+        layout=layout,
+        z_led1_all=Z_cam_led1_jax,
+        z_led2_all=Z_cam_led2_jax,
+    )
+
+    def filter_step(carry, t_idx):
+        """Single filtering step at camera frame t_idx."""
+        state_prev, log_lik_accum = carry
+        has_vision_t = mask_cam_jax[t_idx]
+
+        def propagate_from_prev(state_in):
+            imu_indices = imu_index_arrays[t_idx]
+
+            def propagate_imu(state, imu_idx):
+                is_valid = imu_idx >= 0
+
+                def do_propagate(s):
+                    u = U_imu_jax[imu_idx]
+                    dt = lax.cond(
+                        imu_idx > 0,
+                        lambda: t_imu_jax[imu_idx] - t_imu_jax[imu_idx - 1],
+                        lambda: dt_imu_mean,
+                    )
+                    return predict_step(s, u, dt, config_for_filter, has_vision_t, layout=layout)
+
+                def no_propagate(s):
+                    return s
+
+                return lax.cond(is_valid, do_propagate, no_propagate, state), None
+
+            state_out, _ = lax.scan(propagate_imu, state_in, imu_indices)
+            return state_out
+
+        def no_propagate(state_in):
+            return state_in
+
+        state_pred = lax.cond(t_idx == 0, no_propagate, propagate_from_prev, state_prev)
+
+        state_after_pos, log_lik_pos = update_step(
+            state_pred,
+            camera_model,
+            t_idx,
+            mask_cam_jax[t_idx],
+            config_for_filter,
+            layout=layout,
+        )
+
+        state_after_heading, log_lik_heading = update_heading(
+            state_after_pos,
+            heading_model,
+            t_idx,
+            mask_cam_jax[t_idx],
+            layout=layout,
+        )
+
+        state_filt, log_lik_zupt = update_zupt(
+            state_after_heading,
+            config_for_filter,
+        )
+
+        log_lik_k = log_lik_pos + log_lik_heading + log_lik_zupt
+
+        outputs = {
+            "filtered_mean": state_filt.mean,
+            "filtered_cov": state_filt.cov,
+            "predicted_mean": state_pred.mean,
+            "predicted_cov": state_pred.cov,
+        }
+
+        carry_next = (state_filt, log_lik_accum + log_lik_k)
+        return carry_next, outputs
+
+    carry_init = (
+        initial_state,
+        jnp.asarray(0.0, dtype=initial_state.mean.dtype),
+    )
+
+    (_, log_lik_total), outputs = lax.scan(filter_step, carry_init, jnp.arange(n_cam))
+
+    return EKFComputationResult(
+        filtered_means=outputs["filtered_mean"],
+        filtered_covariances=outputs["filtered_cov"],
+        predicted_means=outputs["predicted_mean"],
+        predicted_covariances=outputs["predicted_cov"],
+        marginal_loglik=log_lik_total,
+    )
+
+
+_extended_kalman_filter_jit = jax.jit(
+    _extended_kalman_filter_impl,
+    static_argnames=EXTENDED_KALMAN_FILTER_STATIC_ARGNAMES,
+    donate_argnums=EXTENDED_KALMAN_FILTER_DONATE_ARGNUMS,
+)
 
 
 # =============================================================================
@@ -491,8 +624,6 @@ def extended_kalman_filter(
             layout=get_layout(config_for_filter.state_mode),
         )
 
-    n_cam = int(t_cam_jax.shape[0])
-
     # Resolve state layout once for this run
     layout = get_layout(config_for_filter.state_mode)
 
@@ -502,121 +633,26 @@ def extended_kalman_filter(
     # Precompute IMU index arrays (host-side, using shared utility)
     imu_index_arrays = compute_imu_index_arrays(t_imu, t_cam)
 
-    # Instantiate measurement models with preallocated arrays
-    camera_model = CameraPositionModel(
-        led_distance=config_for_filter.led_distance,  # type: ignore[arg-type]
-        measurement_noise_base=config_for_filter.measurement_noise_pos,
+    computation = _extended_kalman_filter_jit(
+        initial_state,
+        t_imu_jax,
+        U_imu_jax,
+        t_cam_jax,
+        Z_cam_led1_jax,
+        Z_cam_led2_jax,
+        mask_cam_jax,
+        conf_cam_jax,
+        imu_index_arrays,
+        dt_imu_mean,
+        config_for_filter=config_for_filter,
         layout=layout,
-        z_led1_all=Z_cam_led1_jax,
-        z_led2_all=Z_cam_led2_jax,
-        conf_all=conf_cam_jax,
-        confidence_clip_min=1e-2,
     )
-
-    heading_model = HeadingPseudoModel(
-        config=config_for_filter,
-        layout=layout,
-        z_led1_all=Z_cam_led1_jax,
-        z_led2_all=Z_cam_led2_jax,
-    )
-
-    def filter_step(carry, t_idx):
-        """Single filtering step at camera frame t_idx."""
-        state_prev, log_lik_accum = carry
-
-        # Check if we have vision at this timestep (for blackout-aware Q)
-        has_vision_t = mask_cam_jax[t_idx]
-
-        # Propagate using IMU samples in this segment
-        def propagate_from_prev(state_in):
-            """Propagate from previous camera frame to current."""
-            # Get IMU indices for this interval
-            imu_indices = imu_index_arrays[t_idx]
-
-            # Predict forward using each IMU sample
-            def propagate_imu(state, imu_idx):
-                """Propagate state with single IMU measurement."""
-                # Skip invalid indices
-                is_valid = imu_idx >= 0
-
-                def do_propagate(s):
-                    # Get IMU sample and timestep
-                    u = U_imu_jax[imu_idx]
-                    # Compute dt (use mean when at first index)
-                    dt = lax.cond(
-                        imu_idx > 0,
-                        lambda: t_imu_jax[imu_idx] - t_imu_jax[imu_idx - 1],
-                        lambda: jnp.array(dt_imu_mean),
-                    )
-                    return predict_step(s, u, dt, config_for_filter, has_vision_t, layout=layout)
-
-                def no_propagate(s):
-                    return s
-
-                return lax.cond(is_valid, do_propagate, no_propagate, state), None
-
-            state_out, _ = lax.scan(propagate_imu, state_in, imu_indices)
-            return state_out
-
-        def no_propagate(state_in):
-            """First frame: no IMU propagation."""
-            return state_in
-
-        # Use lax.cond to handle first frame
-        state_pred = lax.cond(t_idx == 0, no_propagate, propagate_from_prev, state_prev)
-
-        # Position measurement update (returns state and log-likelihood)
-        state_after_pos, log_lik_pos = update_step(
-            state_pred,
-            camera_model,
-            t_idx,
-            mask_cam_jax[t_idx],
-            config_for_filter,
-            layout=layout,
-        )
-
-        # Heading measurement update (sequential after position)
-        # Only applied if use_heading_measurement=True (gated via large R otherwise)
-        state_after_heading, log_lik_heading = update_heading(
-            state_after_pos,
-            heading_model,
-            t_idx,
-            mask_cam_jax[t_idx],
-            layout=layout,
-        )
-
-        # Zero-velocity update (ZUPT) for stationary detection (sequential after heading)
-        # Only applied if enable_zupt=True and velocity < threshold (gated via large R otherwise)
-        state_filt, log_lik_zupt = update_zupt(
-            state_after_heading,
-            config_for_filter,
-        )
-
-        # Total log-likelihood for this frame
-        log_lik_k = log_lik_pos + log_lik_heading + log_lik_zupt
-
-        # Store outputs
-        outputs = {
-            "filtered_mean": state_filt.mean,
-            "filtered_cov": state_filt.cov,
-            "predicted_mean": state_pred.mean,
-            "predicted_cov": state_pred.cov,
-        }
-
-        # Update carry with accumulated log-likelihood
-        carry = (state_filt, log_lik_accum + log_lik_k)
-
-        return carry, outputs
-
-    # Run filter over all camera frames
-    carry_init = (initial_state, 0.0)
-    (_, log_lik_total), outputs = lax.scan(filter_step, carry_init, jnp.arange(n_cam))
 
     return EKFResult(
-        filtered_means=outputs["filtered_mean"],
-        filtered_covariances=outputs["filtered_cov"],
-        predicted_means=outputs["predicted_mean"],
-        predicted_covariances=outputs["predicted_cov"],
-        marginal_loglik=float(log_lik_total),
+        filtered_means=computation.filtered_means,
+        filtered_covariances=computation.filtered_covariances,
+        predicted_means=computation.predicted_means,
+        predicted_covariances=computation.predicted_covariances,
+        marginal_loglik=float(computation.marginal_loglik),
         estimated_led_distance=estimated_led_distance,
     )

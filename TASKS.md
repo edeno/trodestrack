@@ -169,9 +169,9 @@
 
 **Objective:** Improve speed/memory with stable shapes and compilation behavior.
 
-- [ ] Wrap hot paths in `jax.jit(static_argnames=("layout",))`
-- [ ] Use `donate_argnums` in scan bodies for large arrays
-- [ ] Remove Python branching inside scans; rely on projection and `R` inflation
+- [x] Wrap hot paths in `jax.jit(static_argnames=("layout",))`
+- [x] Use `donate_argnums` in scan bodies for large arrays
+- [x] Remove Python branching inside scans; rely on projection and `R` inflation
 - [ ] Benchmarks:
   - [ ] ≥ 20% speedup on reference session or same speed with lower peak memory
   - [ ] No additional recompiles (cache hits observed)

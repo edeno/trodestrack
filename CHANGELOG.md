@@ -2,6 +2,34 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-13 - Milestone M6 (Performance Tighten): JIT Kernels ✅
+
+**Added:**
+
+- **JIT-compiled EKF and RTS smoother cores**
+  - Introduced `_extended_kalman_filter_jit` (`src/trodestrack/models/ekf.py`:130-262) and `_rts_smoother_jit` (`src/trodestrack/runtime/offline.py`:73-225) with `jax.jit` wrappers.
+  - Static args capture `layout`, filter configs, and IEKS iteration count to avoid recompiles; large carries donated via `donate_argnums`.
+  - Config dataclasses are now frozen pytrees, enabling device-friendly tracing while keeping Python ergonomics.
+- **Hot-path metadata test**: `tests/models/test_jit_wrappers.py` guards static argnames/donation contracts for both kernels.
+
+**Changed:**
+
+- Refactored `extended_kalman_filter` and `rts_smoother` to delegate to compiled kernels while preserving public APIs.
+- Eliminated traced-Python branching inside scan loops (consistent `lax.cond`/boolean tensors) and lifted measurement model instantiation into the compiled scope.
+- Registered `FilterCoreConfig`, `EKFConfig`, and `UKFConfig` as JAX pytrees (`frozen=True`) so configs can flow through JIT safely.
+
+**Tests:**
+
+- ✅ `pytest tests/models/test_jit_wrappers.py`
+- ✅ `pytest tests/models/test_dynamics_3d_imu.py`
+- ✅ `pytest tests/sim/test_rat_imu_gravity.py`
+- ✅ `pytest tests/runtime`
+
+**Notes:**
+
+- JAX reports some non-donatable buffers during smoothing; donation is still active, but further tuning may recover additional wins.
+- Benchmark delta (≥20 % speedup) still pending; schedule dedicated throughput run before closing out the performance acceptance criterion.
+
 ### Session: 2025-10-12 - Milestone M5 (2D Pose + 3D IMU): Filter Integration Tests ✅
 
 **Added:**
