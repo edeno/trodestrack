@@ -34,4 +34,48 @@ Successfully implemented `ZUPTModel` in `src/trodestrack/models/sensors/zupt.py`
 
 **Next Steps:**
 - **M5 (Priority):** 2D Pose + 3D IMU with gravity compensation
-- Future: Active models list `[camera, heading?, zupt?]` (deferred from M4)
+
+---
+
+### Milestone M5 In Progress (2025-10-12)
+
+**Task:** Update `process_noise.py` to consume all 3 accelerometer axes
+
+**Implementation:**
+1. Added `n_accel` parameter to `build_input_noise_cov()`:
+   - Returns (3, 3) for 2D accel [ω_z, f_x, f_y]
+   - Returns (4, 4) for 3D accel [ω_z, f_x, f_y, f_z]
+   - Validation: raises ValueError if n_accel not in (2, 3)
+
+2. Updated `assemble_Q()` to infer `n_accel` from layout:
+   - Extracts from `len(layout.bias_accel_idx)`: 2 biases → 2D, 3 biases → 3D
+   - Passes `n_accel` to `build_input_noise_cov()` and `build_G_matrix_generic()`
+   - Refactored: added `_get_layout_for_dimension()` helper to avoid duplicate lookups
+
+3. Updated `build_G_matrix_generic()` in `filter_common.py`:
+   - Accepts `n_accel` parameter and `vel_idx` as 2-tuple or 3-tuple
+   - For 3D: maps f_z directly to vz (∂vz/∂f_z = dt, no rotation since z is vertical)
+   - Returns G matrix (n, n_accel+1) instead of hardcoded (n, 3)
+   - Validation: checks n_accel ∈ {2,3} and consistency with vel_idx length
+
+**Test Results:**
+- 7/7 process_noise tests pass
+- 4 new tests added for 10D state (3D accel):
+  * Shape correctness (4x4 Qu)
+  * Symmetry and PSD properties
+  * Blackout scaling respects all 3 accel bias terms (b_ax, b_ay, b_az)
+  * Bias freezing zeros all 4 bias indices during blackout
+- 159/159 filter/runtime tests pass (no regressions)
+- mypy clean (type safety validated)
+
+**Code Review Results:**
+- Fixed critical type hint issue: cast `vel_tuple` to `tuple[int, int] | tuple[int, int, int]`
+- Added validation for `n_accel` values in both functions
+- Extracted `_get_layout_for_dimension()` helper to remove duplicate layout lookup
+- Enhanced docstrings with clearer inference logic comments
+
+**Remaining M5 Tasks:**
+- [ ] Update `state_layout.py` (verify indices - likely already correct)
+- [ ] Update `dynamics_function()` to use gravity compensation
+- [ ] Add/update tests for gravity-aware dynamics
+- [ ] Verify drift reduction in occlusion scenarios

@@ -6,7 +6,26 @@ import jax.numpy as jnp
 from jax import Array
 
 from trodestrack.models.filter_common import symmetrize
-from trodestrack.models.state_layout import LAYOUT_REGISTRY, get_heading_index
+from trodestrack.models.state_layout import LAYOUT_REGISTRY, StateLayout, get_heading_index
+
+
+def _get_layout_for_dimension(n: int) -> StateLayout | None:
+    """Find layout matching state dimension n.
+
+    Parameters
+    ----------
+    n : int
+        State dimension.
+
+    Returns
+    -------
+    StateLayout | None
+        Matching layout, or None if no layout matches.
+    """
+    for mode_layout in LAYOUT_REGISTRY.values():
+        if mode_layout.n == n:
+            return mode_layout
+    return None
 
 
 def build_Q_rate(config: Any, n: int, dtype=jnp.float32) -> jnp.ndarray:
@@ -74,7 +93,9 @@ def build_Q_rate(config: Any, n: int, dtype=jnp.float32) -> jnp.ndarray:
     return jnp.diag(diag)
 
 
-def build_input_noise_cov(config: Any, dt: float | Array, dtype=jnp.float32) -> jnp.ndarray:
+def build_input_noise_cov(
+    config: Any, dt: float | Array, n_accel: int = 2, dtype=jnp.float32
+) -> jnp.ndarray:
     """IMU input noise covariance from noise densities.
 
     Parameters
@@ -83,19 +104,37 @@ def build_input_noise_cov(config: Any, dt: float | Array, dtype=jnp.float32) -> 
         Filter configuration with IMU noise densities.
     dt : float
         Sample period (s).
+    n_accel : int, default 2
+        Number of accelerometer axes (2 for 2D, 3 for 3D).
     dtype : jnp.dtype, default jnp.float32
         Array dtype.
 
     Returns
     -------
     jnp.ndarray
-        Qu (3, 3) for [ω_z(rad/s), f_x(m/s^2), f_y(m/s^2)].
+        Qu (n_accel+1, n_accel+1) for [ω_z(rad/s), f_x(m/s^2), f_y(m/s^2), ...].
+        - n_accel=2: returns (3, 3) for [ω_z, f_x, f_y]
+        - n_accel=3: returns (4, 4) for [ω_z, f_x, f_y, f_z]
+
+    Raises
+    ------
+    ValueError
+        If n_accel is not 2 or 3.
+
+    Notes
+    -----
+    All accelerometer axes are assumed to have the same noise density.
     """
+    if n_accel not in (2, 3):
+        raise ValueError(f"n_accel must be 2 or 3, got {n_accel}")
+
     dt_arr = jnp.asarray(dt, dtype=dtype)
     sg = (config.imu_gyro_noise_density * jnp.sqrt(dt_arr)) ** 2
     sa = (config.imu_accel_noise_density * jnp.sqrt(dt_arr)) ** 2
 
-    Qu = jnp.diag(jnp.array([sg, sa, sa], dtype=dtype))
+    # Build diagonal: [sg, sa, sa, ...] with n_accel accelerometer axes
+    diag = jnp.concatenate([jnp.array([sg], dtype=dtype), jnp.full(n_accel, sa, dtype=dtype)])
+    Qu = jnp.diag(diag)
     return symmetrize(Qu)
 
 
@@ -142,18 +181,22 @@ def assemble_Q(
     Applies optional blackout scaling for pos/vel/bias components and IMU input
     noise reduction, and can freeze biases by zeroing corresponding rows/cols.
     """
+    # Find layout for this dimension (used for adaptive Q, n_accel, G matrix, bias freeze)
+    layout: StateLayout | None = _get_layout_for_dimension(n)
+
+    # Determine number of accelerometer axes from layout
+    # Infer from bias count: 2 bias terms (b_ax, b_ay) → 2D accel
+    #                       3 bias terms (b_ax, b_ay, b_az) → 3D accel
+    # Default to 2 for backward compatibility (2D tracking with 2D accel)
+    n_accel = 2
+    if layout is not None:
+        n_accel = len(layout.bias_accel_idx) if len(layout.bias_accel_idx) > 0 else 2
+
     # Base random-walk diffusion (time-scaled)
     Q_rate = build_Q_rate(config, n, dtype=dtype) * jnp.asarray(dt, dtype=dtype)
 
     # Apply adaptive Q scaling during dropout (dimension-agnostic)
     if getattr(config, "adaptive_q_during_dropout", False):
-        # Find layout for this dimension
-        layout = None
-        for mode_layout in LAYOUT_REGISTRY.values():
-            if mode_layout.n == n:
-                layout = mode_layout
-                break
-
         if layout is not None:
             one = jnp.asarray(1.0, dtype=dtype)
             pos_mult = jnp.asarray(getattr(config, "dropout_q_pos_multiplier", 1.0), dtype=dtype)
@@ -178,7 +221,11 @@ def assemble_Q(
                 Q_rate = Q_rate.at[idx, idx].set(Q_rate[idx, idx] * bias_mult)
 
     # IMU input noise mapping
-    Qu = Qu_override if Qu_override is not None else build_input_noise_cov(config, dt, dtype=dtype)
+    Qu = (
+        Qu_override
+        if Qu_override is not None
+        else build_input_noise_cov(config, dt, n_accel=n_accel, dtype=dtype)
+    )
     if getattr(config, "reduce_imu_noise_during_blackout", False):
         scale = jnp.asarray(getattr(config, "blackout_imu_noise_scale", 1.0), dtype=dtype)
         Qu = Qu * jnp.where(has_vision, jnp.asarray(1.0, dtype=dtype), scale)
@@ -187,13 +234,6 @@ def assemble_Q(
     if G_override is not None:
         Q = Q_rate + G_override @ Qu @ G_override.T
     else:
-        # Find layout for this dimension to build appropriate G matrix
-        layout = None
-        for mode_layout in LAYOUT_REGISTRY.values():
-            if mode_layout.n == n:
-                layout = mode_layout
-                break
-
         if layout is not None and layout.has_biases:
             # Use layout to build dimension-agnostic G matrix
             from trodestrack.models.filter_common import build_G_matrix_generic
@@ -201,15 +241,17 @@ def assemble_Q(
             # For 2D heading, use scalar heading_idx; for 3D, skip IMU mapping for now
             if layout.has_heading_2d:
                 pos_pair = (layout.pos_idx[0], layout.pos_idx[1])
-                vel_pair = (layout.vel_idx[0], layout.vel_idx[1])
+                # Use full velocity tuple (2D or 3D depending on layout)
+                vel_tuple = cast(tuple[int, int] | tuple[int, int, int], tuple(layout.vel_idx))
                 theta_idx = get_heading_index(layout)
                 G = build_G_matrix_generic(
                     n,
                     jnp.asarray(theta, dtype=dtype),
                     jnp.asarray(dt, dtype=dtype),
                     pos_idx=pos_pair,
-                    vel_idx=vel_pair,
+                    vel_idx=vel_tuple,
                     theta_idx=theta_idx,
+                    n_accel=n_accel,
                     dtype=dtype,
                 )
                 Q = Q_rate + G @ Qu @ G.T
@@ -222,13 +264,7 @@ def assemble_Q(
 
     # Optionally freeze bias random walks during dropout (dimension-agnostic)
     if getattr(config, "freeze_bias_during_blackout", False):
-        # Find layout for this dimension
-        layout = None
-        for mode_layout in LAYOUT_REGISTRY.values():
-            if mode_layout.n == n:
-                layout = mode_layout
-                break
-
+        # Reuse layout from earlier (already looked up at top of function)
         if layout is not None and layout.has_biases:
             # Zero bias rows/cols during blackout in a JAX-safe way
             freeze_factor = jnp.where(

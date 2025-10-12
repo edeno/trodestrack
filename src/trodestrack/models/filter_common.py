@@ -1193,8 +1193,9 @@ def build_G_matrix_generic(
     dt: float | Array,
     *,
     pos_idx: tuple[int, int] = (0, 1),
-    vel_idx: tuple[int, int] = (2, 3),
+    vel_idx: tuple[int, int] | tuple[int, int, int] = (2, 3),
     theta_idx: int = 4,
+    n_accel: int = 2,
     dtype=jnp.float32,
 ) -> jnp.ndarray:
     """Generic IMU input noise mapping G for arbitrary layouts.
@@ -1208,41 +1209,69 @@ def build_G_matrix_generic(
     dt : float
         Time step (s).
     pos_idx : tuple[int, int], default (0, 1)
-        Position indices (x, y).
-    vel_idx : tuple[int, int], default (2, 3)
-        Velocity indices (vx, vy).
+        Position indices (x, y). Only 2D positions supported.
+    vel_idx : tuple[int, int] or tuple[int, int, int], default (2, 3)
+        Velocity indices (vx, vy) or (vx, vy, vz). Length must match n_accel.
     theta_idx : int, default 4
         Heading index.
+    n_accel : int, default 2
+        Number of accelerometer axes (2 for 2D, 3 for 3D).
     dtype : jnp.dtype, default jnp.float32
         Array dtype.
 
     Returns
     -------
     jnp.ndarray
-        G matrix (n, 3).
+        G matrix (n, n_accel+1) for [ω_z, f_x, f_y, ...].
 
     Notes
     -----
     Places ∂θ/∂ω_z = dt at ``theta_idx``, ∂v/∂f = R(θ)·dt at ``vel_idx``,
     and ∂p/∂f = R(θ)·0.5·dt² at ``pos_idx``. Missing/out-of-bounds indices
     are ignored.
+
+    For n_accel=3 (3D accel), the z-axis velocity is affected directly by f_z
+    without rotation: ∂vz/∂f_z = dt (since z-axis is vertical).
+
+    Raises
+    ------
+    ValueError
+        If n_accel is not 2 or 3.
+        If n_accel=3 but len(vel_idx) != 3 (inconsistent configuration).
+        If n_accel=2 but len(vel_idx) not in (2, 3).
     """
-    G = jnp.zeros((n, 3), dtype=dtype)
+    if n_accel not in (2, 3):
+        raise ValueError(f"n_accel must be 2 or 3, got {n_accel}")
+
+    # Validate consistency between n_accel and vel_idx
+    if n_accel == 3 and len(vel_idx) != 3:
+        raise ValueError(f"n_accel=3 requires 3D velocity (len(vel_idx)=3), got {len(vel_idx)}")
+    if n_accel == 2 and len(vel_idx) not in (2, 3):
+        raise ValueError(f"n_accel=2 requires 2D velocity, got len(vel_idx)={len(vel_idx)}")
+
+    G = jnp.zeros((n, n_accel + 1), dtype=dtype)
     theta_arr = jnp.asarray(theta, dtype=dtype)
     dt_arr = jnp.asarray(dt, dtype=dtype)
     c, s = jnp.cos(theta_arr), jnp.sin(theta_arr)
     R_2d = jnp.array([[c, -s], [s, c]], dtype=dtype)
 
-    # Heading
+    # Heading: ∂θ/∂ω_z = dt
     if 0 <= theta_idx < n:
         G = G.at[theta_idx, 0].set(dt_arr)
 
-    # Velocity
-    vx_i, vy_i = vel_idx
-    if 0 <= vx_i < n and 0 <= vy_i < n:
-        G = G.at[vx_i : vy_i + 1, 1:3].set(R_2d * dt_arr)
+    # Velocity (x, y components affected by 2D rotated accel)
+    if len(vel_idx) >= 2:
+        vx_i, vy_i = vel_idx[0], vel_idx[1]
+        if 0 <= vx_i < n and 0 <= vy_i < n:
+            G = G.at[vx_i : vy_i + 1, 1:3].set(R_2d * dt_arr)
 
-    # Position
+    # Velocity (z component, if present, affected directly by f_z)
+    if n_accel == 3 and len(vel_idx) == 3:
+        vz_i = vel_idx[2]
+        if 0 <= vz_i < n:
+            G = G.at[vz_i, 3].set(dt_arr)  # ∂vz/∂f_z = dt (no rotation)
+
+    # Position (only x, y components affected, since we track 2D position)
     px_i, py_i = pos_idx
     if 0 <= px_i < n and 0 <= py_i < n:
         G = G.at[px_i : py_i + 1, 1:3].set(R_2d * (0.5 * dt_arr * dt_arr))

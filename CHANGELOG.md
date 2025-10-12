@@ -2,6 +2,65 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-12 - Milestone M5 (2D Pose + 3D IMU): Process Noise Updated for 3D Accel
+
+**Added:**
+
+- **3D Accelerometer Support in Process Noise** ([src/trodestrack/models/process_noise.py](src/trodestrack/models/process_noise.py))
+  - `build_input_noise_cov()` now accepts `n_accel` parameter (2 or 3):
+    * Returns (3, 3) for 2D accel [ω_z, f_x, f_y]
+    * Returns (4, 4) for 3D accel [ω_z, f_x, f_y, f_z]
+    * Validation: raises ValueError if n_accel not in {2, 3}
+  - `assemble_Q()` automatically infers `n_accel` from layout:
+    * 2 accel bias terms (b_ax, b_ay) → n_accel=2
+    * 3 accel bias terms (b_ax, b_ay, b_az) → n_accel=3
+    * Default to 2 for backward compatibility
+  - **Impact:** Enables correct process noise calculation for 10D state (2D cam + 3D IMU)
+
+- **3D Accelerometer Support in G Matrix** ([src/trodestrack/models/filter_common.py](src/trodestrack/models/filter_common.py))
+  - `build_G_matrix_generic()` updated to accept `n_accel` parameter and 3D velocity:
+    * Returns G matrix (n, n_accel+1) instead of hardcoded (n, 3)
+    * For 3D: maps f_z directly to vz (∂vz/∂f_z = dt, no rotation since z is vertical)
+    * Validation: checks n_accel ∈ {2,3} and consistency with vel_idx length
+  - **Impact:** Correct IMU noise propagation for 3D accelerometer data
+
+- **Layout Lookup Helper** ([src/trodestrack/models/process_noise.py](src/trodestrack/models/process_noise.py))
+  - `_get_layout_for_dimension(n)` - Extracts layout lookup logic to helper function
+  - **Impact:** Eliminates duplicate layout lookups in `assemble_Q()`, improves code quality
+
+**Test Results:**
+
+- ✅ New tests: 4/4 pass for 10D state ([tests/models/test_process_noise.py](tests/models/test_process_noise.py), lines 123-232)
+  - 3D accel shape correctness (4×4 Qu matrix)
+  - Symmetry and PSD properties maintained
+  - Blackout scaling respects all 3 accel bias terms (b_ax, b_ay, b_az)
+  - Bias freezing zeros all 4 bias indices during blackout
+- ✅ Existing tests: 3/3 pass (8D state parity maintained)
+- ✅ Integration tests: 159/159 pass (no regressions)
+- ✅ Code quality: black ✓, ruff ✓, mypy ✓
+
+**Documentation:**
+
+- Enhanced docstrings with:
+  - Physical units (rad/s, m/s²)
+  - Shape specifications ((3,3) vs (4,4))
+  - ValueError conditions and error messages
+  - Clearer inference logic comments
+
+**Code Review:** REQUEST_CHANGES → APPROVED
+- Fixed critical type hint: cast `vel_tuple` to `tuple[int, int] | tuple[int, int, int]`
+- Added validation for `n_accel` values in both functions
+- Extracted `_get_layout_for_dimension()` helper to remove duplicate lookup
+- Enhanced docstrings with clearer inference logic
+
+**Milestone Status:**
+
+- ✅ M5 subtask complete: `assemble_Q()` now consumes all 3 accel axes for noise energy
+- ✅ M5 subtask complete: Blackout-aware diffusion and bias freezing still honored
+- Next: Update `dynamics_function()` to use rotation + gravity compensation
+
+---
+
 ### Session: 2025-10-12 - Milestone M5 (2D Pose + 3D IMU): Helper Functions Added
 
 **Added:**

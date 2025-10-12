@@ -138,9 +138,9 @@
 - [x] `filter_common.py`:
   - [x] Add `rotate_body_accel_to_world(accel_body, yaw_heading)`
   - [x] Add `gravity_compensate(accel_world, g=9.81)`
-- [ ] `process_noise.py`:
-  - [ ] Update `assemble_Q()` to consume all 3 accel axes for noise energy
-  - [ ] Ensure blackout-aware diffusion and bias freezing still honored
+- [x] `process_noise.py`:
+  - [x] Update `assemble_Q()` to consume all 3 accel axes for noise energy
+  - [x] Ensure blackout-aware diffusion and bias freezing still honored
 - [ ] `state_layout.py`:
   - [ ] Verify/clarify indices for velocity and 3D accel bias
 - [ ] Dynamics:
