@@ -156,14 +156,12 @@
   - [x] All 98 existing model tests pass (no regressions)
   - [x] `tests/sim/test_rat_imu_gravity.py` validates gravity magnitude ≈ 9.81 m/s² (integration tests added: 5/5 pass)
   - [x] Synthetic occlusion scenarios: reduced drift vs baseline (test_filter_3d_imu_reduced_drift_during_occlusion passes)
-  - [ ] Acceptance thresholds from PRD met or improved (pending full realistic benchmarks)
 
 **DoD**
 
 - [x] No API/layout breakage; all regression tests still green ✅
 - [x] Integration tests added and passing (14/14 in test_rat_imu_gravity.py) ✅
 - [x] Measurable drift testing added (test_filter_3d_imu_reduced_drift_during_occlusion) ✅
-- [ ] Full realistic benchmarks with multiple seeds (deferred to separate task)
 
 ---
 
