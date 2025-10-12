@@ -220,7 +220,41 @@ This runs validation checks and prints a summary of the loaded data.
 
 ### Create Visualization Videos
 
-#### Option 1: 2D IMU (Trodestrack-compatible subset)
+#### Option 1: Filter Overlay (Recommended - Shows Filter Performance)
+
+Overlays Extended Kalman Filter estimates on the actual video with synchronized IMU data:
+
+```bash
+cd data/
+uv run python visualize_filter_overlay.py
+```
+
+Creates `arthur_filter_overlay.mp4` showing:
+
+- **Video (left)**: Original camera feed with filter overlay
+  - Red circle: LED1 (back of head, measured)
+  - Yellow circle: LED2 (front of head, measured)
+  - Cyan circle: Filter position estimate
+  - Cyan arrow: Filter heading estimate
+  - Cyan trail: Recent trajectory (3 seconds)
+- **IMU Data (right, top)**:
+  - 3-axis gyroscope (deg/s) - angular rates
+  - 3-axis accelerometer (m/s²) - linear acceleration + gravity
+- **Filter States (right, bottom)**:
+  - Velocity magnitude (cm/s)
+  - Heading estimate (degrees)
+  - Position uncertainty (cm, 1σ)
+
+To generate multiple example clips showing different behaviors:
+
+```bash
+cd data/
+uv run python generate_example_clips.py
+```
+
+This creates 5 clips in `example_clips/` directory, each demonstrating different filter scenarios (turning, fast movement, stationary, etc.).
+
+#### Option 2: 2D IMU (Trodestrack-compatible subset)
 
 Shows only the axes used by trodestrack's 2D EKF (gyro Z, accel X/Y):
 
@@ -235,7 +269,7 @@ Creates `arthur_visualization.mp4` with:
 - Gyro Z (yaw rate, used for heading)
 - Accel X/Y (horizontal plane motion)
 
-#### Option 2: Complete 6-Axis IMU
+#### Option 3: Complete 6-Axis IMU
 
 Shows ALL sensor data from the headstage:
 
@@ -289,39 +323,68 @@ create_comprehensive_video(
 )
 ```
 
-## Next Steps
+## 3D IMU Support (✓ Implemented)
 
-Before this data can be used with trodestrack, choose one approach:
+**Status**: ✅ Trodestrack now supports 3D IMU data!
 
-### Option 1: Quick Fix (Constant Tilt Correction)
+The data loader and EKF have been updated to handle full 6-axis IMU (3-axis gyro + 3-axis accel):
 
-Estimate headstage tilt from mean accelerometer values and project X/Y onto horizontal plane:
+### Using 3D IMU Mode
 
 ```python
-# Estimate tilt from mean accel
-accel_mean = [accel_x.mean(), accel_y.mean(), accel_z.mean()]
-tilt_angle = np.arccos(-accel_z.mean() / 9.81)  # Angle from vertical
+from load_arthur_session import load_arthur_session
+from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
 
-# Project X/Y to horizontal plane (simplified)
-# This assumes constant tilt throughout session
+# Load data with 3D IMU mode
+data = load_arthur_session(
+    position_file="arthur20220314_position_info.parquet",
+    imu_file="arthur20220314_imu_info.parquet",
+    imu_mode="3d",  # Use full 6-axis IMU
+    meters_per_pixel=0.0022,
+)
+
+# Configure EKF for 2D camera + 3D IMU
+ekf_config = EKFConfig(
+    state_mode="2d_cam_3d_imu",  # 10D state
+    process_noise_pos=0.02,
+    process_noise_vel=2.0,
+    process_noise_gyro_bias=2e-6,
+    process_noise_accel_bias=2e-4,
+    measurement_noise_pos=0.005**2,
+    damping_coeff=0.1,
+    led_distance=data.led_distance,
+)
+
+# Run filter
+result = extended_kalman_filter(
+    ekf_config=ekf_config,
+    t_imu=data.t_imu,
+    U_imu=data.U_imu,  # [N × 6] for 3D mode
+    t_cam=data.t_cam,
+    Z_cam_led1=data.Z_cam_led1,
+    Z_cam_led2=data.Z_cam_led2,
+    mask_cam=data.mask_cam,
+)
 ```
 
-### Option 2: Proper Fix (Extend EKF to 3D)
+### State Layout (2D Camera + 3D IMU)
 
-Extend trodestrack EKF to handle 3D IMU:
+The 10D state vector contains:
 
-- Add pitch/roll to state vector
-- Update process model for 3D dynamics
-- Update measurement model for 3D accelerometer
-- Handle gravity vector properly
+- `[0:2]` - Position: x, y (meters)
+- `[2:5]` - Velocity: vx, vy, vz (m/s) - **includes vertical velocity!**
+- `[5]` - Heading: θ (radians)
+- `[6]` - Gyro bias: b_gz (rad/s)
+- `[7:10]` - Accel bias: b_ax, b_ay, b_az (m/s²) - **includes vertical accel bias!**
 
-### Option 3: Use Only Gyro + Camera
+### Key Features
 
-Disable accelerometer inputs and rely on gyro + camera only:
+- **Gravity compensation**: Uses all 3 accel axes for better bias estimation
+- **Vertical motion detection**: vz state can detect rearing, jumping, etc.
+- **Improved robustness**: Better handling of headstage tilt and orientation changes
+- **Backward compatible**: Set `imu_mode="2d"` for legacy behavior
 
-- Heading from gyro integration + LED pair
-- Position and velocity from camera only
-- Less robust during camera dropouts
+See `benchmark_3d_imu_vs_vision_only.py` for performance comparison and `visualize_filter_overlay.py` to visualize filter behavior with 3D IMU data.
 
 ## Questions?
 
@@ -329,6 +392,6 @@ For issues or questions about this dataset, see the main trodestrack documentati
 
 ---
 
-**Last Updated**: 2025-10-11
-**Dataset Version**: 1.0
-**Status**: ⚠️ Requires 3D IMU support in trodestrack
+**Last Updated**: 2025-10-12
+**Dataset Version**: 2.0
+**Status**: ✅ Ready to use with trodestrack (3D IMU supported)

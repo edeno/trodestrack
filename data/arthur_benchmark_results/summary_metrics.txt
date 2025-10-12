@@ -1,0 +1,26 @@
+================================================================================
+BENCHMARK: 3D IMU + 2D POSITION vs VISION-ONLY
+================================================================================
+
+Dataset: Arthur session (25.3 minutes, 46,056 frames)
+Filter: Extended Kalman Filter (EKF)
+
+--------------------------------------------------------------------------------
+Metric                                       Vision-Only          3D IMU         Δ%
+--------------------------------------------------------------------------------
+Position RMSE (cm)                                  0.00            0.01    -242.3%
+Velocity RMSE (cm/s)                                8.89           13.79     -55.0%
+Heading RMSE (deg)                                  6.48            9.39     -45.0%
+Trajectory smoothness (m/s²)                       2.624           2.596       1.1%
+Mean position uncertainty (cm)                      0.50            0.50       0.4%
+Marginal log-likelihood                         564844.0        534819.2      -5.3%
+--------------------------------------------------------------------------------
+
+INTERPRETATION:
+- Position RMSE: Similar (camera measurement dominates both modes)
+- Velocity RMSE: IMU should be significantly better (less noise)
+- Smoothness: Lower is smoother (IMU should have lower value)
+- Uncertainty: Lower indicates more confident estimates
+- Log-likelihood: Higher indicates better model fit
+
+CONCLUSION:
