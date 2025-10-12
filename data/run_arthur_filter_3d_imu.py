@@ -221,9 +221,7 @@ def main():
     )
 
     # Save
-    save_dir = script_dir / "arthur_filter_results"
-    save_dir.mkdir(exist_ok=True)
-    save_path = save_dir / "arthur_3d_imu_results.png"
+    save_path = script_dir / "arthur_3d_imu_results.png"
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
     print(f"✓ Saved plot: {save_path}")
 
