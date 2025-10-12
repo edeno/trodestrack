@@ -21,8 +21,23 @@ from trodestrack.models.ekf import (
     extended_kalman_filter,
     update_heading,
 )
+from trodestrack.models.sensors.heading_pseudo import HeadingPseudoModel
+from trodestrack.models.state_layout import LAYOUT_2D_FULL
 from trodestrack.qa.metrics import compute_heading_rmse
 from trodestrack.sim.rat_imu import RatIMUSimConfig, simulate_rat_imu
+
+
+def make_heading_model(z_led1, z_led2, config):
+    """Helper to create heading model for single-frame test."""
+    z_led1_all = z_led1.reshape(1, 2)
+    z_led2_all = z_led2.reshape(1, 2)
+
+    return HeadingPseudoModel(
+        config=config,
+        layout=LAYOUT_2D_FULL,
+        z_led1_all=z_led1_all,
+        z_led2_all=z_led2_all,
+    )
 
 
 def test_heading_measurement_improves_convergence() -> None:
@@ -267,21 +282,22 @@ def test_heading_update_respects_camera_mask() -> None:
     )
 
     # Dropout: validity flag False but LED arrays still contain finite values
+    heading_model = make_heading_model(z_led1, z_led2, config)
     state_dropout, log_lik_dropout = update_heading(
         state,
-        z_led1,
-        z_led2,
-        config,
+        heading_model,
+        frame_idx=0,
         observation_is_valid=False,
+        layout=LAYOUT_2D_FULL,
     )
 
     # Valid observation should adjust the heading estimate
     state_valid, log_lik_valid = update_heading(
         state,
-        z_led1,
-        z_led2,
-        config,
+        heading_model,
+        frame_idx=0,
         observation_is_valid=True,
+        layout=LAYOUT_2D_FULL,
     )
 
     np.testing.assert_allclose(
@@ -325,12 +341,13 @@ def test_heading_update_handles_unknown_led_distance() -> None:
         measurement_noise_heading=0.01**2,
     )
 
+    heading_model = make_heading_model(z_led1, z_led2, config)
     updated_state, log_lik = update_heading(
         state,
-        z_led1,
-        z_led2,
-        config,
+        heading_model,
+        frame_idx=0,
         observation_is_valid=True,
+        layout=LAYOUT_2D_FULL,
     )
 
     # Heading mean should move toward 0 rad (geometry indicates 0 heading)
