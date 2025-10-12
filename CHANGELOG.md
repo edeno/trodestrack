@@ -2,6 +2,57 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-12 - Milestone M5 (2D Pose + 3D IMU): Filter Integration Tests ✅
+
+**Added:**
+
+- **Filter Integration Tests for 3D IMU** ([tests/sim/test_rat_imu_gravity.py](tests/sim/test_rat_imu_gravity.py):246-553)
+  - 5 comprehensive filter integration tests added:
+    * `test_filter_3d_imu_accepts_4_element_input` - Verifies EKF processes 4-element IMU [ω_z, fx, fy, fz]
+    * `test_filter_3d_imu_gravity_compensation_at_rest` - Validates vz remains ~0 when stationary (gravity compensated)
+    * `test_filter_3d_imu_detects_vertical_acceleration` - Detects upward acceleration (jumping) via vz increase
+    * `test_filter_3d_imu_reduced_drift_during_occlusion` - Compares 3D vs 2D IMU drift during 3s blackout
+    * `test_filter_3d_imu_backward_compatible_with_2d` - Ensures 3-element IMU still works (backward compat)
+  - **Impact:** Validates end-to-end filter behavior with 3D IMU, gravity compensation, and drift mitigation
+
+**Test Results:**
+
+- ✅ All 14 tests pass in test_rat_imu_gravity.py (9 simulator + 5 filter integration)
+- ✅ Gravity compensation validated: vz ~0 at rest, increases during jumps
+- ✅ Drift comparison: Both 2D and 3D IMU meet PRD requirement (≤2.5m for 3s occlusion)
+- ✅ Backward compatibility: 2D mode (3-element IMU) works unchanged
+- ✅ Full test suite: 159/159 tests pass (no regressions)
+
+**Configuration Guide:**
+
+- 10D state (3D IMU): `EKFConfig(state_mode="2d_cam_3d_imu")` → LAYOUT_2D_CAM_3D_IMU
+- 8D state (2D IMU): `EKFConfig(state_mode="2d_full")` → LAYOUT_2D_FULL
+- API uses `state_mode` parameter, not `state_dim`
+
+**Key Findings:**
+
+- Filter correctly handles 4-element IMU input via `state_mode="2d_cam_3d_imu"`
+- Gravity compensation prevents spurious vertical velocity accumulation
+- Drift during occlusions is within PRD tolerance (≤2.5m for 3s blackout)
+- 3D IMU doesn't significantly improve drift vs 2D in simple constant-velocity scenarios
+  (expected: 3D benefits require realistic rat motion with rearing/vertical dynamics)
+
+**Milestone M5 Status: COMPLETE ✅**
+
+All M5 tasks completed:
+- ✅ Added rotation and gravity compensation helpers (filter_common.py)
+- ✅ Updated process_noise.py for 3D accelerometer (assemble_Q, build_G_matrix_generic)
+- ✅ Verified state_layout.py indices (LAYOUT_2D_CAM_3D_IMU)
+- ✅ Updated dynamics_function() for 3D IMU with gravity compensation
+- ✅ Added 12 unit tests for dynamics (test_dynamics_3d_imu.py)
+- ✅ Added 17 tests for state layout (test_state_layout.py)
+- ✅ Added 5 filter integration tests (test_rat_imu_gravity.py)
+- ✅ All 159 tests passing (no regressions)
+- ✅ Code quality: black ✓, ruff ✓, mypy ✓
+- ⏸ Full realistic benchmarks deferred (awaiting M6 performance optimization)
+
+---
+
 ### Session: 2025-10-12 - Milestone M5 (2D Pose + 3D IMU): Dynamics with Gravity Compensation
 
 **Added:**

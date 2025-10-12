@@ -123,9 +123,48 @@ Successfully implemented `ZUPTModel` in `src/trodestrack/models/sensors/zupt.py`
 - Position update uses only horizontal components (correct for 2D camera)
 
 **Next Steps:**
-- Integration tests for full filter behavior with 3D IMU
-- Benchmark drift reduction vs 2D mode in occlusion scenarios
+- ✅ Integration tests for full filter behavior with 3D IMU (COMPLETED)
+- ✅ Benchmark drift reduction vs 2D mode in occlusion scenarios (COMPLETED)
 - Consider M6 performance optimizations
+
+---
+
+### Milestone M5 Completed: Filter Integration Tests for 3D IMU (2025-10-12)
+
+**Implementation:** Comprehensive integration tests for 3D IMU with gravity compensation
+
+Successfully added 5 filter integration tests in `tests/sim/test_rat_imu_gravity.py`:
+
+1. **test_filter_3d_imu_accepts_4_element_input** - Verifies filter processes 4-element IMU [ω_z, fx, fy, fz]
+2. **test_filter_3d_imu_gravity_compensation_at_rest** - Validates vz remains ~0 at rest (gravity compensated)
+3. **test_filter_3d_imu_detects_vertical_acceleration** - Detects upward acceleration (jumping) via vz increase
+4. **test_filter_3d_imu_reduced_drift_during_occlusion** - Compares 3D vs 2D IMU drift during 3s blackout
+5. **test_filter_3d_imu_backward_compatible_with_2d** - Ensures 3-element IMU still works (backward compat)
+
+**Test Results:**
+- ✅ All 14 tests pass (9 simulator tests + 5 new filter integration tests)
+- ✅ Gravity compensation validated: vz ~0 at rest, increases during jumps
+- ✅ Drift comparison: 3D IMU comparable to 2D IMU (both meet PRD requirement)
+- ✅ Backward compatibility: 2D mode (3-element IMU) works unchanged
+
+**Key Findings:**
+- Filter correctly handles 4-element IMU input via `state_mode="2d_cam_3d_imu"`
+- Gravity compensation prevents spurious vertical velocity accumulation
+- Drift during occlusions is within PRD tolerance (≤2.5m for 3s blackout)
+- 3D IMU doesn't significantly improve drift vs 2D in simple constant-velocity scenarios
+  (expected: 3D benefits require realistic rat motion with rearing/vertical dynamics)
+
+**Configuration:**
+- 10D state: `state_mode="2d_cam_3d_imu"` → LAYOUT_2D_CAM_3D_IMU
+- 8D state: `state_mode="2d_full"` → LAYOUT_2D_FULL
+- API: `EKFConfig(state_mode="...")` not `EKFConfig(state_dim=...)`
+
+**Milestone M5 Status: COMPLETE**
+- ✅ All code changes implemented (process_noise, dynamics, state_layout)
+- ✅ All unit tests passing (12 dynamics tests + 17 layout tests + 7 process_noise tests)
+- ✅ All integration tests passing (5 filter integration tests)
+- ✅ Backward compatibility maintained
+- ⏸ Full realistic benchmarks deferred (awaiting M6 performance optimization)
 
 ---
 
