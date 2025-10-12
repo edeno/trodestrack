@@ -143,18 +143,25 @@
   - [x] Ensure blackout-aware diffusion and bias freezing still honored
 - [x] `state_layout.py`:
   - [x] Verify/clarify indices for velocity and 3D accel bias
-- [ ] Dynamics:
-  - [ ] Update `dynamics_function()` to use rotation + gravity compensation
-  - [ ] Preserve API and shape stability
-- [ ] Tests:
-  - [ ] `tests/sim/test_rat_imu_gravity.py` validates gravity magnitude ≈ 9.81 m/s²
-  - [ ] Synthetic occlusion scenarios: reduced drift vs baseline
-  - [ ] Acceptance thresholds from PRD met or improved
+- [x] Dynamics:
+  - [x] Update `dynamics_function()` to use rotation + gravity compensation
+  - [x] Preserve API and shape stability
+  - [x] Support both 2D IMU [ω_z, fx, fy] and 3D IMU [ω_z, fx, fy, fz]
+  - [x] Apply gravity compensation for 3D mode
+  - [x] Maintain backward compatibility with 2D mode
+- [x] Tests:
+  - [x] Created `tests/models/test_dynamics_3d_imu.py` with 12 comprehensive tests
+  - [x] Tests validate gravity compensation, rotation, bias correction
+  - [x] Tests verify backward compatibility (2D IMU, vision-only modes)
+  - [x] All 98 existing model tests pass (no regressions)
+  - [ ] `tests/sim/test_rat_imu_gravity.py` validates gravity magnitude ≈ 9.81 m/s² (integration test pending)
+  - [ ] Synthetic occlusion scenarios: reduced drift vs baseline (pending full integration)
+  - [ ] Acceptance thresholds from PRD met or improved (pending benchmarks)
 
 **DoD**
 
-- [ ] Measurable drift reduction in IMU-only intervals (see PRD robustness target)
-- [ ] No API/layout breakage; all regression tests still green
+- [x] No API/layout breakage; all regression tests still green ✅
+- [ ] Measurable drift reduction in IMU-only intervals (see PRD robustness target) (pending integration tests)
 
 ---
 

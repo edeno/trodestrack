@@ -2,6 +2,58 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-12 - Milestone M5 (2D Pose + 3D IMU): Dynamics with Gravity Compensation
+
+**Added:**
+
+- **3D IMU Support in Dynamics Function** ([src/trodestrack/models/filter_common.py](src/trodestrack/models/filter_common.py):365)
+  - `dynamics_function()` now supports both 2D and 3D IMU inputs:
+    * 2D IMU: [ω_z, fx, fy] (3-element) - backward compatible
+    * 3D IMU: [ω_z, fx, fy, fz] (4-element) - new 3D mode
+  - For 3D mode, applies:
+    * 3D bias correction: removes [b_ax, b_ay, b_az] from body-frame accelerations
+    * 3D rotation: `rotate_body_accel_to_world()` using R_z(θ) matrix
+    * Gravity compensation: `gravity_compensate()` removes [0, 0, 9.81] in world frame
+    * 3D velocity update: integrates gravity-compensated acceleration to [vx, vy, vz]
+    * 2D position update: uses only horizontal components (correct for overhead camera)
+  - **Impact:** Enables detection of vertical motion (rearing, jumping) with LAYOUT_2D_CAM_3D_IMU (10D state)
+
+- **Comprehensive Test Suite for 3D IMU Dynamics** ([tests/models/test_dynamics_3d_imu.py](tests/models/test_dynamics_3d_imu.py))
+  - 12 new tests covering:
+    * Gravity compensation at rest (IMU reads [0, 0, 9.81] → velocity unchanged)
+    * Vertical acceleration (jumping detection: fz > 9.81 → vz increases)
+    * Body-to-world rotation (validates R_z(θ) matrix correctness)
+    * 3D bias correction (b_ax, b_ay, b_az)
+    * Backward compatibility (2D IMU, vision-only modes work unchanged)
+    * Edge cases (large rotations, extreme inputs, determinism)
+  - **Impact:** Comprehensive validation of physics correctness and edge case handling
+
+**Test Results:**
+
+- ✅ New tests: 12/12 pass ([tests/models/test_dynamics_3d_imu.py](tests/models/test_dynamics_3d_imu.py))
+- ✅ Existing tests: 98/98 model tests pass (no regressions)
+- ✅ Integration tests: 22/22 EKF/runtime tests pass
+- ✅ Code quality: black ✓, ruff ✓, mypy ✓
+- ✅ Code review: APPROVED (0 critical, 0 high issues)
+
+**Physics Validation:**
+
+- Rotation matrix R_z(θ) verified correct (preserves z-component during yaw rotation)
+- Gravity compensation order validated (bias removal → rotation → gravity subtraction)
+- Position update correctly uses only horizontal components (matches overhead camera geometry)
+
+**Documentation:**
+
+- Enhanced docstrings in `dynamics_function()`:
+  - Physical equations for 2D and 3D modes
+  - Clear explanation of IMU dimension detection
+  - Notes on gravity compensation physics (specific force vs coordinate acceleration)
+- Test docstrings explain physical scenarios and expected outcomes
+
+**Code Review:** APPROVED (0 critical issues, optional enhancements suggested for future)
+
+---
+
 ### Session: 2025-10-12 - Milestone M5 (2D Pose + 3D IMU): Process Noise Updated for 3D Accel
 
 **Added:**

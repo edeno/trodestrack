@@ -371,12 +371,18 @@ def dynamics_function(
 ) -> jnp.ndarray:
     """Constant-acceleration dynamics with linear damping (layout-aware).
 
+    Supports both 2D and 3D IMU inputs:
+    - 2D IMU: [ω_z(rad/s), f_x(m/s²), f_y(m/s²)] (3,)
+    - 3D IMU: [ω_z(rad/s), f_x(m/s²), f_y(m/s²), f_z(m/s²)] (4,)
+
+    For 3D IMU, applies gravity compensation and 3D rotation.
+
     Parameters
     ----------
     state : jnp.ndarray
-        State vector (n,). Typical 2D layout: [x(m), y(m), vx(m/s), vy(m/s), θ(rad), ...].
+        State vector (n,). Layout-dependent structure.
     imu : jnp.ndarray
-        IMU specific force and yaw rate [ω_z(rad/s), f_x(m/s^2), f_y(m/s^2)] (3,).
+        IMU measurements. Either 3-element (2D) or 4-element (3D).
     dt : float
         Time step (s).
     damping : float
@@ -391,13 +397,18 @@ def dynamics_function(
 
     Notes
     -----
-    Uses body→world rotation R(θ) and updates
+    For 2D IMU mode:
+        vₖ₊₁ = vₖ + (R₂ₓ₂ f − γ vₖ) dt
+        pₖ₊₁ = pₖ + vₖ dt + 1/2 (R₂ₓ₂ f − γ vₖ) dt²
 
-    vₖ₊₁ = vₖ + (R f − γ vₖ) dt
+    For 3D IMU mode:
+        f_world = R₃ₓ₃(θ) @ f_body
+        a_kinematic = f_world - [0, 0, g]  (gravity compensation)
+        vₖ₊₁ = vₖ + (a_kinematic − γ vₖ) dt
+        pₖ₊₁ = pₖ + vₖ dt + 1/2 (a_kinematic − γ vₖ) dt²
 
-    pₖ₊₁ = pₖ + vₖ dt + 1/2 (R f − γ vₖ) dt²
-
-    θₖ₊₁ = θₖ + (ω_z − b_gz) dt
+    Heading update:
+        θₖ₊₁ = θₖ + (ω_z − b_gz) dt
 
     Unused layout components are propagated as identity.
     """
@@ -407,41 +418,97 @@ def dynamics_function(
     px_i, py_i = layout.pos_idx[0], layout.pos_idx[1]
     vx_i, vy_i = layout.vel_idx[0], layout.vel_idx[1]
 
+    # Check if layout has 3D velocity (vz)
+    has_3d_velocity = len(layout.vel_idx) >= 3
+
     # Bias indices (may be empty for vision-only)
     b_gz = state[layout.bias_gyro_idx[0]] if len(layout.bias_gyro_idx) >= 1 else 0.0
     b_ax = state[layout.bias_accel_idx[0]] if len(layout.bias_accel_idx) >= 1 else 0.0
     b_ay = state[layout.bias_accel_idx[1]] if len(layout.bias_accel_idx) >= 2 else 0.0
+    b_az = state[layout.bias_accel_idx[2]] if len(layout.bias_accel_idx) >= 3 else 0.0
 
     # Current values
     px, py = state[px_i], state[py_i]
     vx, vy = state[vx_i], state[vy_i]
     theta = state[h_idx]
 
-    # IMU inputs (2D): [omega_z, f_x, f_y]
-    omega_z, fx, fy = imu
+    # Detect IMU dimension: 3-element (2D) or 4-element (3D)
+    imu_is_3d = imu.shape[0] >= 4
 
+    # Update heading
+    omega_z = imu[0]
     omega_z_unbiased = omega_z - b_gz
-    accel_body = jnp.array([fx - b_ax, fy - b_ay])
-
     theta_next = theta + omega_z_unbiased * dt
-    cos_t = jnp.cos(theta)
-    sin_t = jnp.sin(theta)
-    R = jnp.array([[cos_t, -sin_t], [sin_t, cos_t]])
-    accel_world = R @ accel_body
 
-    vel = jnp.array([vx, vy])
-    vel_next = vel + accel_world * dt - damping * vel * dt
+    if imu_is_3d and has_3d_velocity:
+        # 3D IMU mode: [ω_z, fx, fy, fz]
+        # Extract 3D velocity
+        vz_i = layout.vel_idx[2]
+        vz = state[vz_i]
 
-    pos = jnp.array([px, py])
-    pos_next = pos + vel * dt + 0.5 * accel_world * dt**2 - 0.5 * damping * vel * dt**2
+        # Extract 3D accelerations from IMU
+        fx, fy, fz = imu[1], imu[2], imu[3]
 
-    # Start with identity propagation
-    next_state = state
-    next_state = next_state.at[px_i].set(pos_next[0])
-    next_state = next_state.at[py_i].set(pos_next[1])
-    next_state = next_state.at[vx_i].set(vel_next[0])
-    next_state = next_state.at[vy_i].set(vel_next[1])
-    next_state = next_state.at[h_idx].set(theta_next)
+        # Remove biases (body frame)
+        accel_body = jnp.array([fx - b_ax, fy - b_ay, fz - b_az])
+
+        # Rotate from body frame to world frame using current heading
+        accel_world = rotate_body_accel_to_world(accel_body, theta)
+
+        # Compensate for gravity (remove [0, 0, g] from world-frame measurement)
+        accel_kinematic = gravity_compensate(accel_world, g=9.81)
+
+        # Update 3D velocity with damping
+        vel = jnp.array([vx, vy, vz])
+        vel_next = vel + accel_kinematic * dt - damping * vel * dt
+
+        # Update 2D position (only x, y; no z position in LAYOUT_2D_CAM_3D_IMU)
+        pos = jnp.array([px, py])
+        # Only use horizontal components for position update
+        accel_horizontal = accel_kinematic[:2]
+        vel_horizontal = vel[:2]
+        pos_next = (
+            pos
+            + vel_horizontal * dt
+            + 0.5 * accel_horizontal * dt**2
+            - 0.5 * damping * vel_horizontal * dt**2
+        )
+
+        # Update state
+        next_state = state
+        next_state = next_state.at[px_i].set(pos_next[0])
+        next_state = next_state.at[py_i].set(pos_next[1])
+        next_state = next_state.at[vx_i].set(vel_next[0])
+        next_state = next_state.at[vy_i].set(vel_next[1])
+        next_state = next_state.at[vz_i].set(vel_next[2])
+        next_state = next_state.at[h_idx].set(theta_next)
+
+    else:
+        # 2D IMU mode: [ω_z, fx, fy] (backward compatible)
+        fx, fy = imu[1], imu[2]
+        accel_body = jnp.array([fx - b_ax, fy - b_ay])
+
+        # 2D rotation (yaw only)
+        cos_t = jnp.cos(theta)
+        sin_t = jnp.sin(theta)
+        R = jnp.array([[cos_t, -sin_t], [sin_t, cos_t]])
+        accel_world = R @ accel_body
+
+        # Update 2D velocity
+        vel = jnp.array([vx, vy])
+        vel_next = vel + accel_world * dt - damping * vel * dt
+
+        # Update 2D position
+        pos = jnp.array([px, py])
+        pos_next = pos + vel * dt + 0.5 * accel_world * dt**2 - 0.5 * damping * vel * dt**2
+
+        # Update state
+        next_state = state
+        next_state = next_state.at[px_i].set(pos_next[0])
+        next_state = next_state.at[py_i].set(pos_next[1])
+        next_state = next_state.at[vx_i].set(vel_next[0])
+        next_state = next_state.at[vy_i].set(vel_next[1])
+        next_state = next_state.at[h_idx].set(theta_next)
 
     return next_state
 

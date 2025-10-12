@@ -76,9 +76,56 @@ Successfully implemented `ZUPTModel` in `src/trodestrack/models/sensors/zupt.py`
 
 **Remaining M5 Tasks:**
 - [x] Update `state_layout.py` (verified indices - already correct)
-- [ ] Update `dynamics_function()` to use gravity compensation
-- [ ] Add/update tests for gravity-aware dynamics
-- [ ] Verify drift reduction in occlusion scenarios
+- [x] Update `dynamics_function()` to use gravity compensation
+- [x] Add/update tests for gravity-aware dynamics
+- [ ] Verify drift reduction in occlusion scenarios (integration tests pending)
+
+---
+
+**Task:** Update `dynamics_function()` to support 3D IMU with gravity compensation (2025-10-12)
+
+**Implementation:**
+1. Modified `dynamics_function()` in `filter_common.py`:
+   - Detects IMU dimension: 3-element (2D) vs 4-element (3D)
+   - For 3D mode: extracts b_az from state, reads fz from IMU[3]
+   - Applies 3D rotation: `rotate_body_accel_to_world(accel_body, theta)`
+   - Applies gravity compensation: `gravity_compensate(accel_world, g=9.81)`
+   - Updates 3D velocity (vx, vy, vz) with gravity-compensated acceleration
+   - Maintains 2D position update (no z position in LAYOUT_2D_CAM_3D_IMU)
+   - 2D mode unchanged (backward compatible)
+
+2. Uses existing helper functions:
+   - `rotate_body_accel_to_world()`: R_z(θ) @ [ax, ay, az] (line 241-278)
+   - `gravity_compensate()`: removes [0, 0, 9.81] from world frame (line 281-308)
+
+**Test Results:**
+- Created `tests/models/test_dynamics_3d_imu.py` with 12 comprehensive tests:
+  * 3D IMU input acceptance
+  * Gravity compensation at rest (IMU reads [0, 0, 9.81] → velocity unchanged)
+  * Vertical acceleration (jumping: fz > 9.81 → vz increases)
+  * Body-to-world rotation (body +x at θ=90° → world +y)
+  * 3D bias correction (b_ax, b_ay, b_az)
+  * Backward compatibility (2D IMU, vision-only modes)
+  * Edge cases (large rotations, extreme inputs, determinism)
+- All 12 new tests pass ✅
+- All 98 existing model tests pass (no regressions) ✅
+- All 22 EKF/runtime tests pass ✅
+
+**Code Quality:**
+- Type checking: mypy clean ✅
+- Linting: ruff clean ✅
+- Formatting: black applied ✅
+- Code review: APPROVED (0 critical, 0 high issues) ✅
+
+**Physics Validation:**
+- Rotation matrix R_z(θ) verified correct (preserves z-component)
+- Gravity compensation order correct (bias → rotate → gravity)
+- Position update uses only horizontal components (correct for 2D camera)
+
+**Next Steps:**
+- Integration tests for full filter behavior with 3D IMU
+- Benchmark drift reduction vs 2D mode in occlusion scenarios
+- Consider M6 performance optimizations
 
 ---
 
