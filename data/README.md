@@ -111,17 +111,20 @@ The 3-axis accelerometer measures **specific force** (linear acceleration + grav
 - **Accel Z**: Acceleration in Z direction + **~9.81 m/s² from gravity** (when upright)
 
 **Key Insight**: When the rat is upright and stationary, the accelerometer reads:
+
 - X ≈ 0, Y ≈ 0, Z ≈ -9.81 m/s² (gravity pulls "down" in body frame)
 - When tilted, gravity components appear in X and Y axes too
 
 ### Why 2D Tracking Uses Only a Subset
 
 **Trodestrack's 2D tracking assumes:**
+
 1. The rat moves primarily on a horizontal plane (maze floor)
 2. The headstage stays approximately upright (small roll/pitch variations)
 3. Only **yaw (heading)** matters for 2D position tracking
 
 **Therefore, 2D tracking uses:**
+
 - **Gyro Z** → Measures yaw rate (turning left/right on the floor)
 - **Accel X, Y** → Approximate horizontal plane acceleration (after gravity removal)
 - **Ignores: Gyro X, Y, Accel Z** → Roll, pitch, and vertical motion not tracked
@@ -204,6 +207,7 @@ uv run python visualize_session.py
 ```
 
 Creates `arthur_visualization.mp4` with:
+
 - Video with LED tracking (red=rear, cyan=front)
 - Gyro Z (yaw rate, used for heading)
 - Accel X/Y (horizontal plane motion)
@@ -218,6 +222,7 @@ uv run python visualize_all_sensors.py
 ```
 
 Creates `arthur_all_sensors.mp4` with:
+
 - Video with LED tracking
 - **3D Gyroscope**: X (roll rate), Y (pitch rate), Z (yaw rate)
 - **3D Accelerometer**: X, Y, Z (including gravity in Z-axis)
