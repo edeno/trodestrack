@@ -40,6 +40,9 @@ dev = [
     "ruff>=0.1.0",
     "mypy>=1.0.0",
 ]
+video = [
+    "opencv-python>=4.12.0.88",
+]
 
 [project.scripts]
 trodestrack = "trodestrack:main"

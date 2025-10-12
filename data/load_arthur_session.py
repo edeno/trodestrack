@@ -1,15 +1,30 @@
 """Load and prepare Arthur session data for trodestrack.
 
 This module provides functions to load SpikeGadgets tracking data with proper
-unit conversions and sample-and-hold removal.
+unit conversions, sample-and-hold removal, and video frame extraction.
 
+Design principles (Raymond Hettinger style):
+- One function does one thing well
+- Composition over complexity
+- Clear names that reveal intent
+- Immutable data flow where possible
+- Type hints for clarity
 """
 
 from dataclasses import dataclass
-from typing import Tuple
+from pathlib import Path
+from typing import Optional, Tuple
 
 import numpy as np
 import pandas as pd
+
+try:
+    import cv2
+
+    HAS_CV2 = True
+except ImportError:
+    HAS_CV2 = False
+
 
 # SpikeGadgets headstage hardware specifications
 GYRO_SCALE = 0.061  # deg/s per LSB (±2000 deg/s range, 16-bit)
@@ -24,41 +39,61 @@ class SessionData:
 
     All timestamps are relative (start from 0).
     All units are SI: meters, seconds, rad/s, m/s².
+
+    Attributes
+    ----------
+    t_imu : np.ndarray
+        IMU timestamps in seconds (relative to start)
+    t_cam : np.ndarray
+        Camera timestamps in seconds (relative to start)
+    U_imu : np.ndarray
+        IMU data [N_imu × 3]: [gyro_z (rad/s), accel_x (m/s²), accel_y (m/s²)]
+    Z_cam_led1 : np.ndarray
+        LED1 positions [N_cam × 2]: [x, y] in meters
+    Z_cam_led2 : np.ndarray
+        LED2 positions [N_cam × 2]: [x, y] in meters
+    mask_cam : np.ndarray
+        Validity mask [N_cam] boolean array
+    led_distance : float
+        Median LED separation distance in meters
+    fs_imu : float
+        IMU sampling rate in Hz
+    fs_cam : float
+        Camera sampling rate in Hz
+    meters_per_pixel : float
+        Scale factor for converting pixels to meters
     """
 
-    # Time arrays
-    t_imu: np.ndarray  # IMU timestamps (s)
-    t_cam: np.ndarray  # Camera timestamps (s)
-
-    # IMU data [N_imu × 3]: [gyro_z, accel_x, accel_y]
-    U_imu: np.ndarray  # rad/s, m/s², m/s²
-
-    # Camera data [N_cam × 2]: [x, y] for each LED
-    Z_cam_led1: np.ndarray  # meters
-    Z_cam_led2: np.ndarray  # meters
-
-    # Validity mask
-    mask_cam: np.ndarray  # bool [N_cam]
-
-    # Derived parameters
-    led_distance: float  # meters (median separation)
-    fs_imu: float  # Hz (sampling rate)
-    fs_cam: float  # Hz (sampling rate)
+    t_imu: np.ndarray
+    t_cam: np.ndarray
+    U_imu: np.ndarray
+    Z_cam_led1: np.ndarray
+    Z_cam_led2: np.ndarray
+    mask_cam: np.ndarray
+    led_distance: float
+    fs_imu: float
+    fs_cam: float
+    meters_per_pixel: float
 
 
 def find_unique_samples(values: np.ndarray) -> np.ndarray:
     """Find indices where values change (removes sample-and-hold repeats).
 
-    Args:
-        values: Array with repeated values from sample-and-hold
+    Parameters
+    ----------
+    values : np.ndarray
+        Array with repeated values from sample-and-hold
 
-    Returns:
+    Returns
+    -------
+    np.ndarray
         Indices of unique samples (first occurrence of each value)
 
-    Example:
-        >>> values = [1, 1, 1, 2, 2, 3, 3, 3]
-        >>> find_unique_samples(values)
-        array([0, 3, 5])
+    Examples
+    --------
+    >>> values = np.array([1, 1, 1, 2, 2, 3, 3, 3])
+    >>> find_unique_samples(values)
+    array([0, 3, 5])
     """
     changes = np.where(np.diff(values) != 0)[0] + 1
     return np.concatenate([[0], changes])
@@ -69,11 +104,16 @@ def estimate_sampling_rate(timestamps: np.ndarray, n_samples: int = 10000) -> fl
 
     Uses median of time differences for robustness to outliers.
 
-    Args:
-        timestamps: Time values in seconds
-        n_samples: Number of samples to use for estimation
+    Parameters
+    ----------
+    timestamps : np.ndarray
+        Time values in seconds
+    n_samples : int, optional
+        Number of samples to use for estimation (default: 10000)
 
-    Returns:
+    Returns
+    -------
+    float
         Sampling rate in Hz
     """
     dt_samples = np.diff(timestamps[: min(n_samples, len(timestamps))])
@@ -86,12 +126,19 @@ def convert_timestamps_to_relative(
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Convert Unix timestamps to relative time starting from 0.
 
-    Args:
-        t_imu: IMU timestamps (Unix time)
-        t_cam: Camera timestamps (Unix time)
+    Parameters
+    ----------
+    t_imu : np.ndarray
+        IMU timestamps (Unix time in seconds)
+    t_cam : np.ndarray
+        Camera timestamps (Unix time in seconds)
 
-    Returns:
-        (t_imu_relative, t_cam_relative) both starting from 0
+    Returns
+    -------
+    t_imu_relative : np.ndarray
+        IMU timestamps starting from 0
+    t_cam_relative : np.ndarray
+        Camera timestamps starting from 0
     """
     t_start = min(t_imu[0], t_cam[0])
     return t_imu - t_start, t_cam - t_start
@@ -102,10 +149,14 @@ def convert_imu_to_si(imu_df: pd.DataFrame) -> np.ndarray:
 
     Converts gyro (raw → deg/s → rad/s) and accel (raw → g → m/s²).
 
-    Args:
-        imu_df: DataFrame with columns Headstage_GyroZ, Headstage_AccelX, Headstage_AccelY
+    Parameters
+    ----------
+    imu_df : pd.DataFrame
+        DataFrame with columns: Headstage_GyroZ, Headstage_AccelX, Headstage_AccelY
 
-    Returns:
+    Returns
+    -------
+    np.ndarray
         Array [N × 3] of [gyro_z (rad/s), accel_x (m/s²), accel_y (m/s²)]
     """
     gyro_z_raw = imu_df["Headstage_GyroZ"].values
@@ -127,12 +178,19 @@ def convert_positions_to_meters(
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Convert LED positions from pixels to meters.
 
-    Args:
-        pos_df: DataFrame with columns xloc, yloc, xloc2, yloc2
-        meters_per_pixel: Scale factor (e.g., 0.0022)
+    Parameters
+    ----------
+    pos_df : pd.DataFrame
+        DataFrame with columns: xloc, yloc, xloc2, yloc2
+    meters_per_pixel : float
+        Scale factor (e.g., 0.0022)
 
-    Returns:
-        (led1_positions, led2_positions) both [N × 2] in meters
+    Returns
+    -------
+    led1_positions : np.ndarray
+        LED1 positions [N × 2] in meters
+    led2_positions : np.ndarray
+        LED2 positions [N × 2] in meters
     """
     led1_pixels = pos_df[["xloc", "yloc"]].values
     led2_pixels = pos_df[["xloc2", "yloc2"]].values
@@ -143,26 +201,123 @@ def convert_positions_to_meters(
     return led1_meters, led2_meters
 
 
+def convert_meters_to_pixels(positions_m: np.ndarray, meters_per_pixel: float) -> np.ndarray:
+    """Convert positions from meters to pixels.
+
+    Parameters
+    ----------
+    positions_m : np.ndarray
+        Positions in meters [N × 2]
+    meters_per_pixel : float
+        Scale factor (e.g., 0.0022)
+
+    Returns
+    -------
+    np.ndarray
+        Positions in pixels [N × 2]
+    """
+    return positions_m / meters_per_pixel
+
+
 def compute_led_separation(led1: np.ndarray, led2: np.ndarray) -> float:
     """Compute median LED separation distance.
 
-    Args:
-        led1: LED1 positions [N × 2]
-        led2: LED2 positions [N × 2]
+    Parameters
+    ----------
+    led1 : np.ndarray
+        LED1 positions [N × 2]
+    led2 : np.ndarray
+        LED2 positions [N × 2]
 
-    Returns:
+    Returns
+    -------
+    float
         Median Euclidean distance in same units as input
     """
     separations = np.linalg.norm(led2 - led1, axis=1)
     return float(np.median(separations))
 
 
+def load_video_frame(video_path: str, frame_idx: int) -> Optional[np.ndarray]:
+    """Load a single frame from a video file.
+
+    Parameters
+    ----------
+    video_path : str
+        Path to video file (e.g., .mp4)
+    frame_idx : int
+        Zero-based frame index to load
+
+    Returns
+    -------
+    np.ndarray or None
+        Frame as RGB image [H × W × 3] or None if cv2 not available or frame not found
+
+    Notes
+    -----
+    Requires opencv-python (cv2) to be installed.
+    """
+    if not HAS_CV2:
+        print("Warning: opencv-python not installed, cannot load video frames")
+        return None
+
+    cap = cv2.VideoCapture(video_path)
+    try:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+        ret, frame = cap.read()
+        if ret:
+            # Convert BGR (OpenCV) to RGB
+            return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        return None
+    finally:
+        cap.release()
+
+
+def get_video_info(video_path: str) -> dict:
+    """Get video file metadata.
+
+    Parameters
+    ----------
+    video_path : str
+        Path to video file
+
+    Returns
+    -------
+    dict
+        Dictionary with keys: 'width', 'height', 'fps', 'frame_count', 'duration_s'
+        Returns empty dict if cv2 not available or file not found
+
+    Notes
+    -----
+    Requires opencv-python (cv2) to be installed.
+    """
+    if not HAS_CV2:
+        print("Warning: opencv-python not installed, cannot read video info")
+        return {}
+
+    cap = cv2.VideoCapture(video_path)
+    try:
+        info = {
+            "width": int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+            "height": int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+            "fps": cap.get(cv2.CAP_PROP_FPS),
+            "frame_count": int(cap.get(cv2.CAP_PROP_FRAME_COUNT)),
+        }
+        info["duration_s"] = info["frame_count"] / info["fps"] if info["fps"] > 0 else 0
+        return info
+    finally:
+        cap.release()
+
+
 def load_arthur_session(
-    position_file: str, imu_file: str, meters_per_pixel: float = 0.0022, verbose: bool = True
+    position_file: str,
+    imu_file: str,
+    meters_per_pixel: float = 0.0022,
+    verbose: bool = True,
 ) -> SessionData:
     """Load Arthur session data with proper preprocessing.
 
-    This function:
+    This function performs the following steps:
     1. Loads parquet files
     2. Removes IMU sample-and-hold repeats
     3. Converts timestamps to relative time
@@ -170,22 +325,36 @@ def load_arthur_session(
     5. Estimates sampling rates
     6. Validates data quality
 
-    Args:
-        position_file: Path to position parquet file
-        imu_file: Path to IMU parquet file
-        meters_per_pixel: Camera scale factor (default: 0.0022)
-        verbose: Print loading progress and statistics
+    Parameters
+    ----------
+    position_file : str
+        Path to position parquet file
+    imu_file : str
+        Path to IMU parquet file
+    meters_per_pixel : float, optional
+        Camera scale factor (default: 0.0022)
+    verbose : bool, optional
+        Print loading progress and statistics (default: True)
 
-    Returns:
-        SessionData with all preprocessing applied
+    Returns
+    -------
+    SessionData
+        Immutable dataclass with all preprocessing applied
 
-    Example:
-        >>> data = load_arthur_session(
-        ...     "arthur20220314_position_info.parquet",
-        ...     "arthur20220314_imu_info.parquet"
-        ... )
-        >>> print(f"Duration: {data.t_cam[-1]:.1f} s")
-        >>> print(f"IMU rate: {data.fs_imu:.1f} Hz")
+    Examples
+    --------
+    >>> data = load_arthur_session(
+    ...     "arthur20220314_position_info.parquet",
+    ...     "arthur20220314_imu_info.parquet"
+    ... )
+    >>> print(f"Duration: {data.t_cam[-1]:.1f} s")
+    >>> print(f"IMU rate: {data.fs_imu:.1f} Hz")
+
+    Notes
+    -----
+    - Removes ~287× sample-and-hold from IMU data
+    - Validates 3D accelerometer magnitude ≈ 9.81 m/s²
+    - All output timestamps are relative (start from 0)
     """
     if verbose:
         print("=" * 80)
@@ -254,7 +423,7 @@ def load_arthur_session(
         accel_z = imu_unique["Headstage_AccelZ"].values * ACCEL_SCALE * GRAVITY
         accel_mag_3d = np.sqrt(U_imu[:, 1] ** 2 + U_imu[:, 2] ** 2 + accel_z**2)
         print("\nData quality check:")
-        print(f"  3D accel magnitude: {accel_mag_3d.mean():.2f} m/s² " f"(expected ~{GRAVITY:.2f})")
+        print(f"  3D accel magnitude: {accel_mag_3d.mean():.2f} m/s² (expected ~{GRAVITY:.2f})")
 
     # All frames valid (no tracking failures in this dataset)
     mask_cam = np.ones(len(pos_df), dtype=bool)
@@ -274,13 +443,13 @@ def load_arthur_session(
         led_distance=led_distance,
         fs_imu=fs_imu,
         fs_cam=fs_cam,
+        meters_per_pixel=meters_per_pixel,
     )
 
 
 def main():
     """Example usage and validation."""
     import sys
-    from pathlib import Path
 
     # Assume script is in data/ directory
     script_dir = Path(__file__).parent
@@ -302,6 +471,29 @@ def main():
     print(f"  Z_cam_led2: shape {data.Z_cam_led2.shape}, dtype {data.Z_cam_led2.dtype}")
     print(f"  mask_cam: {data.mask_cam.sum():,} / {len(data.mask_cam):,} valid frames")
     print(f"  led_distance: {data.led_distance*100:.2f} cm")
+    print(f"  meters_per_pixel: {data.meters_per_pixel}")
+
+    # Test pixel conversion
+    print("\n✓ Testing pixel conversion:")
+    led1_pixels = convert_meters_to_pixels(data.Z_cam_led1, data.meters_per_pixel)
+    print(f"  LED1 pixels range: [{led1_pixels[:, 0].min():.1f}, {led1_pixels[:, 0].max():.1f}]")
+
+    # Test video loading if available
+    video_path = script_dir / "20220314_arthur_02_r1.mp4"
+    if video_path.exists():
+        print("\n✓ Testing video loading:")
+        info = get_video_info(str(video_path))
+        if info:
+            print(f"  Video: {info['width']}×{info['height']} @ {info['fps']:.1f} fps")
+            print(f"  Frames: {info['frame_count']:,} ({info['duration_s']:.1f} s)")
+
+            frame = load_video_frame(str(video_path), 1000)
+            if frame is not None:
+                print(f"  Loaded frame 1000: shape {frame.shape}, dtype {frame.dtype}")
+        else:
+            print("  (opencv-python not installed)")
+    else:
+        print(f"\n  Video file not found: {video_path}")
 
     # Validate immutability
     print("\n✓ SessionData is immutable (frozen dataclass)")
