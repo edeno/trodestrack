@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-### Session: 2025-10-12 - Milestone M1 Complete (MeasurementModel Protocol)
+### Session: 2025-10-12 - Milestone M1 Complete (MeasurementModel Protocol + JAX Readiness)
 
 **Added:**
 
@@ -11,58 +11,75 @@
   - Core methods: `meas_dim`, `predict()`, `jacobian()`, `meas_cov()`, `innovation()`, `subspace()`
   - Supports EKF and UKF via structural subtyping (duck typing)
   - Enables future sensor types: ZUPT, TTL events, RFID tags
+  - **Static shape contract:** `subspace()` always returns (2, 4) selector for camera measurements
   - Impact: Foundation for PR2 (generic update primitives) and PR3 (filter integration)
 
-- **CameraPositionModel** ([src/trodestrack/models/sensors/camera_position.py](src/trodestrack/models/sensors/camera_position.py))
-  - Wraps existing `measurement_function()` for dual-LED position predictions
-  - Wraps `confidence_to_R_diagonal()` for adaptive per-dimension measurement noise
-  - Wraps `make_led_selector()` for 2D/4D projected updates (single/dual LED)
-  - Frame-specific caching via `set_frame_data()` for per-observation metadata
-  - Maintains static 4D shapes for JAX compatibility (NaN for invalid LEDs)
-  - Impact: Zero behavior drift, clean separation of measurement logic from filter loops
+- **CameraPositionModel** ([src/trodestrack/models/sensors/camera_position.py](src/trodestrack/models/sensors/camera_position.py), 340 lines)
+  - **Preallocated JAX arrays:** Replaced dict cache with `z_led1_all`, `z_led2_all`, `conf_all` (T, ...) arrays
+  - **Analytic Jacobian:** Hand-coded derivatives (no AD cost) for camera measurement function
+  - **Projection-only approach:** Invalid LED components (NaN) replaced with `meas_pred` → zero residual
+  - **Static (2×4) selector:** Always returns (2, 4) shape, even for dual-LED case (JAX compatibility)
+  - Wraps existing `measurement_function()`, `confidence_to_R_diagonal()`, `make_led_selector()`
+  - Maintains static 4D shapes for JAX compatibility
+  - Impact: JAX-traceable, ready for jit/scan in PR2/PR3
 
-- **HeadingPseudoModel** ([src/trodestrack/models/sensors/heading_pseudo.py](src/trodestrack/models/sensors/heading_pseudo.py))
-  - Wraps `prepare_heading_measurement()` for heading extraction from LED geometry
-  - Implements LED spacing validation and adaptive noise scaling (R ∝ (expected/observed)²)
+- **HeadingPseudoModel** ([src/trodestrack/models/sensors/heading_pseudo.py](src/trodestrack/models/sensors/heading_pseudo.py), 284 lines)
+  - **Preallocated JAX arrays:** Replaced dict cache with `z_led1_all`, `z_led2_all` (T, 2) arrays
+  - **On-demand computation:** Calls `prepare_heading_measurement()` per frame (no caching)
+  - **Finite heading guarantee:** Replaces NaN with 0.0 in innovation (safety for gated cases)
   - Large-R gating (R=1e6) for invalid observations (single LED, out-of-tolerance spacing)
   - Angle wrapping in innovation computation ([-π, π])
   - Accepts `FilterCoreConfig` for type safety with existing helpers
-  - Impact: Maintains heading measurement parity with existing EKF/UKF implementations
+  - Impact: JAX-traceable, maintains heading measurement parity
 
 - **Comprehensive Test Suite** ([tests/models/test_sensor_protocols.py](tests/models/test_sensor_protocols.py), 17 tests)
+  - **Array-based fixtures:** All tests use preallocated arrays (dual_led_arrays, single_led1_arrays, etc.)
   - Protocol compliance tests (structural subtyping verification)
-  - Camera model: predict, jacobian, confidence scaling, LED subspace projectors
+  - Camera model: predict, jacobian, confidence scaling, LED subspace selectors
   - Heading model: predict, jacobian, spacing gate, adaptive noise, single LED gating, innovation wrapping
   - **Parity test:** Camera model outputs match `measurement_function()` within 1e-7 mean difference
-  - LED validity patterns → correct projector consistency (2×4 single, 4×4 dual)
-  - Confidence scaling → correct R per frame (R_i = base / conf_i)
-  - All 17 tests passing
+  - **Static shape verification:** Confirms selector always (2, 4) for JAX compatibility
+  - All 17 tests passing with array-based API
+
+**Breaking Changes:**
+
+- **CameraPositionModel API:**
+  - REMOVED: `set_frame_data(frame_idx, z_led1, z_led2, confidence)` method
+  - ADDED: Constructor accepts `z_led1_all`, `z_led2_all`, `conf_all` preallocated arrays
+  - Migration: Replace per-frame calls with preallocated arrays at initialization
+
+- **HeadingPseudoModel API:**
+  - REMOVED: `set_frame_data(frame_idx, z_led1, z_led2)` method
+  - ADDED: Constructor accepts `z_led1_all`, `z_led2_all` preallocated arrays
+  - Migration: Replace per-frame calls with preallocated arrays at initialization
+
+- **Subspace return signature:**
+  - Camera model: Always returns (2, 4) selector (previously (4, 4) for dual-LED)
+  - Update primitives use `lax.cond(both_leds, ...)` to choose 4D vs 2D update path
 
 **Configuration:**
 
 - HeadingPseudoModel accepts full `FilterCoreConfig` for type compatibility with `prepare_heading_measurement()`
-- CameraPositionModel accepts individual parameters (led_distance, measurement_noise_base, layout)
+- CameraPositionModel accepts individual parameters plus preallocated arrays
 
 **Testing:**
 
 - All tests passing (17/17 in test_sensor_protocols.py)
 - Parity verified: camera model mean difference ≤1e-7 vs existing helpers
-- Code quality: black ✓, ruff ✓, mypy ✓ (after fixing HeadingConfig type issue)
-- Code review: APPROVED WITH COMMENTS (critical type error fixed, Python branching documented)
+- Code quality: black ✓, ruff ✓, mypy ✓
 
 **Milestone Status:**
 
-- ✅ M1 Complete: MeasurementModel protocol introduced with zero behavior drift
+- ✅ M1 Complete: MeasurementModel protocol + JAX readiness (aggressive refactor)
 - 📋 Next: M2 - Generic Projected Update Primitives (PR2)
 
 **Implementation Notes:**
 
-- Python `if/else` used in `CameraPositionModel.subspace()` due to variable return shapes (2×4 vs 4×4)
-  - JAX `lax.cond`/`lax.select` require identical branch shapes
-  - Acceptable for M1 since `subspace()` only called in tests
-  - Will be redesigned for PR3 filter integration (pad to 4×4 or alternative approach)
-- Type safety: Fixed `HeadingPseudoModel` to accept `FilterCoreConfig` instead of custom `HeadingConfig`
-- Test fixtures: Use shared `heading_config` fixture for consistent configuration across tests
+- **Aggressive refactor rationale:** Critical review identified that per-frame dict cache would block JAX jit/scan in PR2/PR3. Refactored immediately to avoid rework.
+- **Analytic Jacobian:** Camera model uses hand-coded derivatives (H matrix with position + heading components) to avoid AD overhead.
+- **Projection-only approach:** Invalid LED components handled via NaN → meas_pred replacement (zero residual). No R inflation needed. Generic update uses `lax.cond(both_leds, ...)` for dimension selection.
+- **Static shapes:** All array dimensions known at trace time. Selector always (2, 4), never (4, 4).
+- **On-demand heading computation:** HeadingPseudoModel computes heading measurement per frame from arrays (acceptable for 1D measurement; camera uses predict once per state).
 
 **References:**
 

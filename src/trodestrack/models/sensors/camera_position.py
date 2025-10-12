@@ -2,15 +2,16 @@
 
 This module implements the MeasurementModel protocol for camera-based position
 measurements from dual-LED tracking. It wraps existing filter_common helpers
-while providing a clean, stateful interface for per-frame observations.
+while providing a JAX-traceable interface via preallocated arrays.
 
 Design
 ------
 - Wraps `measurement_function()` for prediction h(x)
 - Wraps `confidence_to_R_diagonal()` for adaptive measurement noise
 - Wraps `make_led_selector()` for 2D/4D projection handling
-- Caches per-frame observations via `set_frame_data()`
+- **Preallocated JAX arrays** for all frame data (JAX-compatible)
 - Maintains static 4D shapes for JAX compatibility
+- **Projection-only approach:** NaN → meas_pred (zero residual), no R inflation
 
 References
 ----------
@@ -21,21 +22,20 @@ References
 from __future__ import annotations
 
 import jax.numpy as jnp
-from jax import jacfwd
 
 from trodestrack.models.filter_common import (
     confidence_to_R_diagonal,
     make_led_selector,
     measurement_function,
 )
-from trodestrack.models.state_layout import StateLayout
+from trodestrack.models.state_layout import StateLayout, get_heading_index
 
 
 class CameraPositionModel:
-    """Dual-LED camera position measurement model.
+    """Dual-LED camera position measurement model with preallocated arrays.
 
     This model predicts LED positions from state (position + heading) and
-    handles partial observations (single LED) via projection matrices.
+    handles partial observations (single LED) via 2D projection matrices.
 
     Parameters
     ----------
@@ -45,36 +45,45 @@ class CameraPositionModel:
         Base position measurement noise variance (m²).
     layout : StateLayout
         State index mapping for accessing position/heading components.
+    z_led1_all : jnp.ndarray
+        LED1 positions (T, 2) [x, y] in meters. Use NaN for invalid frames.
+    z_led2_all : jnp.ndarray
+        LED2 positions (T, 2) [x, y] in meters. Use NaN for invalid frames.
+    conf_all : jnp.ndarray | None, default None
+        Confidence scores (T, 4) [x1, y1, x2, y2] in [0, 1]. If None, uniform.
     confidence_clip_min : float, default 1e-2
         Minimum confidence value for noise scaling (avoids division by zero).
 
     Attributes
     ----------
-    _frame_data : dict[int, dict]
-        Cached frame-specific observations and validity flags.
-        Keys: frame_idx, Values: {z_led1, z_led2, confidence, led1_valid, led2_valid}
+    z_led1_all : jnp.ndarray
+        Preallocated LED1 positions (T, 2).
+    z_led2_all : jnp.ndarray
+        Preallocated LED2 positions (T, 2).
+    conf_all : jnp.ndarray | None
+        Preallocated confidence scores (T, 4) or None.
 
     Methods
     -------
-    set_frame_data(frame_idx, z_led1, z_led2, confidence=None)
-        Cache observations for frame_idx.
     meas_dim : int
         Measurement dimension (always 4 for dual-LED).
     predict(state_mean)
         Predict dual-LED positions [x1, y1, x2, y2] from state.
     jacobian(state_mean)
-        Compute measurement Jacobian H (4, n).
+        Compute analytic measurement Jacobian H (4, n).
     meas_cov(frame_idx)
         Return confidence-scaled measurement noise R (4, 4).
     innovation(frame_idx, meas_pred)
-        Compute innovation z - h(x) with invalid LEDs zeroed.
+        Compute innovation z - h(x) with NaN → meas_pred replacement.
     subspace(frame_idx)
-        Return LED validity and projector matrix for lifted updates.
+        Return LED validity and (2, 4) selector matrix for lifted updates.
 
     Notes
     -----
-    - Maintains static 4D shapes (uses NaN for invalid LEDs)
-    - Invalid observations handled via zeroing in innovation, not gating in R
+    - **JAX-traceable:** Uses preallocated arrays, no Python dict lookups
+    - **Static shapes:** Always returns (2, 4) selector, never (4, 4)
+    - **Projection-only:** Invalid LED components → zero residual via NaN replacement
+    - **Analytic Jacobian:** No AD cost, exact derivatives
     - Confidence scaling: R_i = base / clip(conf_i, min, 1)
 
     Examples
@@ -83,22 +92,26 @@ class CameraPositionModel:
     >>> from trodestrack.models.state_layout import get_layout
     >>> import jax.numpy as jnp
     >>> layout = get_layout("2d_full")
+    >>> # Preallocate arrays for T=100 frames
+    >>> z_led1 = jnp.ones((100, 2))
+    >>> z_led2 = jnp.ones((100, 2)) * 1.04
+    >>> conf = jnp.ones((100, 4)) * 0.9
     >>> model = CameraPositionModel(
     ...     led_distance=0.04,
     ...     measurement_noise_base=0.005**2,
     ...     layout=layout,
-    ... )
-    >>> # Set frame observations
-    >>> model.set_frame_data(
-    ...     frame_idx=0,
-    ...     z_led1=jnp.array([1.0, 2.0]),
-    ...     z_led2=jnp.array([1.04, 2.0]),
-    ...     confidence=jnp.array([0.9, 0.9, 0.8, 0.8]),
+    ...     z_led1_all=z_led1,
+    ...     z_led2_all=z_led2,
+    ...     conf_all=conf,
     ... )
     >>> # Predict from state
     >>> state = jnp.array([1.0, 2.0, 0.5, 0.3, 0.1, 0.0, 0.0, 0.0])
     >>> meas_pred = model.predict(state)
     >>> meas_pred.shape
+    (4,)
+    >>> # Get innovation for frame 0
+    >>> innov = model.innovation(frame_idx=0, meas_pred=meas_pred)
+    >>> innov.shape
     (4,)
     """
 
@@ -107,9 +120,12 @@ class CameraPositionModel:
         led_distance: float,
         measurement_noise_base: float,
         layout: StateLayout,
+        z_led1_all: jnp.ndarray,
+        z_led2_all: jnp.ndarray,
+        conf_all: jnp.ndarray | None = None,
         confidence_clip_min: float = 1e-2,
     ) -> None:
-        """Initialize camera position model.
+        """Initialize camera position model with preallocated arrays.
 
         Parameters
         ----------
@@ -119,6 +135,12 @@ class CameraPositionModel:
             Base position measurement noise variance (m²).
         layout : StateLayout
             State index mapping.
+        z_led1_all : jnp.ndarray
+            LED1 positions (T, 2) [x, y] in meters.
+        z_led2_all : jnp.ndarray
+            LED2 positions (T, 2) [x, y] in meters.
+        conf_all : jnp.ndarray | None
+            Confidence scores (T, 4) or None for uniform confidence.
         confidence_clip_min : float, default 1e-2
             Minimum confidence for noise scaling.
         """
@@ -127,42 +149,10 @@ class CameraPositionModel:
         self.layout = layout
         self.confidence_clip_min = confidence_clip_min
 
-        # Cache for frame-specific observations
-        self._frame_data: dict[int, dict] = {}
-
-    def set_frame_data(
-        self,
-        frame_idx: int,
-        z_led1: jnp.ndarray,
-        z_led2: jnp.ndarray,
-        confidence: jnp.ndarray | None = None,
-    ) -> None:
-        """Cache observations for frame_idx.
-
-        Parameters
-        ----------
-        frame_idx : int
-            Frame index to associate with observations.
-        z_led1 : jnp.ndarray
-            LED1 position (2,) [x, y] in meters. Use NaN for invalid.
-        z_led2 : jnp.ndarray
-            LED2 position (2,) [x, y] in meters. Use NaN for invalid.
-        confidence : jnp.ndarray | None, default None
-            Confidence scores (4,) [x1, y1, x2, y2] in [0, 1].
-            If None, uniform confidence assumed (no scaling).
-        """
-        # Check LED validity (use isfinite to handle NaN)
-        led1_valid = jnp.isfinite(z_led1[0])
-        led2_valid = jnp.isfinite(z_led2[0])
-
-        # Store frame data
-        self._frame_data[frame_idx] = {
-            "z_led1": z_led1,
-            "z_led2": z_led2,
-            "confidence": confidence,
-            "led1_valid": led1_valid,
-            "led2_valid": led2_valid,
-        }
+        # Preallocated arrays (JAX-traceable)
+        self.z_led1_all = z_led1_all
+        self.z_led2_all = z_led2_all
+        self.conf_all = conf_all
 
     @property
     def meas_dim(self) -> int:
@@ -185,7 +175,7 @@ class CameraPositionModel:
         return measurement_function(state_mean, self.led_distance, self.layout)
 
     def jacobian(self, state_mean: jnp.ndarray) -> jnp.ndarray:
-        """Compute measurement Jacobian H = ∂h/∂x.
+        """Compute analytic measurement Jacobian H = ∂h/∂x.
 
         Parameters
         ----------
@@ -199,13 +189,40 @@ class CameraPositionModel:
 
         Notes
         -----
-        Uses JAX automatic differentiation via jacfwd.
+        **Analytic derivation** (no AD cost):
+
+        Measurement function:
+            h(x) = [px - d·cos(θ), py - d·sin(θ), px + d·cos(θ), py + d·sin(θ)]
+        where d = led_distance / 2.
+
+        Jacobian:
+            ∂h/∂[x, y, vx, vy, θ, ...] =
+            [[1, 0, 0, 0,  d·sin(θ), 0, ...],
+             [0, 1, 0, 0, -d·cos(θ), 0, ...],
+             [1, 0, 0, 0, -d·sin(θ), 0, ...],
+             [0, 1, 0, 0,  d·cos(θ), 0, ...]]
         """
+        h_idx = get_heading_index(self.layout)
+        theta = state_mean[h_idx]
+        d = self.led_distance / 2.0
 
-        def h(x):
-            return measurement_function(x, self.led_distance, self.layout)
+        # Initialize Jacobian (4, n) with zeros
+        n = state_mean.shape[0]
+        H = jnp.zeros((4, n))
 
-        return jacfwd(h)(state_mean)
+        # Position derivatives (identity for x, y)
+        H = H.at[0, self.layout.pos_idx[0]].set(1.0)  # ∂x₁/∂x
+        H = H.at[1, self.layout.pos_idx[1]].set(1.0)  # ∂y₁/∂y
+        H = H.at[2, self.layout.pos_idx[0]].set(1.0)  # ∂x₂/∂x
+        H = H.at[3, self.layout.pos_idx[1]].set(1.0)  # ∂y₂/∂y
+
+        # Heading derivatives
+        H = H.at[0, h_idx].set(d * jnp.sin(theta))  # ∂x₁/∂θ
+        H = H.at[1, h_idx].set(-d * jnp.cos(theta))  # ∂y₁/∂θ
+        H = H.at[2, h_idx].set(-d * jnp.sin(theta))  # ∂x₂/∂θ
+        H = H.at[3, h_idx].set(d * jnp.cos(theta))  # ∂y₂/∂θ
+
+        return H
 
     def meas_cov(self, frame_idx: int) -> jnp.ndarray:
         """Return confidence-scaled measurement noise R.
@@ -224,9 +241,10 @@ class CameraPositionModel:
         -----
         - R_i = base / clip(conf_i, min, 1) for each dimension
         - If no confidence, R = base * I
+        - No R inflation for invalid LEDs (projection-only approach)
         """
-        data = self._frame_data[frame_idx]
-        confidence = data["confidence"]
+        # Extract confidence for this frame (or None)
+        confidence = None if self.conf_all is None else self.conf_all[frame_idx]
 
         # Compute diagonal using shared helper
         R_diag = confidence_to_R_diagonal(
@@ -239,7 +257,7 @@ class CameraPositionModel:
         return jnp.diag(R_diag)
 
     def innovation(self, frame_idx: int, meas_pred: jnp.ndarray) -> jnp.ndarray:
-        """Compute innovation z - h(x) with invalid LEDs zeroed.
+        """Compute innovation z - h(x) with NaN replacement (projection-only).
 
         Parameters
         ----------
@@ -251,33 +269,29 @@ class CameraPositionModel:
         Returns
         -------
         jnp.ndarray
-            Innovation (4,) with invalid components set to zero.
+            Innovation (4,) with NaN components replaced by meas_pred (zero residual).
 
         Notes
         -----
-        - Avoids NaN propagation by zeroing invalid LED components
-        - Observation vector: [z_led1[0], z_led1[1], z_led2[0], z_led2[1]]
+        **Projection-only approach:**
+        - Invalid LED components (NaN in z) are replaced with meas_pred
+        - This yields zero residual for those components: (meas_pred - meas_pred) = 0
+        - No explicit zeroing or R inflation needed
+        - The 2D projection will extract only valid components when single LED
         """
-        data = self._frame_data[frame_idx]
-        z_led1 = data["z_led1"]
-        z_led2 = data["z_led2"]
+        z_led1 = self.z_led1_all[frame_idx]
+        z_led2 = self.z_led2_all[frame_idx]
 
-        # Concatenate observations
+        # Concatenate observations [x1, y1, x2, y2]
         z_obs = jnp.concatenate([z_led1, z_led2])
 
-        # Raw innovation
-        innov_raw = z_obs - meas_pred
+        # Replace NaN with meas_pred to yield zero residual for invalid components
+        z_obs_sanitized = jnp.where(jnp.isfinite(z_obs), z_obs, meas_pred)
 
-        # Zero out invalid components (avoid NaN propagation)
-        led1_valid = data["led1_valid"]
-        led2_valid = data["led2_valid"]
-        obs_mask = jnp.array([led1_valid, led1_valid, led2_valid, led2_valid], dtype=bool)
-        innovation = jnp.where(obs_mask, innov_raw, 0.0)
-
-        return innovation
+        return z_obs_sanitized - meas_pred
 
     def subspace(self, frame_idx: int) -> tuple[bool, bool, bool, jnp.ndarray]:
-        """Return LED validity and projector matrix.
+        """Return LED validity flags and (2, 4) selector matrix.
 
         Parameters
         ----------
@@ -287,43 +301,39 @@ class CameraPositionModel:
         Returns
         -------
         both_leds : bool
-            True if both LEDs valid (4D update).
+            True if both LEDs valid (4D update, selector ignored).
         only_led1 : bool
-            True if only LED1 valid (2D update).
+            True if only LED1 valid (2D update via projection).
         only_led2 : bool
-            True if only LED2 valid (2D update).
-        projector_M : jnp.ndarray
-            Projector matrix (2, 4) for single LED, or (4, 4) identity for dual LED.
+            True if only LED2 valid (2D update via projection).
+        selector_M2 : jnp.ndarray
+            **Static shape (2, 4)** selector matrix (never (4, 4)).
+            Selects active 2D subspace from 4D measurement space.
+            For dual-LED, returns conventional LED1 selector (ignored by update).
 
         Notes
         -----
-        - For dual LED: returns eye(4) (no projection)
-        - For single LED: returns 2×4 selector matrix
-        - Uses `make_led_selector()` from filter_common
-        - JAX-compatible: uses lax.select() instead of Python if/else
+        **Critical for PR2/PR3 JAX compatibility:**
+        - Always returns (2, 4) shape, even for dual-LED case
+        - Generic update primitive uses `lax.cond(both_leds, ...)` to choose
+          between 4D direct update vs 2D projected update
+        - When `both_leds=True`, the selector is not used (update works in 4D)
+        - Uses `make_led_selector()` from filter_common for single-LED cases
         """
+        z_led1 = self.z_led1_all[frame_idx]
+        z_led2 = self.z_led2_all[frame_idx]
 
-        data = self._frame_data[frame_idx]
-        led1_valid = data["led1_valid"]
-        led2_valid = data["led2_valid"]
+        # Determine LED validity
+        led1_valid = jnp.isfinite(z_led1[0])
+        led2_valid = jnp.isfinite(z_led2[0])
 
-        # Determine LED configuration
         both_leds = led1_valid & led2_valid
         only_led1 = led1_valid & (~led2_valid)
         only_led2 = (~led1_valid) & led2_valid
 
-        # Projector matrix
-        # NOTE: Python if/else is used here because the shapes differ (2×4 vs 4×4).
-        # JAX's lax.cond/lax.select require identical shapes on both branches.
-        # This is acceptable for M1 since subspace() is only called in tests.
-        # For PR3 integration into traced filter loops, we will need to:
-        #   1. Always return 4×4 projector (pad 2×4 with zeros), OR
-        #   2. Redesign the lifted update to handle variable shapes differently
-        if both_leds:  # noqa: SIM108
-            # No projection needed (4D update)
-            projector_M = jnp.eye(4)
-        else:
-            # Single LED: 2×4 selector matrix
-            projector_M = make_led_selector(only_led1, only_led2)
+        # Always return (2, 4) selector, even for dual-LED case
+        # For dual-LED: return conventional LED1 selector (arbitrary, will be ignored)
+        # For single-LED: return appropriate selector
+        selector_M2 = make_led_selector(only_led1, only_led2)
 
-        return both_leds, only_led1, only_led2, projector_M
+        return both_leds, only_led1, only_led2, selector_M2

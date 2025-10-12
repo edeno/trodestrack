@@ -2,11 +2,12 @@
 
 This module implements the MeasurementModel protocol for heading pseudo-measurements
 derived from dual-LED geometry. It wraps existing filter_common helpers while providing
-a clean interface for per-frame LED observations and adaptive gating logic.
+a JAX-traceable interface via preallocated arrays.
 
 Design
 ------
 - Wraps `prepare_heading_measurement()` for heading observation and gating
+- **Preallocated JAX arrays** for all frame data (JAX-compatible)
 - Uses large-R gating (R=1e6) for invalid observations (JAX-compatible)
 - Supports adaptive noise scaling by LED spacing ratio
 - Maintains 1D measurement shape for heading angle
@@ -32,7 +33,7 @@ from trodestrack.models.state_layout import StateLayout, get_heading_index
 
 
 class HeadingPseudoModel:
-    """Heading pseudo-measurement model from dual-LED geometry.
+    """Heading pseudo-measurement model from dual-LED geometry with preallocated arrays.
 
     This model extracts heading from the LED pair vector and applies
     adaptive gating based on LED spacing validity.
@@ -43,17 +44,20 @@ class HeadingPseudoModel:
         Full filter configuration (heading parameters extracted internally).
     layout : StateLayout
         State index mapping for accessing heading component.
+    z_led1_all : jnp.ndarray
+        LED1 positions (T, 2) [x, y] in meters. Use NaN for invalid frames.
+    z_led2_all : jnp.ndarray
+        LED2 positions (T, 2) [x, y] in meters. Use NaN for invalid frames.
 
     Attributes
     ----------
-    _frame_data : dict[int, dict]
-        Cached frame-specific LED observations.
-        Keys: frame_idx, Values: {z_led1, z_led2, heading_obs, R_heading, use_heading}
+    z_led1_all : jnp.ndarray
+        Preallocated LED1 positions (T, 2).
+    z_led2_all : jnp.ndarray
+        Preallocated LED2 positions (T, 2).
 
     Methods
     -------
-    set_frame_data(frame_idx, z_led1, z_led2)
-        Cache LED observations for frame_idx and precompute heading measurement.
     meas_dim : int
         Measurement dimension (always 1 for heading).
     predict(state_mean)
@@ -65,14 +69,15 @@ class HeadingPseudoModel:
     innovation(frame_idx, meas_pred)
         Compute angle-wrapped innovation (z_heading - predicted_heading).
     subspace(frame_idx)
-        Return identity projector (not applicable for heading).
+        Return identity selector (1, 1) - not applicable for heading.
 
     Notes
     -----
+    - **JAX-traceable:** Uses preallocated arrays, no Python dict lookups
     - Uses prepare_heading_measurement() for LED spacing validation and gating
     - Invalid observations gated via R=1e6 (no Python branching)
     - Innovation wrapped to [-π, π] via wrap_angle()
-    - Accepts full FilterCoreConfig for type compatibility with prepare_heading_measurement()
+    - Ensures heading_obs is finite (replaces NaN with 0.0)
 
     Examples
     --------
@@ -88,12 +93,14 @@ class HeadingPseudoModel:
     ...     led_distance_tolerance=0.3,
     ...     adaptive_heading_noise=True,
     ... )
-    >>> model = HeadingPseudoModel(config=config, layout=layout)
-    >>> # Set frame observations
-    >>> model.set_frame_data(
-    ...     frame_idx=0,
-    ...     z_led1=jnp.array([1.0, 2.0]),
-    ...     z_led2=jnp.array([1.04, 2.0]),
+    >>> # Preallocate arrays for T=100 frames
+    >>> z_led1 = jnp.ones((100, 2))
+    >>> z_led2 = jnp.ones((100, 2)) * 1.04
+    >>> model = HeadingPseudoModel(
+    ...     config=config,
+    ...     layout=layout,
+    ...     z_led1_all=z_led1,
+    ...     z_led2_all=z_led2,
     ... )
     >>> # Predict from state
     >>> state = jnp.array([1.0, 2.0, 0.5, 0.3, 0.1, 0.0, 0.0, 0.0])
@@ -106,8 +113,10 @@ class HeadingPseudoModel:
         self,
         config: FilterCoreConfig,
         layout: StateLayout,
+        z_led1_all: jnp.ndarray,
+        z_led2_all: jnp.ndarray,
     ) -> None:
-        """Initialize heading pseudo-measurement model.
+        """Initialize heading pseudo-measurement model with preallocated arrays.
 
         Parameters
         ----------
@@ -120,50 +129,17 @@ class HeadingPseudoModel:
             - adaptive_heading_noise: Enable adaptive noise scaling
         layout : StateLayout
             State index mapping.
+        z_led1_all : jnp.ndarray
+            LED1 positions (T, 2) [x, y] in meters.
+        z_led2_all : jnp.ndarray
+            LED2 positions (T, 2) [x, y] in meters.
         """
         self.config = config
         self.layout = layout
 
-        # Cache for frame-specific observations and precomputed measurements
-        self._frame_data: dict[int, dict] = {}
-
-    def set_frame_data(
-        self,
-        frame_idx: int,
-        z_led1: jnp.ndarray,
-        z_led2: jnp.ndarray,
-    ) -> None:
-        """Cache LED observations and precompute heading measurement.
-
-        Parameters
-        ----------
-        frame_idx : int
-            Frame index.
-        z_led1 : jnp.ndarray
-            LED1 position (2,) [x, y] in meters.
-        z_led2 : jnp.ndarray
-            LED2 position (2,) [x, y] in meters.
-
-        Notes
-        -----
-        Calls prepare_heading_measurement() to compute:
-        - heading_obs: arctan2(dy, dx) in radians
-        - R_heading: measurement noise (gated to 1e6 if invalid)
-        - use_heading: boolean flag (True if valid)
-        """
-        # Use existing helper to precompute heading measurement
-        heading_obs, R_heading, use_heading = prepare_heading_measurement(
-            z_led1, z_led2, self.config
-        )
-
-        # Store frame data
-        self._frame_data[frame_idx] = {
-            "z_led1": z_led1,
-            "z_led2": z_led2,
-            "heading_obs": heading_obs,
-            "R_heading": R_heading,
-            "use_heading": use_heading,
-        }
+        # Preallocated arrays (JAX-traceable)
+        self.z_led1_all = z_led1_all
+        self.z_led2_all = z_led2_all
 
     @property
     def meas_dim(self) -> int:
@@ -231,9 +207,14 @@ class HeadingPseudoModel:
         - Valid observations: R ≈ 0.05² (small, enables update)
         - Invalid observations: R = 1e6 (large, gates update)
         - Adaptive scaling: R *= (expected/observed)² if enabled
+        - Computed on-demand from LED arrays via prepare_heading_measurement()
         """
-        data = self._frame_data[frame_idx]
-        R_heading = data["R_heading"]
+        z_led1 = self.z_led1_all[frame_idx]
+        z_led2 = self.z_led2_all[frame_idx]
+
+        # Compute heading measurement on-demand
+        _, R_heading, _ = prepare_heading_measurement(z_led1, z_led2, self.config)
+
         return jnp.array([[R_heading]])
 
     def innovation(self, frame_idx: int, meas_pred: jnp.ndarray) -> jnp.ndarray:
@@ -255,21 +236,28 @@ class HeadingPseudoModel:
         -----
         - Raw innovation: z_heading - h_pred
         - Wraps result to [-π, π] via wrap_angle()
-        - Replaces NaN with 0 (for gated observations)
+        - Ensures heading_obs is finite (replaces NaN with 0.0 for gated cases)
+        - Computed on-demand from LED arrays via prepare_heading_measurement()
         """
-        data = self._frame_data[frame_idx]
-        heading_obs = data["heading_obs"]
+        z_led1 = self.z_led1_all[frame_idx]
+        z_led2 = self.z_led2_all[frame_idx]
+
+        # Compute heading measurement on-demand
+        heading_obs, _, _ = prepare_heading_measurement(z_led1, z_led2, self.config)
+
+        # Ensure heading_obs is finite (replace NaN with 0.0)
+        heading_obs = jnp.where(jnp.isfinite(heading_obs), heading_obs, 0.0)
 
         # Raw innovation with angle wrapping
         innov_raw = wrap_angle(heading_obs - meas_pred[0])
 
-        # Replace NaN with 0 (for gated cases)
+        # Replace NaN with 0 (additional safety for gated cases)
         innovation = jnp.where(jnp.isfinite(innov_raw), innov_raw, 0.0)
 
         return jnp.array([innovation])
 
     def subspace(self, frame_idx: int) -> tuple[bool, bool, bool, jnp.ndarray]:
-        """Return identity projector (not applicable for heading).
+        """Return identity selector (not applicable for heading).
 
         Parameters
         ----------
@@ -284,11 +272,12 @@ class HeadingPseudoModel:
             False (not applicable).
         only_led2 : bool
             False (not applicable).
-        projector_M : jnp.ndarray
+        selector_M : jnp.ndarray
             Identity (1, 1).
 
         Notes
         -----
         Heading is always 1D, no LED subspace projection needed.
+        Selector terminology used for consistency with camera model.
         """
         return False, False, False, jnp.eye(1)

@@ -184,15 +184,16 @@ class MeasurementModel(Protocol):
 
         Notes
         -----
-        - For camera: simple z - h(x)
+        - For camera: z - h(x) with NaN replacement (sanitized to meas_pred)
         - For heading: wraps innovation to [-π, π]
         - For velocity: simple z - h(x)
-        - Invalid components set to zero (avoid NaN propagation)
+        - **Projection-only approach**: invalid components replaced with meas_pred
+          to yield zero residual; no explicit zeroing or large-R inflation
         """
         ...
 
     def subspace(self, frame_idx: int) -> tuple[bool, bool, bool, jnp.ndarray]:
-        """Return LED validity and projector matrix for frame_idx.
+        """Return LED validity flags and selector matrix for frame_idx.
 
         Parameters
         ----------
@@ -202,19 +203,29 @@ class MeasurementModel(Protocol):
         Returns
         -------
         both_leds : bool
-            True if both LEDs valid (4D update).
+            True if both LEDs valid (4D update, selector ignored).
         only_led1 : bool
-            True if only LED1 valid (2D update with projection).
+            True if only LED1 valid (2D update via projection).
         only_led2 : bool
-            True if only LED2 valid (2D update with projection).
-        projector_M : jnp.ndarray
-            Projector matrix (2, 4) for single LED, or (4, 4) identity for dual LED.
+            True if only LED2 valid (2D update via projection).
+        selector_M2 : jnp.ndarray
+            Selector matrix with **static shape (2, 4)** for camera measurements.
+            Maps 4D measurement space to 2D active subspace when single LED valid.
+            For dual-LED case, returns a conventional selector (ignored by update).
+            For 1D measurements (heading, ZUPT), returns eye(1) for consistency.
 
         Notes
         -----
-        - Only applicable for camera measurements (dual-LED)
-        - Heading/ZUPT models return (False, False, False, eye(meas_dim))
-        - Projector enables lifted 2D→4D updates for partial observations
-        - See `filter_common.make_led_selector()` for implementation reference
+        **Critical for PR2/PR3 JAX compatibility:**
+        - Shape must be **static** and **known at trace time**
+        - Camera: always returns (2, 4) selector, never (4, 4)
+        - Heading/ZUPT: returns (1, 1) identity
+        - Generic update primitive uses `lax.cond(both_leds, ...)` to choose
+          4D direct update vs 2D projected update
+        - See `filter_common.make_led_selector()` for camera implementation
+
+        **Naming:**
+        - Called "selector" (not "projector") because it selects a 2D subspace
+          from 4D measurement space via matrix multiplication: M2 @ z4 → z2
         """
         ...
