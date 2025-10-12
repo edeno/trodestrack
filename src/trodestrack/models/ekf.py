@@ -42,6 +42,7 @@ from trodestrack.models.filter_common import (
     chi2_threshold,
     compute_imu_index_arrays,
     dynamics_function,
+    estimate_led_spacing,
     initialize_state,
     joseph_update,
     psd_solve,
@@ -111,45 +112,6 @@ class EKFResult(NamedTuple):
 # =============================================================================
 # Utility Functions
 # =============================================================================
-
-
-def estimate_led_spacing(
-    Z_cam_led1: jnp.ndarray,
-    Z_cam_led2: jnp.ndarray,
-    mask_cam: jnp.ndarray,
-) -> float:
-    """Estimate LED spacing from camera observations.
-
-    Parameters
-    ----------
-    Z_cam_led1 : jnp.ndarray
-        LED1 positions (N_cam, 2) in meters.
-    Z_cam_led2 : jnp.ndarray
-        LED2 positions (N_cam, 2) in meters.
-    mask_cam : jnp.ndarray
-        Camera validity mask (N_cam,), boolean.
-
-    Returns
-    -------
-    float
-        Median LED spacing (m). Falls back to 0.04 m if no valid dual-LED frames.
-    """
-    # Find frames where both LEDs are visible
-    led1_valid = jnp.isfinite(Z_cam_led1).all(axis=1)
-    led2_valid = jnp.isfinite(Z_cam_led2).all(axis=1)
-    both_valid = led1_valid & led2_valid & mask_cam
-
-    # Compute distances for valid frames
-    distances = jnp.linalg.norm(Z_cam_led2 - Z_cam_led1, axis=1)
-
-    # Median of valid distances
-    valid_distances = jnp.where(both_valid, distances, jnp.nan)
-
-    # Use nanmedian, with fallback if all NaN
-    median_spacing = jnp.nanmedian(valid_distances)
-
-    # Fallback to 4 cm if no valid observations
-    return float(jnp.where(jnp.isnan(median_spacing), 0.04, median_spacing))
 
 
 def predict_step(
@@ -518,7 +480,7 @@ def extended_kalman_filter(
             layout=get_layout(config_for_filter.state_mode),
         )
 
-    n_cam = len(t_cam)
+    n_cam = int(t_cam_jax.shape[0])
 
     # Resolve state layout once for this run
     layout = get_layout(config_for_filter.state_mode)

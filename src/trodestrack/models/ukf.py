@@ -45,6 +45,7 @@ from trodestrack.models.filter_common import (
     chi2_threshold,
     compute_imu_index_arrays,
     dynamics_function,
+    estimate_led_spacing,
     initialize_state,
     symmetrize,
     update_zupt,
@@ -637,8 +638,6 @@ def unscented_kalman_filter(
 
     # Auto-detect LED spacing if not specified
     # Store estimated value to return in result (immutability: do NOT mutate config)
-    from trodestrack.models.ekf import estimate_led_spacing
-
     estimated_led_distance: float | None = None
     config_for_filter: UKFConfig
 
@@ -664,7 +663,7 @@ def unscented_kalman_filter(
         )
         initial_state = UKFState(mean=ekf_init.mean, cov=ekf_init.cov)
 
-    n_cam = len(t_cam)
+    n_cam = int(t_cam_jax.shape[0])
 
     # Resolve state layout once for this run
     layout = get_layout(config_for_filter.state_mode)

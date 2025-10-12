@@ -924,6 +924,50 @@ def prepare_heading_measurement(
 
 
 # =============================================================================
+# LED Spacing Estimation (shared by EKF and UKF)
+# =============================================================================
+
+
+def estimate_led_spacing(
+    Z_cam_led1: jnp.ndarray,
+    Z_cam_led2: jnp.ndarray,
+    mask_cam: jnp.ndarray,
+) -> float:
+    """Estimate LED spacing from camera observations.
+
+    Parameters
+    ----------
+    Z_cam_led1 : jnp.ndarray
+        LED1 positions (N_cam, 2) in meters.
+    Z_cam_led2 : jnp.ndarray
+        LED2 positions (N_cam, 2) in meters.
+    mask_cam : jnp.ndarray
+        Camera validity mask (N_cam,), boolean.
+
+    Returns
+    -------
+    float
+        Median LED spacing (m). Falls back to 0.04 m if no valid dual-LED frames.
+    """
+    # Find frames where both LEDs are visible
+    led1_valid = jnp.isfinite(Z_cam_led1).all(axis=1)
+    led2_valid = jnp.isfinite(Z_cam_led2).all(axis=1)
+    both_valid = led1_valid & led2_valid & mask_cam
+
+    # Compute distances for valid frames
+    distances = jnp.linalg.norm(Z_cam_led2 - Z_cam_led1, axis=1)
+
+    # Median of valid distances
+    valid_distances = jnp.where(both_valid, distances, jnp.nan)
+
+    # Use nanmedian, with fallback if all NaN
+    median_spacing = jnp.nanmedian(valid_distances)
+
+    # Fallback to 4 cm if no valid observations
+    return float(jnp.where(jnp.isnan(median_spacing), 0.04, median_spacing))
+
+
+# =============================================================================
 # IMU Index Computation (previously in filter_utils.py)
 # =============================================================================
 

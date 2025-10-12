@@ -331,6 +331,10 @@ class CameraPositionModel:
         only_led1 = led1_valid & (~led2_valid)
         only_led2 = (~led1_valid) & led2_valid
 
+        # Invariant: exactly one of {both_leds, only_led1, only_led2} must be True,
+        # or all False (no valid LEDs). Sum should be 0 or 1.
+        # This ensures valid LED configuration for update logic.
+
         # Always return (2, 4) selector, even for dual-LED case
         # For dual-LED: return conventional LED1 selector (arbitrary, will be ignored)
         # For single-LED: return appropriate selector
