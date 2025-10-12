@@ -8,7 +8,8 @@ Real trodestrack data from rat "Arthur" recorded on March 14, 2022.
 - **`arthur20220314_imu_info.parquet`** - IMU sensor data (45.5M samples with sample-and-hold)
 - **`20220314_arthur_02_r1.mp4`** - Video recording (253 MB)
 - **`load_arthur_session.py`** - Data loader with unit conversion and preprocessing
-- **`visualize_session.py`** - Create video with LED tracking overlay and IMU plots
+- **`visualize_session.py`** - Create video with LED tracking and 2D IMU (gyro Z, accel X/Y)
+- **`visualize_all_sensors.py`** - Create video showing complete 6-axis IMU data (all gyro + accel axes)
 
 ## Data Format
 
@@ -149,38 +150,72 @@ uv run python load_arthur_session.py
 
 This runs validation checks and prints a summary of the loaded data.
 
-### Create Visualization Video
+### Create Visualization Videos
 
-Generate a video with LED tracking overlaid on the original video plus synchronized IMU plots:
+#### Option 1: 2D IMU (Trodestrack-compatible subset)
+
+Shows only the axes used by trodestrack's 2D EKF (gyro Z, accel X/Y):
 
 ```bash
 cd data/
 uv run python visualize_session.py
 ```
 
-This creates `data/arthur_visualization.mp4` showing:
-- Video frames with LED positions (red=back, cyan=front)
-- Gyroscope trace (angular rate in deg/s)
-- Accelerometer traces (X and Y in m/s²)
-- Timeline synchronization
+Creates `arthur_visualization.mp4` with:
+- Video with LED tracking (red=rear, cyan=front)
+- Gyro Z (yaw rate, used for heading)
+- Accel X/Y (horizontal plane motion)
 
-Customization options:
+#### Option 2: Complete 6-Axis IMU
+
+Shows ALL sensor data from the headstage:
+
+```bash
+cd data/
+uv run python visualize_all_sensors.py
+```
+
+Creates `arthur_all_sensors.mp4` with:
+- Video with LED tracking
+- **3D Gyroscope**: X (roll rate), Y (pitch rate), Z (yaw rate)
+- **3D Accelerometer**: X, Y, Z (including gravity in Z-axis)
+
+This reveals the complete sensor picture and shows why 2D tracking only uses a subset.
+
+#### Customization
+
+Both scripts support customization:
+
 ```python
+# 2D version (trodestrack subset)
 from visualize_session import create_video_overlay
 from load_arthur_session import load_arthur_session
 
 data = load_arthur_session("position.parquet", "imu.parquet")
-
 create_video_overlay(
     video_path="video.mp4",
     data=data,
     output_path="output.mp4",
-    start_time=60.0,  # Start at 1 minute
-    duration=10.0,     # 10 second clip
-    fps=30.0,          # Output frame rate
-    imu_window_s=2.0,  # Show 2s of IMU data
-    led_marker_size=10.0,  # LED marker size
-    dpi=100            # Output resolution
+    start_time=60.0,
+    duration=10.0,
+    fps=30.0,
+    gyro_ylim=(-200, 200),    # deg/s
+    accel_ylim=(-15, 15)      # m/s²
+)
+
+# Full 6-axis version
+from visualize_all_sensors import create_comprehensive_video
+
+create_comprehensive_video(
+    video_path="video.mp4",
+    position_file="position.parquet",
+    imu_file="imu.parquet",
+    output_path="output.mp4",
+    start_time=60.0,
+    duration=10.0,
+    fps=30.0,
+    gyro_ylim=(-200, 200),    # deg/s
+    accel_ylim=(-15, 15)      # m/s² (shows gravity!)
 )
 ```
 
