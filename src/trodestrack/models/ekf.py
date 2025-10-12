@@ -109,6 +109,16 @@ class EKFResult(NamedTuple):
     estimated_led_distance: float | None
 
 
+class EKFComputationResult(NamedTuple):
+    """Internal EKF outputs produced by the JIT implementation."""
+
+    filtered_means: jnp.ndarray
+    filtered_covariances: jnp.ndarray
+    predicted_means: jnp.ndarray
+    predicted_covariances: jnp.ndarray
+    marginal_loglik: jnp.ndarray
+
+
 # =============================================================================
 # Utility Functions
 # =============================================================================

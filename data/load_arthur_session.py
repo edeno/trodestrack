@@ -46,7 +46,9 @@ class SessionData:
     t_cam : np.ndarray
         Camera timestamps in seconds (relative to start)
     U_imu : np.ndarray
-        IMU data [N_imu × 3]: [gyro_z (rad/s), accel_x (m/s²), accel_y (m/s²)]
+        IMU data in SI units. Shape depends on mode:
+        - 2D mode [N_imu × 3]: [gyro_z, accel_x, accel_y] (rad/s, m/s², m/s²)
+        - 3D mode [N_imu × 6]: [gyro_x, gyro_y, gyro_z, accel_x, accel_y, accel_z]
     Z_cam_led1 : np.ndarray
         LED1 positions [N_cam × 2]: [x, y] in meters
     Z_cam_led2 : np.ndarray
@@ -143,7 +145,7 @@ def convert_timestamps_to_relative(
     return t_imu - t_start, t_cam - t_start
 
 
-def convert_imu_to_si(imu_df: pd.DataFrame) -> np.ndarray:
+def convert_imu_to_si(imu_df: pd.DataFrame, mode: str = "2d") -> np.ndarray:
     """Convert raw IMU values to SI units.
 
     Converts gyro (raw → deg/s → rad/s) and accel (raw → g → m/s²).
@@ -151,25 +153,61 @@ def convert_imu_to_si(imu_df: pd.DataFrame) -> np.ndarray:
     Parameters
     ----------
     imu_df : pd.DataFrame
-        DataFrame with columns: Headstage_GyroZ, Headstage_AccelX, Headstage_AccelY
+        DataFrame with IMU columns (GyroX/Y/Z, AccelX/Y/Z)
+    mode : str, optional
+        IMU output mode:
+        - "2d": [N × 3] = [gyro_z, accel_x, accel_y] (default, legacy)
+        - "3d": [N × 6] = [gyro_x, gyro_y, gyro_z, accel_x, accel_y, accel_z]
 
     Returns
     -------
     np.ndarray
-        Array [N × 3] of [gyro_z (rad/s), accel_x (m/s²), accel_y (m/s²)]
+        Array of IMU data in SI units (rad/s for gyro, m/s² for accel)
+        Shape depends on mode: [N × 3] for "2d", [N × 6] for "3d"
+
+    Raises
+    ------
+    ValueError
+        If mode is not "2d" or "3d"
     """
-    gyro_z_raw = imu_df["Headstage_GyroZ"].values
-    accel_x_raw = imu_df["Headstage_AccelX"].values
-    accel_y_raw = imu_df["Headstage_AccelY"].values
+    if mode not in ("2d", "3d"):
+        raise ValueError(f"Invalid IMU mode: {mode!r}. Must be '2d' or '3d'.")
 
-    # Gyro: raw → deg/s → rad/s
-    gyro_z = gyro_z_raw * GYRO_SCALE * DEG_TO_RAD
+    if mode == "2d":
+        # Legacy 2D mode: only gyro Z and accel X/Y
+        gyro_z_raw = imu_df["Headstage_GyroZ"].values
+        accel_x_raw = imu_df["Headstage_AccelX"].values
+        accel_y_raw = imu_df["Headstage_AccelY"].values
 
-    # Accel: raw → g → m/s²
-    accel_x = accel_x_raw * ACCEL_SCALE * GRAVITY
-    accel_y = accel_y_raw * ACCEL_SCALE * GRAVITY
+        # Gyro: raw → deg/s → rad/s
+        gyro_z = gyro_z_raw * GYRO_SCALE * DEG_TO_RAD
 
-    return np.column_stack([gyro_z, accel_x, accel_y])
+        # Accel: raw → g → m/s²
+        accel_x = accel_x_raw * ACCEL_SCALE * GRAVITY
+        accel_y = accel_y_raw * ACCEL_SCALE * GRAVITY
+
+        return np.column_stack([gyro_z, accel_x, accel_y])
+
+    else:  # mode == "3d"
+        # Full 3D IMU: all 6 axes
+        gyro_x_raw = imu_df["Headstage_GyroX"].values
+        gyro_y_raw = imu_df["Headstage_GyroY"].values
+        gyro_z_raw = imu_df["Headstage_GyroZ"].values
+        accel_x_raw = imu_df["Headstage_AccelX"].values
+        accel_y_raw = imu_df["Headstage_AccelY"].values
+        accel_z_raw = imu_df["Headstage_AccelZ"].values
+
+        # Gyro: raw → deg/s → rad/s
+        gyro_x = gyro_x_raw * GYRO_SCALE * DEG_TO_RAD
+        gyro_y = gyro_y_raw * GYRO_SCALE * DEG_TO_RAD
+        gyro_z = gyro_z_raw * GYRO_SCALE * DEG_TO_RAD
+
+        # Accel: raw → g → m/s²
+        accel_x = accel_x_raw * ACCEL_SCALE * GRAVITY
+        accel_y = accel_y_raw * ACCEL_SCALE * GRAVITY
+        accel_z = accel_z_raw * ACCEL_SCALE * GRAVITY
+
+        return np.column_stack([gyro_x, gyro_y, gyro_z, accel_x, accel_y, accel_z])
 
 
 def convert_positions_to_meters(
@@ -312,6 +350,7 @@ def load_arthur_session(
     position_file: str,
     imu_file: str,
     meters_per_pixel: float = 0.0022,
+    imu_mode: str = "3d",
     verbose: bool = True,
 ) -> SessionData:
     """Load Arthur session data with proper preprocessing.
@@ -332,6 +371,10 @@ def load_arthur_session(
         Path to IMU parquet file
     meters_per_pixel : float, optional
         Camera scale factor (default: 0.0022)
+    imu_mode : str, optional
+        IMU output mode (default: "3d"):
+        - "2d": [N × 3] = [gyro_z, accel_x, accel_y] (legacy)
+        - "3d": [N × 6] = [gyro_x, gyro_y, gyro_z, accel_x, accel_y, accel_z]
     verbose : bool, optional
         Print loading progress and statistics (default: True)
 
@@ -342,17 +385,23 @@ def load_arthur_session(
 
     Examples
     --------
+    >>> # Load with full 3D IMU (default)
     >>> data = load_arthur_session(
     ...     "arthur20220314_position_info.parquet",
     ...     "arthur20220314_imu_info.parquet"
     ... )
-    >>> print(f"Duration: {data.t_cam[-1]:.1f} s")
-    >>> print(f"IMU rate: {data.fs_imu:.1f} Hz")
+    >>> print(f"IMU shape: {data.U_imu.shape}")  # (N, 6)
+
+    >>> # Load with legacy 2D IMU
+    >>> data_2d = load_arthur_session(
+    ...     "position.parquet", "imu.parquet", imu_mode="2d"
+    ... )
+    >>> print(f"IMU shape: {data_2d.U_imu.shape}")  # (N, 3)
 
     Notes
     -----
     - Removes ~287× sample-and-hold from IMU data
-    - Validates 3D accelerometer magnitude ≈ 9.81 m/s²
+    - Validates 3D accelerometer magnitude ≈ 9.81 m/s² (when imu_mode="3d")
     - All output timestamps are relative (start from 0)
     """
     if verbose:
@@ -398,29 +447,42 @@ def load_arthur_session(
         print(f"  Time overlap: {min(t_imu[-1], t_cam[-1]):.1f} s")
 
     # Convert units to SI
-    U_imu = convert_imu_to_si(imu_unique)
+    U_imu = convert_imu_to_si(imu_unique, mode=imu_mode)
     Z_cam_led1, Z_cam_led2 = convert_positions_to_meters(pos_df, meters_per_pixel)
 
     # Compute LED separation
     led_distance = compute_led_separation(Z_cam_led1, Z_cam_led2)
 
     if verbose:
-        print("\nUnit conversions:")
-        print(
-            f"  Gyro: [{U_imu[:, 0].min()*180/np.pi:.1f}, {U_imu[:, 0].max()*180/np.pi:.1f}] deg/s"
-        )
-        print(f"  Accel X: [{U_imu[:, 1].min():.2f}, {U_imu[:, 1].max():.2f}] m/s²")
-        print(f"  Accel Y: [{U_imu[:, 2].min():.2f}, {U_imu[:, 2].max():.2f}] m/s²")
+        print(f"\nUnit conversions (IMU mode: {imu_mode}):")
+        if imu_mode == "2d":
+            print(
+                f"  Gyro Z: [{U_imu[:, 0].min()*180/np.pi:.1f}, {U_imu[:, 0].max()*180/np.pi:.1f}] deg/s"
+            )
+            print(f"  Accel X: [{U_imu[:, 1].min():.2f}, {U_imu[:, 1].max():.2f}] m/s²")
+            print(f"  Accel Y: [{U_imu[:, 2].min():.2f}, {U_imu[:, 2].max():.2f}] m/s²")
+        else:  # 3d mode
+            print(
+                f"  Gyro X: [{U_imu[:, 0].min()*180/np.pi:.1f}, {U_imu[:, 0].max()*180/np.pi:.1f}] deg/s"
+            )
+            print(
+                f"  Gyro Y: [{U_imu[:, 1].min()*180/np.pi:.1f}, {U_imu[:, 1].max()*180/np.pi:.1f}] deg/s"
+            )
+            print(
+                f"  Gyro Z: [{U_imu[:, 2].min()*180/np.pi:.1f}, {U_imu[:, 2].max()*180/np.pi:.1f}] deg/s"
+            )
+            print(f"  Accel X: [{U_imu[:, 3].min():.2f}, {U_imu[:, 3].max():.2f}] m/s²")
+            print(f"  Accel Y: [{U_imu[:, 4].min():.2f}, {U_imu[:, 4].max():.2f}] m/s²")
+            print(f"  Accel Z: [{U_imu[:, 5].min():.2f}, {U_imu[:, 5].max():.2f}] m/s²")
         print(f"  LED separation: {led_distance*100:.2f} cm")
         print(
             f"  Arena: {Z_cam_led1[:, 0].max() - Z_cam_led1[:, 0].min():.2f} × "
             f"{Z_cam_led1[:, 1].max() - Z_cam_led1[:, 1].min():.2f} m"
         )
 
-    # Validate 3D accelerometer magnitude (optional but recommended)
-    if verbose and "Headstage_AccelZ" in imu_unique.columns:
-        accel_z = imu_unique["Headstage_AccelZ"].values * ACCEL_SCALE * GRAVITY
-        accel_mag_3d = np.sqrt(U_imu[:, 1] ** 2 + U_imu[:, 2] ** 2 + accel_z**2)
+    # Validate 3D accelerometer magnitude (when in 3D mode)
+    if verbose and imu_mode == "3d":
+        accel_mag_3d = np.sqrt(U_imu[:, 3] ** 2 + U_imu[:, 4] ** 2 + U_imu[:, 5] ** 2)
         print("\nData quality check:")
         print(f"  3D accel magnitude: {accel_mag_3d.mean():.2f} m/s² (expected ~{GRAVITY:.2f})")
 
