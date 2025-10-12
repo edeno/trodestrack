@@ -158,7 +158,7 @@ cd data/
 uv run python visualize_session.py
 ```
 
-This creates `/tmp/arthur_visualization.mp4` showing:
+This creates `data/arthur_visualization.mp4` showing:
 - Video frames with LED positions (red=back, cyan=front)
 - Gyroscope trace (angular rate in deg/s)
 - Accelerometer traces (X and Y in m/s²)

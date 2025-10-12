@@ -342,7 +342,7 @@ def main():
 
     # Create visualization
     video_path = script_dir / "20220314_arthur_02_r1.mp4"
-    output_path = "/tmp/arthur_visualization.mp4"
+    output_path = script_dir / "arthur_visualization.mp4"
 
     if not video_path.exists():
         print(f"Error: Video file not found: {video_path}")
@@ -351,7 +351,7 @@ def main():
     create_video_overlay(
         video_path=str(video_path),
         data=data,
-        output_path=output_path,
+        output_path=str(output_path),
         start_time=60.0,  # Start at 1 minute
         duration=10.0,  # 10 second clip
         fps=30.0,
