@@ -86,13 +86,33 @@ position_m = pixel_value * 0.0022
 
 ## Understanding the IMU Axes
 
+### How We Determined Axis Orientation
+
+The IMU axis labels (X, Y, Z) are arbitrary hardware conventions. To determine which physical direction each axis corresponds to, we analyzed the data using three methods:
+
+**Method 1: Gravity Detection**
+- Measured mean accelerometer values across the entire session
+- The axis with the largest magnitude mean is aligned with gravity (vertical)
+- Result: **Accel Z = -8.55 m/s²** → Z-axis points upward in body frame
+
+**Method 2: Variance Analysis**
+- Compared standard deviation of gyro axes to find most active rotations
+- Gyro X: σ = 55.4 deg/s, Gyro Y: σ = 39.4 deg/s, Gyro Z: σ = 54.7 deg/s
+- Result: X and Z are most active (roll and yaw), Y less active (pitch)
+
+**Method 3: Physical Constraint**
+- For an upright headstage, yaw rotation must be around the vertical axis
+- Therefore: **Gyro Z measures yaw** (matches vertical axis)
+
+Run [analyze_imu_orientation.py](analyze_imu_orientation.py) to see the complete analysis.
+
 ### Physical Orientation (Body Frame)
 
-The SpikeGadgets headstage is mounted on the rat's head with approximate orientation:
+Based on data analysis, the SpikeGadgets headstage axes correspond to:
 
-- **X-axis**: Left-right (mediolateral)
-- **Y-axis**: Forward-backward (anteroposterior)
-- **Z-axis**: Up-down (dorsoventral) ← approximately aligned with gravity
+- **X-axis**: Left-right (mediolateral) - horizontal plane
+- **Y-axis**: Forward-backward (anteroposterior) - horizontal plane
+- **Z-axis**: Up-down (dorsoventral) - **vertical, aligned with gravity**
 
 ### Gyroscope: Angular Rates (Rotation)
 
