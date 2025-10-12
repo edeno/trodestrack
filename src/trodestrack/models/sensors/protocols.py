@@ -9,7 +9,7 @@ Design Philosophy
 -----------------
 - **Static shapes for JAX**: All measurements use fixed-size arrays (padding/masking for missing data)
 - **Explicit frame indexing**: Sensor models cache frame-specific data (observations, validity)
-- **Projection-based updates**: 2D/4D camera measurements handled via projector matrices
+- **Selector-based updates**: 2D/4D camera measurements handled via selector matrices
 - **Large-R gating**: Invalid observations gated via R=1e6 (no Python branching in JAX scan)
 
 Protocol Methods
@@ -19,7 +19,7 @@ Protocol Methods
 - `jacobian()`: Measurement Jacobian H (optional, returns None for UKF)
 - `meas_cov()`: Measurement noise covariance R for given frame
 - `innovation()`: Innovation z - h(x) with sensor-specific processing (e.g., angle wrapping)
-- `subspace()`: LED validity flags and projector matrix for lifted updates
+- `subspace()`: LED validity flags and selector matrix for lifted updates
 
 References
 ----------
@@ -58,10 +58,10 @@ class MeasurementModel(Protocol):
         Compute innovation (z - h(x)) for frame_idx with sensor-specific
         processing (e.g., angle wrapping for heading).
     subspace(frame_idx: int) -> tuple[bool, bool, bool, jnp.ndarray]
-        Return LED validity flags and projector matrix:
-        ``(both_leds, only_led1, only_led2, projector_M)``
-        For camera: projector is 2×4 (single LED) or 4×4 (dual LED).
-        For heading/ZUPT: not applicable (identity projection).
+        Return LED validity flags and selector matrix:
+        ``(both_leds, only_led1, only_led2, selector_M)``
+        For camera: selector is always (2, 4) regardless of LED validity.
+        For heading: (1, 1) identity. For ZUPT: (2, 2) identity.
 
     Notes
     -----
@@ -205,14 +205,15 @@ class MeasurementModel(Protocol):
         both_leds : bool
             True if both LEDs valid (4D update, selector ignored).
         only_led1 : bool
-            True if only LED1 valid (2D update via projection).
+            True if only LED1 valid (2D update via selector).
         only_led2 : bool
-            True if only LED2 valid (2D update via projection).
+            True if only LED2 valid (2D update via selector).
         selector_M2 : jnp.ndarray
-            Selector matrix with **static shape (2, 4)** for camera measurements.
-            Maps 4D measurement space to 2D active subspace when single LED valid.
-            For dual-LED case, returns a conventional selector (ignored by update).
-            For heading (1D), returns eye(1). For ZUPT (2D velocity), returns eye(2).
+            Selector matrix with **static shape** for measurements:
+            - Camera: (2, 4) selector mapping 4D → 2D subspace when single LED valid
+            - Heading: (1, 1) identity
+            - ZUPT: (2, 2) identity
+            For dual-LED camera case, returns conventional (2, 4) selector (ignored by update).
 
         Notes
         -----
@@ -221,7 +222,7 @@ class MeasurementModel(Protocol):
         - Camera: always returns (2, 4) selector, never (4, 4)
         - Heading: returns (1, 1) identity. ZUPT: returns (2, 2) identity
         - Generic update primitive uses `lax.cond(both_leds, ...)` to choose
-          4D direct update vs 2D projected update
+          4D direct update vs 2D selector-based update
         - See `filter_common.make_led_selector()` for camera implementation
 
         **Naming:**

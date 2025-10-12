@@ -234,7 +234,7 @@ class ZUPTModel:
         return -meas_pred
 
     def subspace(self, frame_idx: int) -> tuple[bool, bool, bool, jnp.ndarray]:
-        """Return subspace flags and identity projector.
+        """Return subspace flags and identity selector.
 
         Parameters
         ----------
@@ -244,17 +244,18 @@ class ZUPTModel:
         Returns
         -------
         both_leds : bool
-            Always True (no projection needed for ZUPT).
+            Always True (no selection needed for ZUPT).
         only_led1 : bool
             Always False (not applicable for ZUPT).
         only_led2 : bool
             Always False (not applicable for ZUPT).
-        projector : jnp.ndarray
-            Identity matrix (2, 2) for consistency with protocol.
+        selector : jnp.ndarray
+            Identity matrix (2, 2) for protocol consistency.
 
         Notes
         -----
-        ZUPT doesn't use LED projection logic. Returns identity for consistency.
+        ZUPT doesn't use LED selection logic. Returns (2, 2) identity for consistency.
         Filter update primitives check `both_leds=True` → direct 2D update.
+        Camera uses (2, 4) selector; heading uses (1, 1); ZUPT uses (2, 2).
         """
         return True, False, False, jnp.eye(2, dtype=self.dtype)
