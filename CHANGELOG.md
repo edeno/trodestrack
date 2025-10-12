@@ -57,6 +57,45 @@
 
 - ✅ M5 subtask complete: `assemble_Q()` now consumes all 3 accel axes for noise energy
 - ✅ M5 subtask complete: Blackout-aware diffusion and bias freezing still honored
+- ✅ M5 subtask complete: Verified `state_layout.py` indices for 3D velocity and accel bias
+- Next: Update `dynamics_function()` to use rotation + gravity compensation
+
+---
+
+### Session: 2025-10-12 - Milestone M5: State Layout Verification
+
+**Added:**
+
+- **Comprehensive State Layout Tests** ([tests/models/test_state_layout.py](tests/models/test_state_layout.py))
+  - 17 new tests verifying all layout definitions and properties
+  - **Layout property tests:** dimensions, indices, flags for all 6 layouts
+  - **Index consistency tests:** Critical validation for 10D state (2D cam + 3D IMU):
+    * `vel_idx=(2, 3, 4)` - 3D velocity [vx, vy, vz]
+    * `bias_accel_idx=(7, 8, 9)` - 3D accel bias [b_ax, b_ay, b_az]
+    * State ordering: `[x, y, vx, vy, vz, θ, b_gz, b_ax, b_ay, b_az]`
+  - **No overlapping indices:** Validates all layouts have unique, consecutive indices
+  - **Compatibility tests:** Verifies process_noise.py inference logic works correctly
+  - **Helper function tests:** `get_heading_index()`, `get_layout()`, registry completeness
+
+**Test Results:**
+
+- ✅ New tests: 17/17 pass
+- ✅ Validates consistency between velocity and accel bias dimensions
+- ✅ Confirms 10D layout is correct for M5 implementation
+
+**Verification:**
+
+- `LAYOUT_2D_CAM_3D_IMU` already correctly defined:
+  * Position: 2D (x, y) from overhead camera
+  * Velocity: 3D (vx, vy, vz) from 3D IMU
+  * Heading: 2D (θ) - yaw only
+  * Biases: 1D gyro (b_gz) + 3D accel (b_ax, b_ay, b_az)
+- No code changes needed - indices were already correct
+- Tests serve as regression protection and documentation
+
+**Milestone Status:**
+
+- ✅ M5 subtask complete: `state_layout.py` indices verified and tested
 - Next: Update `dynamics_function()` to use rotation + gravity compensation
 
 ---

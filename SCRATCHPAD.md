@@ -75,7 +75,33 @@ Successfully implemented `ZUPTModel` in `src/trodestrack/models/sensors/zupt.py`
 - Enhanced docstrings with clearer inference logic comments
 
 **Remaining M5 Tasks:**
-- [ ] Update `state_layout.py` (verify indices - likely already correct)
+- [x] Update `state_layout.py` (verified indices - already correct)
 - [ ] Update `dynamics_function()` to use gravity compensation
 - [ ] Add/update tests for gravity-aware dynamics
 - [ ] Verify drift reduction in occlusion scenarios
+
+---
+
+**Task:** Verify `state_layout.py` indices for 3D velocity and accel bias
+
+**Verification:**
+- Reviewed `LAYOUT_2D_CAM_3D_IMU` (10D state):
+  * State: `[x, y, vx, vy, vz, θ, b_gz, b_ax, b_ay, b_az]`
+  * `vel_idx=(2, 3, 4)` - 3D velocity ✓
+  * `bias_accel_idx=(7, 8, 9)` - 3D accel bias ✓
+  * Consistent with process_noise.py expectations ✓
+
+**Tests Added:**
+- Created `tests/models/test_state_layout.py` (17 tests, all pass)
+- Tests verify:
+  * All layout properties (dimension, indices, flags)
+  * 10D state ordering: position → velocity → heading → biases
+  * No overlapping indices across all layouts
+  * Consistency between velocity dim and accel bias dim
+  * Helper functions (`get_heading_index`, `get_layout`)
+  * Compatibility with process_noise.py inference logic
+
+**Outcome:**
+- ✅ Indices already correct - no code changes needed
+- ✅ Comprehensive test coverage added (17/17 pass)
+- ✅ Verified compatibility with M5 process_noise changes

@@ -141,8 +141,8 @@
 - [x] `process_noise.py`:
   - [x] Update `assemble_Q()` to consume all 3 accel axes for noise energy
   - [x] Ensure blackout-aware diffusion and bias freezing still honored
-- [ ] `state_layout.py`:
-  - [ ] Verify/clarify indices for velocity and 3D accel bias
+- [x] `state_layout.py`:
+  - [x] Verify/clarify indices for velocity and 3D accel bias
 - [ ] Dynamics:
   - [ ] Update `dynamics_function()` to use rotation + gravity compensation
   - [ ] Preserve API and shape stability
