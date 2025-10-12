@@ -2,6 +2,75 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-12 - Milestone M1 Complete (MeasurementModel Protocol)
+
+**Added:**
+
+- **MeasurementModel Protocol** ([src/trodestrack/models/sensors/protocols.py](src/trodestrack/models/sensors/protocols.py))
+  - Introduced `@runtime_checkable` Protocol defining unified sensor interface
+  - Core methods: `meas_dim`, `predict()`, `jacobian()`, `meas_cov()`, `innovation()`, `subspace()`
+  - Supports EKF and UKF via structural subtyping (duck typing)
+  - Enables future sensor types: ZUPT, TTL events, RFID tags
+  - Impact: Foundation for PR2 (generic update primitives) and PR3 (filter integration)
+
+- **CameraPositionModel** ([src/trodestrack/models/sensors/camera_position.py](src/trodestrack/models/sensors/camera_position.py))
+  - Wraps existing `measurement_function()` for dual-LED position predictions
+  - Wraps `confidence_to_R_diagonal()` for adaptive per-dimension measurement noise
+  - Wraps `make_led_selector()` for 2D/4D projected updates (single/dual LED)
+  - Frame-specific caching via `set_frame_data()` for per-observation metadata
+  - Maintains static 4D shapes for JAX compatibility (NaN for invalid LEDs)
+  - Impact: Zero behavior drift, clean separation of measurement logic from filter loops
+
+- **HeadingPseudoModel** ([src/trodestrack/models/sensors/heading_pseudo.py](src/trodestrack/models/sensors/heading_pseudo.py))
+  - Wraps `prepare_heading_measurement()` for heading extraction from LED geometry
+  - Implements LED spacing validation and adaptive noise scaling (R ∝ (expected/observed)²)
+  - Large-R gating (R=1e6) for invalid observations (single LED, out-of-tolerance spacing)
+  - Angle wrapping in innovation computation ([-π, π])
+  - Accepts `FilterCoreConfig` for type safety with existing helpers
+  - Impact: Maintains heading measurement parity with existing EKF/UKF implementations
+
+- **Comprehensive Test Suite** ([tests/models/test_sensor_protocols.py](tests/models/test_sensor_protocols.py), 17 tests)
+  - Protocol compliance tests (structural subtyping verification)
+  - Camera model: predict, jacobian, confidence scaling, LED subspace projectors
+  - Heading model: predict, jacobian, spacing gate, adaptive noise, single LED gating, innovation wrapping
+  - **Parity test:** Camera model outputs match `measurement_function()` within 1e-7 mean difference
+  - LED validity patterns → correct projector consistency (2×4 single, 4×4 dual)
+  - Confidence scaling → correct R per frame (R_i = base / conf_i)
+  - All 17 tests passing
+
+**Configuration:**
+
+- HeadingPseudoModel accepts full `FilterCoreConfig` for type compatibility with `prepare_heading_measurement()`
+- CameraPositionModel accepts individual parameters (led_distance, measurement_noise_base, layout)
+
+**Testing:**
+
+- All tests passing (17/17 in test_sensor_protocols.py)
+- Parity verified: camera model mean difference ≤1e-7 vs existing helpers
+- Code quality: black ✓, ruff ✓, mypy ✓ (after fixing HeadingConfig type issue)
+- Code review: APPROVED WITH COMMENTS (critical type error fixed, Python branching documented)
+
+**Milestone Status:**
+
+- ✅ M1 Complete: MeasurementModel protocol introduced with zero behavior drift
+- 📋 Next: M2 - Generic Projected Update Primitives (PR2)
+
+**Implementation Notes:**
+
+- Python `if/else` used in `CameraPositionModel.subspace()` due to variable return shapes (2×4 vs 4×4)
+  - JAX `lax.cond`/`lax.select` require identical branch shapes
+  - Acceptable for M1 since `subspace()` only called in tests
+  - Will be redesigned for PR3 filter integration (pad to 4×4 or alternative approach)
+- Type safety: Fixed `HeadingPseudoModel` to accept `FilterCoreConfig` instead of custom `HeadingConfig`
+- Test fixtures: Use shared `heading_config` fixture for consistent configuration across tests
+
+**References:**
+
+- incremental_refactor_plan.md: PR1 - MeasurementModel Protocol
+- filter_common.py: measurement_function, confidence_to_R_diagonal, prepare_heading_measurement
+
+---
+
 ### Session: 2025-10-12 - Milestone M0 Complete (Housekeeping & Guardrails)
 
 **Added:**

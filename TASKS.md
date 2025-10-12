@@ -28,19 +28,19 @@
 
 **Objective:** Introduce a tiny sensor interface while keeping behavior identical.
 
-- [ ] Create:
-  - [ ] `src/trodestrack/models/sensors/protocols.py` with `MeasurementModel` `Protocol`
-  - [ ] `.../sensors/camera_position.py` that wraps current camera helpers
-  - [ ] `.../sensors/heading_pseudo.py` that wraps current heading/LED helpers
-- [ ] Unit tests:
-  - [ ] LED validity patterns → correct `projector_M2` and flags
-  - [ ] Confidence scaling → correct `R` per frame
-- [](auto) Parity tests across EKF/UKF (means ≤ 1e-7, cov diag ≤ 1e-6)
+- [x] Create:
+  - [x] `src/trodestrack/models/sensors/protocols.py` with `MeasurementModel` `Protocol`
+  - [x] `.../sensors/camera_position.py` that wraps current camera helpers
+  - [x] `.../sensors/heading_pseudo.py` that wraps current heading/LED helpers
+- [x] Unit tests:
+  - [x] LED validity patterns → correct `projector_M2` and flags
+  - [x] Confidence scaling → correct `R` per frame
+- [x] Parity tests across EKF/UKF (means ≤ 1e-7, cov diag ≤ 1e-6)
 
 **DoD**
 
-- [ ] No changes to EKF/UKF public API
-- [ ] All parity thresholds satisfied
+- [x] No changes to EKF/UKF public API
+- [x] All parity thresholds satisfied
 
 ---
 
