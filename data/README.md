@@ -84,6 +84,48 @@ position_m = pixel_value * 0.0022
 - No dropouts or missing data
 - Consecutive video frames [8, 46063]
 
+## Understanding the IMU Axes
+
+### Physical Orientation (Body Frame)
+
+The SpikeGadgets headstage is mounted on the rat's head with approximate orientation:
+
+- **X-axis**: Left-right (mediolateral)
+- **Y-axis**: Forward-backward (anteroposterior)
+- **Z-axis**: Up-down (dorsoventral) ← approximately aligned with gravity
+
+### Gyroscope: Angular Rates (Rotation)
+
+The 3-axis gyroscope measures **angular velocity** (how fast the rat is rotating):
+
+- **Gyro X (roll rate)**: Rotation around X-axis → tilting left/right (like an airplane rolling)
+- **Gyro Y (pitch rate)**: Rotation around Y-axis → nodding up/down (like pitching forward/back)
+- **Gyro Z (yaw rate)**: Rotation around Z-axis → **turning left/right (heading change)** ← **used by 2D tracking**
+
+### Accelerometer: Linear Acceleration + Gravity
+
+The 3-axis accelerometer measures **specific force** (linear acceleration + gravity):
+
+- **Accel X**: Acceleration in X direction + gravity component from tilt
+- **Accel Y**: Acceleration in Y direction + gravity component from tilt
+- **Accel Z**: Acceleration in Z direction + **~9.81 m/s² from gravity** (when upright)
+
+**Key Insight**: When the rat is upright and stationary, the accelerometer reads:
+- X ≈ 0, Y ≈ 0, Z ≈ -9.81 m/s² (gravity pulls "down" in body frame)
+- When tilted, gravity components appear in X and Y axes too
+
+### Why 2D Tracking Uses Only a Subset
+
+**Trodestrack's 2D tracking assumes:**
+1. The rat moves primarily on a horizontal plane (maze floor)
+2. The headstage stays approximately upright (small roll/pitch variations)
+3. Only **yaw (heading)** matters for 2D position tracking
+
+**Therefore, 2D tracking uses:**
+- **Gyro Z** → Measures yaw rate (turning left/right on the floor)
+- **Accel X, Y** → Approximate horizontal plane acceleration (after gravity removal)
+- **Ignores: Gyro X, Y, Accel Z** → Roll, pitch, and vertical motion not tracked
+
 ## Critical Limitation: 3D IMU
 
 **⚠️ The current trodestrack EKF expects 2D accelerometer input (X, Y only), but this data contains 3D accelerometer measurements (X, Y, Z) with gravity primarily in the Z-axis (mean -8.55 m/s²).**
@@ -92,12 +134,12 @@ This means trodestrack cannot properly process this data without modification. S
 
 ### Accelerometer Breakdown
 
-- **AccelX**: mean=0.78 m/s², std=1.70 m/s² (motion + gravity component)
-- **AccelY**: mean=2.83 m/s², std=3.00 m/s² (motion + gravity component)
-- **AccelZ**: mean=-8.55 m/s², std=1.42 m/s² (mostly gravity)
+- **AccelX**: mean=0.78 m/s², std=1.70 m/s² (motion + gravity component from tilt)
+- **AccelY**: mean=2.83 m/s², std=3.00 m/s² (motion + gravity component from tilt)
+- **AccelZ**: mean=-8.55 m/s², std=1.42 m/s² (mostly gravity, ~87% of 9.81 m/s²)
 - **3D magnitude**: 9.67 m/s² ✓
 
-The headstage is mounted approximately upright with gravity primarily in the -Z direction.
+The headstage is mounted approximately upright with gravity primarily in the -Z direction, but with some tilt causing gravity components in X and Y.
 
 ## Usage
 
