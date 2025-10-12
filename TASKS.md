@@ -135,9 +135,9 @@
 
 **Objective:** Support 3D IMU inputs while keeping a 2D state (x, y, vx, vy, θ) via improved process model.
 
-- [ ] `filter_common.py`:
-  - [ ] Add `rotate_body_accel_to_world(accel_body, yaw_heading)`
-  - [ ] Add `gravity_compensate(accel_world, g=9.81)`
+- [x] `filter_common.py`:
+  - [x] Add `rotate_body_accel_to_world(accel_body, yaw_heading)`
+  - [x] Add `gravity_compensate(accel_world, g=9.81)`
 - [ ] `process_noise.py`:
   - [ ] Update `assemble_Q()` to consume all 3 accel axes for noise energy
   - [ ] Ensure blackout-aware diffusion and bias freezing still honored

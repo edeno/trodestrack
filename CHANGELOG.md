@@ -2,6 +2,74 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-12 - Milestone M5 (2D Pose + 3D IMU): Helper Functions Added
+
+**Added:**
+
+- **3D IMU Rotation Helper** ([src/trodestrack/models/filter_common.py](src/trodestrack/models/filter_common.py), lines 241-280)
+  - `rotate_body_accel_to_world(accel_body, yaw_heading)` - Rotates 3D body-frame acceleration to world frame
+  - **Transformation:** Applies R_z(θ) rotation matrix to x-y plane while preserving z component
+  - **Input:** 3D body-frame acceleration [ax, ay, az] (m/s²) and yaw heading angle (rad)
+  - **Output:** 3D world-frame acceleration [ax_w, ay_w, az_w] (m/s²)
+  - **Use case:** Convert IMU-measured specific force from body coordinates to world coordinates
+  - **Note:** Only handles yaw rotation (2D heading). Full 3D orientation (roll/pitch/yaw) deferred to future work
+  - Impact: Foundation for gravity-aware dynamics (M5 priority)
+
+- **Gravity Compensation Helper** ([src/trodestrack/models/filter_common.py](src/trodestrack/models/filter_common.py), lines 283-310)
+  - `gravity_compensate(accel_world, g=9.81)` - Removes gravity from world-frame acceleration
+  - **Transformation:** Subtracts gravitational vector [0, 0, g] from world-frame measurement
+  - **Input:** 3D world-frame acceleration [ax, ay, az] (m/s²)
+  - **Output:** Gravity-compensated acceleration (kinematic/coordinate acceleration)
+  - **Default gravity:** 9.81 m/s² (configurable for non-Earth scenarios)
+  - **Rationale:** IMUs measure specific force (proper acceleration) which includes gravity. Subtracting [0, 0, g] recovers kinematic acceleration needed for state propagation.
+  - Impact: Enables correct velocity/position integration from 3D IMU data
+
+**Test Results:**
+
+- ✅ New tests: 10/10 pass ([tests/models/test_filter_common.py](tests/models/test_filter_common.py), lines 105-224)
+  - Rotation tests: zero heading, 90°, vertical preservation, full 3D, JAX array type
+  - Gravity tests: removal, horizontal preservation, custom g, default g, JAX array type
+- ✅ Existing tests: 14/14 pass (no regressions)
+- ✅ All code quality checks pass: black ✓, ruff ✓, mypy ✓
+
+**Documentation:**
+
+- Comprehensive NumPy-style docstrings with:
+  - Physical units (m/s², rad)
+  - Rotation matrix math (R_z transformation)
+  - Physics explanation (specific force vs kinematic acceleration)
+  - Examples showing expected behavior
+
+**Code Review:** APPROVED after addressing critical formatting issue
+- Fixed Black formatting violation (rotation matrix initialization)
+- Addressed 6 quality/suggestion items from code review
+- Mathematical correctness validated by comprehensive test suite
+
+**Milestone Status:**
+
+- ✅ M5 subtask complete: `rotate_body_accel_to_world()` and `gravity_compensate()` implemented
+- 📋 Next M5 tasks:
+  - Update `dynamics_function()` to use new helpers
+  - Update `process_noise.py` for 3D accel axes
+  - Verify state layout for 3D accel bias
+  - Add integration tests for gravity magnitude and drift reduction
+
+**Implementation Notes:**
+
+- **Pure functions:** No side effects, fully JIT-compatible with JAX
+- **Static shapes:** All arrays have compile-time known dimensions (3,)
+- **Type hints:** Complete with `float | jnp.ndarray` for scalar flexibility
+- **Rotation semantics:** Standard aerospace convention (R_z for yaw-only rotation)
+- **Gravity convention:** Standard +z = up, gravity acts downward (-z direction)
+
+**References:**
+
+- incremental_refactor_plan.md: PR5 - 2D Pose + 3D IMU (Gravity-Aware Dynamics)
+- TASKS.md: Milestone M5, lines 138-140 (marked complete)
+- PRD.md: Section 5 (Data & Units), Section 6 (Mathematical Model)
+
+---
+
 ### Session: 2025-10-12 - Milestone M4 Complete (ZUPT as First-Class Sensor)
 
 **Added:**

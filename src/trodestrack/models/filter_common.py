@@ -238,6 +238,76 @@ def wrap_angle(theta: jnp.ndarray) -> jnp.ndarray:
     return jnp.arctan2(jnp.sin(theta), jnp.cos(theta))
 
 
+def rotate_body_accel_to_world(
+    accel_body: jnp.ndarray, yaw_heading: float | jnp.ndarray
+) -> jnp.ndarray:
+    """Rotate 3D body-frame acceleration to world frame using yaw angle.
+
+    Parameters
+    ----------
+    accel_body : jnp.ndarray
+        Acceleration in body frame (3,) [ax, ay, az] in m/s².
+    yaw_heading : float or jnp.ndarray
+        Yaw heading angle (rad). Rotation about vertical (z) axis.
+
+    Returns
+    -------
+    jnp.ndarray
+        Acceleration in world frame (3,) [ax_w, ay_w, az_w] in m/s².
+
+    Notes
+    -----
+    Applies R_z(θ) rotation matrix to the x-y plane while preserving z:
+
+    [ax_w]   [cos(θ)  -sin(θ)  0] [ax]
+    [ay_w] = [sin(θ)   cos(θ)  0] [ay]
+    [az_w]   [0        0       1] [az]
+
+    This is the correct transformation for converting IMU measurements from
+    the body frame (where the IMU is mounted on the rat) to the world frame
+    (the fixed laboratory coordinate system).
+    """
+    yaw = jnp.asarray(yaw_heading)
+    cos_yaw = jnp.cos(yaw)
+    sin_yaw = jnp.sin(yaw)
+
+    # Rotation matrix R_z(yaw) for yaw-only rotation (3x3)
+    # Only affects x-y plane; z is unchanged
+    R_z = jnp.array([[cos_yaw, -sin_yaw, 0.0], [sin_yaw, cos_yaw, 0.0], [0.0, 0.0, 1.0]])
+
+    return R_z @ accel_body
+
+
+def gravity_compensate(accel_world: jnp.ndarray, g: float = 9.81) -> jnp.ndarray:
+    """Remove gravity from world-frame acceleration.
+
+    Parameters
+    ----------
+    accel_world : jnp.ndarray
+        Acceleration in world frame (3,) [ax, ay, az] in m/s².
+    g : float, default 9.81
+        Gravitational acceleration magnitude (m/s²).
+
+    Returns
+    -------
+    jnp.ndarray
+        Gravity-compensated acceleration (3,) in m/s².
+
+    Notes
+    -----
+    Removes the gravitational acceleration vector [0, 0, g] from the
+    world-frame measurement. This is necessary because IMUs measure
+    specific force (proper acceleration), which includes gravity.
+
+    The IMU at rest reads [0, 0, +g] due to the normal force from the
+    surface. Motion creates additional accelerations that add to this
+    baseline. Subtracting [0, 0, g] recovers the kinematic acceleration
+    (coordinate acceleration) needed for state propagation.
+    """
+    gravity_vector = jnp.array([0.0, 0.0, g])
+    return accel_world - gravity_vector
+
+
 def chi2_threshold(dof: int, prob: float) -> jnp.ndarray:
     """Closed-form χ² thresholds for common degrees of freedom.
 
