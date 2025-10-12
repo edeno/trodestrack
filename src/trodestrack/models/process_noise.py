@@ -276,14 +276,16 @@ def assemble_Q(
     if getattr(config, "freeze_bias_during_blackout", False):
         # Reuse layout from earlier (already looked up at top of function)
         if layout is not None and layout.has_biases:
-            # Zero bias rows/cols during blackout in a JAX-safe way
+            # Vectorized bias freeze: mask rows/cols without Python loop
             freeze_factor = jnp.where(
                 has_vision, jnp.asarray(1.0, dtype=dtype), jnp.asarray(0.0, dtype=dtype)
             )
-            bias_indices = list(layout.bias_gyro_idx) + list(layout.bias_accel_idx)
-            for idx in bias_indices:
-                Q = Q.at[idx, :].set(Q[idx, :] * freeze_factor)
-                Q = Q.at[:, idx].set(Q[:, idx] * freeze_factor)
+            bias_indices = jnp.array(
+                list(layout.bias_gyro_idx) + list(layout.bias_accel_idx), dtype=jnp.int32
+            )
+            n = Q.shape[0]
+            row_mask = jnp.ones((n,), dtype=dtype).at[bias_indices].set(freeze_factor)
+            Q = Q * row_mask[:, None] * row_mask[None, :]
 
     # Symmetrize for numerical hygiene
     return 0.5 * (Q + Q.T)

@@ -35,6 +35,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import NamedTuple
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import lax, tree_util, vmap
@@ -201,20 +202,21 @@ def compute_sigma_points(mean: jnp.ndarray, cov: jnp.ndarray, n: int, lamb: floa
         Sigma points (2n+1, n) with central point at index 0.
     """
     # Compute Cholesky decomposition: P = L @ L.T
-    # Add small regularization for numerical stability
-    cov_reg = symmetrize(cov) + 1e-9 * jnp.eye(n)
-    # Scale by sqrt(n + lambda) for sigma-point spread
+    # Add small regularization for numerical stability (match dtype)
+    eps = jnp.asarray(1e-9, dtype=cov.dtype)
+    cov_reg = symmetrize(cov) + eps * jnp.eye(n, dtype=cov.dtype)
     chol = jnp.linalg.cholesky(cov_reg)
-    distances = jnp.sqrt(n + lamb) * chol
+    # Scale by sqrt(n + lambda) for sigma-point spread
+    spread = jnp.sqrt(n + lamb)
+    distances = spread * chol  # (n, n)
 
-    # Generate positive-direction sigma points: mean + columns of distances
-    sigma_plus = jnp.array([mean + distances[:, i] for i in range(n)])
+    # Generate sigma points via broadcasting (vectorized)
+    # sigma_pm = [+distances columns, -distances columns] (n, 2n)
+    sigma_pm = jnp.concatenate((distances, -distances), axis=1)
+    # Broadcast mean across all 2n sigma points: mean[:, None] + sigma_pm
+    sigmas = jnp.concatenate((mean[:, None], mean[:, None] + sigma_pm), axis=1).T  # (2n+1, n)
 
-    # Generate negative-direction sigma points: mean - columns of distances
-    sigma_minus = jnp.array([mean - distances[:, i] for i in range(n)])
-
-    # Stack: [mean, sigma_plus (n points), sigma_minus (n points)]
-    return jnp.concatenate((jnp.array([mean]), sigma_plus, sigma_minus))
+    return sigmas
 
 
 def compute_weights(
@@ -591,95 +593,30 @@ def update_heading(
 
 
 # =============================================================================
-# Main UKF Filter
+# JIT Configuration (mirror EKF pattern)
 # =============================================================================
 
+UNSCENTED_KALMAN_FILTER_STATIC_ARGNAMES = ("layout", "config_for_filter")
+UNSCENTED_KALMAN_FILTER_DONATE_ARGNUMS: tuple[int, ...] = ()
 
-def unscented_kalman_filter(
-    ukf_config: UKFConfig,
-    t_imu: np.ndarray,
-    U_imu: np.ndarray,
-    t_cam: np.ndarray,
-    Z_cam_led1: np.ndarray,
-    Z_cam_led2: np.ndarray,
-    mask_cam: np.ndarray,
-    initial_state: UKFState | None = None,
-    conf_cam: np.ndarray | None = None,
-) -> UKFResult:
-    """Run Unscented Kalman Filter on a full trajectory.
 
-    Parameters
-    ----------
-    ukf_config : UKFConfig
-        UKF configuration.
-    t_imu : np.ndarray
-        IMU timestamps (N_imu,) in seconds.
-    U_imu : np.ndarray
-        IMU measurements [ω_z(rad/s), f_x(m/s^2), f_y(m/s^2)] (N_imu, 3).
-    t_cam : np.ndarray
-        Camera timestamps (N_cam,) in seconds.
-    Z_cam_led1 : np.ndarray
-        LED1 positions (N_cam, 2) in meters.
-    Z_cam_led2 : np.ndarray
-        LED2 positions (N_cam, 2) in meters.
-    mask_cam : np.ndarray
-        Camera validity mask (N_cam,), boolean.
-    initial_state : UKFState | None, optional
-        Optional initial state (auto-initialized if None).
-    conf_cam : np.ndarray | None, optional
-        Confidence scores (N_cam, 4) for [x1,y1,x2,y2] in [0, 1] for per-dimension
-        R scaling.
-
-    Returns
-    -------
-    UKFResult
-        Filtered and predicted states at camera times, and log-likelihood.
-    """
-    # Convert to JAX arrays
-    t_imu_jax = jnp.array(t_imu)
-    U_imu_jax = jnp.array(U_imu)
-    t_cam_jax = jnp.array(t_cam)
-    Z_cam_led1_jax = jnp.array(Z_cam_led1)
-    Z_cam_led2_jax = jnp.array(Z_cam_led2)
-    mask_cam_jax = jnp.array(mask_cam)
-    # Precompute clipped confidences device-side for stable shapes
-    conf_cam_jax = None if conf_cam is None else jnp.clip(jnp.array(conf_cam), 1e-2, 1.0)
-
-    # Auto-detect LED spacing if not specified
-    # Store estimated value to return in result (immutability: do NOT mutate config)
-    estimated_led_distance: float | None = None
-    config_for_filter: UKFConfig
-
-    if ukf_config.led_distance is None:
-        estimated_led_distance = estimate_led_spacing(Z_cam_led1_jax, Z_cam_led2_jax, mask_cam_jax)
-        # Create new config with estimated spacing (do NOT mutate original)
-        config_for_filter = replace(ukf_config, led_distance=estimated_led_distance)
-    else:
-        # Use original config as-is
-        config_for_filter = ukf_config
-
-    # Initialize state (reuse EKF initialization)
-    if initial_state is None:
-        ekf_init = initialize_state(
-            Z_cam_led1_jax,
-            Z_cam_led2_jax,
-            mask_cam_jax,
-            dt_cam=jnp.mean(jnp.diff(t_cam_jax)),  # Keep as JAX scalar for JIT compatibility
-            led_distance=config_for_filter.led_distance,  # type: ignore[arg-type]
-            layout=get_layout(config_for_filter.state_mode),
-        )
-        initial_state = UKFState(mean=ekf_init.mean, cov=ekf_init.cov)
-
+def _unscented_kalman_filter_impl(
+    initial_state: UKFState,
+    t_imu_jax: jnp.ndarray,
+    U_imu_jax: jnp.ndarray,
+    t_cam_jax: jnp.ndarray,
+    Z_cam_led1_jax: jnp.ndarray,
+    Z_cam_led2_jax: jnp.ndarray,
+    mask_cam_jax: jnp.ndarray,
+    conf_cam_jax: jnp.ndarray | None,
+    imu_index_arrays: jnp.ndarray,
+    dt_imu_mean: jnp.ndarray,
+    *,
+    config_for_filter: UKFConfig,
+    layout: StateLayout,
+) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    """Core UKF implementation staged under ``jax.jit``."""
     n_cam = int(t_cam_jax.shape[0])
-
-    # Resolve state layout once for this run
-    layout = get_layout(config_for_filter.state_mode)
-
-    # Compute mean IMU timestep for fallback
-    dt_imu_mean = jnp.mean(jnp.diff(t_imu_jax))  # Keep as JAX scalar for JIT compatibility
-
-    # Precompute IMU index arrays (host-side, using shared utility)
-    imu_index_arrays = compute_imu_index_arrays(t_imu, t_cam)
 
     # Instantiate measurement models with preallocated arrays
     camera_model = CameraPositionModel(
@@ -794,11 +731,134 @@ def unscented_kalman_filter(
     carry_init = (initial_state, 0.0)
     (_, log_lik_total), outputs = lax.scan(filter_step, carry_init, jnp.arange(n_cam))
 
+    return (
+        outputs["filtered_mean"],
+        outputs["filtered_cov"],
+        outputs["predicted_mean"],
+        outputs["predicted_cov"],
+        log_lik_total,
+    )
+
+
+_unscented_kalman_filter_jit = jax.jit(
+    _unscented_kalman_filter_impl,
+    static_argnames=UNSCENTED_KALMAN_FILTER_STATIC_ARGNAMES,
+    donate_argnums=UNSCENTED_KALMAN_FILTER_DONATE_ARGNUMS,
+)
+
+
+# =============================================================================
+# Public API
+# =============================================================================
+
+
+def unscented_kalman_filter(
+    ukf_config: UKFConfig,
+    t_imu: np.ndarray,
+    U_imu: np.ndarray,
+    t_cam: np.ndarray,
+    Z_cam_led1: np.ndarray,
+    Z_cam_led2: np.ndarray,
+    mask_cam: np.ndarray,
+    initial_state: UKFState | None = None,
+    conf_cam: np.ndarray | None = None,
+) -> UKFResult:
+    """Run Unscented Kalman Filter on a full trajectory.
+
+    Parameters
+    ----------
+    ukf_config : UKFConfig
+        UKF configuration.
+    t_imu : np.ndarray
+        IMU timestamps (N_imu,) in seconds.
+    U_imu : np.ndarray
+        IMU measurements [ω_z(rad/s), f_x(m/s^2), f_y(m/s^2)] (N_imu, 3).
+    t_cam : np.ndarray
+        Camera timestamps (N_cam,) in seconds.
+    Z_cam_led1 : np.ndarray
+        LED1 positions (N_cam, 2) in meters.
+    Z_cam_led2 : np.ndarray
+        LED2 positions (N_cam, 2) in meters.
+    mask_cam : np.ndarray
+        Camera validity mask (N_cam,), boolean.
+    initial_state : UKFState | None, optional
+        Optional initial state (auto-initialized if None).
+    conf_cam : np.ndarray | None, optional
+        Confidence scores (N_cam, 4) for [x1,y1,x2,y2] in [0, 1] for per-dimension
+        R scaling.
+
+    Returns
+    -------
+    UKFResult
+        Filtered and predicted states at camera times, and log-likelihood.
+    """
+    # Convert to JAX arrays
+    t_imu_jax = jnp.array(t_imu)
+    U_imu_jax = jnp.array(U_imu)
+    t_cam_jax = jnp.array(t_cam)
+    Z_cam_led1_jax = jnp.array(Z_cam_led1)
+    Z_cam_led2_jax = jnp.array(Z_cam_led2)
+    mask_cam_jax = jnp.array(mask_cam)
+    # Precompute clipped confidences device-side for stable shapes
+    conf_cam_jax = None if conf_cam is None else jnp.clip(jnp.array(conf_cam), 1e-2, 1.0)
+
+    # Auto-detect LED spacing if not specified
+    # Store estimated value to return in result (immutability: do NOT mutate config)
+    estimated_led_distance: float | None = None
+    config_for_filter: UKFConfig
+
+    if ukf_config.led_distance is None:
+        estimated_led_distance = estimate_led_spacing(Z_cam_led1_jax, Z_cam_led2_jax, mask_cam_jax)
+        # Create new config with estimated spacing (do NOT mutate original)
+        config_for_filter = replace(ukf_config, led_distance=estimated_led_distance)
+    else:
+        # Use original config as-is
+        config_for_filter = ukf_config
+
+    # Initialize state (reuse EKF initialization)
+    if initial_state is None:
+        ekf_init = initialize_state(
+            Z_cam_led1_jax,
+            Z_cam_led2_jax,
+            mask_cam_jax,
+            dt_cam=jnp.mean(jnp.diff(t_cam_jax)),  # Keep as JAX scalar for JIT compatibility
+            led_distance=config_for_filter.led_distance,  # type: ignore[arg-type]
+            layout=get_layout(config_for_filter.state_mode),
+        )
+        initial_state = UKFState(mean=ekf_init.mean, cov=ekf_init.cov)
+
+    # Resolve state layout once for this run
+    layout = get_layout(config_for_filter.state_mode)
+
+    # Compute mean IMU timestep for fallback
+    dt_imu_mean = jnp.mean(jnp.diff(t_imu_jax))  # Keep as JAX scalar for JIT compatibility
+
+    # Precompute IMU index arrays (host-side, using shared utility)
+    imu_index_arrays = compute_imu_index_arrays(t_imu, t_cam)
+
+    # Call JIT-compiled implementation
+    filtered_means, filtered_covs, predicted_means, predicted_covs, log_lik_total = (
+        _unscented_kalman_filter_jit(
+            initial_state,
+            t_imu_jax,
+            U_imu_jax,
+            t_cam_jax,
+            Z_cam_led1_jax,
+            Z_cam_led2_jax,
+            mask_cam_jax,
+            conf_cam_jax,
+            imu_index_arrays,
+            dt_imu_mean,
+            config_for_filter=config_for_filter,
+            layout=layout,
+        )
+    )
+
     return UKFResult(
-        filtered_means=outputs["filtered_mean"],
-        filtered_covariances=outputs["filtered_cov"],
-        predicted_means=outputs["predicted_mean"],
-        predicted_covariances=outputs["predicted_cov"],
+        filtered_means=filtered_means,
+        filtered_covariances=filtered_covs,
+        predicted_means=predicted_means,
+        predicted_covariances=predicted_covs,
         marginal_loglik=float(log_lik_total),
         estimated_led_distance=estimated_led_distance,
     )

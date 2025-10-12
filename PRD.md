@@ -9,10 +9,10 @@
 
 ## 1. Problem Overview
 
-Estimate a rat’s position, velocity, and heading on a maze using:
+Estimate a rat's position, velocity, and heading on a maze using:
 
 - **Video tracking** (Trodes LEDs and/or DeepLabCut keypoints) at ~30 Hz.
-- **IMU** (accelerometer, gyroscope; magnetometer optional) recorded with SpikeGadgets headstages at 20–30 kHz.
+- **IMU** (accelerometer, gyroscope; magnetometer optional) recorded with SpikeGadgets headstages at 100 Hz effective rate (nominally 20-30 kHz with sample-and-hold).
 
 **Constraints:** dim lighting, occlusions, LED reflections, occasional handling, uncalibrated IMU tilt, ruler-based pixel→cm scale. Must support **online filtering** and **offline smoothing**. Implemented in **JAX** with `jax.lax.scan`.
 
@@ -66,7 +66,7 @@ Future: extend to full 3D pose (roll/pitch/yaw) with magnetometer. Also could us
 **Inputs**
 
 - Video detections (Trodes LEDs, DLC keypoints): pixels + confidence + timestamps.
-- IMU (SpikeGadgets): raw accel_int, gyro_int + timestamps (20–30 kHz).
+- IMU (SpikeGadgets): raw accel_int, gyro_int + timestamps (100 Hz effective rate after removing sample-and-hold repeats).
 - Optional: magnetometer; arena corner points (subset of frames).
 
 **Clock Sync**
@@ -81,10 +81,11 @@ Future: extend to full 3D pose (roll/pitch/yaw) with magnetometer. Also could us
 - Gyroscope: `ω_deg_s = raw * 0.061`, `ω_rad_s = ω_deg_s * π/180` (rad/s).
 - Pixel→meters: ruler scale or 2D homography (preferred).
 
-**IMU Rate for Offline Processing**
+**IMU Rate for Processing**
 
-- Default workflow downsamples IMU to ≤1 kHz for efficiency.
-- Configurable parameter. Real-time path supports full-rate data.
+- Real data: ~100 Hz effective rate (after removing SpikeGadgets sample-and-hold repeats)
+- Synthetic data: configurable (typically 200 Hz for benchmarking)
+- Workflow handles variable rates via timestamp-based integration
 
 **Outputs**
 

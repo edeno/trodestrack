@@ -1036,7 +1036,8 @@ def compute_nis_and_loglik(
     # 4D branch: both LEDs valid
     def compute_4d():
         S4s = symmetrize(S4)
-        L4 = jnp.linalg.cholesky(S4s + 1e-9 * jnp.eye(4))
+        eps = jnp.asarray(1e-9, dtype=S4s.dtype)
+        L4 = jnp.linalg.cholesky(S4s + eps * jnp.eye(4, dtype=S4s.dtype))
         x4 = cho_solve((L4, True), innov4)
         nis = jnp.dot(innov4, x4)
         logdet = 2.0 * jnp.sum(jnp.log(jnp.diag(L4)))
@@ -1049,7 +1050,8 @@ def compute_nis_and_loglik(
         S2 = M2 @ symmetrize(S4) @ M2.T  # (2, 2)
         innov2 = M2 @ innov4  # (2,)
 
-        L2 = jnp.linalg.cholesky(S2 + 1e-9 * jnp.eye(2))
+        eps = jnp.asarray(1e-9, dtype=S2.dtype)
+        L2 = jnp.linalg.cholesky(S2 + eps * jnp.eye(2, dtype=S2.dtype))
         x2 = cho_solve((L2, True), innov2)
         nis = jnp.dot(innov2, x2)
         logdet = 2.0 * jnp.sum(jnp.log(jnp.diag(L2)))
@@ -1162,6 +1164,8 @@ def estimate_led_spacing(
 ) -> float:
     """Estimate LED spacing from camera observations.
 
+    Uses host-side NumPy to avoid expensive JIT compilation of nanmedian.
+
     Parameters
     ----------
     Z_cam_led1 : jnp.ndarray
@@ -1176,22 +1180,30 @@ def estimate_led_spacing(
     float
         Median LED spacing (m). Falls back to 0.04 m if no valid dual-LED frames.
     """
+    # Convert to NumPy for host-side computation (avoid JIT nanmedian)
+    import numpy as np
+
+    led1_np = np.asarray(Z_cam_led1)
+    led2_np = np.asarray(Z_cam_led2)
+    mask_np = np.asarray(mask_cam)
+
     # Find frames where both LEDs are visible
-    led1_valid = jnp.isfinite(Z_cam_led1).all(axis=1)
-    led2_valid = jnp.isfinite(Z_cam_led2).all(axis=1)
-    both_valid = led1_valid & led2_valid & mask_cam
+    led1_valid = np.isfinite(led1_np).all(axis=1)
+    led2_valid = np.isfinite(led2_np).all(axis=1)
+    both_valid = led1_valid & led2_valid & mask_np
 
     # Compute distances for valid frames
-    distances = jnp.linalg.norm(Z_cam_led2 - Z_cam_led1, axis=1)
+    distances = np.linalg.norm(led2_np - led1_np, axis=1)
 
     # Median of valid distances
-    valid_distances = jnp.where(both_valid, distances, jnp.nan)
+    valid_distances = np.where(both_valid, distances, np.nan)
 
     # Use nanmedian, with fallback if all NaN
-    median_spacing = jnp.nanmedian(valid_distances)
+    median_spacing = np.nanmedian(valid_distances)
 
     # Fallback to 4 cm if no valid observations
-    return float(jnp.where(jnp.isnan(median_spacing), 0.04, median_spacing))
+    spacing = 0.04 if not np.isfinite(median_spacing) else float(median_spacing)
+    return spacing
 
 
 # =============================================================================

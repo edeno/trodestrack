@@ -336,84 +336,33 @@ def _outer_product(a: jnp.ndarray, b: jnp.ndarray) -> jnp.ndarray:
 # Sigma-Point Smoother for UKF
 # =============================================================================
 
+SIGMA_POINT_SMOOTHER_STATIC_ARGNAMES = ("layout", "ukf_config")
+SIGMA_POINT_SMOOTHER_DONATE_ARGNUMS: tuple[int, ...] = ()
 
-def sigma_point_smoother(
-    filter_result: UKFResult,
+
+def _sigma_point_smoother_impl(
+    filtered_means: jnp.ndarray,
+    filtered_covs: jnp.ndarray,
+    t_imu_jax: jnp.ndarray,
+    U_imu_jax: jnp.ndarray,
+    t_cam_jax: jnp.ndarray,
+    imu_index_arrays: jnp.ndarray,
+    dt_imu_mean: jnp.ndarray,
+    mask_cam_jax: jnp.ndarray | None,
+    w_mean: jnp.ndarray,
+    w_cov: jnp.ndarray,
+    lamb: float,
+    *,
+    layout: StateLayout,
     ukf_config: UKFConfig,
-    t_imu: np.ndarray,
-    U_imu: np.ndarray,
-    t_cam: np.ndarray,
-    mask_cam: np.ndarray | None = None,
-) -> SmootherResult:
-    """Run sigma-point (RTS-like) smoother on UKF output.
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Core sigma-point smoother implementation staged under ``jax.jit``.
 
-    Parameters
-    ----------
-    filter_result : UKFResult
-        Output from :func:`trodestrack.models.ukf.unscented_kalman_filter`.
-    ukf_config : UKFConfig
-        UKF configuration (for dynamics and Q assembly).
-    t_imu : np.ndarray
-        IMU timestamps (N_imu,) in seconds.
-    U_imu : np.ndarray
-        IMU measurements [ω_z(rad/s), f_x(m/s^2), f_y(m/s^2)] (N_imu, 3).
-    t_cam : np.ndarray
-        Camera timestamps (N_cam,) in seconds.
-    mask_cam : np.ndarray | None, optional
-        Camera validity mask (N_cam,). If provided, applies blackout-aware noise scaling.
-
-    Returns
-    -------
-    SmootherResult
-        Smoothed means and covariances at camera times; log-likelihood copied
-        from the forward UKF pass.
-    Notes
-    -----
-        Uses unscented transform for prediction to compute cross-covariance
-        between filtered[k] and predicted[k+1], which is needed for the gain.
-        State dimension is derived from filter_result.filtered_means.shape[1].
-
-        Blackout-aware Q/R scaling (when mask_cam is provided):
-        - During vision blackouts, reduces accel bias RW noise and IMU input noise
-        - Helps tighten how hard post-gap vision "pulls" backward through gaps
-        - Mirrors EKF RTS smoother behavior for consistency
+    This is the JIT-compiled inner loop. Call via the public wrapper
+    :func:`sigma_point_smoother` which handles preprocessing.
     """
-    # Convert to JAX arrays
-    t_imu_jax = jnp.array(t_imu)
-    U_imu_jax = jnp.array(U_imu)
-
-    # Convert mask_cam to JAX if provided
-    mask_cam_jax = jnp.array(mask_cam) if mask_cam is not None else None
-
-    # Extract filter outputs and derive state dimension from data
-    filtered_means = filter_result.filtered_means  # (N_cam, n)
-    filtered_covs = filter_result.filtered_covariances  # (N_cam, n, n)
-    n_cam = len(t_cam)
-    n = filtered_means.shape[1]  # Derive state dimension from data
-
-    # Compute UKF sigma-point weights (dimension-dependent)
-    alpha = ukf_config.alpha
-    beta = ukf_config.beta
-    kappa = ukf_config.kappa
-    lamb = alpha**2 * (n + kappa) - n
-
-    # Weights (Julier & Uhlmann)
-    w_mean = jnp.concatenate(
-        [jnp.array([lamb / (n + lamb)]), jnp.full(2 * n, 1.0 / (2 * (n + lamb)))]
-    )
-    w_cov_0 = lamb / (n + lamb) + (1 - alpha**2 + beta)
-    w_cov = jnp.concatenate([jnp.array([w_cov_0]), jnp.full(2 * n, 1.0 / (2 * (n + lamb)))])
-
-    # Compute mean IMU dt
-    dt_imu_mean = float(jnp.mean(jnp.diff(t_imu_jax)))
-
-    # Precompute IMU index arrays (host-side, using shared utility)
-    imu_index_arrays = compute_imu_index_arrays(t_imu, t_cam)
-
-    # Resolve state layout once for this smoother run
-    from trodestrack.models.state_layout import get_heading_index, get_layout
-
-    layout = get_layout(ukf_config.state_mode)
+    n_cam = filtered_means.shape[0]
+    n = filtered_means.shape[1]
 
     def f(x, u, dt):
         return dynamics_function(x, u, dt, ukf_config.damping_coeff, layout)
@@ -562,6 +511,110 @@ def sigma_point_smoother(
     # Concatenate with final frame
     smoothed_means = jnp.vstack([smoothed_means, filtered_means[-1][None, ...]])
     smoothed_covs = jnp.vstack([smoothed_covs, filtered_covs[-1][None, ...]])
+
+    return smoothed_means, smoothed_covs
+
+
+_sigma_point_smoother_jit = jax.jit(
+    _sigma_point_smoother_impl,
+    static_argnames=SIGMA_POINT_SMOOTHER_STATIC_ARGNAMES,
+    donate_argnums=SIGMA_POINT_SMOOTHER_DONATE_ARGNUMS,
+)
+
+
+def sigma_point_smoother(
+    filter_result: UKFResult,
+    ukf_config: UKFConfig,
+    t_imu: np.ndarray,
+    U_imu: np.ndarray,
+    t_cam: np.ndarray,
+    mask_cam: np.ndarray | None = None,
+) -> SmootherResult:
+    """Run sigma-point (RTS-like) smoother on UKF output.
+
+    Parameters
+    ----------
+    filter_result : UKFResult
+        Output from :func:`trodestrack.models.ukf.unscented_kalman_filter`.
+    ukf_config : UKFConfig
+        UKF configuration (for dynamics and Q assembly).
+    t_imu : np.ndarray
+        IMU timestamps (N_imu,) in seconds.
+    U_imu : np.ndarray
+        IMU measurements [ω_z(rad/s), f_x(m/s^2), f_y(m/s^2)] (N_imu, 3 or 6).
+    t_cam : np.ndarray
+        Camera timestamps (N_cam,) in seconds.
+    mask_cam : np.ndarray | None, optional
+        Camera validity mask (N_cam,). If provided, applies blackout-aware noise scaling.
+
+    Returns
+    -------
+    SmootherResult
+        Smoothed means and covariances at camera times; log-likelihood copied
+        from the forward UKF pass.
+
+    Notes
+    -----
+    Uses unscented transform for prediction to compute cross-covariance
+    between filtered[k] and predicted[k+1], which is needed for the gain.
+    State dimension is derived from filter_result.filtered_means.shape[1].
+
+    Blackout-aware Q/R scaling (when mask_cam is provided):
+    - During vision blackouts, reduces accel bias RW noise and IMU input noise
+    - Helps tighten how hard post-gap vision "pulls" backward through gaps
+    - Mirrors EKF RTS smoother behavior for consistency
+    """
+    # Convert to JAX arrays
+    t_imu_jax = jnp.array(t_imu)
+    U_imu_jax = jnp.array(U_imu)
+    t_cam_jax = jnp.array(t_cam)
+
+    # Convert mask_cam to JAX if provided
+    mask_cam_jax = jnp.array(mask_cam) if mask_cam is not None else None
+
+    # Extract filter outputs and derive state dimension from data
+    filtered_means = filter_result.filtered_means  # (N_cam, n)
+    filtered_covs = filter_result.filtered_covariances  # (N_cam, n, n)
+    n = filtered_means.shape[1]  # Derive state dimension from data
+
+    # Compute UKF sigma-point weights (dimension-dependent)
+    alpha = ukf_config.alpha
+    beta = ukf_config.beta
+    kappa = ukf_config.kappa
+    lamb = alpha**2 * (n + kappa) - n
+
+    # Weights (Julier & Uhlmann)
+    w_mean = jnp.concatenate(
+        [jnp.array([lamb / (n + lamb)]), jnp.full(2 * n, 1.0 / (2 * (n + lamb)))]
+    )
+    w_cov_0 = lamb / (n + lamb) + (1 - alpha**2 + beta)
+    w_cov = jnp.concatenate([jnp.array([w_cov_0]), jnp.full(2 * n, 1.0 / (2 * (n + lamb)))])
+
+    # Compute mean IMU dt
+    dt_imu_mean = jnp.mean(jnp.diff(t_imu_jax))
+
+    # Precompute IMU index arrays (host-side, using shared utility)
+    imu_index_arrays = compute_imu_index_arrays(t_imu, t_cam)
+
+    # Resolve state layout once for this smoother run
+    layout = get_layout(ukf_config.state_mode)
+
+    # Call JIT-compiled implementation
+    smoothed_means, smoothed_covs = _sigma_point_smoother_jit(
+        filtered_means,
+        filtered_covs,
+        t_imu_jax,
+        U_imu_jax,
+        t_cam_jax,
+        imu_index_arrays,
+        dt_imu_mean,
+        mask_cam_jax,
+        w_mean,
+        w_cov,
+        lamb,
+        layout=layout,
+        ukf_config=ukf_config,
+    )
 
     return SmootherResult(
         smoothed_means=smoothed_means,

@@ -2,14 +2,15 @@
 
 **Sensor-fused 2D rat tracking with JAX EKF/UKF for neuroscience research**
 
-trodestrack combines video tracking (Trodes LEDs and/or DeepLabCut keypoints) with high-rate IMU data from SpikeGadgets headstages to provide accurate position, velocity, and heading estimates for freely-moving rats on behavioral mazes.
+trodestrack combines video tracking (Trodes LEDs and/or DeepLabCut keypoints) with IMU data from SpikeGadgets headstages to provide accurate position, velocity, and heading estimates for freely-moving rats on behavioral mazes.
 
 ## Features
 
-- **Sensor Fusion**: Extended Kalman Filter (EKF) and Unscented Kalman Filter (UKF) for combining video (~30 Hz) and IMU (~20-30 kHz) measurements
+- **Sensor Fusion**: Extended Kalman Filter (EKF) and Unscented Kalman Filter (UKF) for combining video (~30 Hz) and IMU (100 Hz) measurements
+- **3D IMU Support**: Full 6-axis IMU processing (3-axis gyro + 3-axis accel) with gravity compensation
 - **Online & Offline Processing**: Real-time filtering and RTS smoothing for offline analysis
 - **Robust Handling**: Occlusions, LED swaps, reflections, and sensor dropout
-- **JAX-Accelerated**: High-performance implementation using JAX with GPU support
+- **JAX-Accelerated**: High-performance implementation using JAX - **316× realtime** on CPU, GPU-ready
 - **Rich Simulation**: Comprehensive synthetic data generation for testing and validation
 - **Diagnostic Visualization**: Publication-quality video output for quality control
 
@@ -155,18 +156,25 @@ See [`examples/README.md`](examples/README.md) for the complete learning path. E
   - CLI tool: `trodestrack report --run run1/ --pdf report.pdf`
   - Diagnostic videos with 9-panel filter state visualization
 - ✅ **Testing & Validation**
-  - 200+ unit, integration, and property tests (all passing)
+  - 236+ unit, integration, and property tests (all passing)
   - PRD acceptance criteria achieved:
     - Position RMSE ≤ 2 cm ✓
     - Velocity RMSE ≤ 10 cm/s ✓
     - Heading RMSE ≤ 7° ✓
-    - Throughput: 45× realtime (CPU), latency: 0.39 ms/frame ✓
+    - Throughput: 316× realtime (CPU), latency: 0.11 ms/frame ✓
+- ✅ **3D IMU Support** (M5)
+  - Full 6-axis IMU processing (gyro + accel)
+  - Gravity-aware dynamics with 3D acceleration
+  - 2D pose estimation with 3D IMU inputs
+  - Improved drift handling during vision dropout
+- ✅ **JAX Optimization** (M6)
+  - JIT-compiled UKF (mirrors EKF pattern)
+  - Vectorized operations (sigma points, bias freeze)
+  - Host-side preprocessing for efficiency
+  - 316× realtime speedup on 5-minute session
 
 ### In Progress 🚧
 
-- 🚧 **Documentation** (M5)
-  - Tuning guide with NEES-based diagnostics
-  - Troubleshooting guide for common failure modes
 - 🚧 **I/O Loaders**
   - Trodes LED detection format
   - DeepLabCut keypoint format
