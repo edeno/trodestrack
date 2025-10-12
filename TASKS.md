@@ -48,18 +48,18 @@
 
 **Objective:** Factor out duplicated lifted update math for EKF and UKF.
 
-- [ ] Add `src/trodestrack/models/filter_update.py`
-  - [ ] Implement `ekf_projected_update(...)` (Joseph form, 4D→2D projection inside)
-  - [ ] Implement `ukf_projected_update(...)` (sigma-point cov reconstruction + projection)
-  - [ ] Reuse existing PSD solves / loglik / NIS helpers
-- [ ] Unit tests:
-  - [ ] Param sweep over (both LEDs, only LED1, only LED2) + confidence grid
-  - [ ] Compare NIS/loglik/state deltas vs baseline implementation
+- [x] Add `src/trodestrack/models/filter_update.py`
+  - [x] Implement `ekf_projected_update(...)` (Joseph form, 4D→2D projection inside)
+  - [x] Implement `ukf_projected_update(...)` (sigma-point cov reconstruction + projection)
+  - [x] Reuse existing PSD solves / loglik / NIS helpers
+- [x] Unit tests:
+  - [x] Param sweep over (both LEDs, only LED1, only LED2) + confidence grid
+  - [x] Compare NIS/loglik/state deltas vs baseline implementation
 
 **DoD**
 
-- [ ] Bit-for-bit parity on state mean/cov, NIS, log-likelihood
-- [ ] Benchmarks: ≤ 5% regression
+- [x] Bit-for-bit parity on state mean/cov, NIS, log-likelihood
+- [ ] Benchmarks: ≤ 5% regression (note: will be validated in PR3 integration)
 
 ---
 
