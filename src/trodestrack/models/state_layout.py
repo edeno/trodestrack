@@ -85,7 +85,7 @@ class StateLayout:
         return isinstance(self.heading_idx, tuple) and len(self.heading_idx) > 1
 
 
-def get_heading_index(layout: "StateLayout") -> int:
+def get_heading_index(layout: StateLayout) -> int:
     """Return the 2D heading index, raising for non-2D layouts.
 
     Parameters

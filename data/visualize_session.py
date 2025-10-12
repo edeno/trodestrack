@@ -16,7 +16,6 @@ Design principles (Raymond Hettinger style):
 """
 
 from pathlib import Path
-from typing import Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -51,7 +50,7 @@ def find_nearest_index(timestamps: np.ndarray, target_time: float) -> int:
 
 def extract_time_window(
     timestamps: np.ndarray, data: np.ndarray, center_time: float, window_s: float
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """Extract data within a time window around center time.
 
     Parameters
@@ -78,8 +77,8 @@ def extract_time_window(
 
 
 def setup_figure(
-    gyro_ylim: Tuple[float, float], accel_ylim: Tuple[float, float]
-) -> Tuple[plt.Figure, dict]:
+    gyro_ylim: tuple[float, float], accel_ylim: tuple[float, float]
+) -> tuple[plt.Figure, dict]:
     """Create figure layout for video visualization.
 
     Parameters
@@ -138,8 +137,8 @@ def create_video_overlay(
     imu_window_s: float = 2.0,
     led_marker_size: float = 8.0,
     dpi: int = 100,
-    gyro_ylim: Tuple[float, float] = (-200.0, 200.0),
-    accel_ylim: Tuple[float, float] = (-15.0, 15.0),
+    gyro_ylim: tuple[float, float] = (-200.0, 200.0),
+    accel_ylim: tuple[float, float] = (-15.0, 15.0),
 ) -> None:
     """Create video with position overlay and IMU data visualization.
 

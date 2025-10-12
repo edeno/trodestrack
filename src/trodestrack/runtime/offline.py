@@ -296,7 +296,7 @@ def rts_smoother(
     # Initialize linearization trajectory with filtered estimates
     lin_means = filtered_means
 
-    for iter_idx in range(num_iter):
+    for _iter_idx in range(num_iter):
         smoothed_means, smoothed_covs = run_one_rts_iteration(lin_means)
 
         # Update linearization trajectory for next iteration

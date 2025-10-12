@@ -736,7 +736,7 @@ def plot_vision_robustness(sim_data: dict[str, np.ndarray]) -> plt.Figure:
     ax_dropout.set_yticks([0, 1, 2, 3])
     ax_dropout.set_yticklabels(["LED1\ndropout", "LED1\nvisible", "LED2\ndropout", "LED2\nvisible"])
     ax_dropout.set_title(
-        "Independent LED Dropouts (correlation={:.2f})".format(config.cam_dropout_correlation),
+        f"Independent LED Dropouts (correlation={config.cam_dropout_correlation:.2f})",
         fontweight="normal",
         loc="left",
     )

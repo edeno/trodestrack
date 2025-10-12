@@ -11,7 +11,6 @@ Method:
 """
 
 from pathlib import Path
-from typing import Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -24,7 +23,7 @@ GRAVITY = 9.80665  # m/s²
 DEG_TO_RAD = np.pi / 180.0
 
 
-def load_imu_data(imu_file: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def load_imu_data(imu_file: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Load IMU data with unit conversion.
 
     Parameters
@@ -80,7 +79,7 @@ def load_imu_data(imu_file: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
 
 def load_position_data(
     position_file: str, meters_per_pixel: float
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Load camera position data.
 
     Parameters
@@ -161,7 +160,7 @@ def compute_angular_velocity(timestamps: np.ndarray, heading: np.ndarray) -> np.
     return dheading / dt
 
 
-def find_gravity_axis(accel_m_s2: np.ndarray) -> Tuple[int, float]:
+def find_gravity_axis(accel_m_s2: np.ndarray) -> tuple[int, float]:
     """Find which accelerometer axis is aligned with gravity.
 
     Parameters
@@ -220,7 +219,7 @@ def correlate_gyro_with_heading(
 
 def compute_camera_velocity(
     timestamps: np.ndarray, positions: np.ndarray
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """Compute velocity from position time series.
 
     Parameters

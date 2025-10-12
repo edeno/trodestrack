@@ -2,6 +2,48 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-12 - Milestone M0 Complete (Housekeeping & Guardrails)
+
+**Added:**
+
+- **Toolchain Configuration** ([pyproject.toml:70-106](pyproject.toml#L70-L106))
+  - Configured ruff with py311 target, linting rules (E, F, I, UP, B, SIM)
+  - Configured black with 100 char line length
+  - Configured mypy with baseline settings for models module
+  - Added isort configuration (via ruff.lint.isort)
+  - Impact: Establishes guardrails for refactor milestones M1-M7 (PRD Section 17)
+
+- **Public API Definition** ([src/trodestrack/__init__.py:10-15](src/trodestrack/__init__.py#L10-L15))
+  - Added `__all__` export list defining public API surface
+  - Exports: `__version__`, `main`
+  - Users import from submodules: `from trodestrack.models import ekf`
+  - Impact: Clear contract for package consumers (PRD Section 9)
+
+- **Parity Check Script** ([scripts/check_parity.sh](scripts/check_parity.sh))
+  - Created regression test runner with 5 validation steps
+  - Validates style (ruff, black), types (mypy), tests (pytest), benchmarks
+  - Supports `--quick` mode for fast iteration
+  - Impact: Automated verification of "zero behavior drift" (incremental_refactor_plan.md)
+
+**Configuration:**
+
+- Ruff: py311 target, ignores E501 (formatter), B008 (Pydantic/JAX), SIM102 (stylistic)
+- Mypy: Baseline strictness for models module (M0), ready to tighten in M1
+- Pre-commit hooks: Verified working (black, ruff, ruff-format, standard hooks)
+
+**Testing:**
+
+- All existing tests pass (159 passed, 1 skipped)
+- All tooling passes: `ruff`, `mypy`, `black --check` clean
+- Pre-commit hooks pass on all files
+
+**Milestone Status:**
+
+- ✅ M0 Complete: Toolchain configured, guardrails established, no logic changes
+- 📋 Next: M1 - MeasurementModel Protocol
+
+---
+
 ### Session: 2025-10-11 - Critical Fixes (Post-M5)
 
 **Fixed (Critical):**

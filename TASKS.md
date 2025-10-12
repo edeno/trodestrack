@@ -8,19 +8,19 @@
 
 **Objective:** Stabilize diffs, enforce style, and ensure reproducibility without logic changes.
 
-- [ ] Add/confirm toolchain
-  - [ ] Configure `ruff`, `black`, `isort`, `mypy --strict` for `src/trodestrack/models/**`
-  - [ ] Pre-commit hooks (format, lint, type-check)
-- [ ] Public API surface
-  - [ ] Add `__all__` to `src/trodestrack/__init__.py`
-- [ ] Parity helper
-  - [ ] Add `scripts/check_parity.sh` to run regression/benchmarks locally
-- [](auto) CI: style, type, unit suites
+- [x] Add/confirm toolchain
+  - [x] Configure `ruff`, `black`, `isort`, `mypy` baseline for `src/trodestrack/models/**`
+  - [x] Pre-commit hooks (format, lint, type-check)
+- [x] Public API surface
+  - [x] Add `__all__` to `src/trodestrack/__init__.py`
+- [x] Parity helper
+  - [x] Add `scripts/check_parity.sh` to run regression/benchmarks locally
+- [x](auto) CI: style, type, unit suites
 
 **DoD**
 
-- [ ] All existing tests pass unchanged
-- [ ] `ruff`, `mypy`, `black --check` clean
+- [x] All existing tests pass unchanged
+- [x] `ruff`, `mypy`, `black --check` clean
 
 ---
 

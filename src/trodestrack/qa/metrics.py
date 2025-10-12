@@ -739,7 +739,7 @@ def compute_dropout_drift(
     ends = np.where(diff == -1)[0]  # Dropout ends
 
     # Find first block with duration >= min_duration_s
-    for start_idx, end_idx in zip(starts, ends):
+    for start_idx, end_idx in zip(starts, ends, strict=False):
         duration = t[end_idx - 1] - t[start_idx]
         if duration >= min_duration_s:
             # Measure drift from start to end

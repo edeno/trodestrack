@@ -678,7 +678,7 @@ def update_zupt(
 
     # Zero out log-likelihood when ZUPT is effectively disabled (large R)
     stationary = (
-        jnp.sqrt((mean[2] ** 2 + mean[3] ** 2)) < config.zupt_velocity_threshold
+        jnp.sqrt(mean[2] ** 2 + mean[3] ** 2) < config.zupt_velocity_threshold
     ) & config.enable_zupt
     log_likelihood = lax.select(
         stationary, log_likelihood, jnp.array(0.0, dtype=log_likelihood.dtype)

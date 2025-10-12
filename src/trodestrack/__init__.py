@@ -7,6 +7,13 @@ import sys
 
 __version__ = "0.1.0"
 
+# Public API surface - defines what's exported from the package
+# Users import submodules directly: from trodestrack.models import ekf
+__all__ = [
+    "__version__",
+    "main",
+]
+
 
 def main() -> None:
     """Main entry point for the trodestrack CLI.

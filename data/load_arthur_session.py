@@ -13,7 +13,6 @@ Design principles (Raymond Hettinger style):
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -123,7 +122,7 @@ def estimate_sampling_rate(timestamps: np.ndarray, n_samples: int = 10000) -> fl
 
 def convert_timestamps_to_relative(
     t_imu: np.ndarray, t_cam: np.ndarray
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """Convert Unix timestamps to relative time starting from 0.
 
     Parameters
@@ -175,7 +174,7 @@ def convert_imu_to_si(imu_df: pd.DataFrame) -> np.ndarray:
 
 def convert_positions_to_meters(
     pos_df: pd.DataFrame, meters_per_pixel: float
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """Convert LED positions from pixels to meters.
 
     Parameters
@@ -238,7 +237,7 @@ def compute_led_separation(led1: np.ndarray, led2: np.ndarray) -> float:
     return float(np.median(separations))
 
 
-def load_video_frame(video_path: str, frame_idx: int) -> Optional[np.ndarray]:
+def load_video_frame(video_path: str, frame_idx: int) -> np.ndarray | None:
     """Load a single frame from a video file.
 
     Parameters

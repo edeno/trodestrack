@@ -88,7 +88,7 @@ class UKFConfig(FilterCoreConfig):
     kappa: float = 1.0  # Secondary scaling
 
     @classmethod
-    def conservative(cls, **kwargs) -> "UKFConfig":
+    def conservative(cls, **kwargs) -> UKFConfig:
         """Conservative UKF preset with small alpha for numerical stability.
 
         Uses alpha=1e-3 so sigma points stay very close to the mean, minimizing
@@ -114,7 +114,7 @@ class UKFConfig(FilterCoreConfig):
         return cls(alpha=1e-3, beta=2.0, kappa=0.0, **kwargs)
 
     @classmethod
-    def aggressive(cls, **kwargs) -> "UKFConfig":
+    def aggressive(cls, **kwargs) -> UKFConfig:
         """Aggressive UKF preset with large alpha for capturing nonlinearity.
 
         Uses alpha=sqrt(3) to spread sigma points widely, better approximating

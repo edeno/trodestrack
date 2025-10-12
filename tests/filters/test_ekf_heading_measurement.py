@@ -233,7 +233,7 @@ def test_adaptive_noise_scales_with_baseline() -> None:
     expected_R = R_base * (expected_spacing / observed_spacings) ** 2
 
     # Verify scaling relationship
-    for obs_spacing, exp_R in zip(observed_spacings, expected_R):
+    for obs_spacing, exp_R in zip(observed_spacings, expected_R, strict=False):
         # Shorter baseline → higher noise
         if obs_spacing < expected_spacing:
             assert exp_R > R_base

@@ -7,7 +7,7 @@ an update() method to modify appearance for each video frame.
 from __future__ import annotations
 
 from collections import deque
-from typing import Any, Deque
+from typing import Any
 
 import numpy as np
 from jax import Array
@@ -1021,9 +1021,9 @@ class ResidualPanelArtist:
         self.window_frames = int(window_s * fps)
 
         # Buffers for time series
-        self.time_buffer: Deque[float] = deque(maxlen=self.window_frames)
-        self.resid_led1_buffer: Deque[float] = deque(maxlen=self.window_frames)
-        self.resid_led2_buffer: Deque[float] = deque(maxlen=self.window_frames)
+        self.time_buffer: deque[float] = deque(maxlen=self.window_frames)
+        self.resid_led1_buffer: deque[float] = deque(maxlen=self.window_frames)
+        self.resid_led2_buffer: deque[float] = deque(maxlen=self.window_frames)
 
         # Initialize lines
         (self.line_led1,) = ax.plot(
@@ -1104,9 +1104,9 @@ class StateErrorPanelArtist:
 
         # Velocity error panel (show both components for directional insight)
         self.ax_vel = ax_vel
-        self.time_buffer_vel: Deque[float] = deque(maxlen=self.window_frames)
-        self.error_vx_buffer: Deque[float] = deque(maxlen=self.window_frames)
-        self.error_vy_buffer: Deque[float] = deque(maxlen=self.window_frames)
+        self.time_buffer_vel: deque[float] = deque(maxlen=self.window_frames)
+        self.error_vx_buffer: deque[float] = deque(maxlen=self.window_frames)
+        self.error_vy_buffer: deque[float] = deque(maxlen=self.window_frames)
 
         (self.line_vx,) = ax_vel.plot(
             [], [], color=COLORS["red"], linewidth=1.5, label="vx error", alpha=0.8
@@ -1131,8 +1131,8 @@ class StateErrorPanelArtist:
 
         # Heading error panel
         self.ax_heading = ax_heading
-        self.time_buffer_heading: Deque[float] = deque(maxlen=self.window_frames)
-        self.error_heading_buffer: Deque[float] = deque(maxlen=self.window_frames)
+        self.time_buffer_heading: deque[float] = deque(maxlen=self.window_frames)
+        self.error_heading_buffer: deque[float] = deque(maxlen=self.window_frames)
 
         (self.line_heading,) = ax_heading.plot(
             [], [], color=COLORS["purple"], linewidth=1.5, label="Heading error", alpha=0.8
@@ -1215,10 +1215,10 @@ class BiasEstimatePanelArtist:
         self.window_frames = int(window_s * fps)
 
         # Buffers
-        self.time_buffer: Deque[float] = deque(maxlen=self.window_frames)
-        self.gyro_bias_buffer: Deque[float] = deque(maxlen=self.window_frames)
-        self.accel_bias_x_buffer: Deque[float] = deque(maxlen=self.window_frames)
-        self.accel_bias_y_buffer: Deque[float] = deque(maxlen=self.window_frames)
+        self.time_buffer: deque[float] = deque(maxlen=self.window_frames)
+        self.gyro_bias_buffer: deque[float] = deque(maxlen=self.window_frames)
+        self.accel_bias_x_buffer: deque[float] = deque(maxlen=self.window_frames)
+        self.accel_bias_y_buffer: deque[float] = deque(maxlen=self.window_frames)
 
         # Lines (use distinct colors for each bias)
         (self.line_gyro,) = ax.plot(
@@ -1312,8 +1312,8 @@ class NEESPanelArtist:
         self.state_dim = state_dim
 
         # Buffers
-        self.time_buffer: Deque[float] = deque(maxlen=self.window_frames)
-        self.nees_buffer: Deque[float] = deque(maxlen=self.window_frames)
+        self.time_buffer: deque[float] = deque(maxlen=self.window_frames)
+        self.nees_buffer: deque[float] = deque(maxlen=self.window_frames)
 
         # NEES line
         (self.line_nees,) = ax.plot(

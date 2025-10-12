@@ -51,7 +51,7 @@ class TestPersistentLEDSwaps:
 
             # Verify swap blocks last for multiple frames (not single-frame swaps)
             dt_cam = 1.0 / config.fs_cam
-            durations = [(end - start) * dt_cam for start, end in zip(starts, ends)]
+            durations = [(end - start) * dt_cam for start, end in zip(starts, ends, strict=False)]
             mean_duration = np.mean(durations)
 
             # With no dropouts, durations should be close to 1.0s (within 0.5s tolerance)
@@ -124,7 +124,7 @@ class TestPersistentLEDSwaps:
             ends = np.where(diff == -1)[0]
 
             dt_cam = 1.0 / config.fs_cam
-            durations = [(end - start) * dt_cam for start, end in zip(starts, ends)]
+            durations = [(end - start) * dt_cam for start, end in zip(starts, ends, strict=False)]
 
             # With randomness, we should see variation in durations
             if len(durations) >= 3:

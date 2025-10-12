@@ -18,7 +18,6 @@ Usage:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 import numpy as np
 
@@ -117,8 +116,8 @@ class SimpleSimConfig:
 
 
 def simulate_stationary(
-    config: Optional[SimpleSimConfig] = None,
-    position: Optional[np.ndarray] = None,
+    config: SimpleSimConfig | None = None,
+    position: np.ndarray | None = None,
     heading: float = 0.0,
     seed: int = 0,
 ) -> SimOut:
@@ -259,9 +258,9 @@ def simulate_stationary(
 
 
 def simulate_constant_velocity(
-    config: Optional[SimpleSimConfig] = None,
-    initial_position: Optional[np.ndarray] = None,
-    velocity: Optional[np.ndarray] = None,
+    config: SimpleSimConfig | None = None,
+    initial_position: np.ndarray | None = None,
+    velocity: np.ndarray | None = None,
     seed: int = 0,
 ) -> SimOut:
     """Simulate constant velocity motion (straight line).
@@ -405,8 +404,8 @@ def simulate_constant_velocity(
 
 
 def simulate_circular(
-    config: Optional[SimpleSimConfig] = None,
-    center: Optional[np.ndarray] = None,
+    config: SimpleSimConfig | None = None,
+    center: np.ndarray | None = None,
     radius: float = 0.3,
     angular_velocity: float = 1.0,
     seed: int = 0,

@@ -84,7 +84,7 @@ def plot_simple_simulations(
     simulations = [sim_stat, sim_vel, sim_circ]
     titles = ["Stationary", "Constant Velocity", "Circular"]
 
-    for col, (sim, title) in enumerate(zip(simulations, titles)):
+    for col, (sim, title) in enumerate(zip(simulations, titles, strict=False)):
         # Extract data
         t_imu = sim["t_imu"]
         t_cam = sim["t_cam_exp"]

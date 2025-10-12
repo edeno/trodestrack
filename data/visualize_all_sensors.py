@@ -15,7 +15,6 @@ Design principles (Raymond Hettinger style):
 """
 
 from pathlib import Path
-from typing import Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -38,7 +37,7 @@ GRAVITY = 9.80665  # m/s²
 DEG_TO_RAD = np.pi / 180.0
 
 
-def load_all_imu_data(imu_file: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def load_all_imu_data(imu_file: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Load complete 3D IMU data with unit conversion.
 
     Parameters
@@ -94,7 +93,7 @@ def load_all_imu_data(imu_file: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray
 
 def load_camera_data(
     position_file: str, meters_per_pixel: float
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Load camera tracking data.
 
     Parameters
@@ -132,7 +131,7 @@ def find_nearest_index(timestamps: np.ndarray, target_time: float) -> int:
 
 def extract_time_window(
     timestamps: np.ndarray, data: np.ndarray, center_time: float, window_s: float
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """Extract data within a time window around center time."""
     half_window = window_s / 2.0
     mask = (timestamps >= center_time - half_window) & (timestamps <= center_time + half_window)
@@ -174,9 +173,9 @@ def get_video_info(video_path: str) -> dict:
 
 
 def setup_figure(
-    gyro_ylim: Tuple[float, float] = (-200.0, 200.0),
-    accel_ylim: Tuple[float, float] = (-15.0, 15.0),
-) -> Tuple[plt.Figure, dict]:
+    gyro_ylim: tuple[float, float] = (-200.0, 200.0),
+    accel_ylim: tuple[float, float] = (-15.0, 15.0),
+) -> tuple[plt.Figure, dict]:
     """Create comprehensive figure layout showing all sensors.
 
     Layout:
@@ -257,8 +256,8 @@ def create_comprehensive_video(
     imu_window_s: float = 2.0,
     led_marker_size: float = 10.0,
     dpi: int = 100,
-    gyro_ylim: Tuple[float, float] = (-200.0, 200.0),
-    accel_ylim: Tuple[float, float] = (-15.0, 15.0),
+    gyro_ylim: tuple[float, float] = (-200.0, 200.0),
+    accel_ylim: tuple[float, float] = (-15.0, 15.0),
 ) -> None:
     """Create video showing all sensor data with intuitive layout.
 
@@ -349,7 +348,7 @@ def create_comprehensive_video(
     # Initialize gyro plot (3 axes)
     colors_gyro = {"X": "#E74C3C", "Y": "#2ECC71", "Z": "#3498DB"}  # Red, Green, Blue
     gyro_lines = {}
-    for i, axis in enumerate(["X", "Y", "Z"]):
+    for _i, axis in enumerate(["X", "Y", "Z"]):
         (line,) = axes["gyro"].plot(
             [], [], color=colors_gyro[axis], linewidth=1.8, label=f"Gyro {axis}", alpha=0.9
         )
@@ -360,7 +359,7 @@ def create_comprehensive_video(
     # Initialize accel plot (3 axes)
     colors_accel = {"X": "#E74C3C", "Y": "#2ECC71", "Z": "#3498DB"}  # Red, Green, Blue
     accel_lines = {}
-    for i, axis in enumerate(["X", "Y", "Z"]):
+    for _i, axis in enumerate(["X", "Y", "Z"]):
         (line,) = axes["accel"].plot(
             [], [], color=colors_accel[axis], linewidth=1.8, label=f"Accel {axis}", alpha=0.9
         )

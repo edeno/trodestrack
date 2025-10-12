@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 import jax.numpy as jnp
 from jax import Array
@@ -107,8 +107,8 @@ def assemble_Q(
     *,
     has_vision: bool | Array,
     dtype=jnp.float32,
-    G_override: Optional[jnp.ndarray] = None,
-    Qu_override: Optional[jnp.ndarray] = None,
+    G_override: jnp.ndarray | None = None,
+    Qu_override: jnp.ndarray | None = None,
 ) -> jnp.ndarray:
     """Assemble total process noise matrix.
 

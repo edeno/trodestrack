@@ -23,7 +23,6 @@ Coordinate Frames:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 import numpy as np
 
@@ -294,6 +293,7 @@ class RatIMUSimConfig:
                 f"camera rate ({self.fs_cam} Hz) for proper sensor fusion. "
                 f"Consider fs_imu >= 100.0 Hz.",
                 UserWarning,
+                stacklevel=2,
             )
 
         # Arena validation
@@ -442,6 +442,7 @@ class RatIMUSimConfig:
                 f"LED swap probability is {self.led_swap_prob} but use_second_led=False. "
                 f"Swaps require two LEDs. Set use_second_led=True or led_swap_prob=0.0",
                 UserWarning,
+                stacklevel=2,
             )
 
         # Initial state validation
@@ -460,7 +461,7 @@ class RatIMUSimConfig:
 # -----------------------------------------------------------------------------
 
 
-def simulate_rat_imu(config: Optional[RatIMUSimConfig] = None, seed: int = 0) -> SimOut:
+def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> SimOut:
     """Simulate ground truth trajectory, IMU measurements, and camera observations.
 
     Parameters
@@ -909,7 +910,9 @@ def simulate_rat_imu(config: Optional[RatIMUSimConfig] = None, seed: int = 0) ->
                     event_durations = np.maximum(event_durations, dt_cam)
 
                     # Mark frames as swapped for each event
-                    for start_time, duration in zip(event_start_times, event_durations):
+                    for start_time, duration in zip(
+                        event_start_times, event_durations, strict=False
+                    ):
                         end_time = start_time + duration
 
                         # Find camera frames within this swap event

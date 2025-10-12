@@ -70,9 +70,40 @@ dev = [
 [tool.ruff]
 line-length = 100
 src = ["src"]
+target-version = "py311"  # Match minimum required version from project.requires-python
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = [
+    "E501",  # Line too long (handled by formatter)
+    "B008",  # Do not perform function calls in argument defaults (common in Pydantic/JAX)
+    "SIM102",  # Nested if statements (stylistic preference, not enforced)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["trodestrack"]
 
 [tool.black]
 line-length = 100
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = false  # Too noisy for JAX code
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+check_untyped_defs = false
+strict_optional = true
+
+[[tool.mypy.overrides]]
+module = "trodestrack.models.*"
+# Models module: Incrementally increase strictness across milestones
+# M0: Baseline (match global config) - establish guardrails without breaking existing code
+# M1+: Enable checks as type hints are added during refactor
+disallow_untyped_defs = false       # M1 TODO: Enable after type hints added
+disallow_incomplete_defs = false    # M1 TODO: Enable after type hints added
+check_untyped_defs = false          # M1 TODO: Enable after type hints added
+disallow_untyped_decorators = false # Keep disabled (JAX decorators often untyped)
 
 [tool.pytest.ini_options]
 markers = [
