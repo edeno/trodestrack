@@ -16,6 +16,7 @@ import jax.numpy as jnp
 import pytest
 
 from trodestrack.models.ekf import EKFConfig, EKFState, update_step
+from trodestrack.models.sensors.camera_position import CameraPositionModel
 from trodestrack.models.state_layout import LAYOUT_2D_FULL
 
 
@@ -33,6 +34,23 @@ def initial_state():
     return EKFState(mean=mean, cov=cov)
 
 
+def make_camera_model(z_led1, z_led2, config, confidence=None):
+    """Helper to create camera model for single-frame test."""
+    z_led1_all = z_led1.reshape(1, 2)
+    z_led2_all = z_led2.reshape(1, 2)
+    conf_all = None if confidence is None else confidence.reshape(1, 4)
+
+    return CameraPositionModel(
+        led_distance=config.led_distance,
+        measurement_noise_base=config.measurement_noise_pos,
+        layout=LAYOUT_2D_FULL,
+        z_led1_all=z_led1_all,
+        z_led2_all=z_led2_all,
+        conf_all=conf_all,
+        confidence_clip_min=1e-2,
+    )
+
+
 def test_update_both_leds_valid(ekf_config, initial_state):
     """Test update when both LEDs are valid (4D measurement)."""
     # Both LEDs observed
@@ -40,8 +58,14 @@ def test_update_both_leds_valid(ekf_config, initial_state):
     z_led2 = jnp.array([1.02, 1.0])
     mask = True
 
+    camera_model = make_camera_model(z_led1, z_led2, ekf_config)
     state_upd, log_lik = update_step(
-        initial_state, z_led1, z_led2, mask, ekf_config, layout=LAYOUT_2D_FULL
+        initial_state,
+        camera_model,
+        frame_idx=0,
+        observation_is_valid=mask,
+        config=ekf_config,
+        layout=LAYOUT_2D_FULL,
     )
 
     # Position should be updated toward observation
@@ -64,8 +88,14 @@ def test_update_only_led1_valid(ekf_config, initial_state):
     z_led2 = jnp.array([jnp.nan, jnp.nan])
     mask = True
 
+    camera_model = make_camera_model(z_led1, z_led2, ekf_config)
     state_upd, log_lik = update_step(
-        initial_state, z_led1, z_led2, mask, ekf_config, layout=LAYOUT_2D_FULL
+        initial_state,
+        camera_model,
+        frame_idx=0,
+        observation_is_valid=mask,
+        config=ekf_config,
+        layout=LAYOUT_2D_FULL,
     )
 
     # Position should be updated toward LED1
@@ -87,8 +117,14 @@ def test_update_only_led2_valid(ekf_config, initial_state):
     z_led2 = jnp.array([1.02, 1.0])
     mask = True
 
+    camera_model = make_camera_model(z_led1, z_led2, ekf_config)
     state_upd, log_lik = update_step(
-        initial_state, z_led1, z_led2, mask, ekf_config, layout=LAYOUT_2D_FULL
+        initial_state,
+        camera_model,
+        frame_idx=0,
+        observation_is_valid=mask,
+        config=ekf_config,
+        layout=LAYOUT_2D_FULL,
     )
 
     # Position should be updated toward LED2
@@ -109,8 +145,14 @@ def test_update_no_leds_valid(ekf_config, initial_state):
     z_led2 = jnp.array([jnp.nan, jnp.nan])
     mask = True
 
+    camera_model = make_camera_model(z_led1, z_led2, ekf_config)
     state_upd, log_lik = update_step(
-        initial_state, z_led1, z_led2, mask, ekf_config, layout=LAYOUT_2D_FULL
+        initial_state,
+        camera_model,
+        frame_idx=0,
+        observation_is_valid=mask,
+        config=ekf_config,
+        layout=LAYOUT_2D_FULL,
     )
 
     # State should remain unchanged
@@ -128,8 +170,14 @@ def test_update_mask_false(ekf_config, initial_state):
     z_led2 = jnp.array([1.02, 1.0])
     mask = False
 
+    camera_model = make_camera_model(z_led1, z_led2, ekf_config)
     state_upd, log_lik = update_step(
-        initial_state, z_led1, z_led2, mask, ekf_config, layout=LAYOUT_2D_FULL
+        initial_state,
+        camera_model,
+        frame_idx=0,
+        observation_is_valid=mask,
+        config=ekf_config,
+        layout=LAYOUT_2D_FULL,
     )
 
     # State should remain unchanged
@@ -150,15 +198,27 @@ def test_update_covariance_reduction_dual_vs_single():
     # Dual-LED observation
     z_led1_dual = jnp.array([0.98, 1.0])
     z_led2_dual = jnp.array([1.02, 1.0])
+    camera_model_dual = make_camera_model(z_led1_dual, z_led2_dual, config)
     state_dual, _ = update_step(
-        state, z_led1_dual, z_led2_dual, True, config, layout=LAYOUT_2D_FULL
+        state,
+        camera_model_dual,
+        frame_idx=0,
+        observation_is_valid=True,
+        config=config,
+        layout=LAYOUT_2D_FULL,
     )
 
     # Single-LED observation (LED1 only)
     z_led1_single = jnp.array([1.0, 1.0])
     z_led2_single = jnp.array([jnp.nan, jnp.nan])
+    camera_model_single = make_camera_model(z_led1_single, z_led2_single, config)
     state_single, _ = update_step(
-        state, z_led1_single, z_led2_single, True, config, layout=LAYOUT_2D_FULL
+        state,
+        camera_model_single,
+        frame_idx=0,
+        observation_is_valid=True,
+        config=config,
+        layout=LAYOUT_2D_FULL,
     )
 
     # Dual-LED should reduce position covariance more
@@ -181,8 +241,14 @@ def test_update_no_extreme_artifacts(ekf_config, initial_state):
     z_led2 = jnp.array([jnp.nan, jnp.nan])
     mask = True
 
+    camera_model = make_camera_model(z_led1, z_led2, ekf_config)
     state_upd, _ = update_step(
-        initial_state, z_led1, z_led2, mask, ekf_config, layout=LAYOUT_2D_FULL
+        initial_state,
+        camera_model,
+        frame_idx=0,
+        observation_is_valid=mask,
+        config=ekf_config,
+        layout=LAYOUT_2D_FULL,
     )
 
     # Check that no covariance element is unreasonably large (< 1000, not 1e10)
