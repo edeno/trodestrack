@@ -16,7 +16,25 @@ from trodestrack.models.ekf import (
     update_step,
     wrap_angle,
 )
+from trodestrack.models.sensors.camera_position import CameraPositionModel
 from trodestrack.models.state_layout import LAYOUT_2D_FULL
+
+
+def make_camera_model(z_led1, z_led2, config, confidence=None):
+    """Helper to create camera model for single-frame test."""
+    z_led1_all = z_led1.reshape(1, 2)
+    z_led2_all = z_led2.reshape(1, 2)
+    conf_all = None if confidence is None else confidence.reshape(1, 4)
+
+    return CameraPositionModel(
+        led_distance=config.led_distance,
+        measurement_noise_base=config.measurement_noise_pos,
+        layout=LAYOUT_2D_FULL,
+        z_led1_all=z_led1_all,
+        z_led2_all=z_led2_all,
+        conf_all=conf_all,
+        confidence_clip_min=1e-2,
+    )
 
 
 def test_wrap_angle_function():
@@ -115,8 +133,14 @@ def test_update_step_wraps_heading():
     mask = True
 
     # Update
+    camera_model = make_camera_model(z_led1, z_led2, config)
     state_upd, log_lik = update_step(
-        state_pred, z_led1, z_led2, mask, config, layout=LAYOUT_2D_FULL
+        state_pred,
+        camera_model,
+        frame_idx=0,
+        observation_is_valid=mask,
+        config=config,
+        layout=LAYOUT_2D_FULL,
     )
 
     # Heading should be wrapped to (-π, π]
