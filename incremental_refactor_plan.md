@@ -1,177 +1,236 @@
-# Incremental Refactoring Plan for Extensible Filter Architecture
+# Trodestrack Incremental Refactor Plan
 
-This plan provides a **step-by-step refactor strategy** aligned with CLAUDE.md best practices. Each step is small, reviewable, and fully test-backed, improving maintainability and extensibility.
-
----
-
-## Phase 0 — Stabilize the Foundation
-
-### PR0: Packaging & CI Guardrails
-
-- Add `trodestrack/__main__.py` with `main()`; wire `[project.scripts].trodestrack`.
-- Unify dependencies (`uv`).
-- Pin compatible JAX/NumPy versions.
-- Add `pytest.ini` with skip marks (`slow`, `benchmark`).
-
-**DoD:** CLI runs locally; CI green.
+This plan defines focused, incremental changes to modernize the filter architecture of Trodestrack.
+It follows **CLAUDE.md** conventions: small PRs, typed APIs, shape-stable JAX code, and strong test parity.
+Priority: **2D pose + 3D IMU** readiness. TTL/RFID sensors deferred to a later milestone.
 
 ---
 
-## Phase 1 — Shared Primitives (DRY Foundation)
+## Guiding Principles
 
-### PR1: Centralize Gating, Confidence, and Angle Wrap
-
-- Implement in `filter_common.py`:
-  - `confidence_to_R(...)`
-  - `mahalanobis_gate(...)`
-  - `wrap_angle(...)`
-- Replace duplicates in EKF/UKF.
-
-**DoD:** EKF/UKF tests pass; functions typed with NumPy docstrings.
+- **Zero behavior drift** until explicitly allowed (numerical parity enforced).
+- **Static shapes** for JAX (no ragged measurement vectors).
+- **Explicit, typed interfaces** using `Protocol` and dataclasses.
+- **One concern per PR**, each ≤ 400 LOC.
+- **Names that read like prose** (`state_mean`, `state_cov`, `meas_pred`, `jacobian_H`, `dt_seconds`).
 
 ---
 
-## Phase 2 — Measurement Model Interface
+## PR0 — Housekeeping & Guardrails
 
-### PR2: Introduce `MeasurementModel` Protocol
+**Goal:** ensure stable diffs and reproducible results.
 
-- Add `sensors/base.py` defining a typed `MeasurementModel` interface.
-- Move existing camera logic into `sensors/camera_position.py`.
+**Changes**
 
-**DoD:** Camera code modularized; filters unchanged.
+- `pyproject.toml`: add black, isort, ruff, mypy strict mode for `src/trodestrack/models`.
+- `src/trodestrack/__init__.py`: expose public API via `__all__`.
+- Add `scripts/check_parity.sh` to run regression suites.
 
----
+**Acceptance**
 
-## Phase 3 — Sensor Registry and Fusion Tick
-
-### PR3: Sensor Registry + Tick Builder
-
-- Add `SensorRegistry` and `Tick` dataclasses.
-- Centralize data alignment (IMU, camera, etc.).
-
-**DoD:** Existing runtime compatible.
+- All tests green.
+- No mypy or ruff violations.
 
 ---
 
-## Phase 4 — Unified EKF Update
+## PR1 — MeasurementModel Protocol (Camera + Heading)
 
-### PR4: `update_generic()` with Joseph Form
+**Goal:** introduce a minimal, typed interface for all sensor measurements.
+No functional change yet — wraps existing helpers.
 
-- Move EKF update math into one projected Joseph-form function.
-- Factor once (`S`, `L`, `nis`, `K`), reuse results.
+**New files**
 
-**DoD:** Numerical parity; PSD preserved.
+```
+src/trodestrack/models/sensors/protocols.py
+src/trodestrack/models/sensors/camera_position.py
+src/trodestrack/models/sensors/heading_pseudo.py
+```
 
----
+**Protocol**
 
-## Phase 5 — UKF Parity
+```python
+@runtime_checkable
+class MeasurementModel(Protocol):
+    @property
+    def meas_dim(self) -> int: ...
+    def predict(self, state_mean: jnp.ndarray) -> jnp.ndarray: ...
+    def jacobian(self, state_mean: jnp.ndarray) -> jnp.ndarray | None: ...
+    def meas_cov(self, frame_idx: int) -> jnp.ndarray: ...
+    def innovation(self, frame_idx: int, meas_pred: jnp.ndarray) -> jnp.ndarray: ...
+    def subspace(self, frame_idx: int) -> tuple[bool, bool, bool, jnp.ndarray]: ...
+```
 
-### PR5: UKF Uses Same Update Primitive
+**Acceptance**
 
-- Replace redundant math; add `projected_joseph()`.
-- Fix-size projections for static JIT shape.
-
-**DoD:** EKF/UKF parity; PSD-safe UKF.
-
----
-
-## Phase 6 — Performance Optimizations
-
-### PR6: JIT Scan + Donation
-
-- Fuse predict+update in a single `jit(lax.scan)`.
-- Donate large buffers (`x`, `P`).
-- Replace Python control with `lax.cond`.
-
-**DoD:** ~30% faster steady-state; fewer recompiles.
-
----
-
-## Phase 7 — ZUPT as Sensor
-
-### PR7: Port ZUPT to `MeasurementModel`
-
-- Implement `sensors/zupt.py`.
-- IMU-only mode supported via config.
-
-**DoD:** Identical ZUPT behavior; IMU-only supported.
+- Parity with existing EKF/UKF outputs (≤1e‑7 mean, ≤1e‑6 cov diag).
+- Unit tests validate LED validity → projector consistency.
 
 ---
 
-## Phase 8 — TTL/RFID Integration
+## PR2 — Generic Projected Update Primitives
 
-### PR8: Add Sparse Sensors
+**Goal:** unify duplicated EKF/UKF lifted update logic.
 
-- Add `sensors/ttl.py` and `sensors/rfid.py`.
-- Sparse event-based models.
+**New module**
 
-**DoD:** Examples + basic tests; disabled by default.
+```
+src/trodestrack/models/filter_update.py
+```
 
----
+**Functions**
 
-## Phase 9 — Multi-Camera Support
+```python
+def ekf_projected_update(...):  # Joseph form, 4D→2D projection
+def ukf_projected_update(...):  # reconstruct covariance from sigma points
+```
 
-### PR9: Multiple Camera Instances
+**Acceptance**
 
-- Support multiple `CameraPositionModel`s.
-- Fuse sequential updates in each tick.
-
-**DoD:** Multi-camera accuracy ≥ single camera.
-
----
-
-## Phase 10 — Smoother & IEKS Improvements
-
-### PR10: RTS / IEKS Optimizations
-
-- Replace inverses with triangular solves.
-- Add `jax.checkpoint()` and chunked smoothing.
-
-**DoD:** Memory 40% lower; equivalent accuracy.
+- Full numerical parity on NIS/loglikelihood and state updates across all LED modes.
+- Benchmarks regress <5%.
 
 ---
 
-## Phase 11 — Layout v2 and 3D Hooks
+## PR3 — Integrate MeasurementModel and Generic Updates
 
-### PR11: Extend `StateLayout` for 3D
+**Goal:** wire EKF/UKF to use the new interface and updates.
 
-- Add explicit indices and guards for unsupported modes.
+**Changes**
 
-**DoD:** 3D-ready API; no silent misuse.
+- `ekf.py` / `ukf.py`: replace inlined camera/heading logic with model calls.
+- Pass `layout` explicitly.
+- Keep public signatures identical.
 
----
+**Acceptance**
 
-## Phase 12 — CLI & Documentation
-
-### PR12: CLI Commands + README Refresh
-
-- Add `trodestrack filter|simulate|report` subcommands.
-- Update install matrix, configs, and examples.
-
-**DoD:** End-to-end pipeline runnable via CLI.
+- All regression and filter tests pass within tolerances.
+- Throughput unchanged (±5%).
 
 ---
 
-## Rollout Order
+## PR4 — ZUPT as a First-Class Sensor
 
-1. PR0 → PR1 → PR2 (no behavior changes)
-2. PR3 (structural only)
-3. PR4 → PR5 (filter refactors)
-4. PR6 (perf JIT/scan)
-5. PR7–PR9 (sensors)
-6. PR10–PR12 (smoother, layout, CLI)
+**Goal:** unify ZUPT handling with the new measurement system.
+
+**Changes**
+
+- `src/trodestrack/models/sensors/zupt.py` implements `MeasurementModel`.
+- Runtime builds `active_models` per frame: `[camera, heading?, zupt?]`.
+
+**Acceptance**
+
+- Same state trajectories when stationary windows occur.
+- Off → identical to current behavior.
+
+---
+
+## PR5 — 2D Pose + 3D IMU (Gravity-Aware Dynamics)
+
+**Goal:** extend process model to handle 3D IMU while keeping 2D position estimate.
+
+**Changes**
+
+- **filter_common.py**: add
+
+  ```python
+  def rotate_body_accel_to_world(accel_body, yaw_heading) -> jnp.ndarray
+  def gravity_compensate(accel_world, g=9.81) -> jnp.ndarray
+  ```
+
+- **process_noise.py**: update `assemble_Q()` to consume all 3 accel axes.
+- **state_layout.py**: clarify indices for velocity, accel bias (3D).
+- Update `dynamics_function()` to use new helpers.
+
+**Acceptance**
+
+- `tests/sim/test_rat_imu_gravity.py` passes with improved drift and gravity magnitude ≈9.81 m/s².
+- No API or layout breakage.
 
 ---
 
-## CLAUDE.md Alignment Checklist
+## PR6 — Performance Tighten (JIT + Donation)
 
-✅ Typed public APIs
-✅ ≤20-line functions
-✅ NumPy docstrings with shapes/units
-✅ Deterministic PR scope
-✅ Unit tests per module
-✅ No mutable defaults
-✅ `pathlib.Path`, `logging`, `warnings`
-✅ CI-safe, lint/format on commit
+**Goal:** optimize scan performance and memory.
+
+**Changes**
+
+- Wrap main run functions in `jax.jit(static_argnames=("layout",))`.
+- Use `donate_argnums` for large arrays.
+- Remove Python `if` branches inside JAX scans; use projection masking.
+
+**Acceptance**
+
+- ≥20% speedup or ≤ same time with lower peak memory.
+- No new recompilations.
 
 ---
+
+## PR7 — CLI & Docs
+
+**Goal:** expose new behavior and document it.
+
+**Changes**
+
+- CLI flags for enabling heading/ZUPT sensors.
+- Update `README.md`, `TUNING.md`, `TROUBLESHOOTING.md`.
+
+**Acceptance**
+
+- CLI tests green.
+- Docs accurately reflect 2D+3D IMU readiness.
+
+---
+
+## Deferred: TTL/RFID Event Sensors
+
+These will reuse the `MeasurementModel` protocol and the same update primitives, but are **not part of this milestone**.
+
+---
+
+## Variable Naming Guidelines
+
+| Concept | Preferred name |
+|----------|----------------|
+| State mean | `state_mean` |
+| State covariance | `state_cov` |
+| Dynamics step | `dynamics_fn(state_mean, control, dt_seconds, layout)` |
+| Measurement prediction | `meas_pred` |
+| Innovation | `innovation` |
+| Measurement covariance | `meas_cov` |
+| Jacobian | `jacobian_H` |
+| LED projection | `projector_M2` |
+| Frame index | `frame_idx` |
+| Time step | `dt_seconds` |
+
+---
+
+## Test Plan Summary
+
+| PR | Key Tests | Criteria |
+|----|------------|----------|
+| PR1 | LED validity / projector | parity ≤1e‑7 mean |
+| PR2 | EKF/UKF update parity | same NIS/loglik |
+| PR3 | Integration | full regression parity |
+| PR4 | ZUPT toggle | matches old behavior |
+| PR5 | 3D IMU gravity | reduced drift, correct g |
+| PR6 | Performance | ≥20% faster |
+| PR7 | CLI/docs | correct sensor toggles |
+
+---
+
+## Risk & Mitigation
+
+- **JIT recompiles:** keep measurement shapes static.
+- **Scope creep:** 3D orientation deferred; focus on 2D pose + 3D IMU.
+- **Regression:** parity tests guard every PR.
+
+---
+
+## Implementation Order
+
+1. PR0 → PR1 → PR2 → PR3 (core refactor group)
+2. PR4 (ZUPT integration)
+3. PR5 (2D pose + 3D IMU — highest priority)
+4. PR6 (performance)
+5. PR7 (CLI/docs)
+6. TTL/RFID deferred

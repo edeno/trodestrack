@@ -7,6 +7,7 @@ Your workflow MUST be:
 1. First, read these files IN ORDER:
    - CLAUDE.md (implementation guide)
    - PRD.md (product requirements)
+   - incremental_refactor_plan.md (the plan)
    - TASKS.md (current tasks)
 
 2. Find the FIRST unchecked [ ] task in TASKS.md

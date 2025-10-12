@@ -1,373 +1,207 @@
-# TASKS.md
+# TASKS.md — Refactor Implementation Milestones
 
-**NOTE:** All P0 blockers resolved! Ready for Milestone 4.
-
-- ✅ P0.1: SI Unit Standardization (commit 99c70cb)
-- ✅ P0.2: Generalized χ² Envelopes (commit ab0c75d)
-- ✅ P0.3: UKF Heading Measurement (commit cb5fa85)
-- ✅ P0.4: State-Dimension Generalization in Smoothers (commit 51067f0)
-- ✅ P0.5: Linalg Stability & Joseph Form (commit 88e5ac9)
-- ✅ P0.6: Fix Config Mutation (LED spacing inference) (commit 6b8f8c1)
-- ✅ P0.7: Fix Test Defects & Flakes (resolved)
-- ✅ **CR-1: Fix JIT compatibility test (2025-10-10)**
-- ✅ **CR-2: Fix UKF partial-observation covariance bug (2025-10-10)**
+> Legend: [ ] = todo, [](auto) = will be validated by CI, **DoD** = Definition of Done
 
 ---
 
-## 🧱 Milestone 1 — Simulation Foundation (Weeks 1–2)
+## Milestone M0 — Housekeeping & Guardrails (PR0)
 
-**Goal:** Establish and validate the simulation suite (Tiers 0–3) as the test bed for all filter work.
+**Objective:** Stabilize diffs, enforce style, and ensure reproducibility without logic changes.
 
-### ✅ Core Tasks
+- [ ] Add/confirm toolchain
+  - [ ] Configure `ruff`, `black`, `isort`, `mypy --strict` for `src/trodestrack/models/**`
+  - [ ] Pre-commit hooks (format, lint, type-check)
+- [ ] Public API surface
+  - [ ] Add `__all__` to `src/trodestrack/__init__.py`
+- [ ] Parity helper
+  - [ ] Add `scripts/check_parity.sh` to run regression/benchmarks locally
+- [](auto) CI: style, type, unit suites
 
-- [x] Implement and validate analytic simulations (`sim/simple.py`)
-  - [x] Stationary, constant velocity, and circular motion scenarios
-  - [x] Return unified `SimOut` schema (`x, y, vx, vy, θ, imu, camera`)
-- [x] Implement realistic IMU simulation (`sim/rat_imu.py`)
-  - [x] Add tilt, drag, bias random walks, and OU process for motion
-  - [x] Add LED occlusions, swaps, and confidence scaling
-- [x] Build reusable utilities (`sim/utils.py`)
-  - [x] Random seeding helpers
-  - [x] IMU pre-integration math (Δθ, Δv)
-  - [x] TypedDicts for simulation output
+**DoD**
 
-### 🧪 Testing
-
-- [x] Create `tests/sim/test_simple.py` – analytic scenarios (36 tests passing)
-- [x] Create `tests/sim/test_rat_imu_gravity.py` – gravity and tilt tests (9 tests passing)
-- [x] Create `tests/sim/test_rat_imu.py` – OU dynamics, noise, dropouts, full scenarios (36 tests passing)
-- [x] Add property tests for deterministic seeds (9 Hypothesis-based tests passing)
-- [x] Verify all Tiers 0–3 pass NEES & RMSE bounds from PRD (10 tests passing)
-
-### 📊 Deliverables
-
-- ✅ Synthetic data validated (≤2 cm RMSE on analytic sims)
-- ✅ Tier 0–3 fully functional and reproducible
-- ✅ QA metrics module implemented (qa/metrics.py)
-- ✅ Foundation ready for EKF development
+- [ ] All existing tests pass unchanged
+- [ ] `ruff`, `mypy`, `black --check` clean
 
 ---
 
-## 🧩 Milestone 2 — Filter Implementation (Weeks 3–5)
+## Milestone M1 — Minimal MeasurementModel Protocol (PR1)
 
-**Goal:** Implement core state-space filters and smoother in JAX.
+**Objective:** Introduce a tiny sensor interface while keeping behavior identical.
 
-### 🚀 EKF / UKF Development
+- [ ] Create:
+  - [ ] `src/trodestrack/models/sensors/protocols.py` with `MeasurementModel` `Protocol`
+  - [ ] `.../sensors/camera_position.py` that wraps current camera helpers
+  - [ ] `.../sensors/heading_pseudo.py` that wraps current heading/LED helpers
+- [ ] Unit tests:
+  - [ ] LED validity patterns → correct `projector_M2` and flags
+  - [ ] Confidence scaling → correct `R` per frame
+- [](auto) Parity tests across EKF/UKF (means ≤ 1e-7, cov diag ≤ 1e-6)
 
-- [x] `models/ekf.py`
-  - [x] Implement prediction step with IMU pre-integration
-  - [x] Implement measurement update with dual-LED positions
-  - [x] Augment state for IMU biases
-  - [x] Add IEKF (Iterated EKF) for improved nonlinear handling
-  - [x] Implement marginal log-likelihood computation
-- [x] `viz/video.py` + `viz/components.py`
-  - [x] Comprehensive filter diagnostics visualization
-  - [x] State error panels (velocity, heading vs PRD targets)
-  - [x] Bias estimate tracking (gyro, accel biases)
-  - [x] NEES panel with chi-squared bounds
-  - [x] Innovation/residual time series
-- [x] `models/ukf.py` [CODE_REVIEWED: 2025-10-09]
-  - [x] Implement sigma-point prediction
-  - [x] Unscented transform for nonlinear measurement updates
-  - [x] Compare UKF and EKF accuracy on Tier 1–2 simulations
-- [x] `runtime/offline.py`
-  - [x] Implement RTS smoother with cached Fₖ, Qₖ
-  - [x] Add optional sigma-point smoother
+**DoD**
 
-### 🧪 Testing
-
-- [x] `tests/filters/test_ekf_analytic.py`
-  - [x] Stationary: reject IMU drift
-  - [x] Constant velocity: maintain steady covariance
-  - [x] Circular: converge gyro bias
-- [x] `examples/04_ekf_scenarios_video.py`
-  - [x] Diagnostic videos for Tiers 0-2 (stationary, const-vel, circular)
-  - [x] Extended circular (20s) for bias convergence demo
-- [x] `examples/05_ekf_rat_imu_video.py`
-  - [x] Comprehensive diagnostic video for Tier 3
-  - [x] Innovation statistics console output
-  - [x] Interpolated truth (angle-aware for heading)
-- [x] `tests/filters/test_ukf_accuracy.py`
-  - [x] Compare EKF/UKF consistency and RMSE on OU motion
-  - [x] Stationary, constant velocity, circular scenarios
-  - [x] NEES consistency checks
-  - [x] Marginal log-likelihood computation
-- [x] `tests/filters/test_bias_observability.py`
-  - [x] Stationary bias unobservable
-  - [x] Circular bias converges
-  - [x] Straight-line lateral bias unobservable
-- [x] `tests/filters/test_ekf_heading_measurement.py` [CODE_REVIEWED: 2025-10-09]
-  - [x] Heading pseudo-measurement from dual LEDs
-  - [x] Auto-detection of LED spacing
-  - [x] Adaptive noise scaling with baseline geometry
-  - [x] Spacing gating for invalid observations
-  - [x] Single LED graceful degradation
-  - [x] JAX JIT compatibility
-
-### 📊 Deliverables
-
-- ✅ Deterministic EKF that passes analytic tests
-- ✅ Comprehensive diagnostic visualization suite
-- ✅ Filter performance validated on all simulation tiers
-- ✅ UKF implementation complete with sigma-point transforms
-- ✅ UKF vs EKF comparison tests passing
-- ✅ RTS smoother implemented (EKF and UKF)
-- ✅ Smoother tests validate covariance reduction and determinism
+- [ ] No changes to EKF/UKF public API
+- [ ] All parity thresholds satisfied
 
 ---
 
-## 🧠 Milestone 3 — Robustness & Sensor Edge Cases (Weeks 6–7)
+## Milestone M2 — Generic Projected Update Primitives (PR2)
 
-**Goal:** Stress-test the filter with realistic sensor artifacts and physical constraints.
+**Objective:** Factor out duplicated lifted update math for EKF and UKF.
 
-### 🧩 Simulation Enhancements
+- [ ] Add `src/trodestrack/models/filter_update.py`
+  - [ ] Implement `ekf_projected_update(...)` (Joseph form, 4D→2D projection inside)
+  - [ ] Implement `ukf_projected_update(...)` (sigma-point cov reconstruction + projection)
+  - [ ] Reuse existing PSD solves / loglik / NIS helpers
+- [ ] Unit tests:
+  - [ ] Param sweep over (both LEDs, only LED1, only LED2) + confidence grid
+  - [ ] Compare NIS/loglik/state deltas vs baseline implementation
 
-- [x] Add arena boundaries (`arena_bounds`) with soft reflections
-  - **NOTE**: Already implemented in `rat_imu.py` (lines 510-522)
-  - Inelastic reflections with coefficient of restitution = 0.5
-  - Tests added in `tests/sim/test_arena_physics.py` (13 tests passing)
-- [x] Add anisotropic drag (forward ≠ lateral)
-  - Implemented in `rat_imu.py` (lines 215-217, 336-358, 516-531)
-  - Body-frame drag: `drag_fwd` (streamlined) vs `drag_lat` (sideways)
-  - Backward compatible with legacy `vel_drag` parameter
-  - Tests added in `tests/sim/test_anisotropic_drag.py` (13 tests passing)
-- [x] Add optional wall reflection probability for LED artifacts
-  - Implemented in `rat_imu.py` (lines 191-192, 766-834)
-  - Config parameters: `led_wall_reflection_prob` and `led_wall_reflection_distance`
-  - Reflections mirror LEDs across nearest wall when rat is near boundaries
-  - Tests added in `tests/sim/test_led_wall_reflections.py` (16 tests passing)
-  - New fields in SimOut: `led_reflection_applied`, `led1_truth_cam`, `led2_truth_cam`, `swap_applied`
-- [x] Add persistent LED swaps (event-based, not per-frame)
+**DoD**
 
-### ⚙️ Filter Robustness
-
-- [x] Add Mahalanobis gating for outlier rejection
-  - **NOTE**: Already implemented in EKF/UKF (P0 improvements from REVIEW.md)
-- [x] Add adaptive measurement noise scaling based on confidence
-  - **NOTE**: Already implemented in EKF/UKF (P0 improvements from REVIEW.md)
-- [x] Implement zero-velocity update (stationary detection)
-  - [x] ZUPT configuration parameters (enable_zupt, velocity_threshold, measurement_noise)
-  - [x] Sequential update after heading measurement (JAX-friendly large-R gating)
-  - [x] Test suite with 9 tests (stationary, moving, dropout, JAX compatibility)
-  - [x] Code reviewed and approved (formatting, docs enhanced)
-- [x] Add covariance regularization (ensure PD matrix)
-  - **NOTE**: Joseph form covariance updates implemented (P0.5 from REVIEW.md)
-
-### 🧪 Tests
-
-- [x] `tests/sim/test_arena_physics.py`
-  - [x] Rat stays in bounds (multiple arena sizes)
-  - [x] Wall collisions reverse velocity
-  - [x] Energy dissipation (coefficient of restitution = 0.5)
-  - [x] Corner collisions affect both axes
-  - [x] No tunneling through walls
-  - [x] Trajectory continuity preserved
-  - [x] Deterministic with same seed
-- [x] `tests/filters/test_robustness.py`
-  - [x] Out-of-bounds measurements rejected
-  - [x] Swap & dropout handling stable
-  - [x] Bias estimation stable across occlusions
-
-### 📊 Deliverables
-
-- Filter handles occlusions, swaps, and reflections
-- Arena constraints prevent unrealistic motion
-- Simulation & filter ready for full PRD validation
+- [ ] Bit-for-bit parity on state mean/cov, NIS, log-likelihood
+- [ ] Benchmarks: ≤ 5% regression
 
 ---
 
-## 🔧 Milestone 3.5 — Missing/Partial PRD Features
+## Milestone M3 — Wire EKF/UKF to Models + Generic Updates (PR3)
 
-**Goal:** Complete missing or partially-implemented PRD requirements before integration testing.
+**Objective:** Make EKF/UKF call the protocol and common updates; keep signatures stable.
 
-### 🚨 High Priority (PRD Blockers)
+- [ ] In `ekf.py` / `ukf.py`:
+  - [ ] Replace inlined camera/heading logic with `MeasurementModel` calls
+  - [ ] Pass `layout` explicitly from callers (no hidden globals)
+  - [ ] Ensure shape stability (always compute 4D camera space; project internally)
+- [ ] Integration tests:
+  - [ ] All `tests/filters/*` and `tests/regression/*` pass with parity thresholds
+  - [ ] `tests/benchmark/test_throughput.py` regression < 5%
 
-- [x] **Mahalanobis Gating (Outlier Rejection)** - `models/ekf.py`, `models/ukf.py`
-  - [x] Implement proper k-DOF χ² test (k=2 or 4 depending on LED availability)
-  - [x] Add NIS threshold computation (χ²(k, 0.95))
-  - [x] Add JIT-safe reject branch (`lax.cond` to skip update when NIS > threshold)
-  - [x] Proper 2D/4D subspace gating (use lifted operator)
-  - [x] **Impact:** Outliers (reflections, swaps) rejected before corrupting state
-  - [x] **PRD Ref:** Section 13 - "Mahalanobis gating for outlier rejection"
-  - [x] **Tests:** Added dedicated gating suites (`tests/filters/test_ekf_gating.py`, `tests/filters/test_ukf_gating.py`)
+**DoD**
 
-- [x] **ZUPT (Zero-Velocity Update)** - `models/ekf.py`, `models/ukf.py`
-  - [x] Implement stationary detection (velocity threshold check)
-  - [x] Add velocity pseudo-measurement (zero-velocity constraint)
-  - [x] Add config parameters:
-    - [x] `enable_zupt: bool = False`
-    - [x] `zupt_velocity_threshold: float = 0.05`  # m/s
-    - [x] `zupt_measurement_noise: float = 0.01**2`  # (1 cm/s)²
-  - [x] Sequential update after heading measurement
-  - [x] **Impact:** Worse stabilization during stops, drift accumulation at stationary periods
-  - [x] **PRD Ref:** Section 9 - "Zero-velocity constraints during stationary periods"
-  - [x] **Tests:** Added `tests/filters/test_zupt.py` coverage (stationary, moving, dropout scenarios)
-
-- [x] **Blackout-Aware Process Noise Adaptation** - `models/ekf.py`, `models/ukf.py`
-  - [x] Detect vision dropout (`mask_cam=False`)
-  - [x] Increase Q on position/velocity during dropout (configurable multiplier)
-  - [x] Freeze or slow bias random walk during dropout (configurable multiplier)
-  - [x] Add config parameters:
-    - [x] `adaptive_q_during_dropout: bool = True`
-    - [x] `dropout_q_pos_multiplier: float = 10.0`
-    - [x] `dropout_q_vel_multiplier: float = 10.0`
-    - [x] `dropout_q_bias_multiplier: float = 0.1`
-  - [x] **Impact:** Over-confident or over-diffusive drift through dropouts, harder to meet PRD 5s blackout bound
-  - [x] **PRD Ref:** Section 12 - "Adaptive Q during vision loss"
-  - [x] **Tests:** Added `test_ekf_adaptive_process_noise_scales_dropout_covariance` in `tests/filters/test_ekf_analytic.py`
-
-### ⚙️ Medium Priority (Robustness Polish)
-
-- [x] **Heading Measurement Robustness** - `models/ekf.py`
-  - [x] Add LED spacing tolerance gating
-    - [x] Reject heading update when spacing deviates too much from expected
-    - [x] Use `led_distance_tolerance` parameter (already exists in config)
-  - [x] Implement adaptive heading noise
-    - [x] Increase R when observed LED spacing is short/poor
-    - [x] Scale based on geometry quality metric
-  - [x] Respect camera dropout mask to block stale heading updates
-  - [x] **Impact:** Over-trusted heading during near-collinear LED geometry or partial occlusions
-  - [x] **PRD Ref:** Section 8 - "Heading constraints with LED spacing validation"
-  - [x] **Status:** Basic heading update exists in EKF, needs robustness features
-  - [x] **Tests:** Enhance `tests/filters/test_ekf_heading_measurement.py`
-
-- [x] **UKF Heading Pseudo-Measurement** - `models/ukf.py`
-  - [x] Port EKF's `update_heading()` to UKF
-  - [x] Add `use_heading_measurement` config parameter
-  - [x] Ensure parity with EKF heading update logic
-  - [x] **Impact:** UKF doesn't benefit from heading constraints
-  - [x] **Status:** EKF has this, UKF missing
-  - [x] **Tests:** Add to `tests/filters/test_ukf_accuracy.py`
-
-- [x] **Shared Filter Config/State Refactor** - `models/ekf.py`, `models/ukf.py`
-  - [x] Extract common config/state dataclasses usable by EKF and UKF
-  - [x] Move shared helpers (init, ZUPT, gating) into neutral module
-  - [x] Update both filters to consume shared structures without casting
-  - [x] **Impact:** Reduces duplication, keeps filter behavior aligned as features expand
-  - [x] **Tests:** Added `tests/models/test_filter_common.py`; reran EKF/UKF suites
-
-### 📊 Summary
-
-**Blockers for M4:**
-
-- Mahalanobis gating (required for robustness tests)
-- ZUPT (required for stationary drift bound)
-- Blackout-aware Q (required for 5s dropout bound)
-
-**Polish for Production:**
-
-- Heading robustness enhancements
-- UKF heading measurement parity
+- [ ] Public signatures unchanged, parity green, throughput steady
 
 ---
 
-## ⚙️ Milestone 4 — Integration & QA (Week 8)
+## Milestone M4 — ZUPT as First-Class Sensor (PR4)
 
-**Goal:** Achieve all PRD acceptance criteria with full-session tests.
+**Objective:** Unify ZUPT handling with the sensor interface.
 
-### 🧪 Integration Tests
+- [ ] Create `.../sensors/zupt.py` implementing `MeasurementModel`
+  - [ ] `meas_dim` equals velocity subspace (2 for 2D)
+  - [ ] `predict()` selects velocity; `jacobian()` = velocity selector
+  - [ ] `meas_cov()` wraps existing ZUPT heuristics
+  - [ ] `innovation()` = `-pred`
+  - [ ] `subspace()` returns identity (no projection needed)
+- [ ] Runtime wiring:
+  - [ ] Build `active_models` per frame → `[camera, heading? , zupt?]`
+- [ ] Tests:
+  - [ ] Stationary windows reduce velocity residuals vs baseline
+  - [ ] Turning off ZUPT reproduces old trajectories
 
-- [x] `tests/integration/test_prd_session.py`
-  - [x] 30 min session RMSE ≤ 2 cm, velocity ≤ 10 cm/s, heading ≤ 7°
-  - [x] 5 s dropout drift ≤ 15 cm (xfail: unrealistic requirement documented)
-  - [x] IMU-only vs Vision-only vs Fusion ablations
-  - [x] NEES consistency check (95% CI)
-  - [x] Smoother performance on long session
-- [x] `tests/benchmark/test_throughput.py`
-  - [x] Offline smoother ≥ 10× realtime (CPU) - **Achieved: 45.3× realtime**
-  - [x] Online EKF latency ≤ 33 ms (CPU) - **Achieved: 0.39 ms per frame**
+**DoD**
 
-### 📊 QA & Visualization
-
-- [x] `qa/metrics.py` – RMSE, NEES, NIS computations
-  - [x] Comprehensive test suite (33 tests, 92% coverage)
-- [x] `qa/plots.py` – residuals, NEES histograms, covariance ellipses **[CODE_REVIEWED: 2025-10-10]**
-  - [x] Comprehensive test suite (21 tests, all passing)
-  - [x] All functions exported in qa/**init**.py
-  - [x] Type hints complete (mypy clean)
-  - [x] Code quality checks passed (ruff, black)
-- [x] `qa/report.py` – summary PDF of metrics, configuration, and plots **[CODE_REVIEWED: 2025-10-10]**
-  - [x] Comprehensive test suite (7 tests, all passing)
-  - [x] Multi-page PDF generation with matplotlib PdfPages
-  - [x] Summary statistics with PRD thresholds
-  - [x] Time series plots (position/velocity error, trajectory)
-  - [x] Consistency checks (NEES/NIS histograms)
-  - [x] Configuration display
-  - [x] Exported in qa/**init**.py
-  - [x] Type hints complete (mypy clean)
-  - [x] Code quality checks passed (ruff, black)
-- [x] Add CLI command: **[COMPLETE: 2025-10-11]**
-
-  ```bash
-  trodestrack report --run run1/ --pdf report.pdf
-  ```
-
-  - [x] Main entry point (`src/trodestrack/__init__.py::main()`)
-  - [x] Report subcommand (`src/trodestrack/cli/report.py`)
-  - [x] Comprehensive test suite (`tests/cli/test_report_command.py`, 4 tests passing)
-  - [x] Shape validation for input arrays
-  - [x] Warning for missing measurement_dim.txt
-  - [x] Code reviewed and approved with quality fixes
-
-### 📈 Deliverables
-
-- Filters meet all PRD quantitative criteria
-- Benchmarks documented
-- Full QA pipeline with reproducible artifacts
+- [ ] ZUPT on/off toggles without side-effects; parity when off
 
 ---
 
-## 🧰 Milestone 5 — Packaging, Docs & Release (Week 9)
+## Milestone M5 — 2D Pose + 3D IMU (Gravity-Aware) — **Priority** (PR5)
 
-**Goal:** Deliver a clean, reproducible, and user-facing package.
+**Objective:** Support 3D IMU inputs while keeping a 2D state (x, y, vx, vy, θ) via improved process model.
 
-### 🧭 Documentation
+- [ ] `filter_common.py`:
+  - [ ] Add `rotate_body_accel_to_world(accel_body, yaw_heading)`
+  - [ ] Add `gravity_compensate(accel_world, g=9.81)`
+- [ ] `process_noise.py`:
+  - [ ] Update `assemble_Q()` to consume all 3 accel axes for noise energy
+  - [ ] Ensure blackout-aware diffusion and bias freezing still honored
+- [ ] `state_layout.py`:
+  - [ ] Verify/clarify indices for velocity and 3D accel bias
+- [ ] Dynamics:
+  - [ ] Update `dynamics_function()` to use rotation + gravity compensation
+  - [ ] Preserve API and shape stability
+- [ ] Tests:
+  - [ ] `tests/sim/test_rat_imu_gravity.py` validates gravity magnitude ≈ 9.81 m/s²
+  - [ ] Synthetic occlusion scenarios: reduced drift vs baseline
+  - [ ] Acceptance thresholds from PRD met or improved
 
-- [x] **README: Quickstart with synthetic + example dataset** (2025-10-11)
-  - [x] Updated Quick Start section with progressive 5-step workflow
-  - [x] Added Python API examples (simulation, filtering, QA reports)
-  - [x] Updated Project Status to reflect M4 completion
-  - [x] Reorganized documentation links (User vs Developer docs)
-- [x] **Tuning Guide with NEES-based diagnostics** (2025-10-11)
-  - [x] Complete parameter reference with defaults
-  - [x] NEES interpretation and consistency checks
-  - [x] Diagnostic workflow (5-step process)
-  - [x] Common tuning scenarios (occlusions, jitter, drift, etc.)
-  - [x] Advanced features (gating, ZUPT, adaptive Q, IEKF)
-  - [x] Quick reference table for common issues
-- [x] **Troubleshooting Guide (common filter failures)** (2025-10-11)
-  - [x] Quick diagnostic checklist (data sanity, config, QA report)
-  - [x] Symptom index with jump links
-  - [x] 11 common problems with diagnostic steps and solutions
-  - [x] Data quality issues (LED detection, IMU saturation, time sync)
-  - [x] Advanced debugging (visualization, integration tests, EKF vs UKF)
-  - [x] Template for minimal reproducible examples
-- [x] **Examples folder refactored with comprehensive pedagogical demos** (2025-10-11)
-  - [x] `examples/03_ekf_basic_scenarios.py` – EKF fundamentals (stationary, const-vel, circular)
-  - [x] `examples/04_ukf_basic_scenarios.py` – UKF vs EKF comparison with metrics
-  - [x] `examples/05_ekf_with_dropouts.py` – EKF robustness (10%, 20%, 30% dropout)
-  - [x] `examples/06_ukf_with_dropouts.py` – UKF vs EKF under stress
-  - [x] `examples/README.md` – Comprehensive learning guide with progressive path
-  - [x] All examples save outputs to examples/ folder (proper organization)
-  - [x] 5,395 lines of pedagogical code with detailed explanations
+**DoD**
 
-### 🧱 Packaging
-
-- [x] Ensure `pyproject.toml` entry point → `trodestrack:main` (already configured)
-- [x] Implement CLI subcommands: **[COMPLETE: 2025-10-11]**
-  - [x] `trodestrack smooth` (src/trodestrack/cli/smooth.py, 5 tests passing)
-  - [x] `trodestrack online` (src/trodestrack/cli/online.py, 5 tests passing)
-  - [x] `trodestrack report` (already done - see M4)
-- [x] Verify reproducibility: **[VERIFIED: 2025-10-11]**
-  - [x] Deterministic RNG seeding (all sim functions accept `seed` parameter)
-  - [x] Version pinning via `uv.lock` (253KB lock file present)
-  - [x] CI: mypy + ruff + pytest (.github/workflows/ci.yml includes all checks)
-  - [x] Reproducibility tests (tests/test_reproducibility.py, 14 tests passing)
-
-### 📦 Deliverables
-
-- Installable `trodestrack` wheel (MIT licensed)
-- Fully documented + reproducible release
-- Ready for internal validation and external use
+- [ ] Measurable drift reduction in IMU-only intervals (see PRD robustness target)
+- [ ] No API/layout breakage; all regression tests still green
 
 ---
+
+## Milestone M6 — Performance Tighten (JIT + Donation) (PR6)
+
+**Objective:** Improve speed/memory with stable shapes and compilation behavior.
+
+- [ ] Wrap hot paths in `jax.jit(static_argnames=("layout",))`
+- [ ] Use `donate_argnums` in scan bodies for large arrays
+- [ ] Remove Python branching inside scans; rely on projection and `R` inflation
+- [ ] Benchmarks:
+  - [ ] ≥ 20% speedup on reference session or same speed with lower peak memory
+  - [ ] No additional recompiles (cache hits observed)
+
+**DoD**
+
+- [ ] Benchmark targets achieved; results documented in `CHANGELOG.md`
+
+---
+
+## Milestone M7 — CLI & Documentation (PR7)
+
+**Objective:** Expose sensor toggles and document the workflow.
+
+- [ ] CLI flags:
+  - [ ] `--heading-pseudo`, `--zupt`
+- [ ] Docs:
+  - [ ] Update `README.md`, `TUNING.md`, `TROUBLESHOOTING.md` for 2D+3D IMU path
+  - [ ] Minimal usage examples and caveats
+- [ ] Tests:
+  - [ ] `tests/cli/*` cover new flags and defaults
+
+**DoD**
+
+- [ ] Users can enable/disable sensors from CLI; docs are accurate
+
+---
+
+## Deferred Milestone (Backlog) — TTL/RFID Event Sensors
+
+**Objective:** Prepare stubs for later without shipping now.
+
+- [ ] Stubs for `ttl_zone.py` / `rfid_zone.py` implementing `MeasurementModel`
+- [ ] Smoke tests proving they can be included in `active_models` with no perf hit when idle
+- [ ] Full feature deferred to a future release
+
+**DoD**
+
+- [ ] Stubs land behind feature flags; not on by default
+
+---
+
+## Cross-Cutting Tasks
+
+- [ ] Parity script: capture JSON summaries (means, cov diag, NIS/loglik deltas) for artifact diffing
+- [ ] Add Hypothesis property tests for angle wrapping and masking invariants
+- [ ] Ensure reproducible seeds across sims/benchmarks
+- [ ] Update `CHANGELOG.md` per milestone
+
+---
+
+## Acceptance Criteria Summary (per PR)
+
+- **Parity (PR1–PR4):** means ≤ 1e-7, cov diag ≤ 1e-6; identical NIS/loglik
+- **Robustness (PR5):** reduced drift in occlusion windows; gravity ≈ 9.81 m/s²
+- **Throughput (PR6):** ≥ 20% faster or same speed with lower memory
+- **Usability (PR7):** CLI toggles + clear docs
+
+---
+
+## Implementation Order
+
+1. M0 → M1 → M2 → M3 (core refactor group)
+2. M4 (ZUPT)
+3. **M5 (2D+3D IMU priority)**
+4. M6 (performance)
+5. M7 (CLI & docs)
+6. Deferred: TTL/RFID backlog
