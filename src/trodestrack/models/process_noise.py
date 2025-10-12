@@ -178,8 +178,18 @@ def assemble_Q(
     Notes
     -----
     Q = Q_rate·dt (+ blackout scaling) + G Qu Gᵀ.
+
     Applies optional blackout scaling for pos/vel/bias components and IMU input
     noise reduction, and can freeze biases by zeroing corresponding rows/cols.
+
+    **Dropout Behavior:**
+    - ``reduce_imu_noise_during_blackout=True``: Scales IMU input noise Qu by
+      ``blackout_imu_noise_scale`` (typically < 1) during vision gaps, reducing
+      noise driving the G Qu Gᵀ term. This prevents IMU noise from inflating
+      uncertainty when vision is unavailable.
+    - ``freeze_bias_during_blackout=True``: Zeros bias random walks during
+      vision gaps to prevent bias drift when biases are unobservable.
+    - Combine both flags to stabilize filter behavior during extended occlusions.
     """
     # Find layout for this dimension (used for adaptive Q, n_accel, G matrix, bias freeze)
     layout: StateLayout | None = _get_layout_for_dimension(n)

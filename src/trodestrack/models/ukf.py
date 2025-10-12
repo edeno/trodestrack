@@ -339,11 +339,12 @@ def predict_step(
     P_pred = jnp.tensordot(w_cov, _outer_product_batch(deviations, deviations), axes=1)
 
     # Add process noise Q using shared assembly for parity with EKF/smoothers
+    # Use predicted heading θ⁺ for tighter alignment between dynamics and Q
     dtype = m.dtype
     h_idx = get_heading_index(layout)
     Q = assemble_Q(
         config,
-        theta=m[h_idx],
+        theta=m_pred[h_idx],  # Use predicted heading, not current
         dt=dt_imu,
         n=n,
         has_vision=has_vision,

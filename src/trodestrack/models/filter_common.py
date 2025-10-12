@@ -299,6 +299,9 @@ def gravity_compensate(accel_world: jnp.ndarray, g: float = 9.81) -> jnp.ndarray
     world-frame measurement. This is necessary because IMUs measure
     specific force (proper acceleration), which includes gravity.
 
+    **IMU Convention:** Assumes IMU reports specific force (proper acceleration).
+    Kinematic acceleration is: a = R f_body - g_world
+
     The IMU at rest reads [0, 0, +g] due to the normal force from the
     surface. Motion creates additional accelerations that add to this
     baseline. Subtracting [0, 0, g] recovers the kinematic acceleration
@@ -442,6 +445,14 @@ def dynamics_function(
 
     if imu_is_3d and has_3d_velocity:
         # 3D IMU mode: [ω_z, fx, fy, fz]
+        # Consistency check: 3D velocity requires 3D accel bias
+        if len(layout.bias_accel_idx) < 3:
+            raise ValueError(
+                f"3D IMU mode requires 3D accel bias (b_ax, b_ay, b_az), "
+                f"but layout has only {len(layout.bias_accel_idx)} accel bias terms. "
+                f"Use LAYOUT_2D_CAM_3D_IMU or ensure bias_accel_idx has length 3."
+            )
+
         # Extract 3D velocity
         vz_i = layout.vel_idx[2]
         vz = state[vz_i]
@@ -1336,7 +1347,9 @@ def build_G_matrix_generic(
     if n_accel == 3 and len(vel_idx) == 3:
         vz_i = vel_idx[2]
         if 0 <= vz_i < n:
-            G = G.at[vz_i, 3].set(dt_arr)  # ∂vz/∂f_z = dt (no rotation)
+            # ∂vz/∂f_z = dt (no rotation, since yaw-only model preserves z)
+            # R_z(θ) rotates only in x-y plane; world z ≈ body z
+            G = G.at[vz_i, 3].set(dt_arr)
 
     # Position (only x, y components affected, since we track 2D position)
     px_i, py_i = pos_idx

@@ -164,9 +164,10 @@ def predict_step(
     m_pred = m_pred.at[h_idx].set(wrap_angle(m_pred[h_idx]))
 
     # Assemble process noise using shared helper
+    # Use predicted heading θ⁺ for tighter alignment between dynamics and Q
     Q = assemble_Q(
         config,
-        theta=m[h_idx],
+        theta=m_pred[h_idx],  # Use predicted heading, not current
         dt=dt_imu,
         n=m.shape[0],
         has_vision=has_vision,
