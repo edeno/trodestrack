@@ -11,6 +11,7 @@ import jax.numpy as jnp
 import pytest
 
 from trodestrack.models.ekf import EKFConfig, EKFState, update_step
+from trodestrack.models.sensors.camera_position import CameraPositionModel
 from trodestrack.models.state_layout import LAYOUT_2D_FULL
 
 
@@ -28,6 +29,23 @@ def initial_state():
     return EKFState(mean=mean, cov=cov)
 
 
+def make_camera_model(z_led1, z_led2, config, confidence=None):
+    """Helper to create camera model for single-frame test."""
+    z_led1_all = z_led1.reshape(1, 2)
+    z_led2_all = z_led2.reshape(1, 2)
+    conf_all = None if confidence is None else confidence.reshape(1, 4)
+
+    return CameraPositionModel(
+        led_distance=config.led_distance,
+        measurement_noise_base=config.measurement_noise_pos,
+        layout=LAYOUT_2D_FULL,
+        z_led1_all=z_led1_all,
+        z_led2_all=z_led2_all,
+        conf_all=conf_all,
+        confidence_clip_min=1e-2,
+    )
+
+
 def test_high_confidence_reduces_covariance_more(ekf_config, initial_state):
     """Test that high confidence observations reduce uncertainty more."""
     # Observation far from current estimate
@@ -36,14 +54,26 @@ def test_high_confidence_reduces_covariance_more(ekf_config, initial_state):
 
     # High confidence update
     conf_high = jnp.array([0.99, 0.99, 0.99, 0.99])
+    camera_model_high = make_camera_model(z_led1, z_led2, ekf_config, conf_high)
     state_high, _ = update_step(
-        initial_state, z_led1, z_led2, True, ekf_config, confidence=conf_high, layout=LAYOUT_2D_FULL
+        initial_state,
+        camera_model_high,
+        frame_idx=0,
+        observation_is_valid=True,
+        config=ekf_config,
+        layout=LAYOUT_2D_FULL,
     )
 
     # Low confidence update
     conf_low = jnp.array([0.1, 0.1, 0.1, 0.1])
+    camera_model_low = make_camera_model(z_led1, z_led2, ekf_config, conf_low)
     state_low, _ = update_step(
-        initial_state, z_led1, z_led2, True, ekf_config, confidence=conf_low, layout=LAYOUT_2D_FULL
+        initial_state,
+        camera_model_low,
+        frame_idx=0,
+        observation_is_valid=True,
+        config=ekf_config,
+        layout=LAYOUT_2D_FULL,
     )
 
     # High confidence should reduce position covariance more
@@ -64,14 +94,26 @@ def test_high_confidence_pulls_mean_more(ekf_config, initial_state):
 
     # High confidence update
     conf_high = jnp.array([0.99, 0.99, 0.99, 0.99])
+    camera_model_high = make_camera_model(z_led1, z_led2, ekf_config, conf_high)
     state_high, _ = update_step(
-        initial_state, z_led1, z_led2, True, ekf_config, confidence=conf_high, layout=LAYOUT_2D_FULL
+        initial_state,
+        camera_model_high,
+        frame_idx=0,
+        observation_is_valid=True,
+        config=ekf_config,
+        layout=LAYOUT_2D_FULL,
     )
 
     # Low confidence update
     conf_low = jnp.array([0.1, 0.1, 0.1, 0.1])
+    camera_model_low = make_camera_model(z_led1, z_led2, ekf_config, conf_low)
     state_low, _ = update_step(
-        initial_state, z_led1, z_led2, True, ekf_config, confidence=conf_low, layout=LAYOUT_2D_FULL
+        initial_state,
+        camera_model_low,
+        frame_idx=0,
+        observation_is_valid=True,
+        config=ekf_config,
+        layout=LAYOUT_2D_FULL,
     )
 
     # High confidence should move mean closer to observation
@@ -91,14 +133,26 @@ def test_zero_confidence_smaller_update_than_high(ekf_config, initial_state):
 
     # Zero confidence (will be clipped to minimum 1e-2)
     conf_zero = jnp.array([0.0, 0.0, 0.0, 0.0])
+    camera_model_zero = make_camera_model(z_led1, z_led2, ekf_config, conf_zero)
     state_zero, _ = update_step(
-        initial_state, z_led1, z_led2, True, ekf_config, confidence=conf_zero, layout=LAYOUT_2D_FULL
+        initial_state,
+        camera_model_zero,
+        frame_idx=0,
+        observation_is_valid=True,
+        config=ekf_config,
+        layout=LAYOUT_2D_FULL,
     )
 
     # High confidence
     conf_high = jnp.array([0.99, 0.99, 0.99, 0.99])
+    camera_model_high = make_camera_model(z_led1, z_led2, ekf_config, conf_high)
     state_high, _ = update_step(
-        initial_state, z_led1, z_led2, True, ekf_config, confidence=conf_high, layout=LAYOUT_2D_FULL
+        initial_state,
+        camera_model_high,
+        frame_idx=0,
+        observation_is_valid=True,
+        config=ekf_config,
+        layout=LAYOUT_2D_FULL,
     )
 
     # Zero confidence update should be smaller than high confidence
@@ -119,25 +173,25 @@ def test_confidence_per_led_covariance(ekf_config, initial_state):
 
     # Both LEDs high confidence
     conf_both_high = jnp.array([0.99, 0.99, 0.99, 0.99])
+    camera_model_both = make_camera_model(z_led1, z_led2, ekf_config, conf_both_high)
     state_both, _ = update_step(
         initial_state,
-        z_led1,
-        z_led2,
-        True,
-        ekf_config,
-        confidence=conf_both_high,
+        camera_model_both,
+        frame_idx=0,
+        observation_is_valid=True,
+        config=ekf_config,
         layout=LAYOUT_2D_FULL,
     )
 
     # LED1 high, LED2 low
     conf_led1_high = jnp.array([0.99, 0.99, 0.01, 0.01])
+    camera_model_led1 = make_camera_model(z_led1, z_led2, ekf_config, conf_led1_high)
     state_led1, _ = update_step(
         initial_state,
-        z_led1,
-        z_led2,
-        True,
-        ekf_config,
-        confidence=conf_led1_high,
+        camera_model_led1,
+        frame_idx=0,
+        observation_is_valid=True,
+        config=ekf_config,
         layout=LAYOUT_2D_FULL,
     )
 
@@ -156,14 +210,26 @@ def test_default_confidence_is_high(ekf_config, initial_state):
     z_led2 = jnp.array([0.54, 0.5])
 
     # Update without confidence parameter (should default to 1.0)
+    camera_model_default = make_camera_model(z_led1, z_led2, ekf_config, confidence=None)
     state_default, _ = update_step(
-        initial_state, z_led1, z_led2, True, ekf_config, layout=LAYOUT_2D_FULL
+        initial_state,
+        camera_model_default,
+        frame_idx=0,
+        observation_is_valid=True,
+        config=ekf_config,
+        layout=LAYOUT_2D_FULL,
     )
 
     # Update with explicit high confidence
     conf_high = jnp.array([1.0, 1.0, 1.0, 1.0])
+    camera_model_explicit = make_camera_model(z_led1, z_led2, ekf_config, conf_high)
     state_explicit, _ = update_step(
-        initial_state, z_led1, z_led2, True, ekf_config, confidence=conf_high, layout=LAYOUT_2D_FULL
+        initial_state,
+        camera_model_explicit,
+        frame_idx=0,
+        observation_is_valid=True,
+        config=ekf_config,
+        layout=LAYOUT_2D_FULL,
     )
 
     # Should be identical
@@ -183,14 +249,26 @@ def test_confidence_clipping():
 
     # Test very small confidence (should be clipped)
     conf_tiny = jnp.array([1e-10, 1e-10, 1e-10, 1e-10])
+    camera_model_tiny = make_camera_model(z_led1, z_led2, config, conf_tiny)
     state_tiny, _ = update_step(
-        state, z_led1, z_led2, True, config, confidence=conf_tiny, layout=LAYOUT_2D_FULL
+        state,
+        camera_model_tiny,
+        frame_idx=0,
+        observation_is_valid=True,
+        config=config,
+        layout=LAYOUT_2D_FULL,
     )
 
     # Test slightly negative confidence (invalid but should be clipped)
     conf_neg = jnp.array([-0.1, -0.1, -0.1, -0.1])
+    camera_model_neg = make_camera_model(z_led1, z_led2, config, conf_neg)
     state_neg, _ = update_step(
-        state, z_led1, z_led2, True, config, confidence=conf_neg, layout=LAYOUT_2D_FULL
+        state,
+        camera_model_neg,
+        frame_idx=0,
+        observation_is_valid=True,
+        config=config,
+        layout=LAYOUT_2D_FULL,
     )
 
     # Both should produce valid states (no NaN, no extreme values)
@@ -210,14 +288,26 @@ def test_confidence_affects_log_likelihood(ekf_config, initial_state):
 
     # High confidence: small R → higher likelihood for good match
     conf_high = jnp.array([0.99, 0.99, 0.99, 0.99])
+    camera_model_high = make_camera_model(z_led1, z_led2, ekf_config, conf_high)
     _, ll_high = update_step(
-        initial_state, z_led1, z_led2, True, ekf_config, confidence=conf_high, layout=LAYOUT_2D_FULL
+        initial_state,
+        camera_model_high,
+        frame_idx=0,
+        observation_is_valid=True,
+        config=ekf_config,
+        layout=LAYOUT_2D_FULL,
     )
 
     # Low confidence: large R → lower likelihood sensitivity
     conf_low = jnp.array([0.1, 0.1, 0.1, 0.1])
+    camera_model_low = make_camera_model(z_led1, z_led2, ekf_config, conf_low)
     _, ll_low = update_step(
-        initial_state, z_led1, z_led2, True, ekf_config, confidence=conf_low, layout=LAYOUT_2D_FULL
+        initial_state,
+        camera_model_low,
+        frame_idx=0,
+        observation_is_valid=True,
+        config=ekf_config,
+        layout=LAYOUT_2D_FULL,
     )
 
     # Log-likelihoods should differ
