@@ -20,6 +20,8 @@ import numpy as np
 import pytest
 
 from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
+from trodestrack.models.sensors.heading_pseudo import HeadingPseudoModel
+from trodestrack.models.state_layout import LAYOUT_2D_FULL
 from trodestrack.models.ukf import (
     UKFConfig,
     UKFState,
@@ -37,6 +39,24 @@ from trodestrack.sim.simple import (
     simulate_constant_velocity,
     simulate_stationary,
 )
+
+# =============================================================================
+# Helpers
+# =============================================================================
+
+
+def make_heading_model(z_led1, z_led2, config):
+    """Helper to create heading model for single-frame test."""
+    z_led1_all = z_led1.reshape(1, 2)
+    z_led2_all = z_led2.reshape(1, 2)
+
+    return HeadingPseudoModel(
+        config=config,
+        layout=LAYOUT_2D_FULL,
+        z_led1_all=z_led1_all,
+        z_led2_all=z_led2_all,
+    )
+
 
 # =============================================================================
 # Fixtures
@@ -480,8 +500,14 @@ def test_ukf_heading_respects_camera_mask(ukf_config):
     )
 
     # Masked observation should perform no update and return zero log-likelihood.
+    heading_model = make_heading_model(z_led1, z_led2, config_with_heading)
     state_masked, log_lik_masked = update_heading(
-        base_state, z_led1, z_led2, config_with_heading, observation_is_valid=False
+        base_state,
+        heading_model,
+        frame_idx=0,
+        observation_is_valid=False,
+        config=config_with_heading,
+        layout=LAYOUT_2D_FULL,
     )
     np.testing.assert_allclose(np.array(state_masked.mean), np.array(base_state.mean), atol=1e-9)
     np.testing.assert_allclose(np.array(state_masked.cov), np.array(base_state.cov), atol=1e-9)
@@ -489,7 +515,12 @@ def test_ukf_heading_respects_camera_mask(ukf_config):
 
     # With mask True, heading should move toward measurement (0 rad).
     state_updated, log_lik_used = update_heading(
-        base_state, z_led1, z_led2, config_with_heading, observation_is_valid=True
+        base_state,
+        heading_model,
+        frame_idx=0,
+        observation_is_valid=True,
+        config=config_with_heading,
+        layout=LAYOUT_2D_FULL,
     )
     assert np.abs(state_updated.mean[4]) < np.abs(
         base_state.mean[4]
