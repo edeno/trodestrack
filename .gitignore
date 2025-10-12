@@ -45,3 +45,4 @@ calibration_*.yaml
 *.sh
 *.mp4
 examples/*.pdf
+*.parquet
