@@ -38,7 +38,7 @@ from typing import NamedTuple
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax import lax, tree_util, vmap
+from jax import Array, lax, tree_util, vmap
 
 from trodestrack.models.filter_common import (
     FilterCoreConfig,
@@ -614,7 +614,7 @@ def _unscented_kalman_filter_impl(
     *,
     config_for_filter: UKFConfig,
     layout: StateLayout,
-) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+) -> tuple[Array, Array, Array, Array, Array]:
     """Core UKF implementation staged under ``jax.jit``."""
     n_cam = int(t_cam_jax.shape[0])
 
@@ -728,7 +728,7 @@ def _unscented_kalman_filter_impl(
         return carry, outputs
 
     # Run filter over all camera frames
-    carry_init = (initial_state, 0.0)
+    carry_init = (initial_state, jnp.array(0.0))
     (_, log_lik_total), outputs = lax.scan(filter_step, carry_init, jnp.arange(n_cam))
 
     return (

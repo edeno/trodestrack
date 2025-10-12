@@ -130,8 +130,21 @@ class FilterCoreConfig:
     # PyTree support: treat `state_mode` as static auxiliary data.
     _TREE_STATIC_FIELDS: ClassVar[tuple[str, ...]] = ("state_mode",)
 
-    def tree_flatten(self):
-        """Flatten config for JAX PyTree registration."""
+    def tree_flatten(self) -> tuple[tuple, dict]:
+        """Flatten config for JAX PyTree registration.
+
+        Returns
+        -------
+        tuple[tuple, dict]
+            Children tuple containing dynamic fields and static data dictionary
+            containing class reference and static field values.
+
+        Notes
+        -----
+        This method is part of the JAX PyTree protocol. It separates config
+        fields into dynamic (children) and static (auxiliary) data for JIT
+        compilation and tracing.
+        """
         field_names = list(self.__dataclass_fields__.keys())
         children = []
         static_data = {"cls": self.__class__}
@@ -148,8 +161,28 @@ class FilterCoreConfig:
         return tuple(children), static_data
 
     @classmethod
-    def tree_unflatten(cls, static_data, children):
-        """Reconstruct config from PyTree children."""
+    def tree_unflatten(cls, static_data: dict, children: tuple) -> FilterCoreConfig:
+        """Reconstruct config from PyTree children.
+
+        Parameters
+        ----------
+        static_data : dict
+            Static auxiliary data containing class reference and static field values.
+            Must include 'cls' key with the target class.
+        children : tuple
+            Dynamic field values to reconstruct.
+
+        Returns
+        -------
+        FilterCoreConfig
+            Reconstructed configuration instance with all fields restored.
+
+        Notes
+        -----
+        This method is part of the JAX PyTree protocol. It reconstructs a config
+        instance from the separated dynamic (children) and static (auxiliary) data
+        produced by tree_flatten().
+        """
         target_cls = static_data.get("cls", cls)
         field_names = list(target_cls.__dataclass_fields__.keys())
         child_iter = iter(children)
@@ -595,19 +628,19 @@ def measurement_function(
     return jnp.array([px - dx, py - dy, px + dx, py + dy])
 
 
-def make_led_selector(only_led1: bool, only_led2: bool) -> jnp.ndarray:
+def make_led_selector(only_led1: bool | Array, only_led2: bool | Array) -> Array:
     """Create 2×4 selector matrix for single-LED observations.
 
     Parameters
     ----------
-    only_led1 : bool
-        True if only LED1 is valid.
-    only_led2 : bool
-        True if only LED2 is valid.
+    only_led1 : bool | Array
+        Boolean value or boolean scalar array. True if only LED1 is valid.
+    only_led2 : bool | Array
+        Boolean value or boolean scalar array. True if only LED2 is valid.
 
     Returns
     -------
-    jnp.ndarray
+    Array
         Selector matrix ``M`` (2, 4) such that ``M @ [x1,y1,x2,y2]`` extracts
         the active LED's 2D subspace.
     """

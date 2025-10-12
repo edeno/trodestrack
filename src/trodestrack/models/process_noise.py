@@ -28,7 +28,7 @@ def _get_layout_for_dimension(n: int) -> StateLayout | None:
     return None
 
 
-def build_Q_rate(config: Any, n: int, dtype=jnp.float32) -> jnp.ndarray:
+def build_Q_rate(config: Any, n: int, dtype: Any = jnp.float32) -> jnp.ndarray:
     """Diagonal process noise-rate matrix Q_rate (dimension-agnostic).
 
     Parameters
@@ -94,7 +94,7 @@ def build_Q_rate(config: Any, n: int, dtype=jnp.float32) -> jnp.ndarray:
 
 
 def build_input_noise_cov(
-    config: Any, dt: float | Array, n_accel: int = 2, dtype=jnp.float32
+    config: Any, dt: float | Array, n_accel: int = 2, dtype: Any = jnp.float32
 ) -> jnp.ndarray:
     """IMU input noise covariance from noise densities.
 

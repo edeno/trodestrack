@@ -596,12 +596,27 @@ class IMUPanelArtist:
         self.ax_gyro.set_xticklabels([])
         self.ax_accel_x.set_xticklabels([])
 
-    def add_reference_bands(self, U_imu: np.ndarray, percentiles: tuple[float, float] = (10, 90)):
+    def add_reference_bands(
+        self, U_imu: np.ndarray, percentiles: tuple[float, float] = (10, 90)
+    ) -> None:
         """Add shaded reference bands showing typical IMU ranges.
 
-        Args:
-            U_imu: (N, 3) array of IMU measurements [gyro, accel_x, accel_y]
-            percentiles: Tuple of (low, high) percentiles for bands (default: 10th-90th)
+        Computes percentile-based bands for gyro and accelerometer channels
+        and overlays them as low-alpha shaded regions on the IMU panel plots.
+
+        Parameters
+        ----------
+        U_imu : np.ndarray
+            IMU measurements (N, 3) containing [gyro, accel_x, accel_y] in
+            standard units (rad/s for gyro, m/s² for accel).
+        percentiles : tuple[float, float], default (10, 90)
+            Low and high percentiles for band boundaries. Default shows
+            10th to 90th percentile range.
+
+        Returns
+        -------
+        None
+            Modifies axes in-place by adding axhspan patches.
         """
         # Compute percentiles for each IMU channel
         gyro_low, gyro_high = np.percentile(U_imu[:, 0], percentiles)

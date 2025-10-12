@@ -22,6 +22,7 @@ References
 from __future__ import annotations
 
 import jax.numpy as jnp
+from jax import Array
 
 from trodestrack.models.filter_common import (
     confidence_to_R_diagonal,
@@ -290,7 +291,7 @@ class CameraPositionModel:
 
         return z_obs_sanitized - meas_pred
 
-    def subspace(self, frame_idx: int) -> tuple[bool, bool, bool, jnp.ndarray]:
+    def subspace(self, frame_idx: int) -> tuple[Array, Array, Array, Array]:
         """Return LED validity flags and (2, 4) selector matrix.
 
         Parameters
@@ -300,13 +301,13 @@ class CameraPositionModel:
 
         Returns
         -------
-        both_leds : bool
-            True if both LEDs valid (4D update, selector ignored).
-        only_led1 : bool
-            True if only LED1 valid (2D update via projection).
-        only_led2 : bool
-            True if only LED2 valid (2D update via projection).
-        selector_M2 : jnp.ndarray
+        both_leds : Array
+            Boolean scalar array. True if both LEDs valid (4D update, selector ignored).
+        only_led1 : Array
+            Boolean scalar array. True if only LED1 valid (2D update via projection).
+        only_led2 : Array
+            Boolean scalar array. True if only LED2 valid (2D update via projection).
+        selector_M2 : Array
             **Static shape (2, 4)** selector matrix (never (4, 4)).
             Selects active 2D subspace from 4D measurement space.
             For dual-LED, returns conventional LED1 selector (ignored by update).
