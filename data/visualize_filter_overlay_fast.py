@@ -40,14 +40,18 @@ def render_plot_to_image(fig, width, height):
 
     from PIL import Image
 
-    # Save to bytes buffer
+    # Save to bytes buffer WITHOUT bbox_inches='tight' to prevent resizing
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+    fig.savefig(buf, format="png", dpi=100)
     buf.seek(0)
 
     # Load as image
     img = Image.open(buf)
-    img = img.resize((width, height), Image.Resampling.LANCZOS)
+
+    # Only resize if dimensions don't match exactly
+    if img.size != (width, height):
+        img = img.resize((width, height), Image.Resampling.LANCZOS)
+
     img_array = np.array(img)
 
     # Convert RGBA to RGB if needed
