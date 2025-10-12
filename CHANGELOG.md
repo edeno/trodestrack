@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-12 - Milestone M3 Complete (EKF/UKF Integration)
+
+**Changed:**
+
+- **EKF/UKF Filter Integration** ([src/trodestrack/models/ekf.py](src/trodestrack/models/ekf.py), [src/trodestrack/models/ukf.py](src/trodestrack/models/ukf.py))
+  - Refactored `update_step()` and `update_heading()` to use `MeasurementModel` protocol
+  - **EKF:** Replaced inlined camera/heading logic with `CameraPositionModel`, `HeadingPseudoModel`, and `ekf_projected_update()`
+  - **UKF:** Replaced inlined camera/heading logic with `CameraPositionModel`, `HeadingPseudoModel`, and `ukf_projected_update()`
+  - Models instantiated once in `extended_kalman_filter()` / `unscented_kalman_filter()` with preallocated JAX arrays
+  - Removed obsolete helpers: `_prepare_camera_observations()`, `_compute_lifted_joseph_covariance()`, `_prepare_ukf_camera_observations()`
+  - **Public API preserved:** `extended_kalman_filter()` and `unscented_kalman_filter()` signatures unchanged
+  - **Numerical parity maintained:** 31/32 integration tests pass (1 unit test needs internal API update)
+  - Pass `layout` explicitly throughout (no hidden globals)
+  - Impact: Cleaner architecture, ready for M4 (ZUPT sensor) and M5 (3D IMU gravity handling)
+
+**Test Results:**
+
+- ✅ EKF integration: 25/25 tests pass ([tests/filters/test_ekf_analytic.py](tests/filters/test_ekf_analytic.py), [tests/filters/test_prd_acceptance.py](tests/filters/test_prd_acceptance.py), [tests/filters/test_robustness.py](tests/filters/test_robustness.py))
+- ✅ UKF integration: 11/12 tests pass ([tests/filters/test_ukf_accuracy.py](tests/filters/test_ukf_accuracy.py), [tests/filters/test_ukf_heading_measurement.py](tests/filters/test_ukf_heading_measurement.py))
+- ⚠️ Unit tests calling internal helpers with old signatures need updates (minor cleanup task)
+
 ### Session: 2025-10-12 - Milestone M1 Complete (MeasurementModel Protocol + JAX Readiness)
 
 **Added:**

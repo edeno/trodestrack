@@ -37,25 +37,23 @@ from typing import NamedTuple
 
 import jax.numpy as jnp
 import numpy as np
-from jax import Array, lax, vmap
+from jax import lax, vmap
 
 from trodestrack.models.filter_common import (
     FilterCoreConfig,
     FilterState,
     chi2_threshold,
     compute_imu_index_arrays,
-    compute_nis_and_loglik,
     dynamics_function,
     initialize_state,
-    make_led_selector,
-    measurement_function,
-    prepare_heading_measurement,
-    psd_solve,
     symmetrize,
     update_zupt,
     wrap_angle,
 )
+from trodestrack.models.filter_update import ukf_projected_update
 from trodestrack.models.process_noise import assemble_Q
+from trodestrack.models.sensors.camera_position import CameraPositionModel
+from trodestrack.models.sensors.heading_pseudo import HeadingPseudoModel
 from trodestrack.models.state_layout import StateLayout, get_heading_index, get_layout
 
 # =============================================================================
@@ -364,103 +362,39 @@ def predict_step(
 # =============================================================================
 
 
-def _prepare_ukf_camera_observations(
-    z_led1: jnp.ndarray,
-    z_led2: jnp.ndarray,
-    pre_z_obs_full: jnp.ndarray | None,
-    pre_led1_valid: bool | None,
-    pre_led2_valid: bool | None,
-) -> tuple[jnp.ndarray, Array, Array]:
-    """Prepare camera observations for UKF update.
-
-    Parameters
-    ----------
-    z_led1 : jnp.ndarray
-        LED1 observation (2,) [x, y] in meters.
-    z_led2 : jnp.ndarray
-        LED2 observation (2,) [x, y] in meters.
-    pre_z_obs_full : jnp.ndarray | None
-        Optional precomputed concatenated observations (4,).
-    pre_led1_valid : bool | None
-        Optional precomputed LED1 validity.
-    pre_led2_valid : bool | None
-        Optional precomputed LED2 validity.
-
-    Returns
-    -------
-    tuple[jnp.ndarray, bool, bool]
-        ``(z_obs_full, led1_valid, led2_valid)`` where ``z_obs_full`` is (4,)
-        and NaNs have been replaced with zeros to avoid propagating NaNs through
-        the sigma-point transform.
-    """
-    # Check which LEDs are valid (use precomputed if provided)
-    led1_valid = jnp.asarray(
-        pre_led1_valid if pre_led1_valid is not None else jnp.isfinite(z_led1[0]),
-        dtype=bool,
-    )
-    led2_valid = jnp.asarray(
-        pre_led2_valid if pre_led2_valid is not None else jnp.isfinite(z_led2[0]),
-        dtype=bool,
-    )
-
-    # Build observation vector (replace NaN with 0 to avoid propagation)
-    if pre_z_obs_full is not None:
-        z_obs_full = pre_z_obs_full
-    else:
-        z_led1_clean = jnp.where(jnp.isfinite(z_led1), z_led1, 0.0)
-        z_led2_clean = jnp.where(jnp.isfinite(z_led2), z_led2, 0.0)
-        z_obs_full = jnp.concatenate([z_led1_clean, z_led2_clean])
-
-    return z_obs_full, led1_valid, led2_valid
-
-
 def update_step(
     state: UKFState,
-    z_led1: jnp.ndarray,
-    z_led2: jnp.ndarray,
+    camera_model: CameraPositionModel,
+    frame_idx: int,
     observation_is_valid: bool,
     config: UKFConfig,
-    confidence: jnp.ndarray | None = None,
-    *,
-    pre_z_obs_full: jnp.ndarray | None = None,
-    pre_conf: jnp.ndarray | None = None,
-    pre_led1_valid: bool | None = None,
-    pre_led2_valid: bool | None = None,
 ) -> tuple[UKFState, float]:
-    """UKF measurement update using camera observations.
+    """UKF measurement update using camera model.
 
     Parameters
     ----------
     state : UKFState
         Predicted state.
-    z_led1 : jnp.ndarray
-        LED1 observation (2,) [x, y] in meters.
-    z_led2 : jnp.ndarray
-        LED2 observation (2,) [x, y] in meters.
+    camera_model : CameraPositionModel
+        Camera position measurement model with preallocated frame data.
+    frame_idx : int
+        Current frame index.
     observation_is_valid : bool
         Observation validity flag.
     config : UKFConfig
         UKF configuration.
-    confidence : jnp.ndarray | None, optional
-        Confidence [x1,y1,x2,y2] (4,) in [0, 1] for per-dimension R scaling.
-    pre_z_obs_full : jnp.ndarray | None, optional
-        Precomputed concatenated observation (4,).
-    pre_conf : jnp.ndarray | None, optional
-        Precomputed confidence (4,).
-    pre_led1_valid : bool | None, optional
-        Precomputed LED1 validity.
-    pre_led2_valid : bool | None, optional
-        Precomputed LED2 validity.
 
     Returns
     -------
     tuple[UKFState, float]
         Updated state and log-likelihood.
+
+    Notes
+    -----
+    Uses the MeasurementModel protocol and generic ukf_projected_update() primitive
+    to handle 4D→2D projection for single-LED observations.
     """
     m_pred, P_pred = state.mean, state.cov
-
-    # Confidence→R scaling helper
-    from trodestrack.models.filter_common import confidence_to_R_diagonal
 
     # If no valid observation, return prediction unchanged
     def no_update(m, P):
@@ -468,10 +402,10 @@ def update_step(
 
     # If valid observation, perform update
     def do_update(m, P):
-        # Prepare camera observations using helper
-        z_obs_full, led1_valid, led2_valid = _prepare_ukf_camera_observations(
-            z_led1, z_led2, pre_z_obs_full, pre_led1_valid, pre_led2_valid
-        )
+        # Get LED validity from camera model
+        both_leds, only_led1, only_led2, _ = camera_model.subspace(frame_idx)
+        led1_valid = both_leds | only_led1
+        led2_valid = both_leds | only_led2
 
         # If no valid LEDs, skip update
         def no_leds_update(m_in, P_in):
@@ -488,13 +422,8 @@ def update_step(
             # Generate sigma points
             sigmas = compute_sigma_points(m_in, P_in, n, lamb)
 
-            # Transform sigma points through measurement function
-            layout = get_layout(config.state_mode)
-
-            def h(x):
-                return measurement_function(x, config.led_distance, layout)
-
-            sigmas_meas = vmap(h)(sigmas)  # (17, 4)
+            # Transform sigma points through camera model prediction
+            sigmas_meas = vmap(camera_model.predict)(sigmas)  # (17, 4)
 
             # Reconstruct predicted observation
             z_pred = jnp.tensordot(w_mean, sigmas_meas, axes=1)
@@ -503,10 +432,8 @@ def update_step(
             meas_deviations = sigmas_meas - z_pred
             S = jnp.tensordot(w_cov, _outer_product_batch(meas_deviations, meas_deviations), axes=1)
 
-            # Add measurement noise R with confidence scaling (shared helper)
-            conf_arg = pre_conf if pre_conf is not None else confidence
-            R_diag = confidence_to_R_diagonal(conf_arg, base=config.measurement_noise_pos, size=4)
-            R = jnp.diag(R_diag)  # Full 4×4 matrix (no huge-R masking)
+            # Add measurement noise R from camera model (confidence-scaled)
+            R = camera_model.meas_cov(frame_idx)
             S = S + R
 
             # Compute cross-covariance between state and observations
@@ -515,84 +442,28 @@ def update_step(
                 w_cov, _outer_product_batch(state_deviations, meas_deviations), axes=1
             )
 
-            # Innovation (full 4D vector, NaN handling via LED validity flags)
-            innov_full = z_obs_full - z_pred
+            # Get innovation from camera model (handles NaN → zero residual)
+            innovation = camera_model.innovation(frame_idx, z_pred)
 
-            # Determine LED validity for subspace computation
-            both_leds = led1_valid & led2_valid
-            only_led1 = led1_valid & ~led2_valid
-            only_led2 = led2_valid & ~led1_valid
-
-            # Compute exact NIS and log-likelihood in active subspace
-            # (no diagonal approximation - uses Cholesky + cho_solve)
-            nis, log_lik = compute_nis_and_loglik(
-                innov_full,
+            # Call generic UKF projected update primitive
+            state_upd, nis, log_lik = ukf_projected_update(
+                UKFState(mean=m_in, cov=P_in),
+                innovation,
                 S,
+                P_cross,
                 both_leds,
                 only_led1,
                 only_led2,
             )
 
-            # Kalman gain and covariance update using lifted subspace operator
-            # Project to active measurement subspace (2D or 4D) to avoid spurious
-            # covariance reduction from missing observations
-            #
-            # Algorithm:
-            #   - Both LEDs: standard 4D update
-            #   - Single LED: compute in 2D subspace, lift back to 4D
-            #
-            # This ensures K only affects the observed dimensions and prevents
-            # the filter from becoming overconfident when LEDs are occluded.
-
-            # Project innovation, covariance, and cross-correlation to active subspace
-            M = make_led_selector(only_led1, only_led2)  # (2, 4)
-
-            def compute_in_full_space():
-                """Both LEDs valid: standard 4D update."""
-                K_full = psd_solve(S, P_cross.T).T  # (8, 4)
-                innov_4d = innov_full  # (4,)
-                return K_full, innov_4d, S
-
-            def compute_in_subspace():
-                """Single LED valid: compute in 2D subspace, lift to 4D."""
-                # Project to 2D subspace
-                S_sub = M @ S @ M.T  # (2, 2)
-                P_cross_sub = P_cross @ M.T  # (8, 2)
-                innov_sub = M @ innov_full  # (2,)
-
-                # Compute gain in subspace
-                K_sub = psd_solve(S_sub, P_cross_sub.T).T  # (8, 2)
-
-                # Lift back to 4D (pad with zeros)
-                K_lifted = K_sub @ M  # (8, 4) - only affects active dims
-                innov_lifted = M.T @ innov_sub  # (4,)
-                S_lifted = M.T @ S_sub @ M  # (4, 4) - only active block
-
-                return K_lifted, innov_lifted, S_lifted
-
-            K, innov_active, S_active = lax.cond(
-                both_leds,
-                compute_in_full_space,
-                compute_in_subspace,
-            )
-
-            # Apply update in full 8D state space
-            m_upd = m_in + K @ innov_active
-            P_upd = P_in - K @ S_active @ K.T
-            P_upd = symmetrize(P_upd)
-
-            state_candidate = UKFState(mean=m_upd, cov=P_upd)
-
+            # Mahalanobis gating
             def apply_gating():
                 """Apply Mahalanobis gating to reject outliers."""
-
-                def dof_from_visibility():
-                    return lax.cond(both_leds, lambda: 4, lambda: 2)
-
-                threshold = chi2_threshold(dof_from_visibility(), config.mahalanobis_threshold_prob)
+                dof = lax.cond(both_leds, lambda: 4, lambda: 2)
+                threshold = chi2_threshold(dof, config.mahalanobis_threshold_prob)
 
                 def accept():
-                    return state_candidate, log_lik
+                    return state_upd, log_lik
 
                 def reject():
                     return UKFState(mean=m_in, cov=P_in), 0.0
@@ -601,22 +472,12 @@ def update_step(
                 return lax.cond(nis_safe < threshold, accept, reject)
 
             def skip_gating():
-                return state_candidate, log_lik
+                return state_upd, log_lik
 
-            return lax.cond(
-                config.use_mahalanobis_gating,
-                apply_gating,
-                skip_gating,
-            )
+            return lax.cond(config.use_mahalanobis_gating, apply_gating, skip_gating)
 
         # Conditional update based on LED availability
-        return lax.cond(
-            led1_valid | led2_valid,
-            do_leds_update,
-            no_leds_update,
-            m,
-            P,
-        )
+        return lax.cond(led1_valid | led2_valid, do_leds_update, no_leds_update, m, P)
 
     # Conditional update based on validity flag
     return lax.cond(observation_is_valid, do_update, no_update, m_pred, P_pred)
@@ -624,25 +485,29 @@ def update_step(
 
 def update_heading(
     state: UKFState,
-    z_led1: jnp.ndarray,
-    z_led2: jnp.ndarray,
-    config: UKFConfig,
+    heading_model: HeadingPseudoModel,
+    frame_idx: int,
     observation_is_valid: bool,
+    config: UKFConfig,
+    *,
+    layout: StateLayout,
 ) -> tuple[UKFState, float]:
-    """Apply 1D heading pseudo-measurement update (UKF variant).
+    """Apply 1D heading pseudo-measurement update using heading model.
 
     Parameters
     ----------
     state : UKFState
         Current state (after position update).
-    z_led1 : jnp.ndarray
-        LED1 observation (2,) in meters.
-    z_led2 : jnp.ndarray
-        LED2 observation (2,) in meters.
-    config : UKFConfig
-        UKF configuration.
+    heading_model : HeadingPseudoModel
+        Heading measurement model with preallocated frame data.
+    frame_idx : int
+        Current frame index.
     observation_is_valid : bool
         Camera validity flag (False skips update entirely).
+    config : UKFConfig
+        UKF configuration (for UKF parameters alpha, beta, kappa).
+    layout : StateLayout
+        State index mapping.
 
     Returns
     -------
@@ -658,11 +523,11 @@ def update_heading(
     def do_update(state_in: UKFState) -> tuple[UKFState, jnp.ndarray]:
         m, P = state_in.mean, state_in.cov
 
-        # Prepare heading measurement (shared preprocessing with EKF)
-        heading_obs, R_heading, use_heading = prepare_heading_measurement(z_led1, z_led2, config)
+        # Get measurement covariance from model (already gates invalid)
+        R_mat = heading_model.meas_cov(frame_idx)  # (1, 1)
+        R_heading = R_mat[0, 0]
 
         # 1D unscented heading update
-        # For 1D measurement, we can use a simplified unscented transform
         n = len(m)
         lamb = config.alpha**2 * (n + config.kappa) - n
         w_mean, w_cov = compute_weights(n, config.alpha, config.beta, lamb)
@@ -670,25 +535,22 @@ def update_heading(
         # Generate sigma points
         sigmas = compute_sigma_points(m, P, n, lamb)
 
-        # Transform sigma points through 1D heading measurement function
-        # h(x) = x[h_idx] (heading component)
-        h_idx = get_heading_index(get_layout(config.state_mode))
+        # Transform sigma points through heading model
+        h_idx = get_heading_index(layout)
         sigmas_heading = sigmas[:, h_idx]  # (2n+1,)
 
         # Predicted heading
         h_pred = jnp.dot(w_mean, sigmas_heading)
 
-        # Innovation with angle wrapping (replace NaN with 0 for gated case)
-        innov_raw = wrap_angle(heading_obs - h_pred)
-        innov = jnp.where(jnp.isfinite(innov_raw), innov_raw, 0.0)
+        # Get innovation from model (already angle-wrapped)
+        innovation_vec = heading_model.innovation(frame_idx, jnp.array([h_pred]))
+        innov = innovation_vec[0]
 
         # Innovation covariance (1D)
         heading_deviations = sigmas_heading - h_pred
         S = jnp.dot(w_cov, heading_deviations**2) + R_heading
 
         # Cross-covariance between state and heading measurement
-        # state_deviations: (2n+1, n), heading_deviations: (2n+1,)
-        # P_cross = sum_i w_cov[i] * state_dev[i, :] * heading_dev[i]
         state_deviations = sigmas - m  # (2n+1, n)
         weighted_products = state_deviations * heading_deviations[:, None]  # (2n+1, n)
         P_cross = jnp.dot(w_cov, weighted_products)  # (n,)
@@ -702,14 +564,15 @@ def update_heading(
         # Wrap heading after update
         m_upd = m_upd.at[h_idx].set(wrap_angle(m_upd[h_idx]))
 
-        # Update covariance using UKF's native form (1D measurement)
-        # UKF: P⁺ = P - K S K^T where S = σ² + R
-        # The unscented transform ensures numerical stability naturally
+        # Update covariance
         P_upd = P - jnp.outer(K, K) * S
         P_upd = symmetrize(P_upd)
 
         # Log-likelihood
         log_lik = -0.5 * (jnp.log(2 * jnp.pi) + jnp.log(S) + innov**2 / S)
+
+        # Zero out log-likelihood if R is huge (gated)
+        use_heading = R_heading < 1e5
         log_lik = lax.select(use_heading, log_lik, jnp.array(0.0, dtype=log_lik.dtype))
 
         return UKFState(m_upd, P_upd), log_lik
@@ -812,14 +675,23 @@ def unscented_kalman_filter(
     # Precompute IMU index arrays (host-side, using shared utility)
     imu_index_arrays = compute_imu_index_arrays(t_imu, t_cam)
 
-    # Precompute device-friendly measurement inputs per frame
-    led1_valid_arr = jnp.isfinite(Z_cam_led1_jax[:, 0])
-    led2_valid_arr = jnp.isfinite(Z_cam_led2_jax[:, 0])
-    # Clean per-dim NaNs to zeros for measurement vector
-    z_led1_clean = jnp.where(jnp.isfinite(Z_cam_led1_jax), Z_cam_led1_jax, 0.0)
-    z_led2_clean = jnp.where(jnp.isfinite(Z_cam_led2_jax), Z_cam_led2_jax, 0.0)
-    z_obs_full_arr = jnp.concatenate([z_led1_clean, z_led2_clean], axis=1)
-    conf4_arr = None if conf_cam_jax is None else conf_cam_jax
+    # Instantiate measurement models with preallocated arrays
+    camera_model = CameraPositionModel(
+        led_distance=config_for_filter.led_distance,  # type: ignore[arg-type]
+        measurement_noise_base=config_for_filter.measurement_noise_pos,
+        layout=layout,
+        z_led1_all=Z_cam_led1_jax,
+        z_led2_all=Z_cam_led2_jax,
+        conf_all=conf_cam_jax,
+        confidence_clip_min=1e-2,
+    )
+
+    heading_model = HeadingPseudoModel(
+        config=config_for_filter,
+        layout=layout,
+        z_led1_all=Z_cam_led1_jax,
+        z_led2_all=Z_cam_led2_jax,
+    )
 
     def filter_step(carry, t_idx):
         """Single filtering step at camera frame t_idx."""
@@ -869,25 +741,21 @@ def unscented_kalman_filter(
         # Position measurement update (returns state and log-likelihood)
         state_after_pos, log_lik_pos = update_step(
             state_pred,
-            Z_cam_led1_jax[t_idx],
-            Z_cam_led2_jax[t_idx],
+            camera_model,
+            t_idx,
             mask_cam_jax[t_idx],
             config_for_filter,
-            None if conf_cam_jax is None else conf_cam_jax[t_idx],
-            pre_z_obs_full=z_obs_full_arr[t_idx],
-            pre_conf=None if conf4_arr is None else conf4_arr[t_idx],
-            pre_led1_valid=led1_valid_arr[t_idx],
-            pre_led2_valid=led2_valid_arr[t_idx],
         )
 
         # Heading measurement update (sequential after position)
         # Only applied if use_heading_measurement=True (gated via large R otherwise)
         state_after_heading, log_lik_heading = update_heading(
             state_after_pos,
-            Z_cam_led1_jax[t_idx],
-            Z_cam_led2_jax[t_idx],
-            config_for_filter,
+            heading_model,
+            t_idx,
             mask_cam_jax[t_idx],
+            config_for_filter,
+            layout=layout,
         )
 
         # Zero-velocity update (reuse shared implementation for parity)
