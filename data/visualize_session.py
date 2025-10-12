@@ -77,8 +77,17 @@ def extract_time_window(
     return timestamps[mask], data[mask]
 
 
-def setup_figure() -> Tuple[plt.Figure, dict]:
+def setup_figure(
+    gyro_ylim: Tuple[float, float], accel_ylim: Tuple[float, float]
+) -> Tuple[plt.Figure, dict]:
     """Create figure layout for video visualization.
+
+    Parameters
+    ----------
+    gyro_ylim : Tuple[float, float]
+        Y-axis limits for gyroscope plot in deg/s
+    accel_ylim : Tuple[float, float]
+        Y-axis limits for accelerometer plot in m/s²
 
     Returns
     -------
@@ -103,12 +112,14 @@ def setup_figure() -> Tuple[plt.Figure, dict]:
     # IMU plots on right
     ax_gyro = fig.add_subplot(gs[0, 1])
     ax_gyro.set_ylabel("Gyro Z (deg/s)", fontsize=10)
+    ax_gyro.set_ylim(gyro_ylim)  # Set fixed Y-axis
     ax_gyro.grid(True, alpha=0.3)
     ax_gyro.set_title("Angular Rate", fontsize=10, fontweight="bold")
 
     ax_accel = fig.add_subplot(gs[1:, 1])
     ax_accel.set_xlabel("Time (s)", fontsize=10)
     ax_accel.set_ylabel("Acceleration (m/s²)", fontsize=10)
+    ax_accel.set_ylim(accel_ylim)  # Set fixed Y-axis
     ax_accel.grid(True, alpha=0.3)
     ax_accel.set_title("Accelerometer", fontsize=10, fontweight="bold")
 
@@ -127,6 +138,8 @@ def create_video_overlay(
     imu_window_s: float = 2.0,
     led_marker_size: float = 8.0,
     dpi: int = 100,
+    gyro_ylim: Tuple[float, float] = (-200.0, 200.0),
+    accel_ylim: Tuple[float, float] = (-15.0, 15.0),
 ) -> None:
     """Create video with position overlay and IMU data visualization.
 
@@ -150,11 +163,16 @@ def create_video_overlay(
         Size of LED markers in pixels (default: 8.0)
     dpi : int, optional
         Output resolution (default: 100)
+    gyro_ylim : Tuple[float, float], optional
+        Fixed Y-axis limits for gyroscope plot in deg/s (default: (-200, 200))
+    accel_ylim : Tuple[float, float], optional
+        Fixed Y-axis limits for accelerometer plot in m/s² (default: (-15, 15))
 
     Notes
     -----
     Requires opencv-python and ffmpeg for video output.
     Output file format determined by extension (e.g., .mp4, .avi).
+    Fixed Y-axis limits prevent distracting axis rescaling during video playback.
     """
     # Get video metadata
     video_info = get_video_info(video_path)
@@ -192,7 +210,7 @@ def create_video_overlay(
     accel_y = data.U_imu[:, 2]
 
     # Setup figure
-    fig, axes = setup_figure()
+    fig, axes = setup_figure(gyro_ylim, accel_ylim)
 
     # Initialize plot elements
     video_frame = axes["video"].imshow(
@@ -278,19 +296,14 @@ def create_video_overlay(
         # Update gyro plot
         gyro_line.set_data(t_gyro, gyro_window)
         axes["gyro"].set_xlim(current_time - imu_window_s / 2, current_time + imu_window_s / 2)
-        if len(gyro_window) > 0:
-            y_margin = max(20, np.ptp(gyro_window) * 0.2)
-            axes["gyro"].set_ylim(gyro_window.min() - y_margin, gyro_window.max() + y_margin)
+        axes["gyro"].set_ylim(gyro_ylim)  # Fixed Y-axis
         gyro_marker.set_xdata([current_time, current_time])
 
         # Update accelerometer plot
         accel_x_line.set_data(t_accel_x, accel_x_window)
         accel_y_line.set_data(t_accel_y, accel_y_window)
         axes["accel"].set_xlim(current_time - imu_window_s / 2, current_time + imu_window_s / 2)
-        if len(accel_x_window) > 0 and len(accel_y_window) > 0:
-            all_accel = np.concatenate([accel_x_window, accel_y_window])
-            y_margin = max(2, np.ptp(all_accel) * 0.2)
-            axes["accel"].set_ylim(all_accel.min() - y_margin, all_accel.max() + y_margin)
+        axes["accel"].set_ylim(accel_ylim)  # Fixed Y-axis
         accel_marker.set_xdata([current_time, current_time])
 
         # Update time display
