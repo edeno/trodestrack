@@ -62,7 +62,7 @@ class SmootherResult(NamedTuple):
 
 
 RTS_SMOOTHER_STATIC_ARGNAMES = ("layout", "ekf_config", "num_iter")
-RTS_SMOOTHER_DONATE_ARGNUMS = (0,)
+RTS_SMOOTHER_DONATE_ARGNUMS: tuple[int, ...] = ()
 
 
 # =============================================================================
@@ -94,6 +94,8 @@ def _rts_smoother_impl(
 
     F_jac = jacfwd(f, argnums=0)
     has_mask = jnp.asarray(mask_is_provided, dtype=bool)
+    h_idx = get_heading_index(layout)
+    has_heading = h_idx < n
 
     def predict_between_frames(
         t_idx: int,
@@ -120,9 +122,8 @@ def _rts_smoother_impl(
                 x_pred = f(x_s, u, dt)
                 F_k = F_jac(x_lin_s, u, dt)
 
-                dtype = x_s.dtype
-                h_idx = get_heading_index(layout)
-                theta = x_s[h_idx] if n > h_idx else jnp.asarray(0.0, dtype=dtype)
+                dtype = x_pred.dtype
+                theta = x_pred[h_idx] if has_heading else jnp.asarray(0.0, dtype=dtype)
                 Q_total = assemble_Q(
                     ekf_config,
                     theta=theta,
@@ -439,6 +440,8 @@ def sigma_point_smoother(
         # Compute cross-covariance between filtered[k] and predicted[k+1]
         # by propagating sigma points through all IMU steps.
         # This correctly captures the linearization of the composed dynamics.
+        h_idx = get_heading_index(layout)
+        has_heading = h_idx < n
 
         def propagate_one_imu(carry, imu_idx):
             x_in, P_in = carry
@@ -453,19 +456,6 @@ def sigma_point_smoother(
                     lambda: jnp.array(dt_imu_mean),
                 )
 
-                dtype = x_s.dtype
-                # Predict covariance using shared assemble_Q
-                h_idx = get_heading_index(layout)
-                theta = x_s[h_idx] if n > h_idx else jnp.asarray(0.0, dtype=dtype)
-                Q_total = assemble_Q(
-                    ukf_config,
-                    theta=theta,
-                    dt=dt,
-                    n=n,
-                    has_vision=jnp.logical_not(in_blackout),
-                    dtype=dtype,
-                )
-
                 # Generate sigma points
                 sigmas = _compute_sigma_points(x_s, P_s, n, lamb)
 
@@ -477,6 +467,17 @@ def sigma_point_smoother(
 
                 # Compute predicted mean
                 m_pred = jnp.tensordot(w_mean, sigmas_prop, axes=1)
+
+                dtype = m_pred.dtype
+                theta = m_pred[h_idx] if has_heading else jnp.asarray(0.0, dtype=dtype)
+                Q_total = assemble_Q(
+                    ukf_config,
+                    theta=theta,
+                    dt=dt,
+                    n=n,
+                    has_vision=jnp.logical_not(in_blackout),
+                    dtype=dtype,
+                )
 
                 # Compute predicted covariance
                 deviations = sigmas_prop - m_pred

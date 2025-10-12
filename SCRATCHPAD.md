@@ -217,3 +217,4 @@ Successfully added 5 filter integration tests in `tests/sim/test_rat_imu_gravity
 - Cleaned up runtime branching: `lax.cond` for validity checks, JAX booleans for blackout gating, static loop counts handled via `num_iter` static arg.
 - Validated via targeted suites: `tests/models/test_jit_wrappers.py`, `tests/models/test_dynamics_3d_imu.py`, `tests/sim/test_rat_imu_gravity.py`, and full `tests/runtime` smoother battery (warnings only about non-usable donated buffers).
 - Outstanding: capture throughput delta (≥20% speedup) before closing the benchmark acceptance item.
+- Follow-up tweaks: smoothers now feed θ⁺ into `assemble_Q`, heading log-likelihood gating uses the shared `HEADING_GATE_THRESHOLD`, LED spacing clones use `dataclasses.replace`, and donation metadata tolerates empty tuples (no more buffer donation warnings).

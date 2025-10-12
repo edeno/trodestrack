@@ -17,6 +17,8 @@
 - Refactored `extended_kalman_filter` and `rts_smoother` to delegate to compiled kernels while preserving public APIs.
 - Eliminated traced-Python branching inside scan loops (consistent `lax.cond`/boolean tensors) and lifted measurement model instantiation into the compiled scope.
 - Registered `FilterCoreConfig`, `EKFConfig`, and `UKFConfig` as JAX pytrees (`frozen=True`) so configs can flow through JIT safely.
+- Smoothers now assemble process noise with the predicted heading θ⁺, matching the forward pass, and auto LED spacing copies use `dataclasses.replace`.
+- Heading log-likelihood gating references the shared `HEADING_GATE_THRESHOLD` in both EKF/UKF paths; donation metadata tolerates empty tuples to silence buffer warnings.
 
 **Tests:**
 

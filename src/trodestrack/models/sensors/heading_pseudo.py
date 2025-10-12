@@ -31,6 +31,8 @@ from trodestrack.models.filter_common import (
 )
 from trodestrack.models.state_layout import StateLayout, get_heading_index
 
+HEADING_GATE_THRESHOLD = 1e5
+
 
 class HeadingPseudoModel:
     """Heading pseudo-measurement model from dual-LED geometry with preallocated arrays.

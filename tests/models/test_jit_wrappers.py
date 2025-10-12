@@ -60,4 +60,6 @@ def test_hot_path_modules_expose_jit_metadata(module_name, jit_attr, static_attr
         module, donate_attr
     ), f"{module_name} should declare donated argnums via `{donate_attr}`"
     donate_argnums = getattr(module, donate_attr)
-    assert donate_argnums, f"{module_name} must donate at least one argument"
+    assert isinstance(
+        donate_argnums, tuple
+    ), f"{module_name}.{donate_attr} must be a tuple of donated argument indices"

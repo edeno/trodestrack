@@ -29,7 +29,7 @@ References:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import NamedTuple
 
 import jax
@@ -54,7 +54,10 @@ from trodestrack.models.filter_common import (
 from trodestrack.models.filter_update import ekf_projected_update
 from trodestrack.models.process_noise import assemble_Q
 from trodestrack.models.sensors.camera_position import CameraPositionModel
-from trodestrack.models.sensors.heading_pseudo import HeadingPseudoModel
+from trodestrack.models.sensors.heading_pseudo import (
+    HEADING_GATE_THRESHOLD,
+    HeadingPseudoModel,
+)
 from trodestrack.models.state_layout import StateLayout, get_heading_index, get_layout
 
 # =============================================================================
@@ -124,7 +127,7 @@ class EKFComputationResult(NamedTuple):
 
 
 EXTENDED_KALMAN_FILTER_STATIC_ARGNAMES = ("layout", "config_for_filter")
-EXTENDED_KALMAN_FILTER_DONATE_ARGNUMS = (0,)
+EXTENDED_KALMAN_FILTER_DONATE_ARGNUMS: tuple[int, ...] = ()
 
 
 def _extended_kalman_filter_impl(
@@ -535,8 +538,12 @@ def update_heading(
         log_lik = -0.5 * (jnp.log(2 * jnp.pi) + jnp.log(S_scalar) + innov**2 / S_scalar)
 
         # Zero out log-likelihood if R is huge (gated)
-        use_heading = R_heading < 1e5
-        log_lik = lax.select(use_heading, log_lik, 0.0)
+        use_heading = R_heading < HEADING_GATE_THRESHOLD
+        log_lik = lax.select(
+            use_heading,
+            log_lik,
+            jnp.array(0.0, dtype=log_lik.dtype),
+        )
 
         return EKFState(m_upd, P_upd), log_lik
 
@@ -606,9 +613,7 @@ def extended_kalman_filter(
     if ekf_config.led_distance is None:
         estimated_led_distance = estimate_led_spacing(Z_cam_led1_jax, Z_cam_led2_jax, mask_cam_jax)
         # Create new config with estimated spacing (do NOT mutate original)
-        config_dict = {k: v for k, v in ekf_config.__dict__.items()}
-        config_dict["led_distance"] = estimated_led_distance
-        config_for_filter = EKFConfig(**config_dict)
+        config_for_filter = replace(ekf_config, led_distance=estimated_led_distance)
     else:
         # Use original config as-is
         config_for_filter = ekf_config

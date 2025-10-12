@@ -32,7 +32,7 @@ References:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import NamedTuple
 
 import jax.numpy as jnp
@@ -54,7 +54,10 @@ from trodestrack.models.filter_common import (
 from trodestrack.models.filter_update import ukf_projected_update
 from trodestrack.models.process_noise import assemble_Q
 from trodestrack.models.sensors.camera_position import CameraPositionModel
-from trodestrack.models.sensors.heading_pseudo import HeadingPseudoModel
+from trodestrack.models.sensors.heading_pseudo import (
+    HEADING_GATE_THRESHOLD,
+    HeadingPseudoModel,
+)
 from trodestrack.models.state_layout import StateLayout, get_heading_index, get_layout
 
 # =============================================================================
@@ -450,6 +453,8 @@ def update_step(
             # Get innovation from camera model (handles NaN → zero residual)
             innovation = camera_model.innovation(frame_idx, z_pred)
 
+            # S is the full 4×4 covariance before projection; ukf_projected_update
+            # handles exact 2D statistics for single-LED cases.
             # Call generic UKF projected update primitive
             state_upd, nis, log_lik = ukf_projected_update(
                 UKFState(mean=m_in, cov=P_in),
@@ -577,7 +582,7 @@ def update_heading(
         log_lik = -0.5 * (jnp.log(2 * jnp.pi) + jnp.log(S) + innov**2 / S)
 
         # Zero out log-likelihood if R is huge (gated)
-        use_heading = R_heading < 1e5
+        use_heading = R_heading < HEADING_GATE_THRESHOLD
         log_lik = lax.select(use_heading, log_lik, jnp.array(0.0, dtype=log_lik.dtype))
 
         return UKFState(m_upd, P_upd), log_lik
@@ -648,9 +653,7 @@ def unscented_kalman_filter(
     if ukf_config.led_distance is None:
         estimated_led_distance = estimate_led_spacing(Z_cam_led1_jax, Z_cam_led2_jax, mask_cam_jax)
         # Create new config with estimated spacing (do NOT mutate original)
-        config_dict = {k: v for k, v in ukf_config.__dict__.items()}
-        config_dict["led_distance"] = estimated_led_distance
-        config_for_filter = UKFConfig(**config_dict)
+        config_for_filter = replace(ukf_config, led_distance=estimated_led_distance)
     else:
         # Use original config as-is
         config_for_filter = ukf_config
