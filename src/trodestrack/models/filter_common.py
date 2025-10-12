@@ -657,31 +657,68 @@ def update_zupt(
     -------
     tuple[FilterState, jnp.ndarray]
         Updated state and log-likelihood (scalar).
+
+    Notes
+    -----
+    This function is a compatibility wrapper that uses ZUPTModel internally.
+    It maintains the existing API while adopting the new sensor architecture.
     """
 
-    from trodestrack.models.zupt import zupt_model
+    from trodestrack.models.sensors.zupt import ZUPTModel
 
     mean, cov = state
     n = mean.shape[0]
 
-    H, R, innovation = zupt_model(config, mean, n, dtype=mean.dtype)
+    # Determine layout from state dimension
+    # Find matching layout in registry (same logic as legacy zupt_model)
+    # Assumption: unique mapping from state dimension to layout
+    # If multiple layouts share same dimension, the first match wins
+    from trodestrack.models.state_layout import LAYOUT_REGISTRY
 
+    layout = None
+    for mode_layout in LAYOUT_REGISTRY.values():
+        if mode_layout.n == n:
+            layout = mode_layout
+            break
+
+    if layout is None:
+        # Fallback: assume 2d_full layout
+        from trodestrack.models.state_layout import get_layout
+
+        layout = get_layout("2d_full")
+
+    # Create ZUPT model (fully pure, no mutable state)
+    zupt_model = ZUPTModel(
+        enable_zupt=config.enable_zupt,
+        velocity_threshold=config.zupt_velocity_threshold,
+        measurement_noise=config.zupt_measurement_noise,
+        layout=layout,
+        dtype=mean.dtype,
+    )
+
+    # Extract measurement components (all pure functions, JIT-safe)
+    meas_pred = zupt_model.predict(mean)
+    H = zupt_model.jacobian(mean)
+    R = zupt_model.meas_cov_from_pred(meas_pred)  # Pure: derive R from velocity
+    innovation = zupt_model.innovation(frame_idx=0, meas_pred=meas_pred)
+
+    # Standard Kalman update
     S = H @ cov @ H.T + R
     K = psd_solve(S, H @ cov).T
 
     mean_updated = mean + K @ innovation
     cov_updated = joseph_update(cov, K, H, R)
 
+    # Log-likelihood
     log_det = jnp.linalg.slogdet(S)[1]
     innov_quad = innovation @ psd_solve(S, innovation)
     log_likelihood = -0.5 * (2 * jnp.log(2 * jnp.pi) + log_det + innov_quad)
 
-    # Zero out log-likelihood when ZUPT is effectively disabled (large R)
-    stationary = (
-        jnp.sqrt(mean[2] ** 2 + mean[3] ** 2) < config.zupt_velocity_threshold
-    ) & config.enable_zupt
+    # Zero out log-likelihood when ZUPT is gated out (derive from same R)
+    # R diagonal is 1e6 when disabled (moving or ZUPT off)
+    is_active = jnp.trace(R) < 1e5
     log_likelihood = lax.select(
-        stationary, log_likelihood, jnp.array(0.0, dtype=log_likelihood.dtype)
+        is_active, log_likelihood, jnp.array(0.0, dtype=log_likelihood.dtype)
     )
 
     return FilterState(mean=mean_updated, cov=cov_updated), log_likelihood

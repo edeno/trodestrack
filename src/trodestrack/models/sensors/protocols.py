@@ -212,14 +212,14 @@ class MeasurementModel(Protocol):
             Selector matrix with **static shape (2, 4)** for camera measurements.
             Maps 4D measurement space to 2D active subspace when single LED valid.
             For dual-LED case, returns a conventional selector (ignored by update).
-            For 1D measurements (heading, ZUPT), returns eye(1) for consistency.
+            For heading (1D), returns eye(1). For ZUPT (2D velocity), returns eye(2).
 
         Notes
         -----
         **Critical for PR2/PR3 JAX compatibility:**
         - Shape must be **static** and **known at trace time**
         - Camera: always returns (2, 4) selector, never (4, 4)
-        - Heading/ZUPT: returns (1, 1) identity
+        - Heading: returns (1, 1) identity. ZUPT: returns (2, 2) identity
         - Generic update primitive uses `lax.cond(both_leds, ...)` to choose
           4D direct update vs 2D projected update
         - See `filter_common.make_led_selector()` for camera implementation

@@ -2,6 +2,63 @@
 
 ## [Unreleased]
 
+### Session: 2025-10-12 - Milestone M4 Complete (ZUPT as First-Class Sensor)
+
+**Added:**
+
+- **ZUPTModel** ([src/trodestrack/models/sensors/zupt.py](src/trodestrack/models/sensors/zupt.py), 252 lines)
+  - Implements `MeasurementModel` protocol for Zero-Velocity Update pseudo-measurements
+  - **Measurement dimension:** 2 (2D velocity [vx, vy])
+  - **Velocity-dependent gating:** Small R when stationary (v < threshold), large R (1e6) when moving
+  - **Branchless logic:** Uses `lax.select` for JAX JIT compatibility (no Python if statements)
+  - **State-dependent behavior:** Call `set_state()` before measurement update to recompute R based on velocity
+  - Methods:
+    - `predict()`: Extracts [vx, vy] from state using layout
+    - `jacobian()`: Returns velocity selector matrix H (2, n)
+    - `meas_cov()`: Returns R based on velocity magnitude and enable_zupt flag
+    - `innovation()`: Returns -[vx, vy] (measuring zero velocity)
+    - `subspace()`: Returns (True, False, False, eye(2)) for identity projection
+  - Impact: Unifies ZUPT with sensor architecture, enables future extensibility
+
+**Changed:**
+
+- **update_zupt() Refactored** ([src/trodestrack/models/filter_common.py](src/trodestrack/models/filter_common.py), lines 643-728)
+  - Now uses `ZUPTModel` internally (maintains existing API)
+  - Removed dependency on legacy `zupt_model()` helper
+  - Added layout inference from state dimension
+  - Impact: EKF/UKF automatically use new ZUPTModel without code changes
+
+**Removed:**
+
+- **Legacy ZUPT helpers** ([src/trodestrack/models/zupt.py](src/trodestrack/models/zupt.py))
+  - Deleted `zupt_model()` function (replaced by ZUPTModel)
+  - Deleted `H_vel()` helper (logic moved into ZUPTModel.jacobian())
+  - Impact: Cleaner codebase, single source of truth for ZUPT logic
+
+**Test Results:**
+
+- ✅ ZUPTModel unit tests: 12/12 pass ([tests/models/sensors/test_zupt.py](tests/models/sensors/test_zupt.py))
+  - Protocol compliance validated
+  - Velocity extraction, Jacobian, R gating tested
+  - JAX JIT compatibility verified
+  - Edge cases (threshold boundary, disabled ZUPT) covered
+- ✅ ZUPT integration tests: 12/12 pass ([tests/filters/test_zupt.py](tests/filters/test_zupt.py))
+  - Stationary scenarios: velocity drift reduced by >30%
+  - Moving scenarios: ZUPT correctly inactive
+  - Vision dropout handling validated
+  - EKF and UKF parity maintained
+- ✅ Broader filter suite: 136/136 pass (no regressions)
+
+**Documentation:**
+
+- Updated `MeasurementModel` protocol documentation to correctly describe ZUPT as 2D measurement
+- Added usage notes in `set_state()` docstring
+- Added layout assumption comments in `update_zupt()`
+
+**Code Review:** APPROVED (0 critical, 0 high, 1 medium documentation issue fixed, 2 low suggestions addressed)
+
+---
+
 ### Session: 2025-10-12 - Milestone M3 Complete (EKF/UKF Integration)
 
 **Changed:**
