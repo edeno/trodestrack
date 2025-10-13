@@ -619,6 +619,9 @@ def update_heading(
 # =============================================================================
 
 UNSCENTED_KALMAN_FILTER_STATIC_ARGNAMES = ("layout", "config_for_filter")
+# Buffer donation not beneficial: input shapes (N_cam, 2) don't match output shapes (N_cam, n)
+# XLA cannot reuse donated buffers when shapes differ. Donation only helps when input
+# buffers can be reused for outputs of matching shape/dtype.
 UNSCENTED_KALMAN_FILTER_DONATE_ARGNUMS: tuple[int, ...] = ()
 
 
