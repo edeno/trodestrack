@@ -64,6 +64,7 @@ import numpy as np
 from matplotlib.gridspec import GridSpec
 
 from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
+from trodestrack.models.state_layout import get_layout
 from trodestrack.qa.metrics import compute_nees, compute_position_rmse
 from trodestrack.sim.simple import (
     SimpleSimConfig,
@@ -174,6 +175,7 @@ def plot_ekf_results(
     scenario_name: str,
     metrics: dict,
     output_path: Path,
+    ekf_config: EKFConfig,
 ) -> None:
     """Create comprehensive visualization of EKF performance.
 
@@ -191,9 +193,13 @@ def plot_ekf_results(
         scenario_name: Descriptive name for the scenario
         metrics: Dictionary of computed metrics
         output_path: Where to save the figure
+        ekf_config: EKF configuration (for extracting state layout)
     """
     fig = plt.figure(figsize=(16, 10))
     gs = GridSpec(3, 3, figure=fig, hspace=0.35, wspace=0.3)
+
+    # Get state layout from config (BEST PRACTICE - dimension-agnostic!)
+    layout = get_layout(ekf_config.state_mode)
 
     t_imu = sim_data["t_imu"]
     t_cam = sim_data["t_cam_exp"]
@@ -201,21 +207,34 @@ def plot_ekf_results(
     X_est = np.array(filter_result.filtered_means)
     P_est = np.array(filter_result.filtered_covariances)
 
-    # Interpolate truth to camera times (including biases for full 8D state)
+    # Interpolate truth to camera times (including biases for full state)
     from trodestrack.sim.utils import interp_angle
 
-    X_truth_cam = np.column_stack(
-        [
-            np.interp(t_cam, t_imu, X_truth[:, 0]),  # x
-            np.interp(t_cam, t_imu, X_truth[:, 1]),  # y
-            np.interp(t_cam, t_imu, X_truth[:, 2]),  # vx
-            np.interp(t_cam, t_imu, X_truth[:, 3]),  # vy
-            interp_angle(t_cam, t_imu, X_truth[:, 4]),  # θ (angle-aware)
-            np.interp(t_cam, t_imu, sim_data["bias_gyro"]),  # bias_gz
-            np.interp(t_cam, t_imu, sim_data["bias_accel_x"]),  # bias_ax
-            np.interp(t_cam, t_imu, sim_data["bias_accel_y"]),  # bias_ay
-        ]
-    )
+    # Use layout indices for dimension-agnostic interpolation
+    pos_idx = layout.pos_idx
+    vel_idx = layout.vel_idx
+    heading_idx = layout.heading_idx
+    bias_gyro_idx = layout.bias_gyro_idx
+    # bias_accel_idx = layout.bias_accel_idx
+
+    # Build truth state at camera times using layout
+    truth_components = []
+    # Position
+    for i in pos_idx:
+        truth_components.append(np.interp(t_cam, t_imu, X_truth[:, i]))
+    # Velocity
+    for i in vel_idx:
+        truth_components.append(np.interp(t_cam, t_imu, X_truth[:, i]))
+    # Heading (angle-aware interpolation)
+    truth_components.append(interp_angle(t_cam, t_imu, X_truth[:, heading_idx]))
+    # Gyro bias
+    for _ in bias_gyro_idx:
+        truth_components.append(np.interp(t_cam, t_imu, sim_data["bias_gyro"]))
+    # Accel biases
+    truth_components.append(np.interp(t_cam, t_imu, sim_data["bias_accel_x"]))
+    truth_components.append(np.interp(t_cam, t_imu, sim_data["bias_accel_y"]))
+
+    X_truth_cam = np.column_stack(truth_components)
 
     # -------------------------------------------------------------------------
     # Panel 1: 2D Trajectory (top-left, span 2 rows)
@@ -226,10 +245,14 @@ def plot_ekf_results(
     ax_traj.set_ylabel("Y Position (m)")
     ax_traj.set_title("🎯 Trajectory Tracking", fontweight="bold", loc="left")
 
+    # Extract positions using layout (dimension-agnostic)
+    pos_truth_imu = X_truth[:, layout.pos_idx]  # (N_imu, 2)
+    pos_est = X_est[:, layout.pos_idx]  # (N_cam, 2)
+
     # Ground truth path (use IMU-rate truth for smooth line)
     ax_traj.plot(
-        X_truth[:, 0],
-        X_truth[:, 1],
+        pos_truth_imu[:, 0],
+        pos_truth_imu[:, 1],
         "-",
         linewidth=2,
         color=COLORS["gray"],
@@ -240,8 +263,8 @@ def plot_ekf_results(
 
     # EKF estimate
     ax_traj.plot(
-        X_est[:, 0],
-        X_est[:, 1],
+        pos_est[:, 0],
+        pos_est[:, 1],
         "-",
         linewidth=2.5,
         color=COLORS["blue"],
@@ -262,11 +285,13 @@ def plot_ekf_results(
         zorder=3,
     )
 
-    # Add uncertainty ellipse at final position
+    # Add uncertainty ellipse at final position using layout
     from matplotlib.patches import Ellipse
 
-    final_pos = X_est[-1, :2]
-    final_cov = P_est[-1, :2, :2]
+    final_pos = pos_est[-1]  # Already extracted using layout
+    # Extract position covariance using layout indices
+    final_cov_full = P_est[-1]
+    final_cov = final_cov_full[np.ix_(layout.pos_idx, layout.pos_idx)]  # (2, 2)
     eigvals, eigvecs = np.linalg.eigh(final_cov)
     angle = np.degrees(np.arctan2(eigvecs[1, 0], eigvecs[0, 0]))
     width, height = 2 * np.sqrt(5.991 * eigvals)  # 95% confidence (chi2 with df=2)
@@ -294,7 +319,9 @@ def plot_ekf_results(
     ax_pos_err.set_ylabel("Position Error (cm)")
     ax_pos_err.set_title("📏 Position Accuracy", fontweight="bold", loc="left")
 
-    pos_err = np.linalg.norm(X_est[:, :2] - X_truth_cam[:, :2], axis=1) * 100  # m→cm
+    # Extract positions using layout for comparison
+    pos_truth_cam = X_truth_cam[:, layout.pos_idx]  # (N_cam, 2)
+    pos_err = np.linalg.norm(pos_est - pos_truth_cam, axis=1) * 100  # m→cm
     ax_pos_err.plot(t_cam, pos_err, linewidth=2, color=COLORS["red"], alpha=0.8)
     ax_pos_err.axhline(
         2.0, linestyle="--", color=COLORS["gray"], linewidth=1, alpha=0.5, label="PRD Target (2 cm)"
@@ -325,7 +352,10 @@ def plot_ekf_results(
     ax_vel_err.set_ylabel("Velocity Error (cm/s)")
     ax_vel_err.set_title("🏃 Velocity Tracking", fontweight="bold", loc="left")
 
-    vel_err = np.linalg.norm(X_est[:, 2:4] - X_truth_cam[:, 2:4], axis=1) * 100  # m/s→cm/s
+    # Extract velocities using layout for comparison
+    vel_est = X_est[:, layout.vel_idx]  # (N_cam, 2)
+    vel_truth_cam = X_truth_cam[:, layout.vel_idx]  # (N_cam, 2)
+    vel_err = np.linalg.norm(vel_est - vel_truth_cam, axis=1) * 100  # m/s→cm/s
     ax_vel_err.plot(t_cam, vel_err, linewidth=2, color=COLORS["purple"], alpha=0.8)
     ax_vel_err.axhline(
         10.0,
@@ -351,7 +381,10 @@ def plot_ekf_results(
     def angle_diff(a, b):
         return np.arctan2(np.sin(a - b), np.cos(a - b))
 
-    heading_err = np.abs(np.degrees(angle_diff(X_est[:, 4], X_truth_cam[:, 4])))
+    # Extract headings using layout
+    heading_est = X_est[:, layout.heading_idx]  # (N_cam,)
+    heading_truth_cam = X_truth_cam[:, layout.heading_idx]  # (N_cam,)
+    heading_err = np.abs(np.degrees(angle_diff(heading_est, heading_truth_cam)))
     ax_heading_err.plot(t_cam, heading_err, linewidth=2, color=COLORS["orange"], alpha=0.8)
     ax_heading_err.axhline(
         7.0, linestyle="--", color=COLORS["gray"], linewidth=1, alpha=0.5, label="PRD Target (7°)"
@@ -369,43 +402,46 @@ def plot_ekf_results(
     ax_gyro_bias.set_ylabel("Gyro Bias (deg/s)")
     ax_gyro_bias.set_title("⚙️ Gyro Bias Learning", fontweight="bold", loc="left")
 
-    # Truth (already interpolated in X_truth_cam)
-    bias_gyro_truth = X_truth_cam[:, 5]
-    ax_gyro_bias.plot(
-        t_cam,
-        np.degrees(bias_gyro_truth),
-        linewidth=2,
-        color=COLORS["gray"],
-        alpha=0.5,
-        label="True Bias",
-        linestyle="--",
-    )
+    # Extract gyro bias using layout (supports single or multiple gyro biases)
+    gyro_bias_idx = layout.bias_gyro_idx[0] if layout.bias_gyro_idx else None
+    if gyro_bias_idx is not None:
+        # Truth (already interpolated in X_truth_cam)
+        bias_gyro_truth = X_truth_cam[:, gyro_bias_idx]
+        ax_gyro_bias.plot(
+            t_cam,
+            np.degrees(bias_gyro_truth),
+            linewidth=2,
+            color=COLORS["gray"],
+            alpha=0.5,
+            label="True Bias",
+            linestyle="--",
+        )
 
-    # EKF estimate
-    bias_gyro_est = X_est[:, 5]
-    ax_gyro_bias.plot(
-        t_cam,
-        np.degrees(bias_gyro_est),
-        linewidth=2,
-        color=COLORS["purple"],
-        alpha=0.8,
-        label="EKF Estimate",
-    )
+        # EKF estimate
+        bias_gyro_est = X_est[:, gyro_bias_idx]
+        ax_gyro_bias.plot(
+            t_cam,
+            np.degrees(bias_gyro_est),
+            linewidth=2,
+            color=COLORS["purple"],
+            alpha=0.8,
+            label="EKF Estimate",
+        )
 
-    # ±1σ uncertainty
-    bias_std = np.sqrt(P_est[:, 5, 5])
-    ax_gyro_bias.fill_between(
-        t_cam,
-        np.degrees(bias_gyro_est - bias_std),
-        np.degrees(bias_gyro_est + bias_std),
-        alpha=0.2,
-        color=COLORS["purple"],
-        label="±1σ",
-    )
+        # ±1σ uncertainty
+        bias_std = np.sqrt(P_est[:, gyro_bias_idx, gyro_bias_idx])
+        ax_gyro_bias.fill_between(
+            t_cam,
+            np.degrees(bias_gyro_est - bias_std),
+            np.degrees(bias_gyro_est + bias_std),
+            alpha=0.2,
+            color=COLORS["purple"],
+            label="±1σ",
+        )
 
-    ax_gyro_bias.legend(loc="best", fontsize=8)
-    ax_gyro_bias.grid(True, alpha=0.2)
-    ax_gyro_bias.axhline(0, color="k", linewidth=0.5, alpha=0.3)
+        ax_gyro_bias.legend(loc="best", fontsize=8)
+        ax_gyro_bias.grid(True, alpha=0.2)
+        ax_gyro_bias.axhline(0, color="k", linewidth=0.5, alpha=0.3)
 
     # -------------------------------------------------------------------------
     # Panel 6: Accel Bias Estimates (bottom-left)
@@ -415,35 +451,38 @@ def plot_ekf_results(
     ax_accel_bias.set_ylabel("Accel Bias (m/s²)")
     ax_accel_bias.set_title("⚙️ Accelerometer Bias Learning", fontweight="bold", loc="left")
 
-    # Truth (already interpolated in X_truth_cam)
-    bias_ax_truth = X_truth_cam[:, 6]
-    bias_ay_truth = X_truth_cam[:, 7]
-    ax_accel_bias.plot(
-        t_cam,
-        bias_ax_truth,
-        linewidth=1.5,
-        color=COLORS["gray"],
-        alpha=0.4,
-        linestyle="--",
-        label="True X/Y",
-    )
-    ax_accel_bias.plot(
-        t_cam, bias_ay_truth, linewidth=1.5, color=COLORS["gray"], alpha=0.4, linestyle="--"
-    )
+    # Extract accel biases using layout (supports 2D or 3D accel)
+    accel_bias_idx = layout.bias_accel_idx
+    if len(accel_bias_idx) >= 2:
+        # Truth (already interpolated in X_truth_cam) - use first 2 accel biases
+        bias_ax_truth = X_truth_cam[:, accel_bias_idx[0]]
+        bias_ay_truth = X_truth_cam[:, accel_bias_idx[1]]
+        ax_accel_bias.plot(
+            t_cam,
+            bias_ax_truth,
+            linewidth=1.5,
+            color=COLORS["gray"],
+            alpha=0.4,
+            linestyle="--",
+            label="True X/Y",
+        )
+        ax_accel_bias.plot(
+            t_cam, bias_ay_truth, linewidth=1.5, color=COLORS["gray"], alpha=0.4, linestyle="--"
+        )
 
-    # EKF estimates
-    bias_ax_est = X_est[:, 6]
-    bias_ay_est = X_est[:, 7]
-    ax_accel_bias.plot(
-        t_cam, bias_ax_est, linewidth=2, color=COLORS["blue"], alpha=0.8, label="EKF X"
-    )
-    ax_accel_bias.plot(
-        t_cam, bias_ay_est, linewidth=2, color=COLORS["red"], alpha=0.8, label="EKF Y"
-    )
+        # EKF estimates
+        bias_ax_est = X_est[:, accel_bias_idx[0]]
+        bias_ay_est = X_est[:, accel_bias_idx[1]]
+        ax_accel_bias.plot(
+            t_cam, bias_ax_est, linewidth=2, color=COLORS["blue"], alpha=0.8, label="EKF X"
+        )
+        ax_accel_bias.plot(
+            t_cam, bias_ay_est, linewidth=2, color=COLORS["red"], alpha=0.8, label="EKF Y"
+        )
 
-    ax_accel_bias.legend(loc="best", fontsize=8, ncol=2)
-    ax_accel_bias.grid(True, alpha=0.2)
-    ax_accel_bias.axhline(0, color="k", linewidth=0.5, alpha=0.3)
+        ax_accel_bias.legend(loc="best", fontsize=8, ncol=2)
+        ax_accel_bias.grid(True, alpha=0.2)
+        ax_accel_bias.axhline(0, color="k", linewidth=0.5, alpha=0.3)
 
     # -------------------------------------------------------------------------
     # Panel 7: NEES (bottom-middle)
@@ -453,15 +492,17 @@ def plot_ekf_results(
     ax_nees.set_ylabel("NEES")
     ax_nees.set_title("📊 Filter Consistency (NEES)", fontweight="bold", loc="left")
 
-    # Compute full 8D NEES
+    # Compute full NEES using actual state dimension from layout
     from scipy.stats import chi2
 
-    state_dim = 8
+    state_dim = layout.n  # Use layout dimension (supports 5D, 8D, 10D, 15D)
     nees_values = []
     for i in range(len(t_cam)):
         err = X_est[i] - X_truth_cam[i]
-        # Wrap heading error
-        err[4] = angle_diff(X_est[i, 4], X_truth_cam[i, 4])
+        # Wrap heading error using layout
+        err[layout.heading_idx] = angle_diff(
+            X_est[i, layout.heading_idx], X_truth_cam[i, layout.heading_idx]
+        )
         nees = err @ np.linalg.solve(P_est[i], err)
         nees_values.append(nees)
     nees_values = np.array(nees_values)
@@ -511,12 +552,13 @@ def plot_ekf_results(
     ax_innov.set_ylabel("Innovation (cm)")
     ax_innov.set_title("🔍 Measurement Residuals", fontweight="bold", loc="left")
 
-    # Compute innovations (measurement - prediction)
+    # Compute innovations (measurement - prediction) using layout
     innovations = []
     for i in range(len(t_cam)):
         if sim_data["mask_cam"][i]:
             z_obs = sim_data["Z_cam_led1"][i]
-            z_pred = filter_result.predicted_means[i, :2]
+            # Extract predicted position using layout
+            z_pred = filter_result.predicted_means[i, layout.pos_idx]
             innov_mag = np.linalg.norm(z_obs - z_pred) * 100  # cm
             innovations.append(innov_mag)
         else:
@@ -771,6 +813,7 @@ def main() -> None:
         "Stationary",
         metrics_stat,
         OUTPUT_DIR / "03_ekf_stationary.png",
+        ekf_config,
     )
 
     # -------------------------------------------------------------------------
@@ -864,6 +907,7 @@ def main() -> None:
         "Constant Velocity",
         metrics_const_vel,
         OUTPUT_DIR / "03_ekf_constant_velocity.png",
+        ekf_config,
     )
 
     # -------------------------------------------------------------------------
@@ -966,6 +1010,7 @@ def main() -> None:
         "Circular Motion",
         metrics_circular,
         OUTPUT_DIR / "03_ekf_circular.png",
+        ekf_config,
     )
 
     # -------------------------------------------------------------------------

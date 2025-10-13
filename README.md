@@ -134,6 +134,70 @@ x0, P0 = ekf_initialize_state(sim, cfg)
 fwd = ekf_forward(x0, P0, cfg, sim)
 ```
 
+#### Working with State Layouts (Recommended Pattern)
+
+TrodesTrack uses an explicit **state layout system** to eliminate hardcoded dimension assumptions and support multiple tracking modes (5D, 8D, 10D, 15D states). **Always use state layouts** instead of magic indices like `[:, 0:2]`.
+
+```python
+from trodestrack.models.ekf import extended_kalman_filter, EKFConfig
+from trodestrack.models.state_layout import get_layout
+from trodestrack.sim.simple import simulate_circular, SimpleSimConfig
+
+# Generate simulation and run filter
+sim_config = SimpleSimConfig(duration_s=10.0)
+sim = simulate_circular(sim_config)
+ekf_config = EKFConfig()
+result = extended_kalman_filter(ekf_config, sim)
+
+# Get state layout from filter config (BEST PRACTICE!)
+layout = get_layout(ekf_config.state_mode)  # Usually "2d_full" (8D state)
+
+# ✅ GOOD: Extract states using layout indices (dimension-agnostic)
+positions = result.filtered_means[:, layout.pos_idx]      # (N, 2) in meters
+velocities = result.filtered_means[:, layout.vel_idx]     # (N, 2) in m/s
+headings = result.filtered_means[:, layout.heading_idx]   # (N,) in radians
+
+# ❌ BAD: Hardcoded indices (breaks when switching state modes!)
+# positions = result.filtered_means[:, 0:2]  # Fragile! Don't do this!
+
+# Extract uncertainties (covariances) using layout indices
+P = result.filtered_covariances                           # (N, 8, 8) full covariance
+pos_cov = P[:, layout.pos_idx, :][:, :, layout.pos_idx] # (N, 2, 2) position covariance
+pos_std = np.sqrt(np.diagonal(pos_cov, axis1=1, axis2=2)) # (N, 2) position uncertainty
+
+# Plot position with ±2σ uncertainty bands
+import matplotlib.pyplot as plt
+t = sim['t_cam_exp']
+plt.plot(t, positions[:, 0], label='x')
+plt.fill_between(t,
+                 positions[:, 0] - 2*pos_std[:, 0],
+                 positions[:, 0] + 2*pos_std[:, 0],
+                 alpha=0.3, label='±2σ')
+plt.xlabel('Time (s)')
+plt.ylabel('X Position (m)')
+plt.legend()
+plt.show()
+```
+
+**Available State Layouts:**
+
+| Layout String | Dimensions | State Vector | Use Case |
+|--------------|-----------|--------------|----------|
+| `"2d_full"` | 8D | `[x, y, vx, vy, θ, b_gz, b_ax, b_ay]` | Standard sensor fusion (camera + IMU) |
+| `"vision_only"` | 5D | `[x, y, vx, vy, θ]` | Camera-only tracking (no biases) |
+| `"2d_cam_3d_imu"` | 10D | `[x, y, vx, vy, vz, θ, b_gz, b_ax, b_ay, b_az]` | 2D camera with 3D accel (detect rearing) |
+| `"3d_euler"` | 15D | `[x, y, z, vx, vy, vz, roll, pitch, yaw, b_gx, b_gy, b_gz, b_ax, b_ay, b_az]` | Full 3D tracking with Euler angles |
+| `"3d_quat"` | 16D | `[x, y, z, vx, vy, vz, qw, qx, qy, qz, b_gx, b_gy, b_gz, b_ax, b_ay, b_az]` | Full 3D tracking with quaternions |
+
+**Why use state layouts?**
+
+1. **Dimension-agnostic code**: Works with 5D, 8D, 10D, 15D states without modification
+2. **Self-documenting**: `layout.pos_idx` is clearer than `[:, 0:2]`
+3. **Robust to changes**: Switching state modes doesn't break your analysis code
+4. **Matches internal implementation**: Filters use the same layout system
+
+See [`src/trodestrack/models/state_layout.py`](src/trodestrack/models/state_layout.py) for full API documentation.
+
 #### Generate QA report
 
 ```python

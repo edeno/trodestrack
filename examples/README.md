@@ -70,6 +70,27 @@ uv run python examples/03_ekf_basic_scenarios.py
 
 ---
 
+#### [03b_using_plot_utilities.py](03b_using_plot_utilities.py) ⭐ **Recommended for Analysis**
+**Learn:** Using built-in plotting utilities and state layouts
+**Duration:** ~5 seconds
+**Topics:**
+- **State Layout System:** Dimension-agnostic state extraction (works with 5D, 8D, 10D, 15D states)
+- Using `qa.plot_*` functions instead of manual matplotlib code
+- Covariance extraction and uncertainty visualization
+- DRY principle for plotting (Don't Repeat Yourself)
+- Comparing code complexity: utilities vs manual approach
+
+```bash
+uv run python examples/03b_using_plot_utilities.py
+```
+
+**Output:** 5 publication-quality plots using trodestrack utilities
+
+**Key Learning:**
+> **Best Practice:** Always use `layout = get_layout(config.state_mode)` and extract states with `result.filtered_means[:, layout.pos_idx]` instead of hardcoded indices like `[:, 0:2]`. This makes code work with any state dimension!
+
+---
+
 #### [04_ukf_basic_scenarios.py](04_ukf_basic_scenarios.py)
 **Learn:** UKF vs EKF comparison
 **Duration:** ~10 seconds
