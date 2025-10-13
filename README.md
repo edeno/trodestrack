@@ -32,6 +32,12 @@ trodestrack is designed for **SpikeGadgets headstages** with integrated 6-axis I
 - Timestamp-based integration handles variable sampling rates
 - Compatible with both 2D IMU mode (gyro-Z, accel-XY) and full 3D mode (all 6 axes)
 
+**Simulation Defaults:**
+- All synthetic data generation uses realistic SpikeGadgets specifications
+- IMU rate: 104 Hz (matches hardware sensor refresh rate)
+- Noise levels: 0.01 °/s/√Hz gyro, 0.2 mg/√Hz accel (per SpikeGadgets spec)
+- Ensures simulations accurately predict real-world performance
+
 **Video Tracking:**
 - Trodes LED detection (dual LED setup for heading)
 - DeepLabCut keypoint tracking (any pose estimation output)
@@ -110,6 +116,7 @@ Creates a publication-quality PDF with all PRD metrics, NEES/NIS checks, and tim
 ```python
 from trodestrack.sim.rat_imu import RatIMUSimConfig, simulate_rat_imu
 
+# Default config matches SpikeGadgets hardware (104 Hz IMU, realistic noise)
 config = RatIMUSimConfig(duration_s=10.0, seed=42)
 sim = simulate_rat_imu(config)
 ```

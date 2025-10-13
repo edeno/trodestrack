@@ -7,8 +7,7 @@ Generates synthetic ground-truth trajectories with realistic IMU measurements
 Features:
 - 2D planar motion with heading (5D state: x, y, vx, vy, θ)
 - Ornstein-Uhlenbeck processes for smooth, realistic motion
-- IMU measurements at high rate (default 200 Hz for synthetic data)
-  Note: Real SpikeGadgets hardware refreshes at 104 Hz (see PRD.md)
+- IMU measurements matching SpikeGadgets hardware (default 104 Hz sensor refresh rate)
 - Camera observations at video rate (default 30 Hz)
 - Optional second LED for heading measurements
 - Optional confidence scores with correlation to dropouts/occlusions
@@ -185,7 +184,7 @@ class RatIMUSimConfig:
 
     # Durations / rates
     duration_s: float = 60.0
-    fs_imu: float = 200.0  # Synthetic default (real SpikeGadgets hardware: 104 Hz)
+    fs_imu: float = 104.0  # SpikeGadgets hardware sensor refresh rate
     fs_cam: float = 30.0
 
     # Arena (meters)
@@ -231,9 +230,9 @@ class RatIMUSimConfig:
         0.2  # Distance from wall (m) within which reflections can occur
     )
 
-    # IMU white noise densities (per √Hz)
-    gyro_noise_density: float = np.deg2rad(0.03)  # rad/s / √Hz
-    accel_noise_density: float = 0.03  # m/s² / √Hz
+    # IMU white noise densities (per √Hz) - SpikeGadgets specifications
+    gyro_noise_density: float = np.deg2rad(0.01)  # 0.01 °/s/√Hz (SpikeGadgets spec)
+    accel_noise_density: float = 0.00196133  # 0.2 mg/√Hz = 0.0002g * 9.80665
 
     # IMU bias random-walk densities (per √s)
     gyro_bias_rw_density: float = np.deg2rad(0.003)  # rad/s / √s
@@ -979,6 +978,8 @@ def make_default_config(**kwargs) -> RatIMUSimConfig:
     """
     Create a RatIMUSimConfig with optional overrides.
 
+    Defaults match SpikeGadgets headstage hardware specifications (104 Hz IMU, realistic noise).
+
     Parameters
     ----------
     **kwargs
@@ -990,7 +991,7 @@ def make_default_config(**kwargs) -> RatIMUSimConfig:
         New configuration instance.
 
     Example:
-        >>> config = make_default_config(duration_s=120.0, fs_imu=1000.0, use_second_led=True)
+        >>> config = make_default_config(duration_s=120.0, use_second_led=True)
     """
     config = RatIMUSimConfig()
     for key, value in kwargs.items():

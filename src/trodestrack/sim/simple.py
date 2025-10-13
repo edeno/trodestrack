@@ -46,7 +46,7 @@ class SimpleSimConfig:
     """
 
     duration_s: float = 10.0
-    fs_imu: float = 200.0
+    fs_imu: float = 104.0  # SpikeGadgets hardware sensor refresh rate
     fs_cam: float = 30.0
 
     # Sensor noise (conservative values for testing)

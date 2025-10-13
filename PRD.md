@@ -47,13 +47,14 @@ Future: extend to full 3D pose (roll/pitch/yaw) with magnetometer. Also could us
 ## 4. Core Outcomes (Acceptance Criteria)
 
 - **Accuracy:** Synthetic benchmarks ≤0.02 m RMSE position, ≤0.10 m/s velocity, ≤7° heading.
+  - All simulations use realistic SpikeGadgets IMU noise (see section 5 below)
 - **Robustness:** Vision dropout tolerance → ≤3.5 m drift after 5s IMU-only operation.
-  - Consumer-grade IMU (MPU-9250/ICM-20948): Accel noise 0.2 mg/√Hz, gyro noise 0.01 °/s/√Hz
-  - Empirical performance with realistic IMU specs (8-seed validation):
+  - SpikeGadgets IMU specification: Accel noise 0.2 mg/√Hz, gyro noise 0.01 °/s/√Hz
+  - Empirical performance with realistic specs (8-seed validation):
     * Mean drift: 2.3 m
     * Median drift: 2.2 m
     * 95th percentile: 3.8 m
-  - Requirement set at 3.5 m (realistic bound, ~95th percentile with consumer-grade IMU)
+  - Requirement set at 3.5 m (realistic bound, ~95th percentile with SpikeGadgets hardware)
 - **Throughput:** Offline smoothing ≥10× realtime on 30 min session (CPU); ≥50× realtime on GPU.
 - **Online:** End-to-end latency ≤33 ms per frame (EKF on CPU).
 - **Reproducibility:** Deterministic runs with fixed seeds; CI green.
