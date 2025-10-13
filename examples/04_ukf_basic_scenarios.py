@@ -63,6 +63,7 @@ import numpy as np
 from matplotlib.gridspec import GridSpec
 
 from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
+from trodestrack.models.state_layout import get_layout
 from trodestrack.models.ukf import UKFConfig, unscented_kalman_filter
 from trodestrack.qa.metrics import compute_nees, compute_position_rmse
 from trodestrack.sim.simple import (
@@ -681,46 +682,56 @@ def main() -> None:
     # -------------------------------------------------------------------------
     print_section_header("Step 1: Configuration (Identical for Fair Comparison)")
 
+    # Simulation config using REALISTIC SpikeGadgets IMU specifications
     sim_config = SimpleSimConfig(
         duration_s=10.0,
         fs_imu=200.0,
         fs_cam=30.0,
-        gyro_noise_density=0.001,
-        accel_noise_density=0.05,
-        gyro_bias_std=0.01,
-        accel_bias_std=0.05,
-        cam_noise_std=0.005,
+        # SpikeGadgets IMU specs (from PRD.md):
+        gyro_noise_density=0.000175,  # 0.01 °/s/√Hz (SpikeGadgets spec)
+        accel_noise_density=0.00196,  # 0.2 mg/√Hz (SpikeGadgets spec)
+        gyro_bias_std=0.001,  # ~0.06 °/s bias std
+        accel_bias_std=0.01,  # ~1 mg bias std
+        cam_noise_std=0.005,  # 5 mm camera noise
         cam_dropout_prob=0.0,  # NO DROPOUTS (ideal conditions)
     )
 
-    # EKF config (same as example 03)
+    # EKF config using REALISTIC SpikeGadgets IMU specifications (same as example 03)
     ekf_config = EKFConfig(
-        process_noise_pos=0.01**2 / 0.005,
-        process_noise_vel=0.1**2 / 0.005,
-        process_noise_heading=0.01**2 / 0.005,
-        process_noise_gyro_bias=1e-6 / 0.005,
-        process_noise_accel_bias=1e-4 / 0.005,
-        measurement_noise_pos=0.005**2,
-        measurement_noise_heading=0.05**2,
-        imu_gyro_noise_density=0.001,
-        imu_accel_noise_density=0.05,
+        # Process noise spectral densities (tuned for good performance)
+        process_noise_pos=2e-3,  # m^2/s^3
+        process_noise_vel=1e-1,  # (m/s)^2/s
+        process_noise_heading=1e-3,  # rad^2/s
+        process_noise_gyro_bias=5e-7,  # (rad/s)^2/s
+        process_noise_accel_bias=5e-5,  # (m/s²)^2/s
+        # Measurement noise
+        measurement_noise_pos=0.005**2,  # m^2
+        measurement_noise_heading=0.05**2,  # rad^2
+        # SpikeGadgets IMU specs
+        imu_gyro_noise_density=0.000175,  # rad/s/√Hz
+        imu_accel_noise_density=0.00196,  # m/s²/√Hz
+        # Physics
         damping_coeff=0.5,
         led_distance=0.04,
         use_heading_measurement=True,
         enable_zupt=False,
     )
 
-    # UKF config (matched parameters, default sigma-point settings)
+    # UKF config (matched parameters to EKF, default sigma-point settings)
     ukf_config = UKFConfig(
-        process_noise_pos=0.01**2 / 0.005,
-        process_noise_vel=0.1**2 / 0.005,
-        process_noise_heading=0.01**2 / 0.005,
-        process_noise_gyro_bias=1e-6 / 0.005,
-        process_noise_accel_bias=1e-4 / 0.005,
-        measurement_noise_pos=0.005**2,
-        measurement_noise_heading=0.05**2,
-        imu_gyro_noise_density=0.001,
-        imu_accel_noise_density=0.05,
+        # Process noise spectral densities (same as EKF)
+        process_noise_pos=2e-3,  # m^2/s^3
+        process_noise_vel=1e-1,  # (m/s)^2/s
+        process_noise_heading=1e-3,  # rad^2/s
+        process_noise_gyro_bias=5e-7,  # (rad/s)^2/s
+        process_noise_accel_bias=5e-5,  # (m/s²)^2/s
+        # Measurement noise (same as EKF)
+        measurement_noise_pos=0.005**2,  # m^2
+        measurement_noise_heading=0.05**2,  # rad^2
+        # SpikeGadgets IMU specs (same as EKF)
+        imu_gyro_noise_density=0.000175,  # rad/s/√Hz
+        imu_accel_noise_density=0.00196,  # m/s²/√Hz
+        # Physics (same as EKF)
         damping_coeff=0.5,
         led_distance=0.04,
         use_heading_measurement=True,
@@ -803,6 +814,9 @@ def main() -> None:
     )
     X_truth_full = np.column_stack([X_truth_cam, bias_truth_cam])
 
+    # Get layout for NEES calculation
+    layout = get_layout(ekf_config.state_mode)
+
     # Helper function to compute metrics
     def compute_metrics(result, truth_full):
         X_est = np.array(result.filtered_means)
@@ -818,7 +832,8 @@ def main() -> None:
         heading_err = np.abs(np.degrees(angle_diff(X_est[:, 4], truth_full[:, 4])))
         heading_rmse = np.sqrt(np.mean(heading_err**2))
 
-        nees = compute_nees(truth_full, X_est, P_est)
+        # Compute NEES using layout (automatically handles angle wrapping)
+        nees = compute_nees(truth_full, X_est, P_est, layout=layout)
         mean_nees = np.mean(nees)
 
         return {
