@@ -1301,7 +1301,7 @@ def compute_imu_index_arrays(
 
 
 # =============================================================================
-# IMU Noise Propagation Matrices (previously in utils.py)
+# IMU Noise Propagation Matrices
 # =============================================================================
 
 

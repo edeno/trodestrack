@@ -33,7 +33,9 @@ Real trodestrack data from rat "Arthur" recorded on March 14, 2022.
 
 - **Total samples**: 45,480,614 (with sample-and-hold repeats)
 - **Unique samples**: ~158,271 (true data points)
-- **True rate**: 100 Hz (nominal 20 kHz with ~287× sample-and-hold)
+- **Hardware refresh rate**: 104 Hz (per SpikeGadgets specification)
+- **Effective rate**: ~100 Hz after removing sample-and-hold duplicates
+- **Nominal output rate**: ~20-30 kHz (sample-and-hold repeats from 104 Hz source)
 - **Duration**: 1516.0 seconds (25.3 minutes)
 - **Columns**: `Headstage_GyroX/Y/Z`, `Headstage_AccelX/Y/Z`
 - **Units**: RAW integers (16-bit)
@@ -41,10 +43,18 @@ Real trodestrack data from rat "Arthur" recorded on March 14, 2022.
 
 ## Unit Conversions (SpikeGadgets Headstage)
 
+**Official Hardware Specifications** (source: [SpikeGadgets Product Manual](https://spikegadgets.com/documentation/)):
+
+- 3-axis accelerometer: ±2g range, 16-bit signed integers
+- 3-axis gyroscope: ±2000 deg/s range, 16-bit signed integers
+- Sensor refresh rate: 104 Hz (when both sensors enabled)
+- Internal sampling: 500 Hz per sensor (both enabled), 1 kHz (single sensor)
+- Output behavior: Sample-and-hold repeats expand 104 Hz data to nominal 20-30 kHz
+
 ### Gyroscope (±2000 deg/s range)
 
 ```python
-GYRO_SCALE = 0.061  # deg/s per LSB
+GYRO_SCALE = 0.061  # deg/s per LSB (2000/32767)
 gyro_deg_s = raw_value * 0.061
 gyro_rad_s = gyro_deg_s * (np.pi / 180)
 ```
@@ -52,7 +62,7 @@ gyro_rad_s = gyro_deg_s * (np.pi / 180)
 ### Accelerometer (±2g range)
 
 ```python
-ACCEL_SCALE = 0.000061  # g per LSB
+ACCEL_SCALE = 0.000061  # g per LSB (2/32767)
 accel_g = raw_value * 0.000061
 accel_m_s2 = accel_g * 9.80665
 ```
@@ -86,9 +96,15 @@ position_m = pixel_value * 0.0022
 
 ## Understanding the IMU Axes
 
+### SpikeGadgets Coordinate System
+
+The SpikeGadgets headstage uses a right-handed coordinate system as shown in the [official documentation](https://spikegadgets.com/documentation/). The physical orientation of the axes depends on how the headstage is mounted on the animal.
+
+**Note:** The axis labels (X, Y, Z) are hardware conventions. The actual physical directions (forward/back, left/right, up/down) depend on the mounting orientation.
+
 ### How We Determined Axis Orientation
 
-The IMU axis labels (X, Y, Z) are arbitrary hardware conventions. To determine which physical direction each axis corresponds to, we analyzed the data using three methods:
+To determine which physical direction each axis corresponds to in our data, we analyzed using three methods:
 
 **Method 1: Gravity Detection**
 

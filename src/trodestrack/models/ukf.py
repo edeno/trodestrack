@@ -1,15 +1,5 @@
 """Unscented Kalman Filter (UKF) for sensor-fused rat tracking.
 
-This module implements a 2D UKF with 8-state model:
-    x_k = [x, y, vx, vy, θ, b_gz, b_ax, b_ay]^T
-
-Where:
-    - (x, y): Position in meters
-    - (vx, vy): Velocity in m/s
-    - θ: Heading angle in radians
-    - b_gz: Gyroscope z-axis bias in rad/s
-    - b_ax, b_ay: Accelerometer x, y biases in m/s²
-
 The UKF uses sigma-point transforms to handle nonlinearity without Jacobians.
 It propagates (2n+1) = 17 sigma points through nonlinear dynamics and measurements.
 
@@ -25,7 +15,6 @@ Key differences from EKF:
 
 References:
     - PRD.md Section 6: Mathematical Model
-    - Dynamax inference_ukf.py
     - Särkkä (2013) "Bayesian Filtering and Smoothing", Algorithm 5.14
     - Julier & Uhlmann (1997) "New extension of the Kalman filter"
 """
@@ -552,7 +541,7 @@ def update_heading(
         sigmas_heading = sigmas[:, h_idx]  # (2n+1,)
 
         # Predicted heading
-        h_pred = jnp.dot(w_mean, sigmas_heading)
+        h_pred = w_mean @ sigmas_heading
 
         # Get innovation from model (already angle-wrapped)
         innovation_vec = heading_model.innovation(frame_idx, jnp.array([h_pred]))
@@ -565,7 +554,7 @@ def update_heading(
         # Cross-covariance between state and heading measurement
         state_deviations = sigmas - m  # (2n+1, n)
         weighted_products = state_deviations * heading_deviations[:, None]  # (2n+1, n)
-        P_cross = jnp.dot(w_cov, weighted_products)  # (n,)
+        P_cross = w_cov @ weighted_products  # (n,)
 
         # Kalman gain (n,)
         K = P_cross / S

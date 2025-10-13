@@ -26,8 +26,12 @@ except ImportError:
 
 
 # SpikeGadgets headstage hardware specifications
-GYRO_SCALE = 0.061  # deg/s per LSB (±2000 deg/s range, 16-bit)
-ACCEL_SCALE = 0.000061  # g per LSB (±2g range, 16-bit)
+# Source: https://spikegadgets.com/documentation/ (Product Manual)
+# Accelerometer: ±2g range, 16-bit signed (2/32767 = 0.000061g per LSB)
+# Gyroscope: ±2000 deg/s range, 16-bit signed (2000/32767 = 0.061 deg/s per LSB)
+# Refresh rate: 104 Hz (both sensors), Internal sampling: 500 Hz per sensor
+GYRO_SCALE = 0.061  # deg/s per LSB
+ACCEL_SCALE = 0.000061  # g per LSB
 GRAVITY = 9.80665  # m/s²
 DEG_TO_RAD = np.pi / 180.0
 

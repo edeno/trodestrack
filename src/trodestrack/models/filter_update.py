@@ -1,28 +1,6 @@
-"""Generic projected update primitives for EKF and UKF (Milestone M2).
+"""Generic projected update primitives for EKF and UKF.
 
-This module implements reusable update functions that factor out duplicated
-lifted-update logic from EKF and UKF implementations. Both functions handle
-4D→2D projection for single-LED observations while maintaining numerical parity
-with the original implementations.
-
-Key Features
-------------
-- **Joseph-form EKF update**: Numerically stable covariance update using lifted inverse
-- **Sigma-point UKF update**: Covariance reconstruction with projection support
-- **Static JAX shapes**: All branches return arrays of identical shape
-- **Exact subspace math**: 2D/4D updates computed correctly without variance hacks
-
-Design Philosophy
------------------
-- **Zero behavior drift**: Bit-for-bit parity with original EKF/UKF (≤1e-7 mean, ≤1e-6 cov)
-- **Explicit projection**: Uses selector matrices (M2) to handle single-LED observations
-- **Reusable primitives**: Both EKF and UKF call these functions for measurement updates
-
-References
-----------
-- incremental_refactor_plan.md: PR2 - Generic Projected Update Primitives
-- TASKS.md: Milestone M2 acceptance criteria
-- Särkkä (2013) "Bayesian Filtering and Smoothing", Section 3.3-3.4
+This module implements reusable update functions for EKF and UKF implementations.
 """
 
 from __future__ import annotations

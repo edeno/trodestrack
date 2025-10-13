@@ -6,7 +6,11 @@ import jax.numpy as jnp
 from jax import Array
 
 from trodestrack.models.filter_common import symmetrize
-from trodestrack.models.state_layout import LAYOUT_REGISTRY, StateLayout, get_heading_index
+from trodestrack.models.state_layout import (
+    LAYOUT_REGISTRY,
+    StateLayout,
+    get_heading_index,
+)
 
 
 def _get_layout_for_dimension(n: int) -> StateLayout | None:

@@ -7,7 +7,8 @@ Generates synthetic ground-truth trajectories with realistic IMU measurements
 Features:
 - 2D planar motion with heading (5D state: x, y, vx, vy, θ)
 - Ornstein-Uhlenbeck processes for smooth, realistic motion
-- IMU measurements at high rate (default 200 Hz, configurable up to 30 kHz)
+- IMU measurements at high rate (default 200 Hz for synthetic data)
+  Note: Real SpikeGadgets hardware refreshes at 104 Hz (see PRD.md)
 - Camera observations at video rate (default 30 Hz)
 - Optional second LED for heading measurements
 - Optional confidence scores with correlation to dropouts/occlusions
@@ -184,7 +185,7 @@ class RatIMUSimConfig:
 
     # Durations / rates
     duration_s: float = 60.0
-    fs_imu: float = 200.0
+    fs_imu: float = 200.0  # Synthetic default (real SpikeGadgets hardware: 104 Hz)
     fs_cam: float = 30.0
 
     # Arena (meters)

@@ -564,8 +564,10 @@ cfg = EKFConfig(num_iter=1)  # Standard EKF (no iteration)
 
 **Option 3: Downsample IMU data**
 ```python
-# Use 200-500 Hz instead of 20 kHz
-# (already done in simulation by default)
+# Note: SpikeGadgets hardware refreshes at 104 Hz with sample-and-hold
+# Output appears as ~20-30 kHz but contains only 104 Hz unique data
+# Preprocessing removes sample-and-hold repeats → ~100 Hz effective rate
+# Synthetic simulations typically use 200 Hz for benchmarking
 ```
 
 **Option 4: Use GPU acceleration**

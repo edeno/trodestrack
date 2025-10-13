@@ -14,6 +14,29 @@ trodestrack combines video tracking (Trodes LEDs and/or DeepLabCut keypoints) wi
 - **Rich Simulation**: Comprehensive synthetic data generation for testing and validation
 - **Diagnostic Visualization**: Publication-quality video output for quality control
 
+## Hardware Compatibility
+
+**Supported IMU Hardware:**
+
+trodestrack is designed for **SpikeGadgets headstages** with integrated 6-axis IMU sensors.
+
+**Official Hardware Specifications** (source: [SpikeGadgets Product Manual](https://spikegadgets.com/documentation/)):
+- **3-axis accelerometer**: ±2g range, 16-bit signed (0.000061g per LSB)
+- **3-axis gyroscope**: ±2000 deg/s range, 16-bit signed (0.061 deg/s per LSB)
+- **Sensor refresh rate**: 104 Hz (when both sensors enabled)
+- **Internal sampling**: 500 Hz per sensor (both enabled), 1 kHz (single sensor)
+- **Output format**: Sample-and-hold repeats expand 104 Hz data to ~20-30 kHz nominal rate
+
+**Data Processing:**
+- Preprocessing removes sample-and-hold duplicates → ~100 Hz effective rate
+- Timestamp-based integration handles variable sampling rates
+- Compatible with both 2D IMU mode (gyro-Z, accel-XY) and full 3D mode (all 6 axes)
+
+**Video Tracking:**
+- Trodes LED detection (dual LED setup for heading)
+- DeepLabCut keypoint tracking (any pose estimation output)
+- Camera rate: typically 30 Hz (configurable)
+
 ## Installation
 
 ### Requirements

@@ -81,9 +81,19 @@ Future: extend to full 3D pose (roll/pitch/yaw) with magnetometer. Also could us
 - Gyroscope: `ω_deg_s = raw * 0.061`, `ω_rad_s = ω_deg_s * π/180` (rad/s).
 - Pixel→meters: ruler scale or 2D homography (preferred).
 
+**SpikeGadgets IMU Specifications**
+
+Hardware specifications (source: [SpikeGadgets Product Manual](https://spikegadgets.com/documentation/)):
+- 3-axis accelerometer: ±2g range, 16-bit signed integers (0.000061g per LSB)
+- 3-axis gyroscope: ±2000 deg/s range, 16-bit signed integers (0.061 deg/s per LSB)
+- Sensor refresh rate: 104 Hz (both sensors enabled)
+- Internal sampling: 500 Hz per sensor (when both enabled), 1 kHz (single sensor)
+- Output behavior: Sample-and-hold repeats expand 104 Hz data to nominal ~20-30 kHz
+
 **IMU Rate for Processing**
 
 - Real data: ~100 Hz effective rate (after removing SpikeGadgets sample-and-hold repeats)
+- Hardware refresh: 104 Hz (accelerometer + gyroscope simultaneously)
 - Synthetic data: configurable (typically 200 Hz for benchmarking)
 - Workflow handles variable rates via timestamp-based integration
 
