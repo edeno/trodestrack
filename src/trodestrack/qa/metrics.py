@@ -14,9 +14,14 @@ All functions use SI units (meters, m/s, radians) for inputs and outputs.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 import scipy.linalg
 from numpy.typing import NDArray
+
+if TYPE_CHECKING:
+    from trodestrack.models.state_layout import StateLayout
 
 
 def compute_position_rmse(
@@ -223,6 +228,8 @@ def compute_nees(
     states_true: NDArray[np.float64],
     states_est: NDArray[np.float64],
     covariances_est: NDArray[np.float64],
+    layout: StateLayout | None = None,
+    heading_idx: int | None = None,
 ) -> NDArray[np.float64]:
     """Compute Normalized Estimation Error Squared (NEES) for consistency check.
 
@@ -238,6 +245,15 @@ def compute_nees(
         Estimated states (N, D).
     covariances_est : NDArray[np.float64]
         Estimated covariances (N, D, D).
+    layout : StateLayout or None, optional
+        State layout describing index mapping. If provided, automatically
+        extracts the heading index for proper angle wrapping. This is the
+        recommended approach as it prevents errors from forgetting to specify
+        heading_idx manually. Default: None.
+    heading_idx : int or None, optional
+        **Deprecated**: Use `layout` parameter instead. Index of heading state
+        (in radians) that requires angle wrapping. If provided, the heading error
+        will be wrapped to [-π, π] before computing NEES. Default: None.
 
     Returns
     -------
@@ -245,12 +261,21 @@ def compute_nees(
         NEES values per timestep (N,).
 
     Example:
+        >>> # Basic usage (no angles)
         >>> true_state = np.array([[0.0, 0.0], [1.0, 1.0]])
         >>> est_state = np.array([[0.1, 0.1], [1.1, 1.1]])
         >>> cov = np.stack([np.eye(2) * 0.1, np.eye(2) * 0.1])
         >>> nees = compute_nees(true_state, est_state, cov)
         >>> print(f"NEES: {nees}")
         NEES: [0.2 0.2]
+
+        >>> # With state layout (recommended for states with heading)
+        >>> from trodestrack.models.state_layout import get_layout
+        >>> layout = get_layout("2d_full")
+        >>> nees = compute_nees(X_truth, X_est, P_est, layout=layout)
+
+        >>> # Legacy approach (deprecated, but still supported)
+        >>> nees = compute_nees(X_truth, X_est, P_est, heading_idx=4)
 
     Notes:
         For a D-dimensional state, NEES ~ chi^2(D) if filter is consistent.
@@ -260,6 +285,10 @@ def compute_nees(
         If NEES is consistently outside this range, the filter is either:
         - Over-confident (NEES too high): covariance underestimated
         - Under-confident (NEES too low): covariance overestimated
+
+        **Important**: For states containing heading/orientation angles, always
+        pass the ``layout`` parameter to ensure proper angle wrapping. Without this,
+        NEES values will be incorrectly large when angles wrap through 0°/360°.
     """
     if states_true.shape != states_est.shape:
         raise ValueError(f"Shape mismatch: true {states_true.shape} vs est {states_est.shape}")
@@ -271,10 +300,26 @@ def compute_nees(
             f"Covariance shape mismatch: expected ({N}, {D}, {D}), got {covariances_est.shape}"
         )
 
+    # Extract heading index from layout if provided
+    if layout is not None:
+        if layout.has_heading_2d:
+            heading_idx = int(layout.heading_idx)
+        # For 3D orientations, we don't currently support angle wrapping
+        # (would need quaternion or Euler angle handling)
+
     nees = np.zeros(N)
 
     for i in range(N):
         error = states_true[i] - states_est[i]
+
+        # Apply angle wrapping if heading_idx is specified
+        if heading_idx is not None:
+            # Wrap heading error to [-π, π]
+            error[heading_idx] = np.arctan2(
+                np.sin(states_true[i, heading_idx] - states_est[i, heading_idx]),
+                np.cos(states_true[i, heading_idx] - states_est[i, heading_idx]),
+            )
+
         cov = covariances_est[i]
 
         # NEES = e^T * P^{-1} * e

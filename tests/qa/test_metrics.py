@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 
+from trodestrack.models.state_layout import StateLayout
 from trodestrack.qa.metrics import (
     chi2_ci95,
     compute_dropout_drift,
@@ -262,6 +263,109 @@ def test_nees_singular_covariance():
 
     nees = compute_nees(true_state, est_state, cov_est)
     assert np.isinf(nees[0])
+
+
+def test_nees_with_angle_wrapping():
+    """NEES should correctly handle angle wrapping for heading states.
+
+    This is a regression test for the bug where heading errors weren't wrapped,
+    causing huge NEES values when angles wrap through 0°/360°.
+    """
+    # State: [x, heading_rad]
+    # Simulate heading wrapping through 0° (359° → 0° → 1°)
+    true_state = np.array(
+        [
+            [1.0, np.deg2rad(359)],  # 359°
+            [1.0, np.deg2rad(360)],  # 360° = 0°
+            [1.0, np.deg2rad(1)],  # 1°
+        ]
+    )
+
+    est_state = np.array(
+        [
+            [1.0, np.deg2rad(359)],  # Perfect match
+            [1.0, np.deg2rad(0)],  # Perfect match (360° = 0°)
+            [1.0, np.deg2rad(1)],  # Perfect match
+        ]
+    )
+
+    # Small covariance (filter is confident)
+    cov = np.array(
+        [
+            [[0.01, 0], [0, 0.01]],  # σ_x = 0.1 m, σ_θ = 0.1 rad ≈ 5.7°
+            [[0.01, 0], [0, 0.01]],
+            [[0.01, 0], [0, 0.01]],
+        ]
+    )
+
+    # Compute NEES with angle wrapping at index 1
+    nees = compute_nees(true_state, est_state, cov, heading_idx=1)
+
+    # All errors are zero (perfect tracking), so NEES should be ~0
+    # Definitely should NOT be huge like 1315 (the bug behavior)
+    mean_nees = np.mean(nees)
+    max_nees = np.max(nees)
+
+    assert (
+        mean_nees < 1.0
+    ), f"Mean NEES {mean_nees:.2f} too high (should be ~0 for perfect tracking)"
+    assert max_nees < 2.0, f"Max NEES {max_nees:.2f} too high (bug: angle not wrapped)"
+
+    # The bug would cause middle sample to have NEES ≈ 3948 (from 360° error)
+    # With fix, middle sample should have NEES ≈ 0
+    assert nees[1] < 1.0, f"Middle sample NEES {nees[1]:.2f} indicates angle wrapping bug"
+
+
+def test_nees_with_layout_auto_detection():
+    """NEES should automatically extract heading index from layout parameter.
+
+    This tests the user-friendly API where users pass the layout and don't
+    need to remember to specify heading_idx manually.
+    """
+    # Create a 2D state layout (similar to "2d_full" mode)
+    # State: [x, y, vx, vy, heading, bias_gyro, bias_ax, bias_ay] (8D)
+    layout = StateLayout(
+        n=8,
+        pos_idx=(0, 1),
+        vel_idx=(2, 3),
+        heading_idx=4,  # Heading at index 4
+        bias_gyro_idx=(5,),
+        bias_accel_idx=(6, 7),
+    )
+
+    # Simulate heading wrapping through 0° (359° → 0° → 1°)
+    # Full 8D state with heading at index 4
+    true_state = np.array(
+        [
+            [1.0, 2.0, 0.1, 0.2, np.deg2rad(359), 0.0, 0.0, 0.0],  # 359°
+            [1.0, 2.0, 0.1, 0.2, np.deg2rad(360), 0.0, 0.0, 0.0],  # 360° = 0°
+            [1.0, 2.0, 0.1, 0.2, np.deg2rad(1), 0.0, 0.0, 0.0],  # 1°
+        ]
+    )
+
+    est_state = np.array(
+        [
+            [1.0, 2.0, 0.1, 0.2, np.deg2rad(359), 0.0, 0.0, 0.0],  # Perfect match
+            [1.0, 2.0, 0.1, 0.2, np.deg2rad(0), 0.0, 0.0, 0.0],  # Perfect match
+            [1.0, 2.0, 0.1, 0.2, np.deg2rad(1), 0.0, 0.0, 0.0],  # Perfect match
+        ]
+    )
+
+    # Small covariance (filter is confident)
+    cov = np.array([np.eye(8) * 0.01] * 3)
+
+    # Pass layout parameter instead of heading_idx (user-friendly API)
+    nees = compute_nees(true_state, est_state, cov, layout=layout)
+
+    # All errors are zero (perfect tracking), so NEES should be ~0
+    mean_nees = np.mean(nees)
+    max_nees = np.max(nees)
+
+    assert mean_nees < 1.0, f"Mean NEES {mean_nees:.2f} too high (should be ~0)"
+    assert max_nees < 2.0, f"Max NEES {max_nees:.2f} too high"
+
+    # Middle sample with angle wrapping should still have NEES ≈ 0
+    assert nees[1] < 1.0, f"Middle sample NEES {nees[1]:.2f} indicates layout didn't work"
 
 
 # =============================================================================
