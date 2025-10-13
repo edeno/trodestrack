@@ -62,7 +62,10 @@ class SmootherResult(NamedTuple):
 
 
 RTS_SMOOTHER_STATIC_ARGNAMES = ("layout", "ekf_config", "num_iter")
-RTS_SMOOTHER_DONATE_ARGNUMS: tuple[int, ...] = ()
+# Donate filtered_means (arg 1) and filtered_covs (arg 2) to enable buffer reuse
+# in scan carry iterations. These arrays are large (N_cam, n) and (N_cam, n, n)
+# and are never used after smoother returns.
+RTS_SMOOTHER_DONATE_ARGNUMS: tuple[int, ...] = (1, 2)
 
 
 # =============================================================================
@@ -249,8 +252,10 @@ def rts_smoother(
     t_imu_jax = jnp.array(t_imu)
     U_imu_jax = jnp.array(U_imu)
 
-    filtered_means = filter_result.filtered_means
-    filtered_covs = filter_result.filtered_covariances
+    # Copy filtered arrays before donation to avoid invalidating filter_result
+    # Buffer donation enables efficient reuse through scan iterations inside JIT
+    filtered_means = filter_result.filtered_means.copy()
+    filtered_covs = filter_result.filtered_covariances.copy()
 
     dt_imu_mean = jnp.mean(jnp.diff(t_imu_jax))
     imu_index_arrays = compute_imu_index_arrays(t_imu, t_cam)
@@ -337,7 +342,10 @@ def _outer_product(a: jnp.ndarray, b: jnp.ndarray) -> jnp.ndarray:
 # =============================================================================
 
 SIGMA_POINT_SMOOTHER_STATIC_ARGNAMES = ("layout", "ukf_config")
-SIGMA_POINT_SMOOTHER_DONATE_ARGNUMS: tuple[int, ...] = ()
+# Donate filtered_means (arg 0) and filtered_covs (arg 1) to enable buffer reuse
+# in scan carry iterations. These arrays are large (N_cam, n) and (N_cam, n, n)
+# and are never used after smoother returns.
+SIGMA_POINT_SMOOTHER_DONATE_ARGNUMS: tuple[int, ...] = (0, 1)
 
 
 def _sigma_point_smoother_impl(
@@ -572,9 +580,10 @@ def sigma_point_smoother(
     # Convert mask_cam to JAX if provided
     mask_cam_jax = jnp.array(mask_cam) if mask_cam is not None else None
 
-    # Extract filter outputs and derive state dimension from data
-    filtered_means = filter_result.filtered_means  # (N_cam, n)
-    filtered_covs = filter_result.filtered_covariances  # (N_cam, n, n)
+    # Copy filtered arrays before donation to avoid invalidating filter_result
+    # Buffer donation enables efficient reuse through scan iterations inside JIT
+    filtered_means = filter_result.filtered_means.copy()  # (N_cam, n)
+    filtered_covs = filter_result.filtered_covariances.copy()  # (N_cam, n, n)
     n = filtered_means.shape[1]  # Derive state dimension from data
 
     # Compute UKF sigma-point weights (dimension-dependent)
