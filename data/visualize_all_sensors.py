@@ -248,6 +248,7 @@ def create_comprehensive_video(
     video_path: str,
     position_file: str,
     imu_file: str,
+    position_df: pd.DataFrame,
     output_path: str,
     meters_per_pixel: float = 0.0022,
     start_time: float = 0.0,
@@ -391,8 +392,10 @@ def create_comprehensive_video(
         current_time = start_time + frame_num / fps
 
         # Load and display video frame
-        video_frame_idx = int(current_time * video_info["fps"])
-        frame = load_video_frame(video_path, video_frame_idx)
+        # Use actual video_frame_ind from position dataframe
+        cam_idx_for_video = int(np.argmin(np.abs(t_cam - current_time)))
+        video_frame_ind = int(position_df["video_frame_ind"].iloc[cam_idx_for_video])
+        frame = load_video_frame(video_path, video_frame_ind)
         if frame is not None:
             video_frame.set_data(frame)
 
@@ -454,19 +457,22 @@ def main():
     """Generate comprehensive sensor visualization."""
     script_dir = Path(__file__).parent
 
-    video_path = script_dir / "20220314_arthur_02_r1.mp4"
-    position_file = script_dir / "arthur20220314_position_info.parquet"
-    imu_file = script_dir / "arthur20220314_imu_info.parquet"
+    video_path = script_dir / "20220324_arthur_02_r1.mp4"
+    position_file = script_dir / "arthur20220324_position_info.parquet"
+    imu_file = script_dir / "arthur20220324_imu_info.parquet"
     output_path = script_dir / "arthur_all_sensors.mp4"
 
     if not video_path.exists():
         print(f"Error: Video not found: {video_path}")
         return 1
 
+    position_df = pd.read_parquet(position_file)
+
     create_comprehensive_video(
         video_path=str(video_path),
         position_file=str(position_file),
         imu_file=str(imu_file),
+        position_df=position_df,
         output_path=str(output_path),
         meters_per_pixel=0.0022,
         start_time=60.0,  # Start at 1 minute

@@ -31,7 +31,7 @@ class TestLoad3DIMU:
     @pytest.fixture
     def position_file(self, data_dir: Path) -> str:
         """Return path to position parquet file."""
-        fpath = data_dir / "arthur20220314_position_info.parquet"
+        fpath = data_dir / "arthur20220324_position_info.parquet"
         if not fpath.exists():
             pytest.skip(f"Position file not found: {fpath}")
         return str(fpath)
@@ -39,7 +39,7 @@ class TestLoad3DIMU:
     @pytest.fixture
     def imu_file(self, data_dir: Path) -> str:
         """Return path to IMU parquet file."""
-        fpath = data_dir / "arthur20220314_imu_info.parquet"
+        fpath = data_dir / "arthur20220324_imu_info.parquet"
         if not fpath.exists():
             pytest.skip(f"IMU file not found: {fpath}")
         return str(fpath)

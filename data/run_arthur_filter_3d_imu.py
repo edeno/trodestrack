@@ -48,8 +48,8 @@ def main():
     # =========================================================================
     script_dir = Path(__file__).parent
     data = load_arthur_session(
-        position_file=str(script_dir / "arthur20220314_position_info.parquet"),
-        imu_file=str(script_dir / "arthur20220314_imu_info.parquet"),
+        position_file=str(script_dir / "arthur20220324_position_info.parquet"),
+        imu_file=str(script_dir / "arthur20220324_imu_info.parquet"),
         imu_mode="3d",  # Load all 6 IMU axes
         verbose=True,
     )

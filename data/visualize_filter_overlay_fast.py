@@ -13,6 +13,7 @@ from pathlib import Path
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from load_arthur_session import (
     SessionData,
     convert_meters_to_pixels,
@@ -218,8 +219,10 @@ def overlay_filter_on_frame(
     )
 
     # Draw heading arrow
-    dx = arrow_length * np.cos(heading)
-    dy = arrow_length * np.sin(heading)
+    # Fix Bug #2: Add 180° to heading arrow to match rat orientation
+    arrow_heading = heading + np.pi
+    dx = arrow_length * np.cos(arrow_heading)
+    dy = arrow_length * np.sin(arrow_heading)
     start_pt = tuple(filter_pos.astype(int))
     end_pt = tuple((filter_pos + np.array([dx, dy])).astype(int))
     cv2.arrowedLine(frame_copy, start_pt, end_pt, (0, 255, 255), 3, cv2.LINE_AA, tipLength=0.3)
@@ -255,6 +258,7 @@ def create_filter_overlay_video_fast(
     data: SessionData,
     filter_result,
     t_filter: np.ndarray,
+    position_df: pd.DataFrame,
     output_path: str,
     start_time: float = 0.0,
     duration: float = 10.0,
@@ -336,8 +340,10 @@ def create_filter_overlay_video_fast(
         current_time = start_time + frame_num / fps
 
         # Get video frame
-        video_frame_idx = int(current_time * video_fps)
-        cap.set(cv2.CAP_PROP_POS_FRAMES, video_frame_idx)
+        # Use actual video_frame_ind from position dataframe
+        cam_idx_for_video = int(np.argmin(np.abs(t_filter - current_time)))
+        video_frame_ind = int(position_df["video_frame_ind"].iloc[cam_idx_for_video])
+        cap.set(cv2.CAP_PROP_POS_FRAMES, video_frame_ind)
         ret, frame = cap.read()
         if not ret:
             frame = np.zeros((video_height, video_width, 3), dtype=np.uint8)
@@ -396,8 +402,8 @@ def main():
     # Load data
     print("Loading session data...")
     data = load_arthur_session(
-        position_file=str(script_dir / "arthur20220314_position_info.parquet"),
-        imu_file=str(script_dir / "arthur20220314_imu_info.parquet"),
+        position_file=str(script_dir / "arthur20220324_position_info.parquet"),
+        imu_file=str(script_dir / "arthur20220324_imu_info.parquet"),
         imu_mode="3d",
         meters_per_pixel=0.0022,
         verbose=False,
@@ -429,14 +435,18 @@ def main():
     print(f"✓ Filter complete: {len(filter_result.filtered_means):,} timesteps\n")
 
     # Create video
-    video_path = script_dir / "20220314_arthur_02_r1.mp4"
+    video_path = script_dir / "20220324_arthur_02_r1.mp4"
     output_path = script_dir / "arthur_filter_overlay_fast.mp4"
+
+    # Load position dataframe for video_frame_ind
+    position_df = pd.read_parquet(script_dir / "arthur20220324_position_info.parquet")
 
     create_filter_overlay_video_fast(
         video_path=str(video_path),
         data=data,
         filter_result=filter_result,
         t_filter=data.t_cam,
+        position_df=position_df,
         output_path=str(output_path),
         start_time=120.0,
         duration=10.0,

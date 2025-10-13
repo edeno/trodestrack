@@ -19,6 +19,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from load_arthur_session import (
     SessionData,
     convert_meters_to_pixels,
@@ -130,6 +131,7 @@ def setup_figure(
 def create_video_overlay(
     video_path: str,
     data: SessionData,
+    position_df: pd.DataFrame,
     output_path: str,
     start_time: float = 0.0,
     duration: float = 10.0,
@@ -267,8 +269,10 @@ def create_video_overlay(
         current_time = start_time + frame_num / fps
 
         # Load video frame
-        video_frame_idx = int(current_time * video_info["fps"])
-        frame = load_video_frame(video_path, video_frame_idx)
+        # Use actual video_frame_ind from position dataframe
+        cam_idx_for_video = int(np.argmin(np.abs(data.t_cam - current_time)))
+        video_frame_ind = int(position_df["video_frame_ind"].iloc[cam_idx_for_video])
+        frame = load_video_frame(video_path, video_frame_ind)
         if frame is not None:
             video_frame.set_data(frame)
 
@@ -344,16 +348,20 @@ def main():
 
     # Load data
     print("Loading session data...")
+    # Load data and position dataframe
+    position_file = script_dir / "arthur20220324_position_info.parquet"
+    position_df = pd.read_parquet(position_file)
+
     data = load_arthur_session(
-        position_file=str(script_dir / "arthur20220314_position_info.parquet"),
-        imu_file=str(script_dir / "arthur20220314_imu_info.parquet"),
+        position_file=str(position_file),
+        imu_file=str(script_dir / "arthur20220324_imu_info.parquet"),
         meters_per_pixel=0.0022,
         verbose=False,
     )
     print(f"✓ Loaded {len(data.t_cam):,} frames and {len(data.t_imu):,} IMU samples\n")
 
     # Create visualization
-    video_path = script_dir / "20220314_arthur_02_r1.mp4"
+    video_path = script_dir / "20220324_arthur_02_r1.mp4"
     output_path = script_dir / "arthur_visualization.mp4"
 
     if not video_path.exists():
@@ -363,6 +371,7 @@ def main():
     create_video_overlay(
         video_path=str(video_path),
         data=data,
+        position_df=position_df,
         output_path=str(output_path),
         start_time=60.0,  # Start at 1 minute
         duration=10.0,  # 10 second clip

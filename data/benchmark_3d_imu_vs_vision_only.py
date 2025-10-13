@@ -668,14 +668,14 @@ def main():
     print("BENCHMARK: 3D IMU + 2D POSITION vs VISION-ONLY")
     print("=" * 80)
     print("\nObjective: Demonstrate filter correctness and IMU benefits")
-    print("Dataset: Arthur session (25.3 min real rat tracking data)")
+    print("Dataset: Arthur session (40.3 min real rat tracking data)")
 
     # Load data
     script_dir = Path(__file__).parent
     print("\nLoading data...")
     data = load_arthur_session(
-        position_file=str(script_dir / "arthur20220314_position_info.parquet"),
-        imu_file=str(script_dir / "arthur20220314_imu_info.parquet"),
+        position_file=str(script_dir / "arthur20220324_position_info.parquet"),
+        imu_file=str(script_dir / "arthur20220324_imu_info.parquet"),
         imu_mode="3d",
         verbose=False,  # Suppress loading output
     )

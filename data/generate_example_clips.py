@@ -32,8 +32,8 @@ def main():
     print("=" * 80)
     print("\nLoading session data...")
     data = load_arthur_session(
-        position_file=str(script_dir / "arthur20220314_position_info.parquet"),
-        imu_file=str(script_dir / "arthur20220314_imu_info.parquet"),
+        position_file=str(script_dir / "arthur20220324_position_info.parquet"),
+        imu_file=str(script_dir / "arthur20220324_imu_info.parquet"),
         imu_mode="3d",
         meters_per_pixel=0.0022,
         verbose=False,
@@ -65,7 +65,7 @@ def main():
     print(f"✓ Filter complete: {len(filter_result.filtered_means):,} timesteps\n")
 
     # Video path
-    video_path = script_dir / "20220314_arthur_02_r1.mp4"
+    video_path = script_dir / "20220324_arthur_02_r1.mp4"
     if not video_path.exists():
         print(f"Error: Video file not found: {video_path}")
         return 1

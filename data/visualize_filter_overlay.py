@@ -16,6 +16,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from load_arthur_session import (
     SessionData,
     convert_meters_to_pixels,
@@ -122,6 +123,7 @@ def create_filter_overlay_video(
     data: SessionData,
     filter_result,
     t_filter: np.ndarray,
+    position_df: pd.DataFrame,
     output_path: str,
     start_time: float = 0.0,
     duration: float = 10.0,
@@ -338,9 +340,12 @@ def create_filter_overlay_video(
         # Compute current time
         current_time = start_time + frame_num / fps
 
-        # Load video frame
-        video_frame_idx = int(current_time * video_info["fps"])
-        frame = load_video_frame(video_path, video_frame_idx)
+        # Load video frame using actual video_frame_ind from position dataframe
+        # Find camera measurement at current time
+        cam_idx_for_video = find_nearest_index(t_filter, current_time)
+        # Get actual video frame index from position dataframe
+        video_frame_ind = int(position_df["video_frame_ind"].iloc[cam_idx_for_video])
+        frame = load_video_frame(video_path, video_frame_ind)
         if frame is not None:
             video_frame.set_data(frame)
 
@@ -371,8 +376,10 @@ def create_filter_overlay_video(
         if heading_arrow is not None:
             heading_arrow.remove()
         arrow_length = 40  # pixels
-        dx = arrow_length * np.cos(current_heading)
-        dy = arrow_length * np.sin(current_heading)
+        # Fix Bug #2: Add 180° to heading arrow to match rat orientation
+        arrow_heading = current_heading + np.pi
+        dx = arrow_length * np.cos(arrow_heading)
+        dy = arrow_length * np.sin(arrow_heading)
         heading_arrow = Arrow(
             current_pos[0],
             current_pos[1],
@@ -518,8 +525,8 @@ def main():
     # Load data
     print("Loading session data...")
     data = load_arthur_session(
-        position_file=str(script_dir / "arthur20220314_position_info.parquet"),
-        imu_file=str(script_dir / "arthur20220314_imu_info.parquet"),
+        position_file=str(script_dir / "arthur20220324_position_info.parquet"),
+        imu_file=str(script_dir / "arthur20220324_imu_info.parquet"),
         imu_mode="3d",
         meters_per_pixel=0.0022,
         verbose=False,
@@ -551,18 +558,22 @@ def main():
     print(f"✓ Filter complete: {len(filter_result.filtered_means):,} timesteps\n")
 
     # Create visualization
-    video_path = script_dir / "20220314_arthur_02_r1.mp4"
+    video_path = script_dir / "20220324_arthur_02_r1.mp4"
     output_path = script_dir / "arthur_filter_overlay.mp4"
 
     if not video_path.exists():
         print(f"Error: Video file not found: {video_path}")
         return 1
 
+    # Load position dataframe for video_frame_ind
+    position_df = pd.read_parquet(script_dir / "arthur20220324_position_info.parquet")
+
     create_filter_overlay_video(
         video_path=str(video_path),
         data=data,
         filter_result=filter_result,
         t_filter=data.t_cam,  # Filter runs at camera timestamps
+        position_df=position_df,
         output_path=str(output_path),
         start_time=120.0,  # Start at 2 minutes
         duration=10.0,  # 10 second clip

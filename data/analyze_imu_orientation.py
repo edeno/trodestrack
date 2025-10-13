@@ -507,8 +507,8 @@ def main():
     """Run IMU orientation analysis."""
     script_dir = Path(__file__).parent
 
-    position_file = script_dir / "arthur20220314_position_info.parquet"
-    imu_file = script_dir / "arthur20220314_imu_info.parquet"
+    position_file = script_dir / "arthur20220324_position_info.parquet"
+    imu_file = script_dir / "arthur20220324_imu_info.parquet"
 
     if not position_file.exists() or not imu_file.exists():
         print(f"Error: Data files not found in {script_dir}")

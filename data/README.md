@@ -1,12 +1,12 @@
-# Arthur Session Data (2022-03-14)
+# Arthur Session Data (2022-03-24)
 
-Real trodestrack data from rat "Arthur" recorded on March 14, 2022.
+Real trodestrack data from rat "Arthur" recorded on March 24, 2022.
 
 ## Files
 
-- **`arthur20220314_position_info.parquet`** - Camera tracking data (46,056 frames, 25 min)
-- **`arthur20220314_imu_info.parquet`** - IMU sensor data (45.5M samples with sample-and-hold)
-- **`20220314_arthur_02_r1.mp4`** - Video recording (253 MB)
+- **`arthur20220324_position_info.parquet`** - Camera tracking data (73,450 frames, 40 min)
+- **`arthur20220324_imu_info.parquet`** - IMU sensor data (72.5M samples with sample-and-hold)
+- **`20220324_arthur_02_r1.mp4`** - Video recording (279 MB)
 - **`load_arthur_session.py`** - Data loader with unit conversion and preprocessing
 - **`visualize_session.py`** - Create video with LED tracking and 2D IMU (gyro Z, accel X/Y)
 - **`visualize_all_sensors.py`** - Create video showing complete 6-axis IMU data (all gyro + accel axes)
@@ -16,27 +16,27 @@ Real trodestrack data from rat "Arthur" recorded on March 14, 2022.
 ### Timestamps
 
 - **Format**: Unix timestamps (float64) as pandas DataFrame index
-- **Example**: 1647365966.563 (seconds since epoch)
+- **Example**: 1648163575.123 (seconds since epoch)
 - **Usage**: Convert to relative time (subtract start time) for trodestrack EKF
 
 ### Camera Data
 
-- **Frames**: 46,056
+- **Frames**: 73,450
 - **Rate**: 30.4 Hz
-- **Duration**: 1515.2 seconds (25.3 minutes)
+- **Duration**: 2416.5 seconds (40.3 minutes)
 - **Columns**: `xloc`, `yloc`, `xloc2`, `yloc2`, `video_frame_ind`, `HWframeCount`, `HWTimestamp`
 - **Units**: Pixels (raw 16-bit integers)
 - **Conversion**: `position_m = pixel_value × 0.0022` (user-provided)
-- **LED separation**: 23.1 pixels = 5.08 cm
+- **LED separation**: 21.6 pixels = 4.75 cm
 
 ### IMU Data
 
-- **Total samples**: 45,480,614 (with sample-and-hold repeats)
-- **Unique samples**: ~158,271 (true data points)
+- **Total samples**: 72,521,877 (with sample-and-hold repeats)
+- **Unique samples**: ~252,334 (true data points)
 - **Hardware refresh rate**: 104 Hz (per SpikeGadgets specification)
 - **Effective rate**: ~100 Hz after removing sample-and-hold duplicates
 - **Nominal output rate**: ~20-30 kHz (sample-and-hold repeats from 104 Hz source)
-- **Duration**: 1516.0 seconds (25.3 minutes)
+- **Duration**: 2417.4 seconds (40.3 minutes)
 - **Columns**: `Headstage_GyroX/Y/Z`, `Headstage_AccelX/Y/Z`
 - **Units**: RAW integers (16-bit)
 - **Time overlap**: 100% with camera data
@@ -80,19 +80,19 @@ position_m = pixel_value * 0.0022
 
 - 3D accelerometer magnitude: **9.67 m/s²** (expected ~9.81 m/s²)
 - Gyro range: ±800 deg/s (within ±2000 deg/s spec)
-- LED separation: 5.08 cm (consistent throughout)
+- LED separation: 4.75 cm (consistent throughout)
 
 ### ✓ Time Synchronization
 
-- Camera: [0.772, 1515.944] seconds (relative)
-- IMU: [0.000, 1516.012] seconds (relative)
-- Overlap: 1515.2 seconds (100% of camera data)
+- Camera: [0.772, 2416.5] seconds (relative)
+- IMU: [0.000, 2417.4] seconds (relative)
+- Overlap: 2416.5 seconds (100% of camera data)
 
 ### ✓ Tracking Quality
 
 - Both LEDs visible: 100% of frames
 - No dropouts or missing data
-- Consecutive video frames [8, 46063]
+- Consecutive video frames [8, 73457]
 
 ## Understanding the IMU Axes
 
@@ -192,8 +192,8 @@ from load_arthur_session import load_arthur_session
 
 # Load and preprocess all data
 data = load_arthur_session(
-    position_file="arthur20220314_position_info.parquet",
-    imu_file="arthur20220314_imu_info.parquet",
+    position_file="arthur20220324_position_info.parquet",
+    imu_file="arthur20220324_imu_info.parquet",
     meters_per_pixel=0.0022,
     verbose=True
 )
@@ -353,8 +353,8 @@ from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
 
 # Load data with 3D IMU mode
 data = load_arthur_session(
-    position_file="arthur20220314_position_info.parquet",
-    imu_file="arthur20220314_imu_info.parquet",
+    position_file="arthur20220324_position_info.parquet",
+    imu_file="arthur20220324_imu_info.parquet",
     imu_mode="3d",  # Use full 6-axis IMU
     meters_per_pixel=0.0022,
 )

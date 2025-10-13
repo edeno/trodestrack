@@ -391,8 +391,8 @@ def load_arthur_session(
     --------
     >>> # Load with full 3D IMU (default)
     >>> data = load_arthur_session(
-    ...     "arthur20220314_position_info.parquet",
-    ...     "arthur20220314_imu_info.parquet"
+    ...     "arthur20220324_position_info.parquet",
+    ...     "arthur20220324_imu_info.parquet"
     ... )
     >>> print(f"IMU shape: {data.U_imu.shape}")  # (N, 6)
 
@@ -519,10 +519,10 @@ def main():
     # Assume script is in data/ directory
     script_dir = Path(__file__).parent
 
-    # Load data
+    # Load data (using 20220324 session - 40 min recording)
     data = load_arthur_session(
-        position_file=str(script_dir / "arthur20220314_position_info.parquet"),
-        imu_file=str(script_dir / "arthur20220314_imu_info.parquet"),
+        position_file=str(script_dir / "arthur20220324_position_info.parquet"),
+        imu_file=str(script_dir / "arthur20220324_imu_info.parquet"),
         meters_per_pixel=0.0022,
         verbose=True,
     )
@@ -544,7 +544,7 @@ def main():
     print(f"  LED1 pixels range: [{led1_pixels[:, 0].min():.1f}, {led1_pixels[:, 0].max():.1f}]")
 
     # Test video loading if available
-    video_path = script_dir / "20220314_arthur_02_r1.mp4"
+    video_path = script_dir / "20220324_arthur_02_r1.mp4"
     if video_path.exists():
         print("\n✓ Testing video loading:")
         info = get_video_info(str(video_path))
