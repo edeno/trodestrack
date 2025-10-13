@@ -41,9 +41,9 @@ class FilterCoreConfig:
         Heading measurement noise variance (rad^2).
 
     imu_gyro_noise_density : float
-        IMU gyro noise density (rad/s/√Hz) used during blackout adjustments.
+        IMU gyro noise density (rad/s/√Hz). Default: 0.01 deg/s/√Hz (SpikeGadgets spec).
     imu_accel_noise_density : float
-        IMU accel noise density (m/s^2/√Hz) used during blackout adjustments.
+        IMU accel noise density (m/s²/√Hz). Default: 0.2 mg/√Hz (SpikeGadgets spec).
 
     damping_coeff : float
         Linear velocity damping coefficient (1/s) in dynamics model.
@@ -98,8 +98,9 @@ class FilterCoreConfig:
     measurement_noise_pos: float = 0.005**2
     measurement_noise_heading: float = 0.05**2
 
-    imu_gyro_noise_density: float = 0.0001
-    imu_accel_noise_density: float = 0.005
+    # SpikeGadgets IMU noise specifications (Product Manual)
+    imu_gyro_noise_density: float = 0.00017453  # 0.01 deg/s/√Hz → rad/s/√Hz
+    imu_accel_noise_density: float = 0.00196133  # 0.2 mg/√Hz → 0.0002g * 9.80665
 
     damping_coeff: float = 0.5
     led_distance: float | None = 0.04
