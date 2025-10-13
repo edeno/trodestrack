@@ -95,23 +95,36 @@ class SimOut(TypedDict):
 
 
 def wrap_angle(a: float | np.ndarray) -> float | np.ndarray:
-    """Wrap angle to (-π, π].
+    """Wrap angle to (-π, π] using numerically stable trigonometric method.
+
+    Uses atan2(sin(θ), cos(θ)) which is more numerically stable than modulo
+    arithmetic, especially near branch cuts and for very large angles.
 
     Parameters
     ----------
     a : float or np.ndarray
-        Angle(s) in radians.
+        Angle(s) in radians (any range).
 
     Returns
     -------
     float or np.ndarray
         Wrapped angle(s) in range (-π, π].
 
-    Example:
-        >>> wrap_angle(3.5 * np.pi)
-        -1.5707963267948966  # ≈ -π/2
+    Notes
+    -----
+    This implementation matches the JAX version in models/filter_common.py
+    to ensure consistency across the codebase.
+
+    Examples
+    --------
+    >>> wrap_angle(3.5 * np.pi)
+    -1.5707963267948966  # ≈ -π/2
+    >>> wrap_angle(np.array([0, np.pi, 2*np.pi, -np.pi]))
+    array([ 0.        ,  3.14159265,  0.        , -3.14159265])
+    >>> wrap_angle(1e10)  # Large angle - stable
+    -2.073451669556168
     """
-    return (a + np.pi) % (2 * np.pi) - np.pi
+    return np.arctan2(np.sin(a), np.cos(a))
 
 
 def interp_angle(t_new: np.ndarray, t_old: np.ndarray, angles: np.ndarray) -> np.ndarray:

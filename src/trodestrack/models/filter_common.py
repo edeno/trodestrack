@@ -298,7 +298,10 @@ def joseph_update(
 
 
 def wrap_angle(theta: jnp.ndarray) -> jnp.ndarray:
-    """Wrap angles to (-π, π] to avoid discontinuities.
+    """Wrap angles to (-π, π] using numerically stable trigonometric method.
+
+    JAX version of the canonical wrap_angle implementation in sim/utils.py.
+    Uses atan2(sin(θ), cos(θ)) for numerical stability.
 
     Parameters
     ----------
@@ -309,8 +312,16 @@ def wrap_angle(theta: jnp.ndarray) -> jnp.ndarray:
     -------
     jnp.ndarray
         Wrapped angle(s), same shape as input.
-    """
 
+    Notes
+    -----
+    This implementation is identical to sim/utils.wrap_angle but uses JAX
+    arrays for JIT compilation and automatic differentiation.
+
+    See Also
+    --------
+    trodestrack.sim.utils.wrap_angle : NumPy version
+    """
     return jnp.arctan2(jnp.sin(theta), jnp.cos(theta))
 
 
