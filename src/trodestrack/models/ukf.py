@@ -328,11 +328,26 @@ def predict_step(
     sigmas_prop = vmap(f)(sigmas)  # (17, 8)
 
     # Reconstruct predicted mean (weighted sum)
+    # Note: For heading dimension, we need circular mean, but it's handled below
     m_pred = jnp.tensordot(w_mean, sigmas_prop, axes=1)
+
+    # Fix heading component using circular mean
+    # Arithmetic mean fails for angles when sigma points straddle 0°/360°
+    h_idx = get_heading_index(layout)
+    sigmas_heading_prop = sigmas_prop[:, h_idx]
+    sin_weighted = w_mean @ jnp.sin(sigmas_heading_prop)
+    cos_weighted = w_mean @ jnp.cos(sigmas_heading_prop)
+    m_pred = m_pred.at[h_idx].set(jnp.arctan2(sin_weighted, cos_weighted))
 
     # Reconstruct predicted covariance
     # Cov = Σ w_cov[i] * (sigma_prop[i] - m_pred) * (sigma_prop[i] - m_pred)^T
     deviations = sigmas_prop - m_pred
+
+    # Wrap heading deviations to [-π, π] for correct covariance computation
+    # Without this, heading deviations can be 358° instead of 2°
+    heading_deviations = wrap_angle(deviations[:, h_idx])
+    deviations = deviations.at[:, h_idx].set(heading_deviations)
+
     P_pred = jnp.tensordot(w_cov, _outer_product_batch(deviations, deviations), axes=1)
 
     # Add process noise Q using shared assembly for parity with EKF/smoothers
@@ -540,8 +555,12 @@ def update_heading(
         h_idx = get_heading_index(layout)
         sigmas_heading = sigmas[:, h_idx]  # (2n+1,)
 
-        # Predicted heading
-        h_pred = w_mean @ sigmas_heading
+        # Predicted heading using circular mean (not arithmetic mean!)
+        # For angles, we must use: atan2(Σ w_i sin(θ_i), Σ w_i cos(θ_i))
+        # Arithmetic mean fails when sigma points straddle 0°/360°
+        sin_weighted = w_mean @ jnp.sin(sigmas_heading)
+        cos_weighted = w_mean @ jnp.cos(sigmas_heading)
+        h_pred = jnp.arctan2(sin_weighted, cos_weighted)
 
         # Get innovation from model (already angle-wrapped)
         innovation_vec = heading_model.innovation(frame_idx, jnp.array([h_pred]))
