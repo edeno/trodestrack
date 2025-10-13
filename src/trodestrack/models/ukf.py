@@ -189,10 +189,20 @@ def compute_sigma_points(mean: jnp.ndarray, cov: jnp.ndarray, n: int, lamb: floa
     -------
     jnp.ndarray
         Sigma points (2n+1, n) with central point at index 0.
+
+    Notes
+    -----
+    Jitter scales with average diagonal (trace/n) to handle covariances
+    with varying scales. Fixed 1e-9 jitter can fail for tight/degenerate
+    covariances in real animal motion data.
     """
     # Compute Cholesky decomposition: P = L @ L.T
-    # Add small regularization for numerical stability (match dtype)
-    eps = jnp.asarray(1e-9, dtype=cov.dtype)
+    # Scale jitter by average diagonal for numerical stability
+    # This prevents failures with tight covariances (e.g., high-confidence position updates)
+    avg_variance = jnp.trace(cov) / n
+    eps = 1e-8 * avg_variance
+    # Ensure minimum jitter for numerical stability even with tiny covariances
+    eps = jnp.maximum(eps, jnp.asarray(1e-12, dtype=cov.dtype))
     cov_reg = symmetrize(cov) + eps * jnp.eye(n, dtype=cov.dtype)
     chol = jnp.linalg.cholesky(cov_reg)
     # Scale by sqrt(n + lambda) for sigma-point spread
@@ -585,8 +595,12 @@ def update_heading(
         m_upd = m_upd.at[h_idx].set(wrap_angle(m_upd[h_idx]))
 
         # Update covariance
+        # Standard UKF update: P⁺ = P⁻ - K S Kᵀ where K = P_cross / S
+        # Note: For scalar measurements in UKF, the Joseph form reduces to standard form
+        # because K P_cross + P_cross^T K^T = 2 K P_cross = 2 K² S = 2 K S K^T
+        # So Joseph form: P⁺ = P⁻ - 2 K P_cross + K S K^T = P⁻ - K S K^T (standard)
         P_upd = P - jnp.outer(K, K) * S
-        P_upd = symmetrize(P_upd)
+        P_upd = symmetrize(P_upd)  # Ensure symmetry for numerical stability
 
         # Log-likelihood
         log_lik = -0.5 * (jnp.log(2 * jnp.pi) + jnp.log(S) + innov**2 / S)
