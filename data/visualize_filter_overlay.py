@@ -494,9 +494,10 @@ def create_filter_overlay_video(
         hdg_w = np.degrees(np.arctan2(np.sin(heading_rad[mstate]), np.cos(heading_rad[mstate])))
         unc_w = pos_std_cm_series[mstate]
 
-        # Update uncertainty fills (±1σ)
-        vel_sig_w = vel_sigma_cms[mstate]
-        hdg_sig_w = heading_sigma_deg[mstate]
+        # Update uncertainty fills (±2σ)
+        k_sigma = 2.0  # for ±2σ fill
+        vel_sig_w = k_sigma * vel_sigma_cms[mstate]
+        hdg_sig_w = k_sigma * heading_sigma_deg[mstate]
 
         if len(ts):
             v_lower = vel_w - vel_sig_w
@@ -813,8 +814,9 @@ def _render_chunk(
 
         unc_w = pos_std_cm_series[ms]
 
-        vel_sig_w = vel_sigma_cms[ms]
-        hdg_sig_w = heading_sigma_deg[ms]
+        k_sigma = 2.0  # for ±2σ fill
+        vel_sig_w = k_sigma * vel_sigma_cms[ms]
+        hdg_sig_w = k_sigma * heading_sigma_deg[ms]
 
         if len(ts):
             v_lower = vel_w - vel_sig_w
