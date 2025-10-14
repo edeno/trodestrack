@@ -15,6 +15,9 @@ Design principles:
 import argparse
 from pathlib import Path
 
+import matplotlib
+
+matplotlib.use("Agg")  # faster headless rendering
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -26,7 +29,7 @@ from load_arthur_session import (
     load_video_frame,
 )
 from matplotlib.animation import FFMpegWriter, FuncAnimation
-from matplotlib.patches import Arrow, Circle
+from matplotlib.patches import Circle
 
 
 def find_nearest_index(timestamps: np.ndarray, target_time: float) -> int:
@@ -230,6 +233,26 @@ def create_filter_overlay_video(
     accel_z = data.U_imu[:, 5]
 
     # Setup figure
+    # Precompute per-frame indices and cache video frames
+    n_frames = int(duration * fps)
+    frame_times = start_time + np.arange(n_frames) / fps
+    # nearest filter idx for each animation frame
+    frame_to_filter_idx = np.clip(
+        np.searchsorted(t_filter, frame_times, side="left"), 0, len(t_filter) - 1
+    )
+    # nearest camera (LED) idx for each animation frame
+    frame_to_cam_idx = np.clip(
+        np.searchsorted(data.t_cam, frame_times, side="left"), 0, len(data.t_cam) - 1
+    )
+    # map to actual video frame indices via position_df
+    pos_vid_inds = position_df["video_frame_ind"].to_numpy()
+    frame_to_video_ind = pos_vid_inds[frame_to_filter_idx]
+
+    # Cache all video frames we'll need (keeps everything inside the function; preserves your helpers)
+    cached_frames = []
+    for vf in frame_to_video_ind:
+        cached_frames.append(load_video_frame(video_path, int(vf)))
+
     fig, axes = setup_figure()
 
     # Initialize video frame
@@ -260,8 +283,10 @@ def create_filter_overlay_video(
     )
     axes["video"].add_patch(filter_circle)
 
-    # Initialize heading arrow (will be recreated each frame)
-    heading_arrow = None
+    # Initialize heading indicator as a simple line (blit-friendly)
+    (heading_line_video,) = axes["video"].plot(
+        [], [], color="cyan", linewidth=2, alpha=0.7, label="Heading"
+    )
 
     # Legend for video
     axes["video"].legend(loc="upper right", fontsize=9, framealpha=0.9)
@@ -312,6 +337,7 @@ def create_filter_overlay_video(
             led1_circle,
             led2_circle,
             filter_circle,
+            heading_line_video,
             gyro_x_line,
             gyro_y_line,
             gyro_z_line,
@@ -331,22 +357,16 @@ def create_filter_overlay_video(
 
     def update(frame_num: int):
         """Update frame."""
-        nonlocal heading_arrow
+        # Compute current time and precomputed indices
+        current_time = frame_times[frame_num]
+        filter_idx = frame_to_filter_idx[frame_num]
+        cam_idx = frame_to_cam_idx[frame_num]
 
-        # Compute current time
-        current_time = start_time + frame_num / fps
-
-        # Load video frame using actual video_frame_ind from position dataframe
-        # Find camera measurement at current time
-        cam_idx_for_video = find_nearest_index(t_filter, current_time)
-        # Get actual video frame index from position dataframe
-        video_frame_ind = int(position_df["video_frame_ind"].iloc[cam_idx_for_video])
-        frame = load_video_frame(video_path, video_frame_ind)
+        # Use cached video frame
+        frame = cached_frames[frame_num]
         if frame is not None:
             video_frame.set_data(frame)
 
-        # Find nearest filter state
-        filter_idx = find_nearest_index(t_filter, current_time)
         current_pos = pos_filter_pixels[filter_idx]
         current_heading = heading_filter[filter_idx]
 
@@ -357,7 +377,6 @@ def create_filter_overlay_video(
         trajectory_line.set_data(traj_x, traj_y)
 
         # Find nearest camera measurements
-        cam_idx = find_nearest_index(data.t_cam, current_time)
         led1_pos = led1_pixels[cam_idx]
         led2_pos = led2_pixels[cam_idx]
 
@@ -368,24 +387,14 @@ def create_filter_overlay_video(
         # Update filter position
         filter_circle.center = (current_pos[0], current_pos[1])
 
-        # Update heading arrow
-        if heading_arrow is not None:
-            heading_arrow.remove()
+        # Update heading line (blit-friendly)
         arrow_length = 40  # pixels
-        # Fix Bug #2: Add 180° to heading arrow to match rat orientation
-        arrow_heading = current_heading + np.pi
+        arrow_heading = current_heading + np.pi  # keep your 180° correction
         dx = arrow_length * np.cos(arrow_heading)
         dy = arrow_length * np.sin(arrow_heading)
-        heading_arrow = Arrow(
-            current_pos[0],
-            current_pos[1],
-            dx,
-            dy,
-            width=20,
-            color="cyan",
-            alpha=0.7,
+        heading_line_video.set_data(
+            [current_pos[0], current_pos[0] + dx], [current_pos[1], current_pos[1] + dy]
         )
-        axes["video"].add_patch(heading_arrow)
 
         # Extract IMU data in time window
         t_gyro_x, gyro_x_window = extract_time_window(
@@ -472,7 +481,7 @@ def create_filter_overlay_video(
             led1_circle,
             led2_circle,
             filter_circle,
-            heading_arrow,
+            heading_line_video,
             gyro_x_line,
             gyro_y_line,
             gyro_z_line,
@@ -491,11 +500,10 @@ def create_filter_overlay_video(
         )
 
     # Create animation
-    n_frames = int(duration * fps)
     print(f"\nGenerating {n_frames} frames...")
 
     anim = FuncAnimation(
-        fig, update, init_func=init, frames=n_frames, interval=1000 / fps, blit=False
+        fig, update, init_func=init, frames=n_frames, interval=1000 / fps, blit=True
     )
 
     # Save video
@@ -611,4 +619,5 @@ def _parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = _parse_args()
+    exit(main(args.smooth))
     exit(main(args.smooth))
