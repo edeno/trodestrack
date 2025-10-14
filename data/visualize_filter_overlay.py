@@ -12,6 +12,7 @@ Design principles:
 - Proper time synchronization across all data streams
 """
 
+import argparse
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -196,8 +197,12 @@ def create_filter_overlay_video(
         print(f"  Adjusted duration to {duration:.1f}s")
 
     # Extract filter states
-    X_filter = np.array(filter_result.filtered_means)  # [T × n_state]
-    P_filter = np.array(filter_result.filtered_covariances)  # [T × n_state × n_state]
+    try:
+        X_filter = np.array(filter_result.filtered_means)  # [T × n_state]
+        P_filter = np.array(filter_result.filtered_covariances)  # [T × n_state × n_state]
+    except AttributeError:
+        X_filter = np.array(filter_result.smoothed_means)  # [T × n_state]
+        P_filter = np.array(filter_result.smoothed_covariances)  # [T × n_state × n_state]
 
     # Extract state components (assuming LAYOUT_2D_CAM_3D_IMU: [x, y, vx, vy, vz, θ, b_gz, b_ax, b_ay, b_az])
     pos_filter = X_filter[:, :2]  # [T × 2]
@@ -503,13 +508,14 @@ def create_filter_overlay_video(
     print("=" * 80)
 
 
-def main():
+def main(smoother: bool = False) -> int:
     """Example usage: create filter overlay video."""
     import sys
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
     from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
+    from trodestrack.runtime.offline import rts_smoother
 
     script_dir = Path(__file__).parent
 
@@ -543,7 +549,7 @@ def main():
         mahalanobis_threshold_prob=0.99,
     )
 
-    filter_result = extended_kalman_filter(
+    result = extended_kalman_filter(
         ekf_config=ekf_config,
         t_imu=data.t_imu,
         U_imu=data.U_imu,
@@ -552,7 +558,14 @@ def main():
         Z_cam_led2=data.Z_cam_led2,
         mask_cam=data.mask_cam,
     )
-    print(f"✓ Filter complete: {len(filter_result.filtered_means):,} timesteps\n")
+    print(f"✓ Filter complete: {len(result.filtered_means):,} timesteps\n")
+
+    if smoother:
+        print("Running RTS smoother...")
+        result = rts_smoother(
+            result, ekf_config, t_imu=data.t_imu, U_imu=data.U_imu, t_cam=data.t_cam
+        )
+        print(f"✓ Smoothing complete: {len(result.smoothed_means):,} timesteps\n")
 
     # Create visualization
     video_path = script_dir / "20220324_arthur_02_r1.mp4"
@@ -568,12 +581,12 @@ def main():
     create_filter_overlay_video(
         video_path=str(video_path),
         data=data,
-        filter_result=filter_result,
+        filter_result=result,
         t_filter=data.t_cam,  # Filter runs at camera timestamps
         position_df=position_df,
         output_path=str(output_path),
         start_time=120.0,  # Start at 2 minutes
-        duration=10.0,  # 10 second clip
+        duration=10.0,  # 10 minute clip
         fps=30.0,
         imu_window_s=2.0,  # Show 2s of IMU data
         state_window_s=5.0,  # Show 5s of state estimates
@@ -586,5 +599,16 @@ def main():
     return 0
 
 
+def _parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Visualize EKF results with uncertainty overlays.")
+    p.add_argument(
+        "--smooth",
+        action="store_true",
+        help="Run RTS smoother (if available) before visualization.",
+    )
+    return p.parse_args()
+
+
 if __name__ == "__main__":
-    exit(main())
+    args = _parse_args()
+    exit(main(args.smooth))
