@@ -168,12 +168,6 @@ The 3-axis accelerometer measures **specific force** (linear acceleration + grav
 - **Accel X, Y** → Approximate horizontal plane acceleration (after gravity removal)
 - **Ignores: Gyro X, Y, Accel Z** → Roll, pitch, and vertical motion not tracked
 
-## Critical Limitation: 3D IMU
-
-**⚠️ The current trodestrack EKF expects 2D accelerometer input (X, Y only), but this data contains 3D accelerometer measurements (X, Y, Z) with gravity primarily in the Z-axis (mean -8.55 m/s²).**
-
-This means trodestrack cannot properly process this data without modification. See below for solutions.
-
 ### Accelerometer Breakdown
 
 - **AccelX**: mean=0.78 m/s², std=1.70 m/s² (motion + gravity component from tilt)
