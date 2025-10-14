@@ -528,13 +528,19 @@ def main():
     print("Running Extended Kalman Filter with 3D IMU...")
     ekf_config = EKFConfig(
         state_mode="2d_cam_3d_imu",  # 10D state: [x, y, vx, vy, vz, θ, b_gz, b_ax, b_ay, b_az]
-        process_noise_pos=0.02,
+        process_noise_pos=0.10,
         process_noise_vel=2.0,
         process_noise_gyro_bias=2e-6,
         process_noise_accel_bias=2e-4,
-        measurement_noise_pos=0.005**2,
+        measurement_noise_pos=0.02**2,
+        use_heading_measurement=True,
+        led_distance_tolerance=0.2,
+        adaptive_heading_noise=True,
         damping_coeff=0.1,
+        num_iter=2,
         led_distance=data.led_distance,
+        use_mahalanobis_gating=True,
+        mahalanobis_threshold_prob=0.99,
     )
 
     filter_result = extended_kalman_filter(
