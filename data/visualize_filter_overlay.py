@@ -216,22 +216,13 @@ def create_filter_overlay_video(
     led2_pixels = convert_meters_to_pixels(data.Z_cam_led2, data.meters_per_pixel)
 
     # Convert IMU data for display
-    if data.U_imu.shape[1] == 6:
-        # 3D IMU mode
-        gyro_x = data.U_imu[:, 0] * 180 / np.pi
-        gyro_y = data.U_imu[:, 1] * 180 / np.pi
-        gyro_z = data.U_imu[:, 2] * 180 / np.pi
-        accel_x = data.U_imu[:, 3]
-        accel_y = data.U_imu[:, 4]
-        accel_z = data.U_imu[:, 5]
-    else:
-        # 2D IMU mode (shouldn't happen with current setup, but handle gracefully)
-        gyro_z = data.U_imu[:, 0] * 180 / np.pi
-        accel_x = data.U_imu[:, 1]
-        accel_y = data.U_imu[:, 2]
-        gyro_x = np.zeros_like(gyro_z)
-        gyro_y = np.zeros_like(gyro_z)
-        accel_z = np.zeros_like(accel_x)
+    # 3D IMU mode
+    gyro_x = data.U_imu[:, 0] * 180 / np.pi
+    gyro_y = data.U_imu[:, 1] * 180 / np.pi
+    gyro_z = data.U_imu[:, 2] * 180 / np.pi
+    accel_x = data.U_imu[:, 3]
+    accel_y = data.U_imu[:, 4]
+    accel_z = data.U_imu[:, 5]
 
     # Setup figure
     fig, axes = setup_figure()
