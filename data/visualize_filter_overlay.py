@@ -216,8 +216,8 @@ def create_filter_overlay_video(
     vel_filter = X_filter[:, 2:5]  # [T × 3] (vx, vy, vz)
     heading_filter = X_filter[:, 5]  # [T]
 
-    # Compute position uncertainty (std of x, y)
-    pos_std = np.sqrt(P_filter[:, 0, 0] + P_filter[:, 1, 1])  # [T]
+    # Compute position uncertainty (Euclidean std, including covariance)
+    pos_std = np.sqrt(P_filter[:, 0, 0] + P_filter[:, 1, 1] + 2 * P_filter[:, 0, 1])  # [T]
 
     # Compute velocity magnitude
     vel_mag = np.sqrt(vel_filter[:, 0] ** 2 + vel_filter[:, 1] ** 2)  # [T] (2D velocity)
