@@ -525,6 +525,7 @@ def create_filter_overlay_video(
 
     # Create animation
     print(f"\nGenerating {n_frames} frames...")
+    t0 = time.time()  # for progress timing
 
     anim = FuncAnimation(
         fig, update, init_func=init, frames=n_frames, interval=1000 / fps, blit=True
@@ -542,7 +543,8 @@ def create_filter_overlay_video(
     anim.save(output_path, writer=writer, dpi=max(72, dpi))
 
     plt.close(fig)
-
+    time_elapsed = time.time() - t0
+    print(f"✓ Video generation complete in {time_elapsed:.1f}s.")
     print(f"\n✓ Video saved to: {output_path}")
     print("=" * 80)
 
