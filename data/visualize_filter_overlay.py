@@ -18,9 +18,13 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")  # faster headless rendering
+import math
 import os
+import shutil
+import subprocess
+import tempfile
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -141,6 +145,9 @@ def create_filter_overlay_video(
     led_marker_size: float = 8.0,
     trajectory_length: int = 90,  # frames to show in trajectory
     dpi: int = 100,
+    render_mode: str = "single_process",  # "single_process" or "parallel_png"
+    max_workers: int | None = None,  # for parallel mode
+    ffmpeg_threads: int | None = None,  # for ffmpeg encoding
 ) -> None:
     """Create video with filter overlay and IMU/state visualization.
 
@@ -217,7 +224,7 @@ def create_filter_overlay_video(
     heading_filter = X_filter[:, 5]  # [T]
 
     # Compute position uncertainty (Euclidean std, including covariance)
-    pos_std = np.sqrt(P_filter[:, 0, 0] + P_filter[:, 1, 1] + 2 * P_filter[:, 0, 1])  # [T]
+    pos_std = np.sqrt(np.trace(P_filter[:, :2, :2], axis1=1, axis2=2))
 
     # Compute velocity magnitude
     vel_mag = np.sqrt(vel_filter[:, 0] ** 2 + vel_filter[:, 1] ** 2)  # [T] (2D velocity)
@@ -239,24 +246,52 @@ def create_filter_overlay_video(
     # Setup figure
     # Precompute per-frame indices and cache video frames
     n_frames = int(duration * fps)
+    print(f"\nGenerating {n_frames} frames...")
     frame_times = start_time + np.arange(n_frames) / fps
-    # nearest filter idx for each animation frame
     frame_to_filter_idx = np.clip(
         np.searchsorted(t_filter, frame_times, side="left"), 0, len(t_filter) - 1
     )
-    # nearest camera (LED) idx for each animation frame
     frame_to_cam_idx = np.clip(
         np.searchsorted(data.t_cam, frame_times, side="left"), 0, len(data.t_cam) - 1
     )
-    # map to actual video frame indices via position_df
     pos_vid_inds = position_df["video_frame_ind"].to_numpy()
     frame_to_video_ind = pos_vid_inds[frame_to_filter_idx]
+
+    # Branch early if using process-parallel renderer
+    if render_mode == "parallel_png":
+        _render_parallel_png(
+            video_path=video_path,
+            output_path=output_path,
+            n_frames=n_frames,
+            fps=fps,
+            dpi=dpi,
+            max_workers=max_workers,
+            frame_times=frame_times,
+            frame_to_filter_idx=frame_to_filter_idx,
+            frame_to_cam_idx=frame_to_cam_idx,
+            frame_to_video_ind=frame_to_video_ind,
+            video_info=video_info,
+            data=data,
+            pos_filter_pixels=pos_filter_pixels,
+            heading_filter=heading_filter,
+            led1_pixels=led1_pixels,
+            led2_pixels=led2_pixels,
+            vel_mag=vel_mag,
+            pos_std=pos_std,
+            imu_window_s=imu_window_s,
+            state_window_s=state_window_s,
+            trajectory_length=trajectory_length,
+            led_marker_size=led_marker_size,
+        )
+        print(f"\n✓ Video saved to: {output_path}")
+        return  # done
 
     # --- Parallel frame caching ---
     # Decode all required frames concurrently to minimize I/O latency.
     print(f"\nCaching {n_frames} video frames for animation...")
     t0 = time.time()  # for progress timing
 
+    # Threaded frame loading for animation mode
     def _read_one(video_idx: int):
         return load_video_frame(video_path, int(video_idx))
 
@@ -268,8 +303,7 @@ def create_filter_overlay_video(
             i = futures[fut]
             cached_frames[i] = fut.result()
 
-    time_elapsed = time.time() - t0
-    print(f"✓ Frame caching complete in {time_elapsed:.1f}s.")
+    # Setup figure
     fig, axes = setup_figure()
 
     # Initialize video frame
@@ -535,10 +569,12 @@ def create_filter_overlay_video(
     # writer = FFMpegWriter(fps=fps, bitrate=8000)
     # anim.save(output_path, writer=writer, dpi=dpi)
     # Enable multi-threaded ffmpeg encode
+    if ffmpeg_threads is None:
+        ffmpeg_threads = min(4, os.cpu_count() or 2)
     writer = FFMpegWriter(
         fps=fps,
         bitrate=4000,
-        extra_args=["-threads", str(max_workers), "-pix_fmt", "yuv420p"],
+        extra_args=["-threads", str(ffmpeg_threads), "-pix_fmt", "yuv420p"],
     )
     anim.save(output_path, writer=writer, dpi=max(72, dpi))
 
@@ -549,7 +585,337 @@ def create_filter_overlay_video(
     print("=" * 80)
 
 
-def main(smoother: bool = False) -> int:
+def _render_parallel_png(
+    *,
+    video_path: str,
+    output_path: str,
+    n_frames: int,
+    fps: float,
+    dpi: int,
+    max_workers: int | None,
+    frame_times: np.ndarray,
+    frame_to_filter_idx: np.ndarray,
+    frame_to_cam_idx: np.ndarray,
+    frame_to_video_ind: np.ndarray,
+    video_info: dict,
+    data: SessionData,
+    pos_filter_pixels: np.ndarray,
+    heading_filter: np.ndarray,
+    led1_pixels: np.ndarray,
+    led2_pixels: np.ndarray,
+    vel_mag: np.ndarray,
+    pos_std: np.ndarray,
+    imu_window_s: float,
+    state_window_s: float,
+    trajectory_length: int,
+    led_marker_size: float,
+) -> None:
+    """
+    Render frames in multiple processes to a temp directory, then stitch with ffmpeg.
+    Each worker creates its own figure and calls a local per-frame render (no shared artists).
+    """
+
+    if shutil.which("ffmpeg") is None:
+        raise RuntimeError("ffmpeg not found in PATH — please install it.")
+    # Choose workers
+    if max_workers is None:
+        max_workers = max(2, (os.cpu_count() or 4) // 2)
+    print(f"\n[parallel] Using {max_workers} workers")
+
+    # Temp dir for PNG frames
+    tmpdir = tempfile.mkdtemp(prefix="overlay_frames_")
+    pat = os.path.join(tmpdir, "frame_%06d.png")
+    print(f"[parallel] Writing frames to {tmpdir}")
+
+    # Partition frames into roughly-equal chunks
+    chunks = []
+    chunk_size = math.ceil(n_frames / max_workers)
+    for s in range(0, n_frames, chunk_size):
+        e = min(n_frames, s + chunk_size)
+        chunks.append((s, e))
+
+    # Render chunks in parallel
+    with ProcessPoolExecutor(max_workers=max_workers) as ex:
+        futures = []
+        for s, e in chunks:
+            futures.append(
+                ex.submit(
+                    _render_chunk,
+                    video_path,
+                    video_info,
+                    s,
+                    e,
+                    fps,
+                    dpi,
+                    pat,
+                    frame_times[s:e],
+                    frame_to_filter_idx[s:e],
+                    frame_to_cam_idx[s:e],
+                    frame_to_video_ind[s:e],
+                    # immutable arrays (slices / views) below are serialized once per worker
+                    data.t_imu,
+                    data.U_imu,
+                    data.t_cam,
+                    pos_filter_pixels,
+                    heading_filter,
+                    led1_pixels,
+                    led2_pixels,
+                    vel_mag,
+                    pos_std,
+                    imu_window_s,
+                    state_window_s,
+                    trajectory_length,
+                    led_marker_size,
+                )
+            )
+        # wait for completion / raise early on error
+        for fut in futures:
+            fut.result()
+
+    # Stitch with ffmpeg (multi-threaded)
+    _ffmpeg_stitch(pat, output_path, fps, bitrate=4000, threads=max_workers)
+
+    # Cleanup
+    shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _render_chunk(
+    video_path,
+    video_info,
+    start_f,
+    end_f,
+    fps,
+    dpi,
+    pattern,
+    frame_times_chunk,
+    fidx_chunk,
+    cidx_chunk,
+    vidx_chunk,
+    t_imu,
+    U_imu,
+    t_cam,
+    pos_filter_pixels,
+    heading_filter,
+    led1_pixels,
+    led2_pixels,
+    vel_mag,
+    pos_std,
+    imu_window_s,
+    state_window_s,
+    trajectory_length,
+    led_marker_size,
+):
+    """
+    Worker: build a fresh figure and render frames [start_f, end_f) into PNGs named by `pattern`.
+    """
+    # Local imports (worker)
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    # Helper: load one frame (keeps your existing loader)
+    def _read_frame(video_idx: int):
+        return load_video_frame(video_path, int(video_idx))
+
+    # Create figure/axes and artists fresh in this process
+    fig, axes = setup_figure()
+    video_frame = axes["video"].imshow(
+        np.zeros((video_info["height"], video_info["width"], 3), dtype=np.uint8)
+    )
+    (trajectory_line,) = axes["video"].plot(
+        [], [], "c-", linewidth=1.5, alpha=0.6, label="Filter trajectory"
+    )
+    led1_circle = Circle((0, 0), led_marker_size, color="red", alpha=0.5, label="LED1 (back)")
+    led2_circle = Circle((0, 0), led_marker_size, color="yellow", alpha=0.5, label="LED2 (front)")
+    axes["video"].add_patch(led1_circle)
+    axes["video"].add_patch(led2_circle)
+    filter_circle = Circle(
+        (0, 0),
+        led_marker_size * 1.2,
+        color="cyan",
+        alpha=0.8,
+        linewidth=2,
+        fill=False,
+        label="Filter estimate",
+    )
+    axes["video"].add_patch(filter_circle)
+    (heading_line_video,) = axes["video"].plot(
+        [], [], color="cyan", linewidth=2, alpha=0.7, label="Heading"
+    )
+    axes["video"].legend(loc="upper right", fontsize=9, framealpha=0.9)
+
+    (gyro_x_line,) = axes["gyro"].plot([], [], "r-", linewidth=1.2, label="X", alpha=0.8)
+    (gyro_y_line,) = axes["gyro"].plot([], [], "g-", linewidth=1.2, label="Y", alpha=0.8)
+    (gyro_z_line,) = axes["gyro"].plot([], [], "b-", linewidth=1.2, label="Z", alpha=0.8)
+    gyro_marker = axes["gyro"].axvline(0, color="black", linestyle="--", linewidth=1.5, alpha=0.5)
+
+    (accel_x_line,) = axes["accel"].plot([], [], "r-", linewidth=1.2, label="X", alpha=0.8)
+    (accel_y_line,) = axes["accel"].plot([], [], "g-", linewidth=1.2, label="Y", alpha=0.8)
+    (accel_z_line,) = axes["accel"].plot([], [], "b-", linewidth=1.2, label="Z", alpha=0.8)
+    accel_marker = axes["accel"].axvline(0, color="black", linestyle="--", linewidth=1.5, alpha=0.5)
+
+    (vel_line,) = axes["pos_vel"].plot([], [], "b-", linewidth=1.5, label="Speed")
+    vel_marker = axes["pos_vel"].axvline(0, color="black", linestyle="--", linewidth=1.5, alpha=0.5)
+    (heading_line_ax,) = axes["heading"].plot([], [], "m-", linewidth=1.5, label="Heading")
+    heading_marker = axes["heading"].axvline(
+        0, color="black", linestyle="--", linewidth=1.5, alpha=0.5
+    )
+    (unc_line,) = axes["uncertainty"].plot([], [], "orange", linewidth=1.5, label="Position σ")
+    unc_marker = axes["uncertainty"].axvline(
+        0, color="black", linestyle="--", linewidth=1.5, alpha=0.5
+    )
+
+    time_text = axes["video"].text(
+        0.02,
+        0.98,
+        "",
+        transform=axes["video"].transAxes,
+        fontsize=11,
+        va="top",
+        bbox=dict(boxstyle="round", facecolor="white", alpha=0.9),
+    )
+
+    # Local IMU conversions (reuse your logic)
+    gyro_x = U_imu[:, 0] * 180 / np.pi
+    gyro_y = U_imu[:, 1] * 180 / np.pi
+    gyro_z = U_imu[:, 2] * 180 / np.pi
+    accel_x = U_imu[:, 3]
+    accel_y = U_imu[:, 4]
+    accel_z = U_imu[:, 5]
+
+    # Render each frame in this chunk
+    for i in range(start_f, end_f):
+        local_i = i - start_f
+        current_time = frame_times_chunk[local_i]
+        filter_idx = fidx_chunk[local_i]
+        cam_idx = cidx_chunk[local_i]
+        video_idx = int(vidx_chunk[local_i])
+
+        # Video image
+        frame = _read_frame(video_idx)
+        if frame is not None:
+            video_frame.set_data(frame)
+
+        # Position + heading
+        current_pos = pos_filter_pixels[filter_idx]
+        current_heading = heading_filter[filter_idx]
+        traj_start = max(0, filter_idx - trajectory_length)
+        traj_x = pos_filter_pixels[traj_start : filter_idx + 1, 0]
+        traj_y = pos_filter_pixels[traj_start : filter_idx + 1, 1]
+        trajectory_line.set_data(traj_x, traj_y)
+        filter_circle.center = (current_pos[0], current_pos[1])
+        led1_pos = led1_pixels[cam_idx]
+        led2_pos = led2_pixels[cam_idx]
+        led1_circle.center = (led1_pos[0], led1_pos[1])
+        led2_circle.center = (led2_pos[0], led2_pos[1])
+        # Heading ray (keep 180° correction)
+        arrow_length = 40
+        arrow_heading = current_heading + np.pi
+        dx = arrow_length * np.cos(arrow_heading)
+        dy = arrow_length * np.sin(arrow_heading)
+        heading_line_video.set_data(
+            [current_pos[0], current_pos[0] + dx], [current_pos[1], current_pos[1] + dy]
+        )
+
+        # IMU windows
+
+        def _win(ts, arr, win, current_time=current_time):
+            half = win / 2.0
+            m = (ts >= current_time - half) & (ts <= current_time + half)
+            return ts[m], arr[m]
+
+        t_gyro_x, gx = _win(t_imu, gyro_x, imu_window_s)
+        t_gyro_y, gy = _win(t_imu, gyro_y, imu_window_s)
+        t_gyro_z, gz = _win(t_imu, gyro_z, imu_window_s)
+        t_accel_x, ax = _win(t_imu, accel_x, imu_window_s)
+        t_accel_y, ay = _win(t_imu, accel_y, imu_window_s)
+        t_accel_z, az = _win(t_imu, accel_z, imu_window_s)
+        # Update IMU plots
+        gyro_x_line.set_data(t_gyro_x, gx)
+        gyro_y_line.set_data(t_gyro_y, gy)
+        gyro_z_line.set_data(t_gyro_z, gz)
+        axes["gyro"].set_xlim(current_time - imu_window_s / 2, current_time + imu_window_s / 2)
+        axes["gyro"].set_ylim(-200, 200)
+        gyro_marker.set_xdata([current_time, current_time])
+        accel_x_line.set_data(t_accel_x, ax)
+        accel_y_line.set_data(t_accel_y, ay)
+        accel_z_line.set_data(t_accel_z, az)
+        axes["accel"].set_xlim(current_time - imu_window_s / 2, current_time + imu_window_s / 2)
+        axes["accel"].set_ylim(-15, 15)
+        accel_marker.set_xdata([current_time, current_time])
+
+        # State windows
+        # vel_mag in cm/s, heading in deg, pos std in cm
+        def _win2(ts, arr, win, current_time=current_time):
+            half = win / 2.0
+            m = (ts >= current_time - half) & (ts <= current_time + half)
+            return ts[m], arr[m]
+
+        t_state, vel_w = _win2(t_cam, vel_mag * 100, state_window_s)
+        _, heading_w = _win2(t_cam, heading_filter * 180 / np.pi, state_window_s)
+        _, unc_w = _win2(t_cam, pos_std * 100, state_window_s)
+
+        vel_line.set_data(t_state, vel_w)
+        axes["pos_vel"].set_xlim(
+            current_time - state_window_s / 2, current_time + state_window_s / 2
+        )
+        axes["pos_vel"].set_ylim(0, max(100, (np.max(vel_w) * 1.2) if len(vel_w) else 100))
+        vel_marker.set_xdata([current_time, current_time])
+
+        heading_line_ax.set_data(t_state, heading_w)
+        axes["heading"].set_xlim(
+            current_time - state_window_s / 2, current_time + state_window_s / 2
+        )
+        axes["heading"].set_ylim(-180, 180)
+        heading_marker.set_xdata([current_time, current_time])
+
+        unc_line.set_data(t_state, unc_w)
+        axes["uncertainty"].set_xlim(
+            current_time - state_window_s / 2, current_time + state_window_s / 2
+        )
+        axes["uncertainty"].set_ylim(0, max(2, (np.max(unc_w) * 1.2) if len(unc_w) else 2))
+        unc_marker.set_xdata([current_time, current_time])
+
+        # Time label
+        time_text.set_text(f"t = {current_time:.2f} s")
+
+        # Save PNG for this frame index (global numbering)
+        plt.tight_layout()
+        out_path = pattern % (i + 1)  # 1-based for ffmpeg %06d
+        fig.canvas.draw()
+        fig.savefig(out_path, dpi=max(72, dpi))
+
+    plt.close(fig)
+
+
+def _ffmpeg_stitch(
+    pattern: str, output_path: str, fps: float, bitrate: int = 4000, threads: int = 4
+):
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-framerate",
+        str(int(fps)),
+        "-i",
+        pattern,
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-r",
+        str(int(fps)),
+        "-b:v",
+        str(bitrate * 1000),
+        "-threads",
+        str(max(1, threads)),
+        output_path,
+    ]
+    print("[ffmpeg]", " ".join(cmd))
+    subprocess.run(cmd, check=True)
+
+
+def main(smoother: bool = False, render_mode: str = "single_process") -> int:
     """Example usage: create filter overlay video."""
     import sys
 
@@ -640,6 +1006,8 @@ def main(smoother: bool = False) -> int:
         led_marker_size=10.0,
         trajectory_length=90,  # 3 seconds of trajectory at 30fps
         dpi=100,
+        ffmpeg_threads=4,  # Set encoding threads separately
+        render_mode=render_mode,
     )
 
     print(f"\n✓ Complete! View output: {output_path}")
@@ -653,9 +1021,17 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Run RTS smoother (if available) before visualization.",
     )
+    p.add_argument(
+        "--render_mode",
+        choices=["single_process", "parallel_png"],
+        default="single_process",
+        help="Choose the rendering mode for the visualization.",
+    )
     return p.parse_args()
 
 
 if __name__ == "__main__":
+    import sys
+
     args = _parse_args()
-    exit(main(args.smooth))
+    sys.exit(main(args.smooth, args.render_mode))
