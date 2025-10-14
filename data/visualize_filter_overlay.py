@@ -19,6 +19,7 @@ import matplotlib
 
 matplotlib.use("Agg")  # faster headless rendering
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import matplotlib.pyplot as plt
@@ -253,6 +254,9 @@ def create_filter_overlay_video(
 
     # --- Parallel frame caching ---
     # Decode all required frames concurrently to minimize I/O latency.
+    print(f"\nCaching {n_frames} video frames for animation...")
+    t0 = time.time()  # for progress timing
+
     def _read_one(video_idx: int):
         return load_video_frame(video_path, int(video_idx))
 
@@ -264,23 +268,29 @@ def create_filter_overlay_video(
             i = futures[fut]
             cached_frames[i] = fut.result()
 
+    time_elapsed = time.time() - t0
+    print(f"✓ Frame caching complete in {time_elapsed:.1f}s.")
     fig, axes = setup_figure()
 
     # Initialize video frame
     video_frame = axes["video"].imshow(
-        np.zeros((video_info["height"], video_info["width"], 3), dtype=np.uint8)
+        np.zeros((video_info["height"], video_info["width"], 3), dtype=np.uint8),
+        animated=True,
     )
 
     # Initialize trajectory line
     (trajectory_line,) = axes["video"].plot(
         [], [], "c-", linewidth=1.5, alpha=0.6, label="Filter trajectory"
     )
+    trajectory_line.set_animated(True)
 
     # Initialize LED circles
     led1_circle = Circle((0, 0), led_marker_size, color="red", alpha=0.5, label="LED1 (back)")
     led2_circle = Circle((0, 0), led_marker_size, color="yellow", alpha=0.5, label="LED2 (front)")
     axes["video"].add_patch(led1_circle)
     axes["video"].add_patch(led2_circle)
+    led1_circle.set_animated(True)
+    led2_circle.set_animated(True)
 
     # Initialize filter position marker
     filter_circle = Circle(
@@ -293,11 +303,13 @@ def create_filter_overlay_video(
         label="Filter estimate",
     )
     axes["video"].add_patch(filter_circle)
+    filter_circle.set_animated(True)
 
     # Initialize heading indicator as a simple line (blit-friendly)
     (heading_line_video,) = axes["video"].plot(
         [], [], color="cyan", linewidth=2, alpha=0.7, label="Heading"
     )
+    heading_line_video.set_animated(True)
 
     # Legend for video
     axes["video"].legend(loc="upper right", fontsize=9, framealpha=0.9)
@@ -325,6 +337,7 @@ def create_filter_overlay_video(
     )
 
     (unc_line,) = axes["uncertainty"].plot([], [], "orange", linewidth=1.5, label="Position σ")
+
     unc_marker = axes["uncertainty"].axvline(
         0, color="black", linestyle="--", linewidth=1.5, alpha=0.5
     )
@@ -518,8 +531,15 @@ def create_filter_overlay_video(
     )
 
     # Save video
-    writer = FFMpegWriter(fps=fps, bitrate=8000)
-    anim.save(output_path, writer=writer, dpi=dpi)
+    # writer = FFMpegWriter(fps=fps, bitrate=8000)
+    # anim.save(output_path, writer=writer, dpi=dpi)
+    # Enable multi-threaded ffmpeg encode
+    writer = FFMpegWriter(
+        fps=fps,
+        bitrate=4000,
+        extra_args=["-threads", str(max_workers), "-pix_fmt", "yuv420p"],
+    )
+    anim.save(output_path, writer=writer, dpi=max(72, dpi))
 
     plt.close(fig)
 
@@ -551,6 +571,7 @@ def main(smoother: bool = False) -> int:
 
     # Run filter
     print("Running Extended Kalman Filter with 3D IMU...")
+    t0 = time.time()
     ekf_config = EKFConfig(
         state_mode="2d_cam_3d_imu",  # 10D state: [x, y, vx, vy, vz, θ, b_gz, b_ax, b_ay, b_az]
         process_noise_pos=0.10,
@@ -577,14 +598,19 @@ def main(smoother: bool = False) -> int:
         Z_cam_led2=data.Z_cam_led2,
         mask_cam=data.mask_cam,
     )
-    print(f"✓ Filter complete: {len(result.filtered_means):,} timesteps\n")
+    time_elapsed = time.time() - t0
+    print(f"✓ Filter complete in {time_elapsed:.1f}s: {len(result.filtered_means):,} timesteps\n")
 
     if smoother:
         print("Running RTS smoother...")
+        t0 = time.time()
         result = rts_smoother(
             result, ekf_config, t_imu=data.t_imu, U_imu=data.U_imu, t_cam=data.t_cam
         )
-        print(f"✓ Smoothing complete: {len(result.smoothed_means):,} timesteps\n")
+        time_elapsed = time.time() - t0
+        print(
+            f"✓ Smoothing complete in {time_elapsed:.1f}s: {len(result.smoothed_means):,} timesteps\n"
+        )
 
     # Create visualization
     video_path = script_dir / "20220324_arthur_02_r1.mp4"
