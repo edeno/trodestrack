@@ -55,7 +55,7 @@ class AxesLimits:
     gyro_ylim: tuple[float, float] = (-200.0, 200.0)
     accel_ylim: tuple[float, float] = (-15.0, 15.0)
     heading_ylim: tuple[float, float] = (-180.0, 180.0)
-    vel_max_default: float = 100.0  # cm/s
+    vel_max_default: float = 150.0  # cm/s
     pos_unc_min: float = 2.0  # cm
 
 
@@ -230,6 +230,30 @@ def create_filter_overlay_video(
     pos_std_cm_series = position_std_cm(P[:, :2, :2])
     vel_mag_cms = np.hypot(vel_filter[:, 0], vel_filter[:, 1]) * 100.0
 
+    # 1σ uncertainties for speed (cm/s) and heading (deg)
+    # Project the (vx, vy) covariance onto the instantaneous speed direction
+    Cov_v = P[:, 2:4, 2:4]  # covariance of (vx, vy)
+    speed = np.hypot(vel_filter[:, 0], vel_filter[:, 1])
+    eps = 1e-6
+    ux = np.where(speed > eps, vel_filter[:, 0] / speed, 1.0)
+    uy = np.where(speed > eps, vel_filter[:, 1] / speed, 0.0)
+    u = np.stack([ux, uy], axis=1)  # [T, 2]
+    # Robust σ_speed (m/s): project onto velocity direction; fall back to radial RMS near zero speed
+    proj = np.einsum("ti,tij,tj->t", u, Cov_v, u)
+    radial_rms = 0.5 * (Cov_v[:, 0, 0] + Cov_v[:, 1, 1])  # ≈ mean of Var(vx), Var(vy)
+    vel_sigma_mps = np.where(
+        speed > eps, np.sqrt(np.clip(proj, 0.0, None)), np.sqrt(np.clip(radial_rms, 0.0, None))
+    )
+    vel_sigma_cms = vel_sigma_mps * 100.0  # m/s -> cm/s
+
+    heading_sigma_deg = np.degrees(np.sqrt(np.clip(P[:, 5, 5], 0.0, None)))  # rad -> deg
+    print(
+        f"σ_speed cm/s — median: {np.nanmedian(vel_sigma_cms):.2f}, 95th: {np.nanpercentile(vel_sigma_cms,95):.2f}"
+    )
+    print(
+        f"σ_heading deg — median: {np.nanmedian(heading_sigma_deg):.2f}, 95th: {np.nanpercentile(heading_sigma_deg,95):.2f}"
+    )
+
     # Convert to pixels for overlay
     pos_filter_px = convert_meters_to_pixels(pos_filter_m, data.meters_per_pixel)
     led1_px = convert_meters_to_pixels(data.Z_cam_led1, data.meters_per_pixel)
@@ -270,6 +294,8 @@ def create_filter_overlay_video(
             led2_pixels=led2_px,
             vel_mag=vel_mag_cms,
             pos_std_cm=pos_std_cm_series,
+            vel_sigma=vel_sigma_cms,
+            heading_sigma=heading_sigma_deg,
             config=config,
         )
         print(f"\n✓ Video saved to: {output_path}")
@@ -345,9 +371,11 @@ def create_filter_overlay_video(
 
     # State plots
     (vel_line,) = axes["pos_vel"].plot([], [], "-", linewidth=1.5, label="Speed")
+    vel_fill = axes["pos_vel"].fill_between([], [], [], alpha=0.2, label="±1σ")
     vel_marker = axes["pos_vel"].axvline(0, color="black", linestyle="--", linewidth=1.5, alpha=0.5)
 
     (heading_line_ax,) = axes["heading"].plot([], [], "-", linewidth=1.5, label="Heading")
+    heading_fill = axes["heading"].fill_between([], [], [], alpha=0.2, label="±1σ")
     heading_marker = axes["heading"].axvline(
         0, color="black", linestyle="--", linewidth=1.5, alpha=0.5
     )
@@ -385,8 +413,10 @@ def create_filter_overlay_video(
             accel_z_line,
             accel_marker,
             vel_line,
+            vel_fill,
             vel_marker,
             heading_line_ax,
+            heading_fill,
             heading_marker,
             unc_line,
             unc_marker,
@@ -461,8 +491,30 @@ def create_filter_overlay_video(
         ts = t_filter[mstate]
 
         vel_w = vel_mag_cms[mstate]
-        hdg_w = np.degrees(heading_rad[mstate])
+        hdg_w = np.degrees(np.arctan2(np.sin(heading_rad[mstate]), np.cos(heading_rad[mstate])))
         unc_w = pos_std_cm_series[mstate]
+
+        # Update uncertainty fills (±1σ)
+        vel_sig_w = vel_sigma_cms[mstate]
+        hdg_sig_w = heading_sigma_deg[mstate]
+
+        if len(ts):
+            v_lower = vel_w - vel_sig_w
+            v_upper = vel_w + vel_sig_w
+            v_verts = np.concatenate(
+                [np.column_stack([ts, v_lower]), np.column_stack([ts[::-1], v_upper[::-1]])]
+            )
+            vel_fill.set_verts([v_verts])
+
+            h_lower = ((hdg_w - hdg_sig_w + 180.0) % 360.0) - 180.0
+            h_upper = ((hdg_w + hdg_sig_w + 180.0) % 360.0) - 180.0
+            h_verts = np.concatenate(
+                [np.column_stack([ts, h_lower]), np.column_stack([ts[::-1], h_upper[::-1]])]
+            )
+            heading_fill.set_verts([h_verts])
+        else:
+            vel_fill.set_verts([])
+            heading_fill.set_verts([])
 
         vel_line.set_data(ts, vel_w)
         axes["pos_vel"].set_xlim(current_time - half_s, current_time + half_s)
@@ -499,8 +551,10 @@ def create_filter_overlay_video(
             accel_z_line,
             accel_marker,
             vel_line,
+            vel_fill,
             vel_marker,
             heading_line_ax,
+            heading_fill,
             heading_marker,
             unc_line,
             unc_marker,
@@ -553,6 +607,8 @@ def _render_parallel_png(
     led2_pixels: np.ndarray,
     vel_mag: np.ndarray,
     pos_std_cm: np.ndarray,
+    vel_sigma: np.ndarray,
+    heading_sigma: np.ndarray,
     config: RenderConfig,
 ) -> None:
     if max_workers is None:
@@ -591,6 +647,8 @@ def _render_parallel_png(
                 led2_pixels,
                 vel_mag,
                 pos_std_cm,
+                vel_sigma,
+                heading_sigma,
                 config,
             )
             for (s, e) in chunks
@@ -623,6 +681,8 @@ def _render_chunk(
     led2_px,
     vel_mag_cms,
     pos_std_cm_series,
+    vel_sigma_cms,
+    heading_sigma_deg,
     config: RenderConfig,
 ):
     import matplotlib
@@ -672,10 +732,14 @@ def _render_chunk(
 
     (vel_line,) = axes["pos_vel"].plot([], [], "-", linewidth=1.5, label="Speed")
     vel_marker = axes["pos_vel"].axvline(0, color="black", linestyle="--", linewidth=1.5, alpha=0.5)
+    vel_fill = axes["pos_vel"].fill_between([], [], [], alpha=0.2, label="±1σ")
+
     (heading_line_ax,) = axes["heading"].plot([], [], "-", linewidth=1.5, label="Heading")
     heading_marker = axes["heading"].axvline(
         0, color="black", linestyle="--", linewidth=1.5, alpha=0.5
     )
+    heading_fill = axes["heading"].fill_between([], [], [], alpha=0.2, label="±1σ")
+
     (unc_line,) = axes["uncertainty"].plot([], [], "-", linewidth=1.5, label="Position σ")
     unc_marker = axes["uncertainty"].axvline(
         0, color="black", linestyle="--", linewidth=1.5, alpha=0.5
@@ -745,8 +809,30 @@ def _render_chunk(
         ms = (t_cam >= t - half_s) & (t_cam <= t + half_s)
         ts = t_cam[ms]
         vel_w = vel_mag_cms[ms]
-        hdg_w = np.degrees(heading_rad[ms])
+        hdg_w = np.degrees(np.arctan2(np.sin(heading_rad[ms]), np.cos(heading_rad[ms])))
+
         unc_w = pos_std_cm_series[ms]
+
+        vel_sig_w = vel_sigma_cms[ms]
+        hdg_sig_w = heading_sigma_deg[ms]
+
+        if len(ts):
+            v_lower = vel_w - vel_sig_w
+            v_upper = vel_w + vel_sig_w
+            v_verts = np.concatenate(
+                [np.column_stack([ts, v_lower]), np.column_stack([ts[::-1], v_upper[::-1]])]
+            )
+            vel_fill.set_verts([v_verts])
+
+            h_lower = ((hdg_w - hdg_sig_w + 180.0) % 360.0) - 180.0
+            h_upper = ((hdg_w + hdg_sig_w + 180.0) % 360.0) - 180.0
+            h_verts = np.concatenate(
+                [np.column_stack([ts, h_lower]), np.column_stack([ts[::-1], h_upper[::-1]])]
+            )
+            heading_fill.set_verts([h_verts])
+        else:
+            vel_fill.set_verts([])
+            heading_fill.set_verts([])
 
         vel_line.set_data(ts, vel_w)
         axes["pos_vel"].set_xlim(t - half_s, t + half_s)
@@ -830,18 +916,27 @@ def main(*, smoother: bool = False, render_mode: str = "single_process") -> int:
     ekf_config = EKFConfig(
         state_mode="2d_cam_3d_imu",  # [x, y, vx, vy, vz, θ, b_gz, b_ax, b_ay, b_az]
         process_noise_pos=0.10,
-        process_noise_vel=2.0,
+        process_noise_vel=0.2,
         process_noise_gyro_bias=2e-6,
         process_noise_accel_bias=2e-4,
         measurement_noise_pos=0.02**2,
         use_heading_measurement=True,
         led_distance_tolerance=0.2,
         adaptive_heading_noise=True,
+        adaptive_q_during_dropout=True,
+        dropout_q_pos_multiplier=10.0,
+        dropout_q_vel_multiplier=10.0,
+        freeze_bias_during_blackout=True,
+        reduce_imu_noise_during_blackout=True,
+        blackout_imu_noise_scale=0.5,
         damping_coeff=0.1,
         num_iter=2,
         led_distance=data.led_distance,
         use_mahalanobis_gating=True,
         mahalanobis_threshold_prob=0.99,
+        enable_zupt=True,
+        zupt_velocity_threshold=0.05,
+        zupt_measurement_noise=0.01**2,
     )
 
     result = extended_kalman_filter(
@@ -887,7 +982,7 @@ def main(*, smoother: bool = False, render_mode: str = "single_process") -> int:
 
     config = RenderConfig(
         start_time=120.0,
-        duration=10.0,  # 10-second clip
+        duration=30.0,  # 10-second clip
         fps=30.0,
         imu_window_s=2.0,
         state_window_s=5.0,
