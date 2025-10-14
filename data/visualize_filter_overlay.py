@@ -18,6 +18,9 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")  # faster headless rendering
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -248,10 +251,18 @@ def create_filter_overlay_video(
     pos_vid_inds = position_df["video_frame_ind"].to_numpy()
     frame_to_video_ind = pos_vid_inds[frame_to_filter_idx]
 
-    # Cache all video frames we'll need (keeps everything inside the function; preserves your helpers)
-    cached_frames = []
-    for vf in frame_to_video_ind:
-        cached_frames.append(load_video_frame(video_path, int(vf)))
+    # --- Parallel frame caching ---
+    # Decode all required frames concurrently to minimize I/O latency.
+    def _read_one(video_idx: int):
+        return load_video_frame(video_path, int(video_idx))
+
+    cached_frames = [None] * n_frames
+    max_workers = min(8, (os.cpu_count() or 4))  # modest default
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = {ex.submit(_read_one, int(vf)): i for i, vf in enumerate(frame_to_video_ind)}
+        for fut in as_completed(futures):
+            i = futures[fut]
+            cached_frames[i] = fut.result()
 
     fig, axes = setup_figure()
 
@@ -619,5 +630,4 @@ def _parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = _parse_args()
-    exit(main(args.smooth))
     exit(main(args.smooth))
