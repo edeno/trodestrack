@@ -167,7 +167,12 @@ def _rts_smoother_impl(
 
         m_pred, P_pred, G = predict_between_frames(t, filtered_mean, filtered_cov, lin_mean)
 
-        smoothed_mean = filtered_mean + G @ (smoothed_mean_next - m_pred)
+        # Correct for angle wrapping in heading (if present in layout)
+        h_idx = get_heading_index(layout)
+        resid = smoothed_mean_next - m_pred
+        resid = resid.at[h_idx].set(jnp.arctan2(jnp.sin(resid[h_idx]), jnp.cos(resid[h_idx])))
+
+        smoothed_mean = filtered_mean + G @ resid
         smoothed_cov = filtered_cov + G @ (smoothed_cov_next - P_pred) @ G.T
         smoothed_cov = symmetrize(smoothed_cov)
 
@@ -501,8 +506,13 @@ def _sigma_point_smoother_impl(
         # Compute smoother gain: G = S_cross @ P_pred^{-1}
         G = psd_solve(P_pred, S_cross.T).T
 
+        # Correct for angle wrapping in heading (if present in layout)
+        h_idx = get_heading_index(layout)
+        resid = smoothed_mean_next - m_pred
+        resid = resid.at[h_idx].set(jnp.arctan2(jnp.sin(resid[h_idx]), jnp.cos(resid[h_idx])))
+
         # Smooth mean and covariance
-        smoothed_mean = filtered_mean + G @ (smoothed_mean_next - m_pred)
+        smoothed_mean = filtered_mean + G @ resid
         smoothed_cov = filtered_cov + G @ (smoothed_cov_next - P_pred) @ G.T
         smoothed_cov = symmetrize(smoothed_cov)
 
