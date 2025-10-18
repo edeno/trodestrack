@@ -123,16 +123,20 @@ class PresentationBuilder:
 
         slide = self.prs.slides.add_slide(slide_layout)
 
-        # Title
+        # Title - positioned at top with safe margin (0.5" from top)
         title_shape = slide.shapes.title
         title_shape.text = title
+        title_shape.top = Inches(0.5)  # Safe margin from top
+        title_shape.left = Inches(0.5)
+        title_shape.width = Inches(9)
+        title_shape.height = Inches(0.6)
         self._format_text(title_shape, font_size=36, bold=True, color=COLORS["blue"])
 
-        # Content area dimensions
+        # Content area dimensions - adjusted to start below title
         content_left = Inches(0.5)
-        content_top = Inches(1.5)
+        content_top = Inches(1.3)  # Just below title (0.5 + 0.6 + 0.2 spacing)
         content_width = Inches(9)
-        content_height = Inches(3.5)
+        content_height = Inches(4.0)  # Increased height since title is higher
 
         # If image provided, adjust layout
         if image_path:
@@ -194,20 +198,24 @@ class PresentationBuilder:
         slide_layout = self.prs.slide_layouts[5]  # Title only
         slide = self.prs.slides.add_slide(slide_layout)
 
-        # Title
+        # Title - positioned at top with safe margin (0.5" from top)
         title_shape = slide.shapes.title
         title_shape.text = title
+        title_shape.top = Inches(0.5)  # Safe margin from top
+        title_shape.left = Inches(0.5)
+        title_shape.width = Inches(9)
+        title_shape.height = Inches(0.6)
         self._format_text(title_shape, font_size=36, bold=True, color=COLORS["blue"])
 
-        # Image (large, centered)
+        # Image (large, centered) - adjusted to start below title
         img_path = Path(image_path)
         if not img_path.is_absolute():
             img_path = VISUALS_DIR / img_path
 
         if img_path.exists():
             try:
-                img_top = Inches(1.3)
-                img_height = Inches(3.8)
+                img_top = Inches(1.3)  # Just below title (0.5 + 0.6 + 0.2 spacing)
+                img_height = Inches(4.0)  # Increased height since title is higher
 
                 # Add image centered
                 pic = slide.shapes.add_picture(
