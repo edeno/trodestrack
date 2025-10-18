@@ -46,6 +46,35 @@ class PresentationBuilder:
         self.prs.slide_width = Inches(10)
         self.prs.slide_height = Inches(5.625)
 
+        # Grid system - all elements snap to these constants
+        self.GRID = {
+            # Margins (safe areas for projectors)
+            "margin_top": Inches(0.5),
+            "margin_bottom": Inches(0.5),
+            "margin_left": Inches(0.5),
+            "margin_right": Inches(0.5),
+            # Title dimensions
+            "title_height": Inches(0.6),
+            "title_bottom_gap": Inches(0.2),  # Gap between title and content
+            # Content area
+            "content_left": Inches(0.5),
+            "content_width": Inches(9),  # 10 - 0.5 left - 0.5 right
+            # Spacing
+            "element_gap": Inches(0.15),  # Gap between elements (image-caption, etc.)
+            "column_gap": Inches(0.5),  # Gap between columns in two-column layout
+            # Caption
+            "caption_height": Inches(0.35),
+        }
+
+        # Calculated positions (derived from grid)
+        self.GRID["title_bottom"] = (
+            self.GRID["margin_top"] + self.GRID["title_height"] + self.GRID["title_bottom_gap"]
+        )
+        self.GRID["content_top"] = self.GRID["title_bottom"]
+        self.GRID["content_max_height"] = (
+            self.prs.slide_height - self.GRID["content_top"] - self.GRID["margin_bottom"]
+        )
+
     def save(self, output_path):
         """Save presentation to file"""
         self.prs.save(output_path)
@@ -123,20 +152,20 @@ class PresentationBuilder:
 
         slide = self.prs.slides.add_slide(slide_layout)
 
-        # Title - positioned at top with safe margin (0.5" from top)
+        # Title - positioned using grid system
         title_shape = slide.shapes.title
         title_shape.text = title
-        title_shape.top = Inches(0.5)  # Safe margin from top
-        title_shape.left = Inches(0.5)
-        title_shape.width = Inches(9)
-        title_shape.height = Inches(0.6)
+        title_shape.top = self.GRID["margin_top"]
+        title_shape.left = self.GRID["margin_left"]
+        title_shape.width = self.GRID["content_width"]
+        title_shape.height = self.GRID["title_height"]
         self._format_text(title_shape, font_size=36, bold=True, color=COLORS["blue"])
 
-        # Content area dimensions - adjusted to start below title
-        content_left = Inches(0.5)
-        content_top = Inches(1.3)  # Just below title (0.5 + 0.6 + 0.2 spacing)
-        content_width = Inches(9)
-        content_height = Inches(4.0)  # Increased height since title is higher
+        # Content area dimensions - using grid system
+        content_left = self.GRID["content_left"]
+        content_top = self.GRID["content_top"]
+        content_width = self.GRID["content_width"]
+        content_height = self.GRID["content_max_height"]
 
         # If image provided, adjust layout
         if image_path:
@@ -146,14 +175,14 @@ class PresentationBuilder:
 
             if img_path.exists():
                 if bullets:
-                    # Split: bullets on left, image on right
-                    bullet_width = Inches(4)
-                    img_left = Inches(5)
-                    img_width = Inches(4.5)
+                    # Split: bullets on left, image on right with column gap
+                    bullet_width = (content_width - self.GRID["column_gap"]) / 2
+                    img_left = content_left + bullet_width + self.GRID["column_gap"]
+                    img_width = bullet_width  # Equal columns
                 else:
                     # Full-width image
-                    img_left = Inches(0.5)
-                    img_width = Inches(9)
+                    img_left = content_left
+                    img_width = content_width
                     bullet_width = 0
 
                 # Add image
@@ -198,14 +227,30 @@ class PresentationBuilder:
         slide_layout = self.prs.slide_layouts[5]  # Title only
         slide = self.prs.slides.add_slide(slide_layout)
 
-        # Title - positioned at top with safe margin (0.5" from top)
+        # Title - positioned using grid system
         title_shape = slide.shapes.title
         title_shape.text = title
-        title_shape.top = Inches(0.5)  # Safe margin from top
-        title_shape.left = Inches(0.5)
-        title_shape.width = Inches(9)
-        title_shape.height = Inches(0.6)
+        title_shape.top = self.GRID["margin_top"]
+        title_shape.left = self.GRID["margin_left"]
+        title_shape.width = self.GRID["content_width"]
+        title_shape.height = self.GRID["title_height"]
         self._format_text(title_shape, font_size=36, bold=True, color=COLORS["blue"])
+
+        # Calculate available space for image using grid system
+        img_top = self.GRID["content_top"]
+
+        # If caption exists, reserve space for it at bottom
+        if caption:
+            available_height_for_image = (
+                self.GRID["content_max_height"]
+                - self.GRID["element_gap"]
+                - self.GRID["caption_height"]
+            )
+            caption_top = img_top + available_height_for_image + self.GRID["element_gap"]
+        else:
+            # No caption: use all available content height
+            available_height_for_image = self.GRID["content_max_height"]
+            caption_top = None
 
         # Image (large, centered) - adjusted to start below title
         img_path = Path(image_path)
@@ -214,12 +259,9 @@ class PresentationBuilder:
 
         if img_path.exists():
             try:
-                img_top = Inches(1.3)  # Just below title (0.5 + 0.6 + 0.2 spacing)
-                img_height = Inches(4.0)  # Increased height since title is higher
-
-                # Add image centered
+                # Add image with calculated height
                 pic = slide.shapes.add_picture(
-                    str(img_path), Inches(0.5), img_top, height=img_height
+                    str(img_path), Inches(0.5), img_top, height=available_height_for_image
                 )
 
                 # Center horizontally
@@ -230,9 +272,14 @@ class PresentationBuilder:
         else:
             print(f"Warning: Image not found: {img_path}")
 
-        # Caption (if provided)
-        if caption:
-            caption_box = slide.shapes.add_textbox(Inches(1), Inches(5.2), Inches(8), Inches(0.3))
+        # Caption (if provided) - positioned dynamically below image using grid
+        if caption and caption_top:
+            caption_box = slide.shapes.add_textbox(
+                self.GRID["content_left"],
+                caption_top,
+                self.GRID["content_width"],
+                self.GRID["caption_height"],
+            )
             caption_frame = caption_box.text_frame
             caption_frame.text = caption
             self._format_text(
