@@ -48,7 +48,7 @@ def plot_covariance_ellipse(ax, mean, cov, color, alpha=0.3, n_std=2):
         facecolor=color,
         edgecolor=color,
         alpha=alpha,
-        linewidth=2,
+        linewidth=4,
     )
     ax.add_patch(ellipse)
 
@@ -108,9 +108,14 @@ def generate_slide08():
         duration_s=10.0,
         fs_imu=104.0,
         fs_cam=30.0,
-        cam_dropout_prob=0.0,  # Start with no dropout
+        cam_dropout_prob=0.0,
         use_second_led=True,
+        imu_tilt_roll_deg=0.0,
+        imu_tilt_pitch_deg=0.0,
+        gyro_bias_rw_density=np.deg2rad(0.0005),
+        accel_bias_rw_density=0.001,
     )
+
     sim = simulate_rat_imu(config)
 
     # Manually create 5-second dropout in middle (frames 150-300, roughly 5s @ 30Hz)
@@ -124,7 +129,17 @@ def generate_slide08():
     mask_cam[dropout_mask] = False
 
     # Run EKF with sensor fusion
-    ekf_config = EKFConfig()
+    ekf_config = EKFConfig(
+        adaptive_q_during_dropout=True,
+        dropout_q_pos_multiplier=2.0,
+        dropout_q_vel_multiplier=2.0,
+        dropout_q_bias_multiplier=0.0,
+        freeze_bias_during_blackout=True,
+        reduce_imu_noise_during_blackout=True,
+        blackout_imu_noise_scale=0.1,
+        use_heading_measurement=True,
+    )
+
     result = extended_kalman_filter(
         ekf_config,
         sim["t_imu"],
@@ -157,8 +172,9 @@ def generate_slide08():
     )
 
     # Create figure with 2 panels (side by side)
-    fig, axes = plt.subplots(1, 2, figsize=(20, 10))
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5.625))
     fig.patch.set_facecolor("white")
+    fig.tight_layout(pad=3.0)
 
     # Set up axes limits (equal for both panels)
     x_min = pos_truth[:, 0].min() - 0.2
@@ -174,9 +190,9 @@ def generate_slide08():
     ):
         ax.set_xlim(x_min, x_max)
         ax.set_ylim(y_min, y_max)
-        ax.set_xlabel("X (meters)", fontsize=16, weight="bold")
-        ax.set_ylabel("Y (meters)", fontsize=16, weight="bold")
-        ax.set_title(title, fontsize=20, weight="bold", color=color, pad=15)
+        ax.set_xlabel("X (meters)", fontsize=24, weight="bold")
+        ax.set_ylabel("Y (meters)", fontsize=24, weight="bold")
+        ax.set_title(title, fontsize=32, weight="bold", color=color, pad=15)
         ax.set_aspect("equal")
         ax.grid(True, alpha=0.3)
 
@@ -195,8 +211,8 @@ def generate_slide08():
             ax.clear()
             ax.set_xlim(x_min, x_max)
             ax.set_ylim(y_min, y_max)
-            ax.set_xlabel("X (meters)", fontsize=16, weight="bold")
-            ax.set_ylabel("Y (meters)", fontsize=16, weight="bold")
+            ax.set_xlabel("X (meters)", fontsize=24, weight="bold")
+            ax.set_ylabel("Y (meters)", fontsize=24, weight="bold")
             ax.set_aspect("equal")
             ax.grid(True, alpha=0.3)
 
@@ -215,7 +231,7 @@ def generate_slide08():
 
         # LEFT PANEL: Vision-only
         ax_left = axes[0]
-        ax_left.set_title("Vision-Only Tracking", fontsize=20, weight="bold", color=RED, pad=15)
+        ax_left.set_title("Vision-Only Tracking", fontsize=32, weight="bold", color=RED, pad=15)
 
         # Plot ground truth (past trajectory)
         ax_left.plot(
@@ -256,7 +272,7 @@ def generate_slide08():
             f"Position Error: {vision_error*100:.1f} cm\n"
             f"2σ Uncertainty: {2*np.sqrt(vision_cov[frame, 0, 0])*100:.1f} cm",
             transform=ax_left.transAxes,
-            fontsize=14,
+            fontsize=16,
             verticalalignment="top",
             bbox=dict(boxstyle="round,pad=0.8", facecolor="white", alpha=0.9),
             weight="bold",
@@ -266,7 +282,7 @@ def generate_slide08():
 
         # RIGHT PANEL: Sensor fusion
         ax_right = axes[1]
-        ax_right.set_title("Sensor Fusion (EKF)", fontsize=20, weight="bold", color=GREEN, pad=15)
+        ax_right.set_title("Sensor Fusion (EKF)", fontsize=32, weight="bold", color=GREEN, pad=15)
 
         # Plot ground truth (past trajectory)
         ax_right.plot(
@@ -305,7 +321,7 @@ def generate_slide08():
             f"Position Error: {ekf_error*100:.1f} cm\n"
             f"2σ Uncertainty: {2*np.sqrt(ekf_cov[frame, 0, 0])*100:.1f} cm",
             transform=ax_right.transAxes,
-            fontsize=14,
+            fontsize=16,
             verticalalignment="top",
             bbox=dict(boxstyle="round,pad=0.8", facecolor="white", alpha=0.9),
             weight="bold",
@@ -336,7 +352,7 @@ def generate_slide08():
     Writer = animation.writers["ffmpeg"]
     writer = Writer(fps=10, bitrate=2000, codec="libx264")
 
-    anim.save(str(output_path), writer=writer, dpi=100)
+    anim.save(str(output_path), writer=writer, dpi=150)
     print(f"✓ Saved: {output_path}")
     plt.close()
 
