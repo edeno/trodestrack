@@ -46,3 +46,4 @@ calibration_*.yaml
 *.mp4
 examples/*.pdf
 *.parquet
+docs/presentation/trodestrack_presentation.pptx
