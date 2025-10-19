@@ -301,15 +301,19 @@ def generate_slide08():
         # Calculate current error - place on RIGHT OUTSIDE below legend
         vision_error = np.linalg.norm(vision_pos[frame] - pos_truth[frame])
         ax_left.text(
-            1.02,
-            0.6,
+            1.01,
+            0.65,
             f"Error:\n{vision_error*100:.1f} cm\n\n2σ:\n{2*np.sqrt(vision_cov[frame, 0, 0])*100:.1f} cm",
             transform=ax_left.transAxes,
-            fontsize=18,
+            fontsize=14,
             verticalalignment="top",
             horizontalalignment="left",
             bbox=dict(
-                boxstyle="round,pad=0.6", facecolor="white", alpha=0.95, edgecolor=RED, linewidth=2
+                boxstyle="round,pad=0.4",
+                facecolor="white",
+                alpha=0.95,
+                edgecolor=RED,
+                linewidth=1.5,
             ),
             weight="bold",
             color=RED,
@@ -317,14 +321,17 @@ def generate_slide08():
 
         # MANDATORY: Place legend OUTSIDE on the right to avoid covering plot
         ax_left.legend(
-            fontsize=18,
+            fontsize=14,
             loc="upper left",
-            bbox_to_anchor=(1.02, 0.95),
+            bbox_to_anchor=(1.01, 1.0),
             frameon=True,
-            fancybox=True,
+            fancybox=False,
             framealpha=0.95,
             edgecolor=RED,
             facecolor="white",
+            borderpad=0.3,
+            labelspacing=0.2,
+            handlelength=1.5,
         )
 
         # RIGHT PANEL: Sensor fusion
@@ -363,19 +370,19 @@ def generate_slide08():
         # Calculate current error - place on RIGHT OUTSIDE below legend
         ekf_error = np.linalg.norm(ekf_pos[frame] - pos_truth[frame])
         ax_right.text(
-            1.02,
-            0.6,
+            1.01,
+            0.65,
             f"Error:\n{ekf_error*100:.1f} cm\n\n2σ:\n{2*np.sqrt(ekf_cov[frame, 0, 0])*100:.1f} cm",
             transform=ax_right.transAxes,
-            fontsize=18,
+            fontsize=14,
             verticalalignment="top",
             horizontalalignment="left",
             bbox=dict(
-                boxstyle="round,pad=0.6",
+                boxstyle="round,pad=0.4",
                 facecolor="white",
                 alpha=0.95,
                 edgecolor=GREEN,
-                linewidth=2,
+                linewidth=1.5,
             ),
             weight="bold",
             color=GREEN,
@@ -383,14 +390,17 @@ def generate_slide08():
 
         # MANDATORY: Place legend OUTSIDE on the right to avoid covering plot
         ax_right.legend(
-            fontsize=18,
+            fontsize=14,
             loc="upper left",
-            bbox_to_anchor=(1.02, 0.95),
+            bbox_to_anchor=(1.01, 1.0),
             frameon=True,
-            fancybox=True,
+            fancybox=False,
             framealpha=0.95,
             edgecolor=GREEN,
             facecolor="white",
+            borderpad=0.3,
+            labelspacing=0.2,
+            handlelength=1.5,
         )
 
         return []
