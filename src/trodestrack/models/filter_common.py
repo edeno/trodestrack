@@ -95,20 +95,20 @@ class FilterCoreConfig:
     process_noise_gyro_bias: float = 2e-6
     process_noise_accel_bias: float = 2e-4
 
-    measurement_noise_pos: float = 0.005**2
+    measurement_noise_pos: float = 0.01**2
     measurement_noise_heading: float = 0.05**2
 
     # SpikeGadgets IMU noise specifications (Product Manual)
     imu_gyro_noise_density: float = 0.00017453  # 0.01 deg/s/√Hz → rad/s/√Hz
     imu_accel_noise_density: float = 0.00196133  # 0.2 mg/√Hz → 0.0002g * 9.80665
 
-    damping_coeff: float = 0.5
+    damping_coeff: float = 0.2
     led_distance: float | None = 0.04
 
-    use_mahalanobis_gating: bool = False  # Disable by default, enable in production
+    use_mahalanobis_gating: bool = True  # Default to robust outlier rejection
     mahalanobis_threshold_prob: float = 0.997  # Reject ~0.3% of measurements (3σ)
 
-    use_heading_measurement: bool = False
+    use_heading_measurement: bool = True
     led_distance_tolerance: float = 0.3
     adaptive_heading_noise: bool = True
 
@@ -116,9 +116,9 @@ class FilterCoreConfig:
     dropout_q_pos_multiplier: float = 10.0
     dropout_q_vel_multiplier: float = 10.0
     dropout_q_bias_multiplier: float = 0.1
-    freeze_bias_during_blackout: bool = False
-    reduce_imu_noise_during_blackout: bool = False
-    blackout_imu_noise_scale: float = 0.5
+    freeze_bias_during_blackout: bool = True
+    reduce_imu_noise_during_blackout: bool = True
+    blackout_imu_noise_scale: float = 0.3
 
     enable_zupt: bool = False
     zupt_velocity_threshold: float = 0.05
