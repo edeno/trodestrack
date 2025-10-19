@@ -53,42 +53,74 @@ def plot_covariance_ellipse(ax, mean, cov, color, alpha=0.3, n_std=2):
     ax.add_patch(ellipse)
 
 
-def naive_vision_only_tracking(t_cam, Z_cam, mask_cam):
+def plot_heading_arrow(ax, pos, heading, color, length=0.15, label=None):
+    """Plot heading direction arrow"""
+    dx = length * np.cos(heading)
+    dy = length * np.sin(heading)
+    ax.arrow(
+        pos[0],
+        pos[1],
+        dx,
+        dy,
+        head_width=0.05,
+        head_length=0.04,
+        fc=color,
+        ec=color,
+        linewidth=3,
+        alpha=0.9,
+        length_includes_head=True,
+        label=label,
+    )
+
+
+def naive_vision_only_tracking(t_cam, Z_cam_led1, Z_cam_led2, mask_cam):
     """
     Naive vision-only tracking: just use observations when available,
     extrapolate with last known velocity during dropout.
+    Also computes velocity direction (not body heading, just motion direction).
     """
     n_frames = len(t_cam)
     pos = np.zeros((n_frames, 2))
     cov = np.zeros((n_frames, 2, 2))
+    velocity_direction = np.zeros(n_frames)
 
     # Initialize with first valid observation
     first_valid = np.where(mask_cam)[0][0]
-    pos[first_valid] = Z_cam[first_valid]
+    pos[first_valid] = Z_cam_led1[first_valid]
     cov[first_valid] = np.eye(2) * 0.005**2  # Small initial uncertainty
+    velocity_direction[first_valid] = 0.0
 
     last_valid_pos = pos[first_valid].copy()
     last_valid_vel = np.array([0.0, 0.0])
+    last_valid_dir = 0.0
 
     for i in range(first_valid + 1, n_frames):
         dt = t_cam[i] - t_cam[i - 1]
 
         if mask_cam[i]:
             # Use observation
-            pos[i] = Z_cam[i]
+            pos[i] = Z_cam_led1[i]
             cov[i] = np.eye(2) * 0.005**2
 
-            # Update velocity estimate
+            # Update velocity estimate and direction
             last_valid_vel = (pos[i] - last_valid_pos) / (t_cam[i] - t_cam[i - 1])
+            if np.linalg.norm(last_valid_vel) > 0.01:  # Only update if moving
+                velocity_direction[i] = np.arctan2(last_valid_vel[1], last_valid_vel[0])
+                last_valid_dir = velocity_direction[i]
+            else:
+                velocity_direction[i] = last_valid_dir
             last_valid_pos = pos[i].copy()
         else:
             # Extrapolate with constant velocity
             pos[i] = pos[i - 1] + last_valid_vel * dt
 
+            # Direction stays at last known value during dropout (no gyro!)
+            velocity_direction[i] = last_valid_dir
+
             # Uncertainty grows quadratically during dropout
             cov[i] = cov[i - 1] + np.eye(2) * (0.5 * dt) ** 2  # Very pessimistic growth
 
-    return pos, cov
+    return pos, cov, velocity_direction
 
 
 def generate_slide08():
@@ -175,8 +207,10 @@ def generate_slide08():
         mask_cam,
     )
 
-    # Run naive vision-only tracking
-    vision_pos, vision_cov = naive_vision_only_tracking(t_cam, sim["Z_cam_led1"], mask_cam)
+    # Run naive vision-only tracking (with velocity direction from camera)
+    vision_pos, vision_cov, vision_dir = naive_vision_only_tracking(
+        t_cam, sim["Z_cam_led1"], sim["Z_cam_led2"], mask_cam
+    )
 
     # Get ground truth
     layout = get_layout("2d_full")
@@ -185,9 +219,17 @@ def generate_slide08():
     cam_indices = np.searchsorted(t_imu, t_cam)
     cam_indices = np.clip(cam_indices, 0, len(t_imu) - 1)
     pos_truth = X_truth[cam_indices, :2]
+    vel_truth = X_truth[cam_indices][:, layout.vel_idx]
 
-    # EKF results
+    # Compute true velocity direction
+    vel_dir_truth = np.arctan2(vel_truth[:, 1], vel_truth[:, 0])
+
+    # EKF results (sensor fusion: camera + IMU)
     ekf_pos = result.filtered_means[:, layout.pos_idx]
+    ekf_vel = result.filtered_means[:, layout.vel_idx]
+    # Compute EKF velocity direction
+    ekf_vel_dir = np.arctan2(ekf_vel[:, 1], ekf_vel[:, 0])
+
     # Extract 2×2 position covariances for each time step
     ekf_cov = np.array(
         [
@@ -195,6 +237,23 @@ def generate_slide08():
             for i in range(len(result.filtered_means))
         ]
     )
+
+    # Compute IMU-only velocity direction estimate (shows drift from bias accumulation)
+    # Simulate what an uncorrected IMU would show - starts correct but drifts over time
+    imu_vel_dir = np.zeros(len(t_cam))
+    imu_vel_dir[0] = vel_dir_truth[0]  # Start from true direction
+
+    # Simulate gyro bias drift (typical: ~0.5-1 deg/s drift rate)
+    drift_rate = np.deg2rad(0.5)  # 0.5 deg/s drift
+    for i in range(1, len(t_cam)):
+        dt = t_cam[i] - t_cam[i - 1]
+        # True rotation in velocity direction
+        true_delta = vel_dir_truth[i] - vel_dir_truth[i - 1]
+        # Normalize angle difference to [-pi, pi]
+        true_delta = np.arctan2(np.sin(true_delta), np.cos(true_delta))
+        # IMU sees true rotation + accumulated bias drift
+        bias_drift = drift_rate * dt
+        imu_vel_dir[i] = imu_vel_dir[i - 1] + true_delta + bias_drift
 
     # Create figure with 2 panels (side by side)
     # MANDATORY: Use constrained_layout=True to prevent overlaps
@@ -298,6 +357,16 @@ def generate_slide08():
             ax_left, vision_pos[frame], vision_cov[frame], RED, alpha=0.3, n_std=2
         )
 
+        # Plot velocity direction arrow (camera-based)
+        plot_heading_arrow(
+            ax_left,
+            vision_pos[frame],
+            vision_dir[frame],
+            ORANGE,
+            length=0.15,
+            label="Camera direction",
+        )
+
         # Calculate current error - place on RIGHT OUTSIDE below legend
         vision_error = np.linalg.norm(vision_pos[frame] - pos_truth[frame])
         ax_left.text(
@@ -366,6 +435,19 @@ def generate_slide08():
 
         # Plot uncertainty ellipse
         plot_covariance_ellipse(ax_right, ekf_pos[frame], ekf_cov[frame], GREEN, alpha=0.3, n_std=2)
+
+        # Plot velocity direction arrows - both fused (EKF) and IMU-only
+        plot_heading_arrow(
+            ax_right,
+            ekf_pos[frame],
+            ekf_vel_dir[frame],
+            GREEN,
+            length=0.15,
+            label="Fused direction",
+        )
+        plot_heading_arrow(
+            ax_right, ekf_pos[frame], imu_vel_dir[frame], ORANGE, length=0.12, label="IMU direction"
+        )
 
         # Calculate current error - place on RIGHT OUTSIDE below legend
         ekf_error = np.linalg.norm(ekf_pos[frame] - pos_truth[frame])
