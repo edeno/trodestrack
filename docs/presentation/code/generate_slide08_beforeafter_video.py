@@ -94,6 +94,31 @@ def naive_vision_only_tracking(t_cam, Z_cam, mask_cam):
 def generate_slide08():
     """
     Create split-screen video comparing vision-only vs sensor fusion.
+
+    SPATIAL LAYOUT PLAN (2-panel horizontal, 12"×5.625"):
+    ┌──────────────────────────┬────┬─────────────────────────┬────┐
+    │ LEFT PANEL               │Leg │ RIGHT PANEL             │Leg │
+    │ "Vision-Only Tracking"   │end │ "Sensor Fusion (EKF)"  │end │
+    │ (red title, 32pt)        │    │ (green title, 32pt)    │    │
+    │                          │Err │                         │Err │
+    │ [Trajectory plot]        │or  │ [Trajectory plot]      │or  │
+    │ - Ground truth (blue)    │    │ - Ground truth (blue)  │    │
+    │ - Vision-only (red)      │2σ  │ - EKF (green)          │2σ  │
+    │ - Current pos (circle)   │    │ - Current pos (circle) │    │
+    │ - Uncertainty ellipse    │    │ - Uncertainty ellipse  │    │
+    ├──────────────────────────┴────┴─────────────────────────┴────┤
+    │ Time: X.XXs | Status (centered text box at bottom)          │
+    └──────────────────────────────────────────────────────────────┘
+
+    OVERLAP PREVENTION:
+    - Use constrained_layout=True (MANDATORY)
+    - Figure size 12"×5.625" (wider to accommodate legends + stats on right)
+    - NO suptitle - status moved to bottom center to avoid title collision
+    - Panel titles at 32pt with pad=15 (plenty of clearance at top)
+    - Legends OUTSIDE RIGHT: bbox_to_anchor=(1.02, 0.95) at top of right margin
+    - Error stats OUTSIDE RIGHT: x=1.02, y=0.6 (below legends, stacked vertically)
+    - Status text at very bottom: fig.text(0.5, 0.005)
+    - labelpad=10 on all axis labels
     """
 
     from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
@@ -172,9 +197,10 @@ def generate_slide08():
     )
 
     # Create figure with 2 panels (side by side)
-    fig, axes = plt.subplots(1, 2, figsize=(10, 5.625))
+    # MANDATORY: Use constrained_layout=True to prevent overlaps
+    # Wider figure (12" instead of 10") to accommodate error stats on right side
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5.625), constrained_layout=True)
     fig.patch.set_facecolor("white")
-    fig.tight_layout(pad=3.0)
 
     # Set up axes limits (equal for both panels)
     x_min = pos_truth[:, 0].min() - 0.2
@@ -190,14 +216,24 @@ def generate_slide08():
     ):
         ax.set_xlim(x_min, x_max)
         ax.set_ylim(y_min, y_max)
-        ax.set_xlabel("X (meters)", fontsize=24, weight="bold")
-        ax.set_ylabel("Y (meters)", fontsize=24, weight="bold")
+        # MANDATORY: Use labelpad=10 for axis labels
+        ax.set_xlabel("X (meters)", fontsize=24, weight="bold", labelpad=10)
+        ax.set_ylabel("Y (meters)", fontsize=24, weight="bold", labelpad=10)
         ax.set_title(title, fontsize=32, weight="bold", color=color, pad=15)
         ax.set_aspect("equal")
         ax.grid(True, alpha=0.3)
 
-    # Add overall title
-    title_text = fig.suptitle("", fontsize=24, weight="bold", y=0.98)
+    # Add status text at very bottom center (below legends)
+    status_text = fig.text(
+        0.5,
+        0.005,
+        "",
+        ha="center",
+        va="bottom",
+        fontsize=18,
+        weight="bold",
+        bbox=dict(boxstyle="round,pad=0.5", facecolor="white", alpha=0.95, edgecolor="gray"),
+    )
 
     # Animation function
     def init():
@@ -211,8 +247,9 @@ def generate_slide08():
             ax.clear()
             ax.set_xlim(x_min, x_max)
             ax.set_ylim(y_min, y_max)
-            ax.set_xlabel("X (meters)", fontsize=24, weight="bold")
-            ax.set_ylabel("Y (meters)", fontsize=24, weight="bold")
+            # MANDATORY: Use labelpad=10 for axis labels
+            ax.set_xlabel("X (meters)", fontsize=24, weight="bold", labelpad=10)
+            ax.set_ylabel("Y (meters)", fontsize=24, weight="bold", labelpad=10)
             ax.set_aspect("equal")
             ax.grid(True, alpha=0.3)
 
@@ -220,14 +257,11 @@ def generate_slide08():
         t_now = t_cam[frame]
         in_dropout = not mask_cam[frame]
 
-        # Update title with time and dropout status
-        dropout_text = "⚠ CAMERA DROPOUT" if in_dropout else "Camera Active"
+        # Update status text at bottom with time and dropout status
+        dropout_text = "⚠ CAMERA DROPOUT" if in_dropout else "✓ Camera Active"
         dropout_color = RED if in_dropout else GREEN
-        title_text.set_text(
-            f"Before & After: Vision-Only vs Sensor Fusion\n"
-            f"Time: {t_now:.2f}s  |  {dropout_text}"
-        )
-        title_text.set_color(dropout_color)
+        status_text.set_text(f"Time: {t_now:.2f}s  |  {dropout_text}")
+        status_text.set_color(dropout_color)
 
         # LEFT PANEL: Vision-only
         ax_left = axes[0]
@@ -264,21 +298,34 @@ def generate_slide08():
             ax_left, vision_pos[frame], vision_cov[frame], RED, alpha=0.3, n_std=2
         )
 
-        # Calculate current error
+        # Calculate current error - place on RIGHT OUTSIDE below legend
         vision_error = np.linalg.norm(vision_pos[frame] - pos_truth[frame])
         ax_left.text(
-            0.02,
-            0.98,
-            f"Position Error: {vision_error*100:.1f} cm\n"
-            f"2σ Uncertainty: {2*np.sqrt(vision_cov[frame, 0, 0])*100:.1f} cm",
+            1.02,
+            0.6,
+            f"Error:\n{vision_error*100:.1f} cm\n\n2σ:\n{2*np.sqrt(vision_cov[frame, 0, 0])*100:.1f} cm",
             transform=ax_left.transAxes,
-            fontsize=16,
+            fontsize=18,
             verticalalignment="top",
-            bbox=dict(boxstyle="round,pad=0.8", facecolor="white", alpha=0.9),
+            horizontalalignment="left",
+            bbox=dict(
+                boxstyle="round,pad=0.6", facecolor="white", alpha=0.95, edgecolor=RED, linewidth=2
+            ),
             weight="bold",
+            color=RED,
         )
 
-        ax_left.legend(fontsize=13, loc="lower right")
+        # MANDATORY: Place legend OUTSIDE on the right to avoid covering plot
+        ax_left.legend(
+            fontsize=18,
+            loc="upper left",
+            bbox_to_anchor=(1.02, 0.95),
+            frameon=True,
+            fancybox=True,
+            framealpha=0.95,
+            edgecolor=RED,
+            facecolor="white",
+        )
 
         # RIGHT PANEL: Sensor fusion
         ax_right = axes[1]
@@ -313,21 +360,38 @@ def generate_slide08():
         # Plot uncertainty ellipse
         plot_covariance_ellipse(ax_right, ekf_pos[frame], ekf_cov[frame], GREEN, alpha=0.3, n_std=2)
 
-        # Calculate current error
+        # Calculate current error - place on RIGHT OUTSIDE below legend
         ekf_error = np.linalg.norm(ekf_pos[frame] - pos_truth[frame])
         ax_right.text(
-            0.02,
-            0.98,
-            f"Position Error: {ekf_error*100:.1f} cm\n"
-            f"2σ Uncertainty: {2*np.sqrt(ekf_cov[frame, 0, 0])*100:.1f} cm",
+            1.02,
+            0.6,
+            f"Error:\n{ekf_error*100:.1f} cm\n\n2σ:\n{2*np.sqrt(ekf_cov[frame, 0, 0])*100:.1f} cm",
             transform=ax_right.transAxes,
-            fontsize=16,
+            fontsize=18,
             verticalalignment="top",
-            bbox=dict(boxstyle="round,pad=0.8", facecolor="white", alpha=0.9),
+            horizontalalignment="left",
+            bbox=dict(
+                boxstyle="round,pad=0.6",
+                facecolor="white",
+                alpha=0.95,
+                edgecolor=GREEN,
+                linewidth=2,
+            ),
             weight="bold",
+            color=GREEN,
         )
 
-        ax_right.legend(fontsize=13, loc="lower right")
+        # MANDATORY: Place legend OUTSIDE on the right to avoid covering plot
+        ax_right.legend(
+            fontsize=18,
+            loc="upper left",
+            bbox_to_anchor=(1.02, 0.95),
+            frameon=True,
+            fancybox=True,
+            framealpha=0.95,
+            edgecolor=GREEN,
+            facecolor="white",
+        )
 
         return []
 
@@ -343,6 +407,23 @@ def generate_slide08():
         blit=False,
         repeat=True,
     )
+
+    # MANDATORY: Check for warnings before saving
+    print("Validating figure layout (checking for warnings)...")
+    import warnings
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        # Render a test frame to check for layout warnings
+        animate(0)
+        fig.canvas.draw()
+
+        if w:
+            print(f"⚠ Found {len(w)} warning(s) during validation:")
+            for warning in w:
+                print(f"  - {warning.category.__name__}: {warning.message}")
+        else:
+            print("✓ No layout warnings detected")
 
     # Save video
     output_path = OUTPUT_DIR / "slide08_beforeafter.mp4"
