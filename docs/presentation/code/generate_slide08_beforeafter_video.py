@@ -26,6 +26,7 @@ ORANGE = "#F77F00"
 GREEN = "#06A77D"
 RED = "#D62828"
 GRAY = "#6C757D"
+PURPLE = "#9B59B6"  # For IMU direction (different from camera's orange)
 
 
 def plot_covariance_ellipse(ax, mean, cov, color, alpha=0.3, n_std=2):
@@ -175,27 +176,18 @@ def generate_slide08():
 
     sim = simulate_rat_imu(config)
 
-    # Manually create 5-second dropout in middle (frames 150-300, roughly 5s @ 30Hz)
+    # Manually create 1-second dropout in middle
     t_cam = sim["t_cam_exp"]
     mask_cam = sim["mask_cam"].copy()
 
-    # Find middle 5 seconds
+    # Find middle 1 seconds
     dropout_start = 2.5  # Start dropout at 2.5s
-    dropout_end = 7.5  # End dropout at 7.5s
+    dropout_end = 3.5  # End dropout at 3.5s
     dropout_mask = (t_cam >= dropout_start) & (t_cam <= dropout_end)
     mask_cam[dropout_mask] = False
 
     # Run EKF with sensor fusion
-    ekf_config = EKFConfig(
-        adaptive_q_during_dropout=True,
-        dropout_q_pos_multiplier=2.0,
-        dropout_q_vel_multiplier=2.0,
-        dropout_q_bias_multiplier=0.0,
-        freeze_bias_during_blackout=True,
-        reduce_imu_noise_during_blackout=True,
-        blackout_imu_noise_scale=0.1,
-        use_heading_measurement=True,
-    )
+    ekf_config = EKFConfig()
 
     result = extended_kalman_filter(
         ekf_config,
@@ -219,16 +211,9 @@ def generate_slide08():
     cam_indices = np.searchsorted(t_imu, t_cam)
     cam_indices = np.clip(cam_indices, 0, len(t_imu) - 1)
     pos_truth = X_truth[cam_indices, :2]
-    vel_truth = X_truth[cam_indices][:, layout.vel_idx]
-
-    # Compute true velocity direction
-    vel_dir_truth = np.arctan2(vel_truth[:, 1], vel_truth[:, 0])
 
     # EKF results (sensor fusion: camera + IMU)
     ekf_pos = result.filtered_means[:, layout.pos_idx]
-    ekf_vel = result.filtered_means[:, layout.vel_idx]
-    # Compute EKF velocity direction
-    ekf_vel_dir = np.arctan2(ekf_vel[:, 1], ekf_vel[:, 0])
 
     # Extract 2×2 position covariances for each time step
     ekf_cov = np.array(
@@ -238,22 +223,11 @@ def generate_slide08():
         ]
     )
 
-    # Compute IMU-only velocity direction estimate (shows drift from bias accumulation)
-    # Simulate what an uncorrected IMU would show - starts correct but drifts over time
-    imu_vel_dir = np.zeros(len(t_cam))
-    imu_vel_dir[0] = vel_dir_truth[0]  # Start from true direction
-
-    # Simulate gyro bias drift (typical: ~0.5-1 deg/s drift rate)
-    drift_rate = np.deg2rad(0.5)  # 0.5 deg/s drift
-    for i in range(1, len(t_cam)):
-        dt = t_cam[i] - t_cam[i - 1]
-        # True rotation in velocity direction
-        true_delta = vel_dir_truth[i] - vel_dir_truth[i - 1]
-        # Normalize angle difference to [-pi, pi]
-        true_delta = np.arctan2(np.sin(true_delta), np.cos(true_delta))
-        # IMU sees true rotation + accumulated bias drift
-        bias_drift = drift_rate * dt
-        imu_vel_dir[i] = imu_vel_dir[i - 1] + true_delta + bias_drift
+    # IMU-only prediction from EKF propagator (state before camera update)
+    imu_pred = np.array(result.predicted_means)
+    imu_pred_pos = imu_pred[:, layout.pos_idx]
+    imu_pred_vel = imu_pred[:, layout.vel_idx]
+    imu_vel_dir = np.arctan2(imu_pred_vel[:, 1], imu_pred_vel[:, 0])
 
     # Create figure with 2 panels (side by side)
     # MANDATORY: Use constrained_layout=True to prevent overlaps
@@ -324,7 +298,7 @@ def generate_slide08():
 
         # LEFT PANEL: Vision-only
         ax_left = axes[0]
-        ax_left.set_title("Vision-Only Tracking", fontsize=32, weight="bold", color=RED, pad=15)
+        ax_left.set_title("Vision-Only\nTracking", fontsize=32, weight="bold", color=RED, pad=15)
 
         # Plot ground truth (past trajectory)
         ax_left.plot(
@@ -371,7 +345,7 @@ def generate_slide08():
         vision_error = np.linalg.norm(vision_pos[frame] - pos_truth[frame])
         ax_left.text(
             1.01,
-            0.65,
+            0.50,
             f"Error:\n{vision_error*100:.1f} cm\n\n2σ:\n{2*np.sqrt(vision_cov[frame, 0, 0])*100:.1f} cm",
             transform=ax_left.transAxes,
             fontsize=14,
@@ -405,7 +379,9 @@ def generate_slide08():
 
         # RIGHT PANEL: Sensor fusion
         ax_right = axes[1]
-        ax_right.set_title("Sensor Fusion (EKF)", fontsize=32, weight="bold", color=GREEN, pad=15)
+        ax_right.set_title(
+            "Sensor Fusion\nTracking", fontsize=32, weight="bold", color=GREEN, pad=15
+        )
 
         # Plot ground truth (past trajectory)
         ax_right.plot(
@@ -428,7 +404,29 @@ def generate_slide08():
             label="EKF",
         )
 
-        # Plot current position
+        # Plot camera prediction (vision/extrapolation)
+        ax_right.plot(
+            vision_pos[: frame + 1, 0],
+            vision_pos[: frame + 1, 1],
+            linewidth=2,
+            color=ORANGE,
+            alpha=0.8,
+            linestyle="--",
+            label="Camera pred.",
+        )
+
+        # Plot IMU-only dead-reckoned prediction (state prior to camera update)
+        ax_right.plot(
+            imu_pred_pos[: frame + 1, 0],
+            imu_pred_pos[: frame + 1, 1],
+            linewidth=2,
+            color=PURPLE,
+            alpha=0.7,
+            linestyle=":",
+            label="IMU-only",
+        )
+
+        # Plot current fused position
         ax_right.plot(
             ekf_pos[frame, 0], ekf_pos[frame, 1], "o", color=GREEN, markersize=15, zorder=10
         )
@@ -436,24 +434,29 @@ def generate_slide08():
         # Plot uncertainty ellipse
         plot_covariance_ellipse(ax_right, ekf_pos[frame], ekf_cov[frame], GREEN, alpha=0.3, n_std=2)
 
-        # Plot velocity direction arrows - both fused (EKF) and IMU-only
+        # Plot direction arrows for camera and IMU predictions
         plot_heading_arrow(
             ax_right,
-            ekf_pos[frame],
-            ekf_vel_dir[frame],
-            GREEN,
+            vision_pos[frame],
+            vision_dir[frame],
+            ORANGE,
             length=0.15,
-            label="Fused direction",
+            label="Camera pred. dir.",
         )
         plot_heading_arrow(
-            ax_right, ekf_pos[frame], imu_vel_dir[frame], ORANGE, length=0.12, label="IMU direction"
+            ax_right,
+            imu_pred_pos[frame],
+            imu_vel_dir[frame],
+            PURPLE,
+            length=0.12,
+            label="IMU vel. dir.",
         )
 
         # Calculate current error - place on RIGHT OUTSIDE below legend
         ekf_error = np.linalg.norm(ekf_pos[frame] - pos_truth[frame])
         ax_right.text(
             1.01,
-            0.65,
+            0.50,
             f"Error:\n{ekf_error*100:.1f} cm\n\n2σ:\n{2*np.sqrt(ekf_cov[frame, 0, 0])*100:.1f} cm",
             transform=ax_right.transAxes,
             fontsize=14,
@@ -471,7 +474,11 @@ def generate_slide08():
         )
 
         # MANDATORY: Place legend OUTSIDE on the right to avoid covering plot
+        handles, labels = ax_right.get_legend_handles_labels()
+        uniq = dict(zip(labels, handles, strict=True))
         ax_right.legend(
+            uniq.values(),
+            uniq.keys(),
             fontsize=14,
             loc="upper left",
             bbox_to_anchor=(1.01, 1.0),
