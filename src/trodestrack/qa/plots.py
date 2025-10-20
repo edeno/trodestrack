@@ -18,6 +18,7 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Ellipse
 from numpy.typing import NDArray
 
+from trodestrack.models.state_layout import StateLayout, get_heading_index
 from trodestrack.qa.metrics import chi2_bounds
 from trodestrack.viz.styles import COLORS, apply_tufte_style
 
@@ -653,3 +654,147 @@ def plot_covariance_ellipse(
     ax.set_ylim(mean[1] - margin, mean[1] + margin)
 
     return fig, ax
+
+
+def plot_heading_consistency_from_leds(
+    t: NDArray[np.float64],
+    filtered_means: NDArray[np.float64],
+    Z_cam_led1: NDArray[np.float64],
+    Z_cam_led2: NDArray[np.float64],
+    mask_cam: NDArray[np.bool_],
+    *,
+    layout: StateLayout,
+    title: str | None = None,
+) -> tuple[Figure, list[Axes], dict[str, float]]:
+    """Compare filter heading vs. camera LED-derived heading over time.
+
+    Computes camera heading as atan2(y2 - y1, x2 - x1) when both LEDs are valid,
+    and compares it to the filter's heading state. Plots time series and the
+    wrapped angular error, and returns basic summary statistics.
+
+    Parameters
+    ----------
+    t : ndarray (N,)
+        Time vector in seconds (camera timeline).
+    filtered_means : ndarray (N, n)
+        Filtered state means at camera times.
+    Z_cam_led1 : ndarray (N, 2)
+        LED1 camera observations in meters.
+    Z_cam_led2 : ndarray (N, 2)
+        LED2 camera observations in meters.
+    mask_cam : ndarray (N,)
+        Camera validity mask.
+    layout : StateLayout
+        State layout (used to locate heading index).
+    title : str | None
+        Optional figure title.
+
+    Returns
+    -------
+    (fig, axes, stats)
+        Figure, list of Axes [heading_trace_ax, error_ax], and a stats dict with:
+        - 'count_valid': number of valid frames
+        - 'mean_abs_err_deg': mean absolute angular error (deg)
+        - 'median_abs_err_deg': median absolute angular error (deg)
+        - 'circular_std_deg': circular standard deviation (deg)
+
+    Notes
+    -----
+    Use this to verify pixel→meter mapping orientation. If camera Y is not
+    oriented upward in world coordinates (e.g., image coordinates with Y down),
+    the LED-derived heading may be flipped or rotated relative to the filter
+    heading. Consistent tracking requires that both share the same world axes.
+    """
+    apply_tufte_style()
+
+    # Convert to numpy arrays
+    t = np.asarray(t)
+    m = np.asarray(filtered_means)
+    led1 = np.asarray(Z_cam_led1)
+    led2 = np.asarray(Z_cam_led2)
+    cam_mask = np.asarray(mask_cam).astype(bool)
+
+    # Heading indices and vectors
+    h_idx = get_heading_index(layout)
+    theta_filt = m[:, h_idx]
+
+    # LED-derived heading where both LEDs are finite and camera mask is true
+    both_finite = np.isfinite(led1).all(axis=1) & np.isfinite(led2).all(axis=1)
+    valid = cam_mask & both_finite
+
+    d = led2 - led1
+    theta_cam = np.arctan2(d[:, 1], d[:, 0])
+
+    # Wrapped error (in [-pi, pi]) computed only on valid frames
+    def wrap(a: NDArray[np.float64]) -> NDArray[np.float64]:
+        return np.arctan2(np.sin(a), np.cos(a))
+
+    err = wrap(theta_cam - theta_filt)
+    err_deg = np.rad2deg(np.abs(err[valid]))
+
+    # Summary stats (valid frames only)
+    count_valid = int(np.sum(valid))
+    mean_abs_err = float(np.mean(err_deg)) if count_valid > 0 else float("nan")
+    median_abs_err = float(np.median(err_deg)) if count_valid > 0 else float("nan")
+    # Circular std over valid frames
+    if count_valid > 0:
+        e_valid = err[valid]
+        R = np.hypot(np.mean(np.cos(e_valid)), np.mean(np.sin(e_valid)))
+        circ_std = np.sqrt(-2.0 * np.log(max(R, 1e-12)))  # radians
+        circular_std_deg = float(np.rad2deg(circ_std))
+    else:
+        circular_std_deg = float("nan")
+
+    stats = {
+        "count_valid": count_valid,
+        "mean_abs_err_deg": mean_abs_err,
+        "median_abs_err_deg": median_abs_err,
+        "circular_std_deg": circular_std_deg,
+    }
+
+    # Build figure
+    fig, axes = plt.subplots(2, 1, figsize=(9, 5), sharex=True, constrained_layout=True)
+
+    # Top: headings over time (valid frames)
+    axes[0].plot(
+        t[valid],
+        wrap(theta_cam[valid]),
+        label="Camera LED heading",
+        color=COLORS["orange"],
+        linewidth=1.2,
+    )
+    axes[0].plot(
+        t[valid],
+        wrap(theta_filt[valid]),
+        label="Filtered heading",
+        color=COLORS["green"],
+        linewidth=1.2,
+    )
+    axes[0].set_ylabel("Heading (rad)")
+    axes[0].legend(loc="upper right")
+    if title:
+        axes[0].set_title(title)
+
+    # Bottom: absolute error in degrees (valid frames)
+    axes[1].plot(t[valid], err_deg, color=COLORS["red"], linewidth=1.0, label="|Δθ| (deg)")
+    axes[1].set_xlabel("Time (s)")
+    axes[1].set_ylabel("Abs error (deg)")
+    axes[1].legend(loc="upper right")
+
+    # Annotate stats
+    txt = (
+        f"n={count_valid}  mean={mean_abs_err:.2f}°  median={median_abs_err:.2f}°  "
+        f"circ-std={circular_std_deg:.2f}°"
+    )
+    axes[1].text(
+        0.01,
+        0.98,
+        txt,
+        transform=axes[1].transAxes,
+        va="top",
+        ha="left",
+        fontsize=9,
+        color=COLORS["gray"],
+    )
+
+    return fig, list(axes), stats
