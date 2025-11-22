@@ -101,7 +101,9 @@ class TestLEDReflectionGeometry:
         n_reflect_low = np.sum(sim_low["led_reflection_applied"])
         n_reflect_high = np.sum(sim_high["led_reflection_applied"])
 
-        assert n_reflect_high > n_reflect_low, "Higher prob should cause more reflections"
+        assert (
+            n_reflect_high > n_reflect_low
+        ), "Higher prob should cause more reflections"
 
     def test_reflection_distance_threshold(self):
         """Reflections only occur within configured distance from walls."""
@@ -122,9 +124,15 @@ class TestLEDReflectionGeometry:
         for idx in reflected_idx:
             # Reflections are based on rat center position, not individual LED positions
             # Check that rat is near wall
-            truth_x = np.interp(sim["t_cam_exp"][idx], sim["t_imu"], sim["X_truth"][:, 0])
-            truth_y = np.interp(sim["t_cam_exp"][idx], sim["t_imu"], sim["X_truth"][:, 1])
-            dist_rat = min(truth_x, cfg.arena_w - truth_x, truth_y, cfg.arena_h - truth_y)
+            truth_x = np.interp(
+                sim["t_cam_exp"][idx], sim["t_imu"], sim["X_truth"][:, 0]
+            )
+            truth_y = np.interp(
+                sim["t_cam_exp"][idx], sim["t_imu"], sim["X_truth"][:, 1]
+            )
+            dist_rat = min(
+                truth_x, cfg.arena_w - truth_x, truth_y, cfg.arena_h - truth_y
+            )
             assert (
                 dist_rat <= cfg.led_wall_reflection_distance
             ), f"Reflection occurred when rat was {dist_rat:.2f}m from wall (threshold={cfg.led_wall_reflection_distance})"

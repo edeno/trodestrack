@@ -253,8 +253,12 @@ def test_update_no_extreme_artifacts(ekf_config, initial_state):
 
     # Check that no covariance element is unreasonably large (< 1000, not 1e10)
     max_cov = jnp.max(jnp.abs(state_upd.cov))
-    assert max_cov < 1000.0, f"Max covariance {max_cov} suggests extreme numerical artifacts"
+    assert (
+        max_cov < 1000.0
+    ), f"Max covariance {max_cov} suggests extreme numerical artifacts"
 
     # Check that covariance is still PSD (all eigenvalues positive)
     eigenvalues = jnp.linalg.eigvalsh(state_upd.cov)
-    assert jnp.all(eigenvalues > -1e-6), f"Covariance should be PSD, got eigenvalues {eigenvalues}"
+    assert jnp.all(
+        eigenvalues > -1e-6
+    ), f"Covariance should be PSD, got eigenvalues {eigenvalues}"

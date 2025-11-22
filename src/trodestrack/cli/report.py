@@ -106,7 +106,9 @@ def load_run_data(run_dir: Path) -> dict[str, NDArray | int]:
             missing_files.append(filename)
 
     if missing_files:
-        raise FileNotFoundError(f"Missing required files in {run_dir}: {', '.join(missing_files)}")
+        raise FileNotFoundError(
+            f"Missing required files in {run_dir}: {', '.join(missing_files)}"
+        )
 
     # Load data
     data = {
@@ -143,9 +145,13 @@ def load_run_data(run_dir: Path) -> dict[str, NDArray | int]:
             f"velocities_est has shape {data['velocities_est'].shape}, expected ({N}, 2)"
         )
     if data["headings_true"].shape != (N,):
-        raise ValueError(f"headings_true has shape {data['headings_true'].shape}, expected ({N},)")
+        raise ValueError(
+            f"headings_true has shape {data['headings_true'].shape}, expected ({N},)"
+        )
     if data["headings_est"].shape != (N,):
-        raise ValueError(f"headings_est has shape {data['headings_est'].shape}, expected ({N},)")
+        raise ValueError(
+            f"headings_est has shape {data['headings_est'].shape}, expected ({N},)"
+        )
     if data["nees"].shape != (N,):
         raise ValueError(f"nees has shape {data['nees'].shape}, expected ({N},)")
 

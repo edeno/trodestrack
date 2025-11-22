@@ -29,7 +29,9 @@ def reference_Q(config: Any, theta: float, dt: float, has_vision: bool) -> jnp.n
         q_bg = q_bg * config.dropout_q_bias_multiplier
         q_bax = q_bax * config.dropout_q_bias_multiplier
         q_bay = q_bay * config.dropout_q_bias_multiplier
-    Q_proc = jnp.diag(jnp.array([q_px, q_py, q_vx, q_vy, q_th, q_bg, q_bax, q_bay], dtype=dtype))
+    Q_proc = jnp.diag(
+        jnp.array([q_px, q_py, q_vx, q_vy, q_th, q_bg, q_bax, q_bay], dtype=dtype)
+    )
     # IMU input mapping
     std_w = config.imu_gyro_noise_density * np.sqrt(dt)
     std_f = config.imu_accel_noise_density * np.sqrt(dt)

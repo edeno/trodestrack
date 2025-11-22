@@ -299,7 +299,9 @@ def compute_comparison_metrics(vision_only, imu_mode, data):
     smoothness_imu = compute_smoothness(pos_imu, dt)
 
     # Covariance trace (uncertainty)
-    trace_vision = np.array([np.trace(P_vision[i, :2, :2]) for i in range(len(P_vision))])
+    trace_vision = np.array(
+        [np.trace(P_vision[i, :2, :2]) for i in range(len(P_vision))]
+    )
     trace_imu = np.array([np.trace(P_imu[i, :2, :2]) for i in range(len(P_imu))])
 
     metrics = {
@@ -394,7 +396,7 @@ def plot_trajectory_comparison(vision_only, imu_mode, data, save_path):
 
     camera_mid = (data.Z_cam_led1 + data.Z_cam_led2) / 2
 
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    _fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
     # Vision-only
     ax = axes[0]
@@ -408,7 +410,12 @@ def plot_trajectory_comparison(vision_only, imu_mode, data, save_path):
         label="Camera",
     )
     ax.plot(
-        x_vision[:, 0], x_vision[:, 1], "-", color=COLORS["red"], linewidth=1, label="EKF estimate"
+        x_vision[:, 0],
+        x_vision[:, 1],
+        "-",
+        color=COLORS["red"],
+        linewidth=1,
+        label="EKF estimate",
     )
     ax.set_xlabel("X position (m)")
     ax.set_ylabel("Y position (m)")
@@ -428,7 +435,14 @@ def plot_trajectory_comparison(vision_only, imu_mode, data, save_path):
         markersize=0.5,
         label="Camera",
     )
-    ax.plot(x_imu[:, 0], x_imu[:, 1], "-", color=COLORS["blue"], linewidth=1, label="EKF estimate")
+    ax.plot(
+        x_imu[:, 0],
+        x_imu[:, 1],
+        "-",
+        color=COLORS["blue"],
+        linewidth=1,
+        label="EKF estimate",
+    )
     ax.set_xlabel("X position (m)")
     ax.set_ylabel("Y position (m)")
     ax.set_title("3D IMU + Vision (10D State)", fontweight="bold")
@@ -436,7 +450,9 @@ def plot_trajectory_comparison(vision_only, imu_mode, data, save_path):
     ax.grid(True, alpha=0.3)
     ax.set_aspect("equal")
 
-    plt.suptitle("Trajectory Comparison: Smoother with IMU Integration", fontsize=14, y=0.98)
+    plt.suptitle(
+        "Trajectory Comparison: Smoother with IMU Integration", fontsize=14, y=0.98
+    )
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close()
@@ -463,7 +479,7 @@ def plot_velocity_comparison(vision_only, imu_mode, data, save_path):
     vel_fd = np.diff(camera_mid, axis=0) / dt
     speed_fd = np.linalg.norm(vel_fd, axis=1)
 
-    fig, axes = plt.subplots(2, 1, figsize=(14, 8))
+    _fig, axes = plt.subplots(2, 1, figsize=(14, 8))
 
     # Speed time series
     ax = axes[0]
@@ -476,11 +492,15 @@ def plot_velocity_comparison(vision_only, imu_mode, data, save_path):
         linewidth=0.5,
         label="Finite diff (raw)",
     )
-    ax.plot(t, speed_vision, "-", color=COLORS["red"], linewidth=1, label="Vision-only EKF")
+    ax.plot(
+        t, speed_vision, "-", color=COLORS["red"], linewidth=1, label="Vision-only EKF"
+    )
     ax.plot(t, speed_imu, "-", color=COLORS["blue"], linewidth=1.5, label="3D IMU EKF")
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Speed (m/s)")
-    ax.set_title("Velocity Magnitude: IMU Dramatically Reduces Noise", fontweight="bold")
+    ax.set_title(
+        "Velocity Magnitude: IMU Dramatically Reduces Noise", fontweight="bold"
+    )
     ax.legend()
     ax.grid(True, alpha=0.3)
     ax.set_xlim(t[0], t[-1])
@@ -500,11 +520,22 @@ def plot_velocity_comparison(vision_only, imu_mode, data, save_path):
         linewidth=1,
         label="Finite diff",
     )
-    ax.plot(t[mask], speed_vision[mask], "-", color=COLORS["red"], linewidth=2, label="Vision-only")
-    ax.plot(t[mask], speed_imu[mask], "-", color=COLORS["blue"], linewidth=2, label="3D IMU")
+    ax.plot(
+        t[mask],
+        speed_vision[mask],
+        "-",
+        color=COLORS["red"],
+        linewidth=2,
+        label="Vision-only",
+    )
+    ax.plot(
+        t[mask], speed_imu[mask], "-", color=COLORS["blue"], linewidth=2, label="3D IMU"
+    )
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Speed (m/s)")
-    ax.set_title("Zoomed Detail (10s window): Note Smoothness Difference", fontweight="bold")
+    ax.set_title(
+        "Zoomed Detail (10s window): Note Smoothness Difference", fontweight="bold"
+    )
     ax.legend()
     ax.grid(True, alpha=0.3)
 
@@ -526,32 +557,50 @@ def plot_uncertainty_comparison(vision_only, imu_mode, data, save_path):
 
     # Extract position uncertainties (sqrt of diagonal elements)
     pos_std_vision = (
-        np.sqrt(np.array([P_vision[i, 0, 0] + P_vision[i, 1, 1] for i in range(len(P_vision))]))
+        np.sqrt(
+            np.array(
+                [P_vision[i, 0, 0] + P_vision[i, 1, 1] for i in range(len(P_vision))]
+            )
+        )
         * 100
     )  # cm
     pos_std_imu = (
-        np.sqrt(np.array([P_imu[i, 0, 0] + P_imu[i, 1, 1] for i in range(len(P_imu))])) * 100
+        np.sqrt(np.array([P_imu[i, 0, 0] + P_imu[i, 1, 1] for i in range(len(P_imu))]))
+        * 100
     )  # cm
 
     # Extract velocity uncertainties
     vel_std_vision = (
-        np.sqrt(np.array([P_vision[i, 2, 2] + P_vision[i, 3, 3] for i in range(len(P_vision))]))
+        np.sqrt(
+            np.array(
+                [P_vision[i, 2, 2] + P_vision[i, 3, 3] for i in range(len(P_vision))]
+            )
+        )
         * 100
     )  # cm/s
     vel_std_imu = (
-        np.sqrt(np.array([P_imu[i, 2, 2] + P_imu[i, 3, 3] for i in range(len(P_imu))])) * 100
+        np.sqrt(np.array([P_imu[i, 2, 2] + P_imu[i, 3, 3] for i in range(len(P_imu))]))
+        * 100
     )  # cm/s
 
-    fig, axes = plt.subplots(2, 1, figsize=(14, 8))
+    _fig, axes = plt.subplots(2, 1, figsize=(14, 8))
 
     # Position uncertainty
     ax = axes[0]
     ax.plot(
-        t, pos_std_vision, "-", color=COLORS["red"], linewidth=1, label="Vision-only", alpha=0.7
+        t,
+        pos_std_vision,
+        "-",
+        color=COLORS["red"],
+        linewidth=1,
+        label="Vision-only",
+        alpha=0.7,
     )
     ax.plot(t, pos_std_imu, "-", color=COLORS["blue"], linewidth=1.5, label="3D IMU")
     ax.set_ylabel("Position uncertainty (cm)")
-    ax.set_title("Position Uncertainty: How Confident is the Filter?", fontweight="bold")
+    ax.set_title(
+        "Position Uncertainty: How Confident is the Filter?", fontweight="bold"
+    )
     ax.legend()
     ax.grid(True, alpha=0.3)
     ax.set_xlim(t[0], t[-1])
@@ -559,12 +608,20 @@ def plot_uncertainty_comparison(vision_only, imu_mode, data, save_path):
     # Velocity uncertainty
     ax = axes[1]
     ax.plot(
-        t, vel_std_vision, "-", color=COLORS["red"], linewidth=1, label="Vision-only", alpha=0.7
+        t,
+        vel_std_vision,
+        "-",
+        color=COLORS["red"],
+        linewidth=1,
+        label="Vision-only",
+        alpha=0.7,
     )
     ax.plot(t, vel_std_imu, "-", color=COLORS["blue"], linewidth=1.5, label="3D IMU")
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Velocity uncertainty (cm/s)")
-    ax.set_title("Velocity Uncertainty: IMU Dramatically Reduces Uncertainty", fontweight="bold")
+    ax.set_title(
+        "Velocity Uncertainty: IMU Dramatically Reduces Uncertainty", fontweight="bold"
+    )
     ax.legend()
     ax.grid(True, alpha=0.3)
     ax.set_xlim(t[0], t[-1])
@@ -647,7 +704,9 @@ def save_summary_table(metrics, save_path):
         f.write("- Log-likelihood: Higher indicates better model fit\n\n")
 
         f.write("CONCLUSION:\n")
-        vel_improvement = pct_change(m_v["velocity_rmse_cm_s"], m_i["velocity_rmse_cm_s"])
+        vel_improvement = pct_change(
+            m_v["velocity_rmse_cm_s"], m_i["velocity_rmse_cm_s"]
+        )
         smooth_improvement = pct_change(m_v["smoothness"], m_i["smoothness"])
 
         if vel_improvement > 10:
@@ -655,7 +714,9 @@ def save_summary_table(metrics, save_path):
                 f"✓ IMU integration provides {vel_improvement:.0f}% improvement in velocity estimation\n"
             )
         if smooth_improvement > 5:
-            f.write(f"✓ IMU integration provides {smooth_improvement:.0f}% smoother trajectories\n")
+            f.write(
+                f"✓ IMU integration provides {smooth_improvement:.0f}% smoother trajectories\n"
+            )
 
         f.write("\n")
 
@@ -679,7 +740,9 @@ def main():
         imu_mode="3d",
         verbose=False,  # Suppress loading output
     )
-    print(f"✓ Loaded {len(data.t_cam):,} camera frames, {len(data.t_imu):,} IMU samples")
+    print(
+        f"✓ Loaded {len(data.t_cam):,} camera frames, {len(data.t_imu):,} IMU samples"
+    )
 
     # Run both modes
     vision_only = run_vision_only(data, verbose=True)
@@ -697,8 +760,12 @@ def main():
     save_dir.mkdir(exist_ok=True)
     print(f"\nSaving to: {save_dir}/")
 
-    plot_trajectory_comparison(vision_only, imu_mode, data, save_dir / "trajectory_comparison.png")
-    plot_velocity_comparison(vision_only, imu_mode, data, save_dir / "velocity_comparison.png")
+    plot_trajectory_comparison(
+        vision_only, imu_mode, data, save_dir / "trajectory_comparison.png"
+    )
+    plot_velocity_comparison(
+        vision_only, imu_mode, data, save_dir / "velocity_comparison.png"
+    )
     plot_uncertainty_comparison(
         vision_only, imu_mode, data, save_dir / "uncertainty_comparison.png"
     )

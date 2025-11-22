@@ -36,9 +36,7 @@ from trodestrack.sim.simple import (
 PRD_POSITION_RMSE_M = 0.02  # Position RMSE <= 0.02 m (2 cm)
 PRD_VELOCITY_RMSE_M_S = 0.10  # Velocity RMSE <= 0.10 m/s (10 cm/s)
 PRD_HEADING_RMSE_DEG = 7.0  # Heading RMSE <= 7 degrees
-PRD_DROPOUT_DRIFT_M = (
-    3.5  # Drift <= 3.5 m after 5s dropout (realistic consumer-grade IMU, 95th percentile)
-)
+PRD_DROPOUT_DRIFT_M = 3.5  # Drift <= 3.5 m after 5s dropout (realistic consumer-grade IMU, 95th percentile)
 
 
 # =============================================================================
@@ -72,6 +70,7 @@ def run_ekf_on_sim(
         damping_coeff=0.5,
         led_distance=0.04,
         use_heading_measurement=use_heading,
+        state_mode="2d_full",  # Use 8D layout (tests use hardcoded indices)
     )
     if ekf_config_override:
         ekf_params.update(ekf_config_override)
@@ -134,7 +133,9 @@ def test_tier0_stationary_ekf_position():
 
     Runtime (observed locally): ~4.7 s
     """
-    config = SimpleSimConfig(duration_s=30.0, fs_imu=200.0, fs_cam=30.0, cam_dropout_prob=0.0)
+    config = SimpleSimConfig(
+        duration_s=30.0, fs_imu=200.0, fs_cam=30.0, cam_dropout_prob=0.0
+    )
     sim_data = simulate_stationary(config=config, seed=42)
 
     result = run_ekf_on_sim(sim_data)
@@ -142,7 +143,9 @@ def test_tier0_stationary_ekf_position():
     # Compute position RMSE (in meters)
     pos_rmse_m = compute_position_rmse(result["pos_truth"], result["pos_est"])
 
-    print(f"\nStationary Position RMSE: {pos_rmse_m:.4f} m (PRD: <={PRD_POSITION_RMSE_M} m)")
+    print(
+        f"\nStationary Position RMSE: {pos_rmse_m:.4f} m (PRD: <={PRD_POSITION_RMSE_M} m)"
+    )
 
     # Allow 5% margin above PRD threshold to account for filter convergence
     assert pos_rmse_m <= PRD_POSITION_RMSE_M * 1.05, (
@@ -157,7 +160,9 @@ def test_tier0_constant_velocity_ekf_velocity():
 
     Runtime (observed locally): ~4.7 s
     """
-    config = SimpleSimConfig(duration_s=30.0, fs_imu=200.0, fs_cam=30.0, cam_dropout_prob=0.0)
+    config = SimpleSimConfig(
+        duration_s=30.0, fs_imu=200.0, fs_cam=30.0, cam_dropout_prob=0.0
+    )
     velocity = np.array([0.10, 0.0])  # 0.10 m/s in x-direction
     sim_data = simulate_constant_velocity(config=config, velocity=velocity, seed=42)
 
@@ -166,7 +171,9 @@ def test_tier0_constant_velocity_ekf_velocity():
     # Compute velocity RMSE (in m/s)
     vel_rmse_m_s = compute_velocity_rmse(result["vel_truth"], result["vel_est"])
 
-    print(f"\nConstant Velocity RMSE: {vel_rmse_m_s:.4f} m/s (PRD: <={PRD_VELOCITY_RMSE_M_S} m/s)")
+    print(
+        f"\nConstant Velocity RMSE: {vel_rmse_m_s:.4f} m/s (PRD: <={PRD_VELOCITY_RMSE_M_S} m/s)"
+    )
 
     assert vel_rmse_m_s <= PRD_VELOCITY_RMSE_M_S, (
         f"Velocity RMSE {vel_rmse_m_s:.4f} m/s exceeds PRD requirement "
@@ -180,16 +187,22 @@ def test_tier0_circular_ekf_heading():
 
     Runtime (observed locally): ~4.6 s
     """
-    config = SimpleSimConfig(duration_s=30.0, fs_imu=200.0, fs_cam=30.0, cam_dropout_prob=0.0)
+    config = SimpleSimConfig(
+        duration_s=30.0, fs_imu=200.0, fs_cam=30.0, cam_dropout_prob=0.0
+    )
     sim_data = simulate_circular(config=config, radius=0.50, seed=42)
 
     result = run_ekf_on_sim(sim_data, use_heading=True)
 
     # Compute heading RMSE (convert to degrees)
-    heading_rmse_rad = compute_heading_rmse(result["heading_truth"], result["heading_est"])
+    heading_rmse_rad = compute_heading_rmse(
+        result["heading_truth"], result["heading_est"]
+    )
     heading_rmse_deg = np.rad2deg(heading_rmse_rad)
 
-    print(f"\nCircular Heading RMSE: {heading_rmse_deg:.3f}° (PRD: <={PRD_HEADING_RMSE_DEG}°)")
+    print(
+        f"\nCircular Heading RMSE: {heading_rmse_deg:.3f}° (PRD: <={PRD_HEADING_RMSE_DEG}°)"
+    )
 
     assert (
         heading_rmse_deg <= PRD_HEADING_RMSE_DEG
@@ -226,7 +239,9 @@ def test_tier3_rat_imu_ekf_position():
     # Compute position RMSE (in meters)
     pos_rmse_m = compute_position_rmse(result["pos_truth"], result["pos_est"])
 
-    print(f"\nRat IMU Position RMSE: {pos_rmse_m:.4f} m (PRD: <={PRD_POSITION_RMSE_M} m)")
+    print(
+        f"\nRat IMU Position RMSE: {pos_rmse_m:.4f} m (PRD: <={PRD_POSITION_RMSE_M} m)"
+    )
 
     assert (
         pos_rmse_m <= PRD_POSITION_RMSE_M
@@ -258,7 +273,9 @@ def test_tier3_rat_imu_ekf_velocity():
     # Compute velocity RMSE (in m/s)
     vel_rmse_m_s = compute_velocity_rmse(result["vel_truth"], result["vel_est"])
 
-    print(f"\nRat IMU Velocity RMSE: {vel_rmse_m_s:.4f} m/s (PRD: <={PRD_VELOCITY_RMSE_M_S} m/s)")
+    print(
+        f"\nRat IMU Velocity RMSE: {vel_rmse_m_s:.4f} m/s (PRD: <={PRD_VELOCITY_RMSE_M_S} m/s)"
+    )
 
     assert vel_rmse_m_s <= PRD_VELOCITY_RMSE_M_S, (
         f"Velocity RMSE {vel_rmse_m_s:.4f} m/s exceeds PRD requirement "
@@ -290,10 +307,14 @@ def test_tier3_rat_imu_ekf_heading():
     result = run_ekf_on_sim(sim_data, use_heading=True)
 
     # Compute heading RMSE (convert to degrees)
-    heading_rmse_rad = compute_heading_rmse(result["heading_truth"], result["heading_est"])
+    heading_rmse_rad = compute_heading_rmse(
+        result["heading_truth"], result["heading_est"]
+    )
     heading_rmse_deg = np.rad2deg(heading_rmse_rad)
 
-    print(f"\nRat IMU Heading RMSE: {heading_rmse_deg:.3f}° (PRD: <={PRD_HEADING_RMSE_DEG}°)")
+    print(
+        f"\nRat IMU Heading RMSE: {heading_rmse_deg:.3f}° (PRD: <={PRD_HEADING_RMSE_DEG}°)"
+    )
 
     assert (
         heading_rmse_deg <= PRD_HEADING_RMSE_DEG
@@ -366,7 +387,9 @@ def test_prd_dropout_drift_5s():
     mask_with_dropout[dropout_start_idx:dropout_end_idx] = False
 
     # Update simulation data with dropout mask
-    sim_data_dropout = {k: (v.copy() if hasattr(v, "copy") else v) for k, v in sim_data.items()}
+    sim_data_dropout = {
+        k: (v.copy() if hasattr(v, "copy") else v) for k, v in sim_data.items()
+    }
     sim_data_dropout["mask_cam"] = mask_with_dropout
 
     # Ensure no usable pixels during blackout (set LEDs to NaN)
@@ -463,7 +486,9 @@ def test_prd_dropout_drift_5s_smoothed():
     mask_with_dropout[dropout_start_idx:dropout_end_idx] = False
 
     # Update simulation data with dropout mask
-    sim_data_dropout = {k: (v.copy() if hasattr(v, "copy") else v) for k, v in sim_data.items()}
+    sim_data_dropout = {
+        k: (v.copy() if hasattr(v, "copy") else v) for k, v in sim_data.items()
+    }
     sim_data_dropout["mask_cam"] = mask_with_dropout
 
     # Ensure no usable pixels during blackout (set LEDs to NaN)
@@ -499,6 +524,7 @@ def test_prd_dropout_drift_5s_smoothed():
         damping_coeff=0.5,
         led_distance=0.04,
         use_heading_measurement=True,
+        state_mode="2d_full",  # Use 8D layout (tests use hardcoded indices)
     )
     ekf_params.update(ekf_config_override)
     ekf_config = EKFConfig(**ekf_params)

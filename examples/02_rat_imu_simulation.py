@@ -207,8 +207,12 @@ def plot_simulation_overview(
     ax_pos = fig.add_subplot(gs[1, :])
 
     # Ground truth position (smooth lines, muted colors)
-    ax_pos.plot(t_imu, X[:, 0], "-", linewidth=0.9, color=COLORS["red"], alpha=0.6, label="x")
-    ax_pos.plot(t_imu, X[:, 1], "-", linewidth=0.9, color=COLORS["blue"], alpha=0.6, label="y")
+    ax_pos.plot(
+        t_imu, X[:, 0], "-", linewidth=0.9, color=COLORS["red"], alpha=0.6, label="x"
+    )
+    ax_pos.plot(
+        t_imu, X[:, 1], "-", linewidth=0.9, color=COLORS["blue"], alpha=0.6, label="y"
+    )
 
     # Camera observations (small semi-transparent markers)
     ax_pos.scatter(
@@ -323,7 +327,9 @@ def plot_simulation_overview(
 
     ax_bias_gyro.set_xlabel("time (s)")
     ax_bias_gyro.set_ylabel("bias (°/s)")
-    ax_bias_gyro.set_title("Gyro Bias (random walk)", fontweight="normal", loc="left", fontsize=10)
+    ax_bias_gyro.set_title(
+        "Gyro Bias (random walk)", fontweight="normal", loc="left", fontsize=10
+    )
 
     # -------------------------------------------------------------------------
     # Row 4, Col 2: Accelerometer Biases
@@ -353,7 +359,9 @@ def plot_simulation_overview(
 
     ax_bias_accel.set_xlabel("time (s)")
     ax_bias_accel.set_ylabel("bias (m/s²)")
-    ax_bias_accel.set_title("Accel Biases", fontweight="normal", loc="left", fontsize=10)
+    ax_bias_accel.set_title(
+        "Accel Biases", fontweight="normal", loc="left", fontsize=10
+    )
     ax_bias_accel.legend(loc="upper right")
 
     # -------------------------------------------------------------------------
@@ -449,7 +457,9 @@ def plot_measurement_errors(sim_data: dict[str, np.ndarray]) -> plt.Figure:
     gyro_err = U[:, 0] - sim_data["bias_gyro"] - sim_data["yaw_rate_truth"]
 
     # Accelerometer errors
-    accel_x_err = U[:, 1] - sim_data["bias_accel_x"] - sim_data["accel_body_truth"][:, 0]
+    accel_x_err = (
+        U[:, 1] - sim_data["bias_accel_x"] - sim_data["accel_body_truth"][:, 0]
+    )
 
     # Camera position error (interpolate truth to camera timestamps)
     px_interp = np.interp(t_cam, t_imu, X[:, 0])
@@ -461,12 +471,19 @@ def plot_measurement_errors(sim_data: dict[str, np.ndarray]) -> plt.Figure:
     # Row 1, Col 1: Gyro Error Time Series
     # -------------------------------------------------------------------------
     axes[0, 0].plot(
-        t_imu, np.rad2deg(gyro_err), "-", linewidth=0.4, color=COLORS["purple"], alpha=0.6
+        t_imu,
+        np.rad2deg(gyro_err),
+        "-",
+        linewidth=0.4,
+        color=COLORS["purple"],
+        alpha=0.6,
     )
     axes[0, 0].axhline(0, color="k", linestyle="-", linewidth=0.5, alpha=0.3)
     axes[0, 0].set_xlabel("time (s)")
     axes[0, 0].set_ylabel("error (°/s)")
-    axes[0, 0].set_title("Gyro Measurement Error", fontweight="normal", loc="left", fontsize=10)
+    axes[0, 0].set_title(
+        "Gyro Measurement Error", fontweight="normal", loc="left", fontsize=10
+    )
 
     # -------------------------------------------------------------------------
     # Row 1, Col 2: Gyro Error Distribution
@@ -492,7 +509,9 @@ def plot_measurement_errors(sim_data: dict[str, np.ndarray]) -> plt.Figure:
     # -------------------------------------------------------------------------
     # Row 1, Col 3: Accel X Error Time Series
     # -------------------------------------------------------------------------
-    axes[0, 2].plot(t_imu, accel_x_err, "-", linewidth=0.4, color=COLORS["blue"], alpha=0.6)
+    axes[0, 2].plot(
+        t_imu, accel_x_err, "-", linewidth=0.4, color=COLORS["blue"], alpha=0.6
+    )
     axes[0, 2].axhline(0, color="k", linestyle="-", linewidth=0.5, alpha=0.3)
     axes[0, 2].set_xlabel("time (s)")
     axes[0, 2].set_ylabel("error (m/s²)")
@@ -527,7 +546,9 @@ def plot_measurement_errors(sim_data: dict[str, np.ndarray]) -> plt.Figure:
     axes[1, 0].axhline(0, color="k", linestyle="-", linewidth=0.5, alpha=0.3)
     axes[1, 0].set_xlabel("time (s)")
     axes[1, 0].set_ylabel("error (mm)")
-    axes[1, 0].set_title("Camera Position Error", fontweight="normal", loc="left", fontsize=10)
+    axes[1, 0].set_title(
+        "Camera Position Error", fontweight="normal", loc="left", fontsize=10
+    )
     axes[1, 0].legend(loc="upper right", markerscale=2)
 
     # -------------------------------------------------------------------------
@@ -603,10 +624,14 @@ def plot_measurement_errors(sim_data: dict[str, np.ndarray]) -> plt.Figure:
 
     axes[1, 2].set_xlabel("x error (mm)")
     axes[1, 2].set_ylabel("y error (mm)")
-    axes[1, 2].set_title("2D Error Pattern", fontweight="normal", loc="left", fontsize=10)
+    axes[1, 2].set_title(
+        "2D Error Pattern", fontweight="normal", loc="left", fontsize=10
+    )
     axes[1, 2].set_aspect("equal")
 
-    fig.suptitle("Measurement Noise Validation", fontsize=11, fontweight="normal", y=0.995)
+    fig.suptitle(
+        "Measurement Noise Validation", fontsize=11, fontweight="normal", y=0.995
+    )
 
     return fig
 
@@ -676,7 +701,9 @@ def plot_vision_robustness(sim_data: dict[str, np.ndarray]) -> plt.Figure:
 
     ax_traj.set_xlabel("x (m)")
     ax_traj.set_ylabel("y (m)")
-    ax_traj.set_title("Trajectory (colored by visibility)", fontweight="normal", loc="left")
+    ax_traj.set_title(
+        "Trajectory (colored by visibility)", fontweight="normal", loc="left"
+    )
     ax_traj.legend(loc="best")
     ax_traj.set_aspect("equal")
 
@@ -689,7 +716,9 @@ def plot_vision_robustness(sim_data: dict[str, np.ndarray]) -> plt.Figure:
     both_visible = mask_led1 & mask_led2
     if np.any(both_visible):
         led_spacing = np.linalg.norm(led1 - led2, axis=1)
-        expected_spacing = np.linalg.norm(config.led1_offset_body - config.led2_offset_body)
+        expected_spacing = np.linalg.norm(
+            config.led1_offset_body - config.led2_offset_body
+        )
 
         ax_spacing.plot(
             t_cam[both_visible],
@@ -709,7 +738,9 @@ def plot_vision_robustness(sim_data: dict[str, np.ndarray]) -> plt.Figure:
 
         ax_spacing.set_xlabel("time (s)")
         ax_spacing.set_ylabel("LED spacing (cm)")
-        ax_spacing.set_title("LED Spacing (both visible)", fontweight="normal", loc="left")
+        ax_spacing.set_title(
+            "LED Spacing (both visible)", fontweight="normal", loc="left"
+        )
         ax_spacing.legend(loc="best")
     else:
         ax_spacing.text(0.5, 0.5, "No frames with both LEDs", ha="center", va="center")
@@ -728,13 +759,20 @@ def plot_vision_robustness(sim_data: dict[str, np.ndarray]) -> plt.Figure:
         t_cam, led1_status, linewidth=0.5, color=COLORS["blue"], label="LED1", alpha=0.7
     )
     ax_dropout.plot(
-        t_cam, led2_status, linewidth=0.5, color=COLORS["orange"], label="LED2", alpha=0.7
+        t_cam,
+        led2_status,
+        linewidth=0.5,
+        color=COLORS["orange"],
+        label="LED2",
+        alpha=0.7,
     )
 
     ax_dropout.set_xlabel("time (s)")
     ax_dropout.set_ylabel("LED status (offset for clarity)")
     ax_dropout.set_yticks([0, 1, 2, 3])
-    ax_dropout.set_yticklabels(["LED1\ndropout", "LED1\nvisible", "LED2\ndropout", "LED2\nvisible"])
+    ax_dropout.set_yticklabels(
+        ["LED1\ndropout", "LED1\nvisible", "LED2\ndropout", "LED2\nvisible"]
+    )
     ax_dropout.set_title(
         f"Independent LED Dropouts (correlation={config.cam_dropout_correlation:.2f})",
         fontweight="normal",
@@ -768,7 +806,9 @@ def plot_vision_robustness(sim_data: dict[str, np.ndarray]) -> plt.Figure:
                 label="LED2",
             )
 
-        ax_conf.axhline(config.confidence_base, color=COLORS["gray"], linestyle="--", linewidth=1)
+        ax_conf.axhline(
+            config.confidence_base, color=COLORS["gray"], linestyle="--", linewidth=1
+        )
         ax_conf.set_ylim([0, 1.05])
         ax_conf.set_xlabel("time (s)")
         ax_conf.set_ylabel("confidence")
@@ -807,8 +847,12 @@ def plot_vision_robustness(sim_data: dict[str, np.ndarray]) -> plt.Figure:
             linewidth=0.5,
         )
         # Add reference lines for PRD targets
-        ax_occ_hist.axvline(3.0, color=COLORS["orange"], linestyle="--", linewidth=1, label="3s")
-        ax_occ_hist.axvline(5.0, color=COLORS["red"], linestyle="--", linewidth=1, label="5s (PRD)")
+        ax_occ_hist.axvline(
+            3.0, color=COLORS["orange"], linestyle="--", linewidth=1, label="3s"
+        )
+        ax_occ_hist.axvline(
+            5.0, color=COLORS["red"], linestyle="--", linewidth=1, label="5s (PRD)"
+        )
 
         ax_occ_hist.set_xlabel("occlusion duration (s)")
         ax_occ_hist.set_ylabel("count")
@@ -847,7 +891,9 @@ def plot_vision_robustness(sim_data: dict[str, np.ndarray]) -> plt.Figure:
 
         ax_conf_hist.set_xlabel("confidence")
         ax_conf_hist.set_ylabel("count")
-        ax_conf_hist.set_title("Confidence Distribution (LED1)", fontweight="normal", loc="left")
+        ax_conf_hist.set_title(
+            "Confidence Distribution (LED1)", fontweight="normal", loc="left"
+        )
         ax_conf_hist.legend(loc="best")
     else:
         ax_conf_hist.text(0.5, 0.5, "Confidence disabled", ha="center", va="center")
@@ -962,7 +1008,8 @@ def main() -> None:
     sim1 = simulate_rat_imu(config1, seed=42)
 
     print(
-        f"   Generated {len(sim1['t_imu'])} IMU samples, " f"{len(sim1['t_cam_exp'])} camera frames"
+        f"   Generated {len(sim1['t_imu'])} IMU samples, "
+        f"{len(sim1['t_cam_exp'])} camera frames"
     )
     print(
         f"   Valid frames: {sim1['mask_cam'].sum()}/{len(sim1['mask_cam'])} "
@@ -1087,7 +1134,9 @@ def main() -> None:
         max_dropout_frames = max(dropout_runs)
         max_dropout_s = max_dropout_frames / config5.fs_cam
         mean_dropout_s = np.mean(dropout_runs) / config5.fs_cam
-        print(f"   Occlusion stats: max={max_dropout_s:.2f}s, mean={mean_dropout_s:.2f}s")
+        print(
+            f"   Occlusion stats: max={max_dropout_s:.2f}s, mean={mean_dropout_s:.2f}s"
+        )
     else:
         print("   No occlusions detected")
 
@@ -1095,12 +1144,16 @@ def main() -> None:
     both_visible = sim5["mask_led1"] & sim5["mask_led2"]
     n_swap_candidates = np.sum(both_visible)
     expected_swaps = int(n_swap_candidates * config5.led_swap_prob)
-    print(f"   LED swap candidates: {n_swap_candidates}, expected swaps: ~{expected_swaps}")
+    print(
+        f"   LED swap candidates: {n_swap_candidates}, expected swaps: ~{expected_swaps}"
+    )
 
     # Mean confidence
     conf_led1 = sim5["confidence_led1"][sim5["mask_led1"]]
     conf_led2 = sim5["confidence_led2"][sim5["mask_led2"]]
-    print(f"   Mean confidence: LED1={conf_led1.mean():.3f}, LED2={conf_led2.mean():.3f}")
+    print(
+        f"   Mean confidence: LED1={conf_led1.mean():.3f}, LED2={conf_led2.mean():.3f}"
+    )
 
     fig5 = plot_vision_robustness(sim5)
     fig5.savefig("05_vision_robustness.png", dpi=150)
@@ -1116,8 +1169,12 @@ def main() -> None:
 
     # Compute measurement errors (truth is known in simulation)
     gyro_err = sim4["U_imu"][:, 0] - sim4["bias_gyro"] - sim4["yaw_rate_truth"]
-    accel_x_err = sim4["U_imu"][:, 1] - sim4["bias_accel_x"] - sim4["accel_body_truth"][:, 0]
-    accel_y_err = sim4["U_imu"][:, 2] - sim4["bias_accel_y"] - sim4["accel_body_truth"][:, 1]
+    accel_x_err = (
+        sim4["U_imu"][:, 1] - sim4["bias_accel_x"] - sim4["accel_body_truth"][:, 0]
+    )
+    accel_y_err = (
+        sim4["U_imu"][:, 2] - sim4["bias_accel_y"] - sim4["accel_body_truth"][:, 1]
+    )
 
     print("IMU Measurement Noise (std):")
     print(

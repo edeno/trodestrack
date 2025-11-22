@@ -265,7 +265,9 @@ def generate_slide08():
         va="bottom",
         fontsize=18,
         weight="bold",
-        bbox=dict(boxstyle="round,pad=0.5", facecolor="white", alpha=0.95, edgecolor="gray"),
+        bbox=dict(
+            boxstyle="round,pad=0.5", facecolor="white", alpha=0.95, edgecolor="gray"
+        ),
     )
 
     # Animation function
@@ -298,7 +300,9 @@ def generate_slide08():
 
         # LEFT PANEL: Vision-only
         ax_left = axes[0]
-        ax_left.set_title("Vision-Only\nTracking", fontsize=32, weight="bold", color=RED, pad=15)
+        ax_left.set_title(
+            "Vision-Only\nTracking", fontsize=32, weight="bold", color=RED, pad=15
+        )
 
         # Plot ground truth (past trajectory)
         ax_left.plot(
@@ -323,7 +327,12 @@ def generate_slide08():
 
         # Plot current position
         ax_left.plot(
-            vision_pos[frame, 0], vision_pos[frame, 1], "o", color=RED, markersize=15, zorder=10
+            vision_pos[frame, 0],
+            vision_pos[frame, 1],
+            "o",
+            color=RED,
+            markersize=15,
+            zorder=10,
         )
 
         # Plot uncertainty ellipse
@@ -428,11 +437,18 @@ def generate_slide08():
 
         # Plot current fused position
         ax_right.plot(
-            ekf_pos[frame, 0], ekf_pos[frame, 1], "o", color=GREEN, markersize=15, zorder=10
+            ekf_pos[frame, 0],
+            ekf_pos[frame, 1],
+            "o",
+            color=GREEN,
+            markersize=15,
+            zorder=10,
         )
 
         # Plot uncertainty ellipse
-        plot_covariance_ellipse(ax_right, ekf_pos[frame], ekf_cov[frame], GREEN, alpha=0.3, n_std=2)
+        plot_covariance_ellipse(
+            ax_right, ekf_pos[frame], ekf_cov[frame], GREEN, alpha=0.3, n_std=2
+        )
 
         # Plot direction arrows for camera and IMU predictions
         plot_heading_arrow(

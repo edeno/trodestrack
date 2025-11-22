@@ -72,7 +72,7 @@ def generate_slide03():
     BR
     """
 
-    fig, axd = plt.subplot_mosaic(
+    _fig, axd = plt.subplot_mosaic(
         mosaic,
         figsize=(12, 5.625),  # Wider for legend space
         dpi=150,
@@ -123,7 +123,9 @@ def generate_slide03():
     # Move legend to dedicated panel
     legend_axes[0].axis("off")
     handles1, labels1 = ax1.get_legend_handles_labels()
-    legend_axes[0].legend(handles1, labels1, loc="center left", fontsize=18, frameon=False)
+    legend_axes[0].legend(
+        handles1, labels1, loc="center left", fontsize=18, frameon=False
+    )
 
     # Right panel: Noisy observations with gaps
     ax2 = axes[1]
@@ -159,7 +161,8 @@ def generate_slide03():
     # Find the LONGEST gap only (minimal annotation)
     if len(gap_starts) > 0:
         gap_durations = [
-            t_cam[end] - t_cam[start] for start, end in zip(gap_starts, gap_ends, strict=False)
+            t_cam[end] - t_cam[start]
+            for start, end in zip(gap_starts, gap_ends, strict=False)
         ]
         longest_gap_idx = np.argmax(gap_durations)
 
@@ -229,7 +232,9 @@ def generate_slide03():
     # Move legend to dedicated panel
     legend_axes[1].axis("off")
     handles2, labels2 = ax2.get_legend_handles_labels()
-    legend_axes[1].legend(handles2, labels2, loc="center left", fontsize=18, frameon=False)
+    legend_axes[1].legend(
+        handles2, labels2, loc="center left", fontsize=18, frameon=False
+    )
 
     # Make axes equal for fair comparison
     all_x = pos_truth[:, 0]

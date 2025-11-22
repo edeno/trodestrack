@@ -90,6 +90,12 @@ def compute_gravity_in_tilted_frame(
 # Configuration
 # -----------------------------------------------------------------------------
 
+# Module-level constants for dataclass defaults (RUF009 compliance)
+# These avoid function calls in dataclass field defaults
+_GYRO_NOISE_DENSITY = np.deg2rad(0.01)  # 0.01 °/s/√Hz (SpikeGadgets spec)
+_GYRO_BIAS_RW_DENSITY = np.deg2rad(0.003)  # rad/s / √s
+_SIGMA_YAW_RATE = np.deg2rad(60.0)  # rad/s / √s
+
 
 @dataclass
 class RatIMUSimConfig:
@@ -220,8 +226,12 @@ class RatIMUSimConfig:
         0.0  # Probability of swapping LED1/LED2 labels per frame (per_frame mode)
     )
     led_swap_rate: float = 0.5  # Mean swap events per second (persistent mode)
-    led_swap_duration_mean: float = 1.0  # Mean duration of swap event in seconds (persistent mode)
-    led_swap_duration_std: float = 0.3  # Std dev of swap duration in seconds (persistent mode)
+    led_swap_duration_mean: float = (
+        1.0  # Mean duration of swap event in seconds (persistent mode)
+    )
+    led_swap_duration_std: float = (
+        0.3  # Std dev of swap duration in seconds (persistent mode)
+    )
 
     led_wall_reflection_prob: float = (
         0.0  # Probability of LED reflection artifacts near walls (0-1)
@@ -231,11 +241,11 @@ class RatIMUSimConfig:
     )
 
     # IMU white noise densities (per √Hz) - SpikeGadgets specifications
-    gyro_noise_density: float = np.deg2rad(0.01)  # 0.01 °/s/√Hz (SpikeGadgets spec)
+    gyro_noise_density: float = _GYRO_NOISE_DENSITY  # 0.01 °/s/√Hz
     accel_noise_density: float = 0.00196133  # 0.2 mg/√Hz = 0.0002g * 9.80665
 
     # IMU bias random-walk densities (per √s)
-    gyro_bias_rw_density: float = np.deg2rad(0.003)  # rad/s / √s
+    gyro_bias_rw_density: float = _GYRO_BIAS_RW_DENSITY  # rad/s / √s
     accel_bias_rw_density: float = 0.005  # m/s² / √s
 
     # IMU mounting/tilt (small constant roll/pitch misalignment)
@@ -245,7 +255,7 @@ class RatIMUSimConfig:
 
     # Motion model (OU parameters)
     tau_yaw_rate: float = 0.8  # s
-    sigma_yaw_rate: float = np.deg2rad(60.0)  # rad/s / √s
+    sigma_yaw_rate: float = _SIGMA_YAW_RATE  # 60 °/s / √s
     tau_a_fwd: float = 0.7  # s
     sigma_a_fwd: float = 1.0  # m/s² / √s
     tau_a_lat: float = 0.5  # s
@@ -453,7 +463,9 @@ class RatIMUSimConfig:
             )
 
         if self.P0.shape != (5, 5):
-            raise ValueError(f"Initial covariance P0 must have shape (5, 5), got {self.P0.shape}")
+            raise ValueError(
+                f"Initial covariance P0 must have shape (5, 5), got {self.P0.shape}"
+            )
 
 
 # -----------------------------------------------------------------------------
@@ -598,7 +610,9 @@ def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> Si
         if speed > 1e-6:  # Avoid division by zero
             # Saturation factor: tanh(speed / speed_clip) ≈ 1 for speed << speed_clip
             #                                              ≈ speed_clip/speed for speed >> speed_clip
-            sat_factor = np.tanh(speed / config.speed_clip) / (speed / config.speed_clip)
+            sat_factor = np.tanh(speed / config.speed_clip) / (
+                speed / config.speed_clip
+            )
             vx_new *= sat_factor
             vy_new *= sat_factor
 
@@ -692,10 +706,14 @@ def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> Si
         led_y = py + s * offset_body[0] + c * offset_body[1]
         return np.stack([led_x, led_y], axis=1)
 
-    led1_truth = led_position(px_interp, py_interp, theta_interp, config.led1_offset_body)
+    led1_truth = led_position(
+        px_interp, py_interp, theta_interp, config.led1_offset_body
+    )
 
     if config.use_second_led:
-        led2_truth = led_position(px_interp, py_interp, theta_interp, config.led2_offset_body)
+        led2_truth = led_position(
+            px_interp, py_interp, theta_interp, config.led2_offset_body
+        )
     else:
         led2_truth = np.full((T_cam, 2), np.nan)
 
@@ -743,7 +761,9 @@ def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> Si
 
         # LED1: Zero out dropouts, then apply neighbor decay
         confidence_led1 = np.where(mask_led1, confidence_led1, 0.0)
-        neighbor_dropout_led1 = np.convolve(~mask_led1.astype(int), [0.5, 1.0, 0.5], mode="same")
+        neighbor_dropout_led1 = np.convolve(
+            ~mask_led1.astype(int), [0.5, 1.0, 0.5], mode="same"
+        )
         # Decay confidence where neighbors are dropouts (but current is valid)
         confidence_led1 *= np.where(
             mask_led1 & (neighbor_dropout_led1 > 0),
@@ -785,7 +805,9 @@ def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> Si
         # Uniform noise (broadcast scalar to array for consistent indexing)
         noise_scale_led1 = np.full(T_cam, config.cam_sigma_m)
         noise_scale_led2 = (
-            np.full(T_cam, config.cam_sigma_m) if config.use_second_led else np.zeros(T_cam)
+            np.full(T_cam, config.cam_sigma_m)
+            if config.use_second_led
+            else np.zeros(T_cam)
         )
 
     noise_led1 = noise_scale_led1[:, None] * rng.standard_normal((T_cam, 2))
@@ -826,7 +848,9 @@ def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> Si
 
         if len(candidate_indices) > 0:
             # Randomly select frames to apply reflection based on probability
-            n_reflections = int(np.round(len(candidate_indices) * config.led_wall_reflection_prob))
+            n_reflections = int(
+                np.round(len(candidate_indices) * config.led_wall_reflection_prob)
+            )
             if n_reflections > 0:
                 reflection_indices = rng.choice(
                     candidate_indices, size=n_reflections, replace=False
@@ -885,7 +909,9 @@ def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> Si
                 if len(swap_candidates) > 0:
                     n_swaps = int(np.round(len(swap_candidates) * config.led_swap_prob))
                     if n_swaps > 0:
-                        swap_indices = rng.choice(swap_candidates, size=n_swaps, replace=False)
+                        swap_indices = rng.choice(
+                            swap_candidates, size=n_swaps, replace=False
+                        )
                         swap_applied[swap_indices] = True
 
         elif config.led_swap_mode == "persistent":

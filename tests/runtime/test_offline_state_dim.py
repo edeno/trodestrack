@@ -71,7 +71,10 @@ def make_minimal_filter_result_ekf(n_cam: int, state_dim: int) -> EKFResult:
     # Create random but reasonable filter outputs
     filtered_means = rng.randn(n_cam, state_dim).astype(np.float32)
     filtered_covs = np.array(
-        [np.eye(state_dim) + 0.01 * rng.randn(state_dim, state_dim) for _ in range(n_cam)]
+        [
+            np.eye(state_dim) + 0.01 * rng.randn(state_dim, state_dim)
+            for _ in range(n_cam)
+        ]
     )
     # Symmetrize
     filtered_covs = 0.5 * (filtered_covs + filtered_covs.transpose(0, 2, 1))
@@ -104,7 +107,10 @@ def make_minimal_filter_result_ukf(n_cam: int, state_dim: int) -> UKFResult:
 
     filtered_means = rng.randn(n_cam, state_dim).astype(np.float32)
     filtered_covs = np.array(
-        [np.eye(state_dim) + 0.01 * rng.randn(state_dim, state_dim) for _ in range(n_cam)]
+        [
+            np.eye(state_dim) + 0.01 * rng.randn(state_dim, state_dim)
+            for _ in range(n_cam)
+        ]
     )
     filtered_covs = 0.5 * (filtered_covs + filtered_covs.transpose(0, 2, 1))
 

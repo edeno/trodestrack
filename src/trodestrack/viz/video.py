@@ -129,7 +129,13 @@ def create_diagnostic_video(
             bottom=0.06,
             left=0.06,
             right=0.97,
-            height_ratios=[1.5, 1.5, 0.8, 0.8, 0.3],  # Arena + Camera | Diagnostics | Progress
+            height_ratios=[
+                1.5,
+                1.5,
+                0.8,
+                0.8,
+                0.3,
+            ],  # Arena + Camera | Diagnostics | Progress
             width_ratios=[1.2, 1, 1],  # Arena wider | IMU | Filter diagnostics
         )
     else:
@@ -268,7 +274,9 @@ def create_diagnostic_video(
         ha="center",
         va="top",
         fontsize=7,
-        bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.8, edgecolor="none"),
+        bbox=dict(
+            boxstyle="round,pad=0.2", facecolor="white", alpha=0.8, edgecolor="none"
+        ),
         zorder=15,
     )
 
@@ -300,12 +308,16 @@ def create_diagnostic_video(
 
     if filter_results is not None:
         filter_artist = FilterArtist(ax_arena)
-        residual_panel = ResidualPanelArtist(ax_residuals, window_s=time_window_s, fps=fps)
+        residual_panel = ResidualPanelArtist(
+            ax_residuals, window_s=time_window_s, fps=fps
+        )
         state_error_panel = StateErrorPanelArtist(
             ax_vel_error, ax_heading_error, window_s=time_window_s, fps=fps
         )
         bias_panel = BiasEstimatePanelArtist(ax_bias, window_s=time_window_s, fps=fps)
-        nees_panel = NEESPanelArtist(ax_nees, window_s=time_window_s, fps=fps, state_dim=2)
+        nees_panel = NEESPanelArtist(
+            ax_nees, window_s=time_window_s, fps=fps, state_dim=2
+        )
 
     # Pre-compute event times for progress bar markers
     log.info("Detecting events...")
@@ -324,7 +336,9 @@ def create_diagnostic_video(
         if led1_visible and led2_visible:
             # Check 1: Spacing deviation (catches occlusion-induced swaps)
             spacing = np.linalg.norm(led1_pos - led2_pos)
-            expected_spacing = np.linalg.norm(config.led1_offset_body - config.led2_offset_body)
+            expected_spacing = np.linalg.norm(
+                config.led1_offset_body - config.led2_offset_body
+            )
             spacing_anomaly = abs(spacing - expected_spacing) > 0.5 * expected_spacing
 
             # Check 2: LED vector direction (catches reflection/labeling swaps)
@@ -439,9 +453,7 @@ def create_diagnostic_video(
             )
         )
     # Overall title (includes frame rate for temporal context)
-    title_str = (
-        f"Diagnostic Video | {config.duration_s:.0f}s simulation | {speedup:.1f}x speed | {fps} fps"
-    )
+    title_str = f"Diagnostic Video | {config.duration_s:.0f}s simulation | {speedup:.1f}x speed | {fps} fps"
     fig.suptitle(title_str, fontsize=11, fontweight="normal", y=0.98)
 
     # Place legend in top right corner (right column)
@@ -566,7 +578,9 @@ def create_diagnostic_video(
                 "accel_y": accel_body_truth_window[:, 1],
             }
 
-            imu_panel.update(t, t_raw=t_imu_window, imu_raw=imu_raw, imu_truth=imu_truth)
+            imu_panel.update(
+                t, t_raw=t_imu_window, imu_raw=imu_raw, imu_truth=imu_truth
+            )
         else:
             # Fallback to interpolated single sample if no raw data in window
             imu_dict = {
@@ -599,7 +613,9 @@ def create_diagnostic_video(
             x_est = np.asarray(
                 filter_results.filtered_means[cam_idx]
             )  # [x, y, vx, vy, θ, b_gz, b_ax, b_ay]
-            P_est = np.asarray(filter_results.filtered_covariances[cam_idx])  # 8x8 covariance
+            P_est = np.asarray(
+                filter_results.filtered_covariances[cam_idx]
+            )  # 8x8 covariance
             x_pred = np.asarray(filter_results.predicted_means[cam_idx])
 
             # Ground truth at camera time

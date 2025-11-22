@@ -4,7 +4,9 @@ import numpy as np
 from trodestrack.models.ekf import EKFConfig
 
 
-def reference_Q(cfg: EKFConfig, theta: float, dt: float, has_vision: bool) -> jnp.ndarray:
+def reference_Q(
+    cfg: EKFConfig, theta: float, dt: float, has_vision: bool
+) -> jnp.ndarray:
     """Compute process noise Q using the existing EKF-style logic as reference.
 
     Mirrors the logic in ekf.predict_step for the 8D state:
@@ -34,7 +36,9 @@ def reference_Q(cfg: EKFConfig, theta: float, dt: float, has_vision: bool) -> jn
         q_bax = q_bax * cfg.dropout_q_bias_multiplier
         q_bay = q_bay * cfg.dropout_q_bias_multiplier
 
-    Q_proc = jnp.diag(jnp.array([q_px, q_py, q_vx, q_vy, q_th, q_bg, q_bax, q_bay], dtype=dtype))
+    Q_proc = jnp.diag(
+        jnp.array([q_px, q_py, q_vx, q_vy, q_th, q_bg, q_bax, q_bay], dtype=dtype)
+    )
 
     # IMU input noise mapped into state via G
     std_w = cfg.imu_gyro_noise_density * np.sqrt(dt)

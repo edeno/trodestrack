@@ -198,7 +198,9 @@ def plot_dropout_scenario(
     ax_traj.set_aspect("equal")
     ax_traj.set_xlabel("X Position (m)")
     ax_traj.set_ylabel("Y Position (m)")
-    ax_traj.set_title("🎯 Trajectory with Dropout Regions", fontweight="bold", loc="left")
+    ax_traj.set_title(
+        "🎯 Trajectory with Dropout Regions", fontweight="bold", loc="left"
+    )
 
     # Ground truth
     ax_traj.plot(
@@ -245,16 +247,22 @@ def plot_dropout_scenario(
     ax_pos_err = fig.add_subplot(gs[0, 1])
     ax_pos_err.set_xlabel("Time (s)")
     ax_pos_err.set_ylabel("Position Error (cm)")
-    ax_pos_err.set_title("📏 Position Error (Dropouts Shaded)", fontweight="bold", loc="left")
+    ax_pos_err.set_title(
+        "📏 Position Error (Dropouts Shaded)", fontweight="bold", loc="left"
+    )
 
     pos_err = np.linalg.norm(X_est[:, :2] - X_truth_cam[:, :2], axis=1) * 100
 
     # Shade dropout regions
     for i in range(len(t_cam) - 1):
         if not mask_cam[i]:
-            ax_pos_err.axvspan(t_cam[i], t_cam[i + 1], alpha=0.15, color=COLORS["red"], zorder=1)
+            ax_pos_err.axvspan(
+                t_cam[i], t_cam[i + 1], alpha=0.15, color=COLORS["red"], zorder=1
+            )
 
-    ax_pos_err.plot(t_cam, pos_err, linewidth=2, color=COLORS["blue"], alpha=0.8, zorder=2)
+    ax_pos_err.plot(
+        t_cam, pos_err, linewidth=2, color=COLORS["blue"], alpha=0.8, zorder=2
+    )
     ax_pos_err.axhline(
         2.0,
         linestyle="--",
@@ -295,7 +303,9 @@ def plot_dropout_scenario(
             ax_vel_err.axvspan(t_cam[i], t_cam[i + 1], alpha=0.15, color=COLORS["red"])
 
     ax_vel_err.plot(t_cam, vel_err, linewidth=2, color=COLORS["purple"], alpha=0.8)
-    ax_vel_err.axhline(10.0, linestyle="--", color=COLORS["gray"], linewidth=1, alpha=0.5)
+    ax_vel_err.axhline(
+        10.0, linestyle="--", color=COLORS["gray"], linewidth=1, alpha=0.5
+    )
 
     ax_vel_err.grid(True, alpha=0.2)
     ax_vel_err.set_ylim(bottom=0)
@@ -596,11 +606,15 @@ def main() -> None:
         print(f"   Dropout Sequences:       {metrics['num_dropout_sequences']:6d}")
         print(f"   Max Dropout Duration:    {metrics['max_dropout_s']:6.2f} s")
         print(f"   Max Dropout Drift:       {metrics['dropout_drift_m']*100:6.1f} cm")
-        print(f"   Overall Position RMSE:   {metrics['pos_rmse_cm']:6.2f} cm  (target: ≤ 2 cm)")
+        print(
+            f"   Overall Position RMSE:   {metrics['pos_rmse_cm']:6.2f} cm  (target: ≤ 2 cm)"
+        )
         print("   " + "-" * 76)
 
         # Plot
-        plot_dropout_scenario(sim, result, scenario_name, metrics, OUTPUT_DIR / output_file)
+        plot_dropout_scenario(
+            sim, result, scenario_name, metrics, OUTPUT_DIR / output_file
+        )
 
         all_results.append((scenario_name, dropout_prob, metrics))
 
@@ -609,7 +623,9 @@ def main() -> None:
 
     print("\n   Comparative Analysis:")
     print("   " + "=" * 76)
-    print(f"   {'Scenario':<25} {'Dropout %':>12} {'Max Drift (cm)':>15} {'RMSE (cm)':>12}")
+    print(
+        f"   {'Scenario':<25} {'Dropout %':>12} {'Max Drift (cm)':>15} {'RMSE (cm)':>12}"
+    )
     print("   " + "=" * 76)
 
     for scenario_name, dropout_prob, metrics in all_results:

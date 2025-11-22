@@ -64,6 +64,7 @@ def get_production_ekf_config(**overrides: Any) -> EKFConfig:
         dropout_q_pos_multiplier=10.0,
         dropout_q_vel_multiplier=10.0,
         dropout_q_bias_multiplier=0.1,
+        state_mode="2d_full",  # Use 8D layout (tests use hardcoded indices)
     )
     defaults.update(overrides)
     return EKFConfig(**defaults)
@@ -144,11 +145,17 @@ def test_offline_smoother_throughput():
 
     # Log results for diagnostics
     print("\n=== Offline Smoother Throughput Benchmark ===")
-    print(f"Session duration: {session_duration_s:.1f} s ({session_duration_s / 60:.1f} min)")
-    print(f"Processing time: {processing_time_s:.2f} s ({processing_time_s / 60:.2f} min)")
+    print(
+        f"Session duration: {session_duration_s:.1f} s ({session_duration_s / 60:.1f} min)"
+    )
+    print(
+        f"Processing time: {processing_time_s:.2f} s ({processing_time_s / 60:.2f} min)"
+    )
     print(f"Speedup: {speedup:.1f}× realtime")
     print(f"PRD requirement: ≥{PRD_OFFLINE_SMOOTHER_SPEEDUP_MIN:.1f}× realtime")
-    print(f"Status: {'PASS ✓' if speedup >= PRD_OFFLINE_SMOOTHER_SPEEDUP_MIN else 'FAIL ✗'}")
+    print(
+        f"Status: {'PASS ✓' if speedup >= PRD_OFFLINE_SMOOTHER_SPEEDUP_MIN else 'FAIL ✗'}"
+    )
 
     # Validate PRD requirement
     assert (
@@ -159,8 +166,12 @@ def test_offline_smoother_throughput():
     assert smoother_result.smoothed_means.shape[0] == len(
         sim_data["t_cam_exp"]
     ), "Smoother output length mismatch"
-    assert smoother_result.smoothed_means.shape[1] == 8, "Smoother state dimension should be 8"
-    assert np.all(np.isfinite(smoother_result.smoothed_means)), "Smoother means contain NaN/Inf"
+    assert (
+        smoother_result.smoothed_means.shape[1] == 8
+    ), "Smoother state dimension should be 8"
+    assert np.all(
+        np.isfinite(smoother_result.smoothed_means)
+    ), "Smoother means contain NaN/Inf"
     # Validate smoother covariances
     assert smoother_result.smoothed_covariances.shape == (
         len(sim_data["t_cam_exp"]),
@@ -268,6 +279,12 @@ def test_online_ekf_latency():
     )
 
     # Sanity check: verify filter produced valid results
-    assert filter_result.filtered_means.shape[0] == num_frames, "Filter output length mismatch"
-    assert filter_result.filtered_means.shape[1] == 8, "Filter state dimension should be 8"
-    assert np.all(np.isfinite(filter_result.filtered_means)), "Filter means contain NaN/Inf"
+    assert (
+        filter_result.filtered_means.shape[0] == num_frames
+    ), "Filter output length mismatch"
+    assert (
+        filter_result.filtered_means.shape[1] == 8
+    ), "Filter state dimension should be 8"
+    assert np.all(
+        np.isfinite(filter_result.filtered_means)
+    ), "Filter means contain NaN/Inf"

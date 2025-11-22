@@ -28,14 +28,18 @@ import pytest
         ),
     ],
 )
-def test_hot_path_modules_expose_jit_metadata(module_name, jit_attr, static_attr, donate_attr):
+def test_hot_path_modules_expose_jit_metadata(
+    module_name, jit_attr, static_attr, donate_attr
+):
     """Modules must expose compiled JIT entry points and metadata."""
     module = importlib.import_module(module_name)
 
     assert hasattr(
         module, jit_attr
     ), f"{module_name} should define compiled JIT helper `{jit_attr}` for hot path execution"
-    assert callable(getattr(module, jit_attr)), f"{module_name}.{jit_attr} should be callable"
+    assert callable(
+        getattr(module, jit_attr)
+    ), f"{module_name}.{jit_attr} should be callable"
 
     assert hasattr(
         module, static_attr

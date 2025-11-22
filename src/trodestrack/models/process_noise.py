@@ -137,7 +137,9 @@ def build_input_noise_cov(
     sa = (config.imu_accel_noise_density * jnp.sqrt(dt_arr)) ** 2
 
     # Build diagonal: [sg, sa, sa, ...] with n_accel accelerometer axes
-    diag = jnp.concatenate([jnp.array([sg], dtype=dtype), jnp.full(n_accel, sa, dtype=dtype)])
+    diag = jnp.concatenate(
+        [jnp.array([sg], dtype=dtype), jnp.full(n_accel, sa, dtype=dtype)]
+    )
     Qu = jnp.diag(diag)
     return symmetrize(Qu)
 
@@ -213,9 +215,15 @@ def assemble_Q(
     if getattr(config, "adaptive_q_during_dropout", False):
         if layout is not None:
             one = jnp.asarray(1.0, dtype=dtype)
-            pos_mult = jnp.asarray(getattr(config, "dropout_q_pos_multiplier", 1.0), dtype=dtype)
-            vel_mult = jnp.asarray(getattr(config, "dropout_q_vel_multiplier", 1.0), dtype=dtype)
-            bias_mult = jnp.asarray(getattr(config, "dropout_q_bias_multiplier", 1.0), dtype=dtype)
+            pos_mult = jnp.asarray(
+                getattr(config, "dropout_q_pos_multiplier", 1.0), dtype=dtype
+            )
+            vel_mult = jnp.asarray(
+                getattr(config, "dropout_q_vel_multiplier", 1.0), dtype=dtype
+            )
+            bias_mult = jnp.asarray(
+                getattr(config, "dropout_q_bias_multiplier", 1.0), dtype=dtype
+            )
 
             # Apply only during blackout
             pos_mult = jnp.asarray(jnp.where(has_vision, one, pos_mult), dtype=dtype)
@@ -241,7 +249,9 @@ def assemble_Q(
         else build_input_noise_cov(config, dt, n_accel=n_accel, dtype=dtype)
     )
     if getattr(config, "reduce_imu_noise_during_blackout", False):
-        scale = jnp.asarray(getattr(config, "blackout_imu_noise_scale", 1.0), dtype=dtype)
+        scale = jnp.asarray(
+            getattr(config, "blackout_imu_noise_scale", 1.0), dtype=dtype
+        )
         Qu = Qu * jnp.where(has_vision, jnp.asarray(1.0, dtype=dtype), scale)
 
     # Build G matrix using layout information
@@ -256,7 +266,9 @@ def assemble_Q(
             if layout.has_heading_2d:
                 pos_pair = (layout.pos_idx[0], layout.pos_idx[1])
                 # Use full velocity tuple (2D or 3D depending on layout)
-                vel_tuple = cast(tuple[int, int] | tuple[int, int, int], tuple(layout.vel_idx))
+                vel_tuple = cast(
+                    tuple[int, int] | tuple[int, int, int], tuple(layout.vel_idx)
+                )
                 theta_idx = get_heading_index(layout)
                 G = build_G_matrix_generic(
                     n,
@@ -285,7 +297,8 @@ def assemble_Q(
                 has_vision, jnp.asarray(1.0, dtype=dtype), jnp.asarray(0.0, dtype=dtype)
             )
             bias_indices = jnp.array(
-                list(layout.bias_gyro_idx) + list(layout.bias_accel_idx), dtype=jnp.int32
+                list(layout.bias_gyro_idx) + list(layout.bias_accel_idx),
+                dtype=jnp.int32,
             )
             n = Q.shape[0]
             row_mask = jnp.ones((n,), dtype=dtype).at[bias_indices].set(freeze_factor)

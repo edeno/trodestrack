@@ -111,7 +111,9 @@ class RatArtist:
         self.body.center = (x, y)
 
         # Update heading arrow using transform (no recreation needed)
-        T_heading = Affine2D().rotate_around(0, 0, theta).translate(x, y) + self.ax.transData
+        T_heading = (
+            Affine2D().rotate_around(0, 0, theta).translate(x, y) + self.ax.transData
+        )
         self.heading_arrow.set_transform(T_heading)
 
         # Update velocity arrow using transform (scale by speed + rotate by velocity direction)
@@ -126,7 +128,10 @@ class RatArtist:
             arrow_length = self.body_radius * 1.8
             scale_factor = vel_length / arrow_length
             T_vel = (
-                Affine2D().scale(scale_factor, 1.0).rotate_around(0, 0, vel_angle).translate(x, y)
+                Affine2D()
+                .scale(scale_factor, 1.0)
+                .rotate_around(0, 0, vel_angle)
+                .translate(x, y)
                 + self.ax.transData
             )
             self.velocity_arrow.set_transform(T_vel)
@@ -187,12 +192,21 @@ class LEDArtist:
         )
 
         # Confidence halo: transparent circle scaled by confidence
-        self.halo = Circle((0, 0), radius=marker_size * 2, color=color, alpha=0.0, zorder=9)
+        self.halo = Circle(
+            (0, 0), radius=marker_size * 2, color=color, alpha=0.0, zorder=9
+        )
         ax.add_patch(self.halo)
 
         # Dropout marker: red X at last known position (subtle)
         (self.dropout_marker,) = ax.plot(
-            [], [], "x", color=COLORS["red"], markersize=8, linewidth=2, alpha=0.7, zorder=11
+            [],
+            [],
+            "x",
+            color=COLORS["red"],
+            markersize=8,
+            linewidth=2,
+            alpha=0.7,
+            zorder=11,
         )
 
         # Residual visualization: expected position (small cross) + residual line
@@ -201,7 +215,14 @@ class LEDArtist:
         if show_residuals:
             # Expected position marker (small cross)
             (self.expected_marker,) = ax.plot(
-                [], [], "+", color=color, markersize=5, markeredgewidth=1.5, alpha=0.7, zorder=8
+                [],
+                [],
+                "+",
+                color=color,
+                markersize=5,
+                markeredgewidth=1.5,
+                alpha=0.7,
+                zorder=8,
             )
             # Residual line from expected to observed (de-emphasized gray dashed)
             (self.residual_line,) = ax.plot(
@@ -306,7 +327,9 @@ class TrailArtist:
     with alpha gradient (old = transparent, new = opaque).
     """
 
-    def __init__(self, ax: Axes, trail_length_s: float, fps: int, color: str | None = None):
+    def __init__(
+        self, ax: Axes, trail_length_s: float, fps: int, color: str | None = None
+    ):
         """Initialize trail artist.
 
         Parameters
@@ -351,7 +374,8 @@ class TrailArtist:
         if len(self.positions) > 1:
             # Create line segments from consecutive positions
             segments = [
-                [self.positions[i], self.positions[i + 1]] for i in range(len(self.positions) - 1)
+                [self.positions[i], self.positions[i + 1]]
+                for i in range(len(self.positions) - 1)
             ]
 
             # Fade alpha from 0 (oldest) to 0.6 (newest) using RGBA per segment
@@ -389,7 +413,13 @@ class HUDArtist:
             ha="left",
             fontsize=8,
             family="monospace",
-            bbox=dict(boxstyle="round", facecolor="white", alpha=0.6, pad=0.3, edgecolor="none"),
+            bbox=dict(
+                boxstyle="round",
+                facecolor="white",
+                alpha=0.6,
+                pad=0.3,
+                edgecolor="none",
+            ),
             zorder=20,
         )
 
@@ -549,9 +579,15 @@ class IMUPanelArtist:
         self.accel_y_buffer: deque[float] = deque(maxlen=self.window_frames)
 
         # Initialize line artists (measured)
-        (self.gyro_line,) = self.ax_gyro.plot([], [], "-", color=COLORS["blue"], linewidth=1)
-        (self.accel_x_line,) = self.ax_accel_x.plot([], [], "-", color=COLORS["red"], linewidth=1)
-        (self.accel_y_line,) = self.ax_accel_y.plot([], [], "-", color=COLORS["green"], linewidth=1)
+        (self.gyro_line,) = self.ax_gyro.plot(
+            [], [], "-", color=COLORS["blue"], linewidth=1
+        )
+        (self.accel_x_line,) = self.ax_accel_x.plot(
+            [], [], "-", color=COLORS["red"], linewidth=1
+        )
+        (self.accel_y_line,) = self.ax_accel_y.plot(
+            [], [], "-", color=COLORS["green"], linewidth=1
+        )
 
         # Initialize truth line artists (ground truth overlays)
         (self.gyro_truth_line,) = self.ax_gyro.plot(
@@ -699,8 +735,12 @@ class IMUPanelArtist:
                 self.accel_y_buffer.append(imu_data["accel_y"])
 
             self.gyro_line.set_data(list(self.time_buffer), list(self.gyro_buffer))
-            self.accel_x_line.set_data(list(self.time_buffer), list(self.accel_x_buffer))
-            self.accel_y_line.set_data(list(self.time_buffer), list(self.accel_y_buffer))
+            self.accel_x_line.set_data(
+                list(self.time_buffer), list(self.accel_x_buffer)
+            )
+            self.accel_y_line.set_data(
+                list(self.time_buffer), list(self.accel_y_buffer)
+            )
 
             # Clear truth lines in single-sample mode (not supported)
             self.gyro_truth_line.set_data([], [])
@@ -750,7 +790,9 @@ class CameraPanelArtist:
 
         # Create bar artists (will update widths)
         self.led1_bar = ax.barh(0.5, 0, height=0.4, color=COLORS["blue"], alpha=0.6)[0]
-        self.led2_bar = ax.barh(1.5, 0, height=0.4, color=COLORS["orange"], alpha=0.6)[0]
+        self.led2_bar = ax.barh(1.5, 0, height=0.4, color=COLORS["orange"], alpha=0.6)[
+            0
+        ]
 
         # Reference line at full confidence
         ax.axvline(1.0, color=COLORS["gray"], linestyle="--", linewidth=0.5)
@@ -821,7 +863,13 @@ class CameraPanelArtist:
         else:
             self.latency_text.set_text("")
 
-        return [self.led1_bar, self.led2_bar, self.led1_text, self.led2_text, self.latency_text]
+        return [
+            self.led1_bar,
+            self.led2_bar,
+            self.led1_text,
+            self.led2_text,
+            self.latency_text,
+        ]
 
 
 class ProgressBarArtist:
@@ -862,10 +910,14 @@ class ProgressBarArtist:
         )[0]
 
         # Progress bar (current position, blue)
-        self.progress_bar = ax.barh(0.5, 0, height=0.6, left=0, color=COLORS["blue"], alpha=0.6)[0]
+        self.progress_bar = ax.barh(
+            0.5, 0, height=0.6, left=0, color=COLORS["blue"], alpha=0.6
+        )[0]
 
         # Current time marker (vertical line)
-        (self.time_marker,) = ax.plot([0, 0], [0, 1], color="black", linewidth=2, zorder=10)
+        (self.time_marker,) = ax.plot(
+            [0, 0], [0, 1], color="black", linewidth=2, zorder=10
+        )
 
         # Event markers (vertical lines for swaps/dropouts)
         legend_handles = []
@@ -905,7 +957,11 @@ class ProgressBarArtist:
         # Add legend if there are any events
         if legend_handles:
             ax.legend(
-                handles=legend_handles, loc="upper right", fontsize=6, frameon=True, framealpha=0.8
+                handles=legend_handles,
+                loc="upper right",
+                fontsize=6,
+                frameon=True,
+                framealpha=0.8,
             )
 
     def update(self, t: float) -> list[Any]:
@@ -1042,10 +1098,20 @@ class ResidualPanelArtist:
 
         # Initialize lines
         (self.line_led1,) = ax.plot(
-            [], [], color=COLORS["blue"], linewidth=1.5, label="LED1 Residual", alpha=0.8
+            [],
+            [],
+            color=COLORS["blue"],
+            linewidth=1.5,
+            label="LED1 Residual",
+            alpha=0.8,
         )
         (self.line_led2,) = ax.plot(
-            [], [], color=COLORS["orange"], linewidth=1.5, label="LED2 Residual", alpha=0.8
+            [],
+            [],
+            color=COLORS["orange"],
+            linewidth=1.5,
+            label="LED2 Residual",
+            alpha=0.8,
         )
 
         # Zero reference line
@@ -1054,7 +1120,9 @@ class ResidualPanelArtist:
         # Styling
         ax.set_ylabel("Position Residual (cm)", fontsize=9)
         ax.set_xlabel("Time (s)", fontsize=9)
-        ax.set_title("Innovation Residuals", fontweight="normal", loc="left", fontsize=10)
+        ax.set_title(
+            "Innovation Residuals", fontweight="normal", loc="left", fontsize=10
+        )
         ax.grid(True, alpha=0.15)
         ax.legend(loc="upper right", fontsize=7)
 
@@ -1132,14 +1200,21 @@ class StateErrorPanelArtist:
 
         # PRD target line: ±10 cm/s
         ax_vel.axhline(
-            10, color="gray", linewidth=1, linestyle="--", alpha=0.5, label="PRD: ±10 cm/s"
+            10,
+            color="gray",
+            linewidth=1,
+            linestyle="--",
+            alpha=0.5,
+            label="PRD: ±10 cm/s",
         )
         ax_vel.axhline(-10, color="gray", linewidth=1, linestyle="--", alpha=0.5)
         ax_vel.axhline(0, color="black", linewidth=0.5, alpha=0.3)
 
         ax_vel.set_ylabel("Velocity Error (cm/s)", fontsize=8)
         ax_vel.set_xlabel("Time (s)", fontsize=8)
-        ax_vel.set_title("Velocity Estimation Error", fontweight="normal", loc="left", fontsize=9)
+        ax_vel.set_title(
+            "Velocity Estimation Error", fontweight="normal", loc="left", fontsize=9
+        )
         ax_vel.grid(True, alpha=0.1, linewidth=0.5)
         ax_vel.legend(loc="upper right", fontsize=6, framealpha=0.9)
         ax_vel.set_ylim(-15, 15)
@@ -1150,7 +1225,12 @@ class StateErrorPanelArtist:
         self.error_heading_buffer: deque[float] = deque(maxlen=self.window_frames)
 
         (self.line_heading,) = ax_heading.plot(
-            [], [], color=COLORS["purple"], linewidth=1.5, label="Heading error", alpha=0.8
+            [],
+            [],
+            color=COLORS["purple"],
+            linewidth=1.5,
+            label="Heading error",
+            alpha=0.8,
         )
 
         # PRD target line: ±7°
@@ -1237,13 +1317,28 @@ class BiasEstimatePanelArtist:
 
         # Lines (use distinct colors for each bias)
         (self.line_gyro,) = ax.plot(
-            [], [], color=COLORS["blue"], linewidth=1.5, label="Gyro bias (rad/s)", alpha=0.8
+            [],
+            [],
+            color=COLORS["blue"],
+            linewidth=1.5,
+            label="Gyro bias (rad/s)",
+            alpha=0.8,
         )
         (self.line_ax,) = ax.plot(
-            [], [], color=COLORS["red"], linewidth=1.5, label="Accel X bias (m/s²)", alpha=0.8
+            [],
+            [],
+            color=COLORS["red"],
+            linewidth=1.5,
+            label="Accel X bias (m/s²)",
+            alpha=0.8,
         )
         (self.line_ay,) = ax.plot(
-            [], [], color=COLORS["green"], linewidth=1.5, label="Accel Y bias (m/s²)", alpha=0.8
+            [],
+            [],
+            color=COLORS["green"],
+            linewidth=1.5,
+            label="Accel Y bias (m/s²)",
+            alpha=0.8,
         )
 
         # Zero reference
@@ -1375,7 +1470,9 @@ class NEESPanelArtist:
         # Styling
         ax.set_ylabel(f"NEES ({state_dim}-D)", fontsize=8)
         ax.set_xlabel("Time (s)", fontsize=8)
-        ax.set_title("Filter Consistency (NEES)", fontweight="normal", loc="left", fontsize=9)
+        ax.set_title(
+            "Filter Consistency (NEES)", fontweight="normal", loc="left", fontsize=9
+        )
         ax.grid(True, alpha=0.1, linewidth=0.5)
         ax.legend(loc="upper right", fontsize=6, framealpha=0.9)
         ax.set_ylim(0, max(self.chi2_upper * 1.5, 10))

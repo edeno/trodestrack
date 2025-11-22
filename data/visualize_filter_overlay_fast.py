@@ -31,7 +31,9 @@ def extract_time_window(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Extract data within a time window around center time."""
     half_window = window_s / 2.0
-    mask = (timestamps >= center_time - half_window) & (timestamps <= center_time + half_window)
+    mask = (timestamps >= center_time - half_window) & (
+        timestamps <= center_time + half_window
+    )
     return timestamps[mask], data[mask]
 
 
@@ -108,13 +110,21 @@ def create_plot_panels(
 
     # Create figure with 5 subplots
     fig = plt.figure(figsize=(width / 100, height / 100), dpi=100)
-    gs = fig.add_gridspec(5, 1, hspace=0.4, left=0.12, right=0.95, top=0.96, bottom=0.05)
+    gs = fig.add_gridspec(
+        5, 1, hspace=0.4, left=0.12, right=0.95, top=0.96, bottom=0.05
+    )
 
     # Gyro plot
     ax_gyro = fig.add_subplot(gs[0])
-    t_gyro_x, gyro_x_window = extract_time_window(data.t_imu, gyro_x, current_time, imu_window_s)
-    t_gyro_y, gyro_y_window = extract_time_window(data.t_imu, gyro_y, current_time, imu_window_s)
-    t_gyro_z, gyro_z_window = extract_time_window(data.t_imu, gyro_z, current_time, imu_window_s)
+    t_gyro_x, gyro_x_window = extract_time_window(
+        data.t_imu, gyro_x, current_time, imu_window_s
+    )
+    t_gyro_y, gyro_y_window = extract_time_window(
+        data.t_imu, gyro_y, current_time, imu_window_s
+    )
+    t_gyro_z, gyro_z_window = extract_time_window(
+        data.t_imu, gyro_z, current_time, imu_window_s
+    )
     ax_gyro.plot(t_gyro_x, gyro_x_window, "r-", linewidth=0.8, alpha=0.7, label="X")
     ax_gyro.plot(t_gyro_y, gyro_y_window, "g-", linewidth=0.8, alpha=0.7, label="Y")
     ax_gyro.plot(t_gyro_z, gyro_z_window, "b-", linewidth=0.8, alpha=0.7, label="Z")
@@ -129,13 +139,21 @@ def create_plot_panels(
 
     # Accel plot
     ax_accel = fig.add_subplot(gs[1])
-    t_accel_x, accel_x_window = extract_time_window(data.t_imu, accel_x, current_time, imu_window_s)
-    t_accel_y, accel_y_window = extract_time_window(data.t_imu, accel_y, current_time, imu_window_s)
-    t_accel_z, accel_z_window = extract_time_window(data.t_imu, accel_z, current_time, imu_window_s)
+    t_accel_x, accel_x_window = extract_time_window(
+        data.t_imu, accel_x, current_time, imu_window_s
+    )
+    t_accel_y, accel_y_window = extract_time_window(
+        data.t_imu, accel_y, current_time, imu_window_s
+    )
+    t_accel_z, accel_z_window = extract_time_window(
+        data.t_imu, accel_z, current_time, imu_window_s
+    )
     ax_accel.plot(t_accel_x, accel_x_window, "r-", linewidth=0.8, alpha=0.7, label="X")
     ax_accel.plot(t_accel_y, accel_y_window, "g-", linewidth=0.8, alpha=0.7, label="Y")
     ax_accel.plot(t_accel_z, accel_z_window, "b-", linewidth=0.8, alpha=0.7, label="Z")
-    ax_accel.axvline(current_time, color="black", linestyle="--", linewidth=1, alpha=0.5)
+    ax_accel.axvline(
+        current_time, color="black", linestyle="--", linewidth=1, alpha=0.5
+    )
     ax_accel.set_ylabel("Accel (m/s²)", fontsize=8)
     ax_accel.set_ylim(-15, 15)
     ax_accel.set_xlim(current_time - imu_window_s / 2, current_time + imu_window_s / 2)
@@ -146,12 +164,18 @@ def create_plot_panels(
 
     # Velocity plot
     ax_vel = fig.add_subplot(gs[2])
-    t_state, vel_window = extract_time_window(t_filter, vel_mag * 100, current_time, state_window_s)
+    t_state, vel_window = extract_time_window(
+        t_filter, vel_mag * 100, current_time, state_window_s
+    )
     ax_vel.plot(t_state, vel_window, "b-", linewidth=1)
     ax_vel.axvline(current_time, color="black", linestyle="--", linewidth=1, alpha=0.5)
     ax_vel.set_ylabel("Speed (cm/s)", fontsize=8)
-    ax_vel.set_ylim(0, max(100, np.max(vel_window) * 1.2) if len(vel_window) > 0 else 100)
-    ax_vel.set_xlim(current_time - state_window_s / 2, current_time + state_window_s / 2)
+    ax_vel.set_ylim(
+        0, max(100, np.max(vel_window) * 1.2) if len(vel_window) > 0 else 100
+    )
+    ax_vel.set_xlim(
+        current_time - state_window_s / 2, current_time + state_window_s / 2
+    )
     ax_vel.grid(True, alpha=0.3)
     ax_vel.tick_params(labelsize=7)
     ax_vel.set_title("Velocity Magnitude", fontsize=9, fontweight="bold")
@@ -162,23 +186,31 @@ def create_plot_panels(
         t_filter, heading_filter * 180 / np.pi, current_time, state_window_s
     )
     ax_heading.plot(t_state, heading_window, "m-", linewidth=1)
-    ax_heading.axvline(current_time, color="black", linestyle="--", linewidth=1, alpha=0.5)
+    ax_heading.axvline(
+        current_time, color="black", linestyle="--", linewidth=1, alpha=0.5
+    )
     ax_heading.set_ylabel("Heading (°)", fontsize=8)
     ax_heading.set_ylim(-180, 180)
-    ax_heading.set_xlim(current_time - state_window_s / 2, current_time + state_window_s / 2)
+    ax_heading.set_xlim(
+        current_time - state_window_s / 2, current_time + state_window_s / 2
+    )
     ax_heading.grid(True, alpha=0.3)
     ax_heading.tick_params(labelsize=7)
     ax_heading.set_title("Heading", fontsize=9, fontweight="bold")
 
     # Uncertainty plot
     ax_unc = fig.add_subplot(gs[4])
-    _, unc_window = extract_time_window(t_filter, pos_std * 100, current_time, state_window_s)
+    _, unc_window = extract_time_window(
+        t_filter, pos_std * 100, current_time, state_window_s
+    )
     ax_unc.plot(t_state, unc_window, "orange", linewidth=1)
     ax_unc.axvline(current_time, color="black", linestyle="--", linewidth=1, alpha=0.5)
     ax_unc.set_xlabel("Time (s)", fontsize=8)
     ax_unc.set_ylabel("Pos σ (cm)", fontsize=8)
     ax_unc.set_ylim(0, max(2, np.max(unc_window) * 1.2) if len(unc_window) > 0 else 2)
-    ax_unc.set_xlim(current_time - state_window_s / 2, current_time + state_window_s / 2)
+    ax_unc.set_xlim(
+        current_time - state_window_s / 2, current_time + state_window_s / 2
+    )
     ax_unc.grid(True, alpha=0.3)
     ax_unc.tick_params(labelsize=7)
     ax_unc.set_title("Position Uncertainty", fontsize=9, fontweight="bold")
@@ -210,12 +242,31 @@ def overlay_filter_on_frame(
         cv2.polylines(frame_copy, [pts], False, (0, 255, 255), 2, cv2.LINE_AA)
 
     # Draw LEDs
-    cv2.circle(frame_copy, tuple(led1_pos.astype(int)), led_radius, (0, 0, 255), -1, cv2.LINE_AA)
-    cv2.circle(frame_copy, tuple(led2_pos.astype(int)), led_radius, (0, 255, 255), -1, cv2.LINE_AA)
+    cv2.circle(
+        frame_copy,
+        tuple(led1_pos.astype(int)),
+        led_radius,
+        (0, 0, 255),
+        -1,
+        cv2.LINE_AA,
+    )
+    cv2.circle(
+        frame_copy,
+        tuple(led2_pos.astype(int)),
+        led_radius,
+        (0, 255, 255),
+        -1,
+        cv2.LINE_AA,
+    )
 
     # Draw filter position
     cv2.circle(
-        frame_copy, tuple(filter_pos.astype(int)), led_radius + 2, (0, 255, 255), 2, cv2.LINE_AA
+        frame_copy,
+        tuple(filter_pos.astype(int)),
+        led_radius + 2,
+        (0, 255, 255),
+        2,
+        cv2.LINE_AA,
     )
 
     # Draw heading arrow
@@ -225,7 +276,9 @@ def overlay_filter_on_frame(
     dy = arrow_length * np.sin(arrow_heading)
     start_pt = tuple(filter_pos.astype(int))
     end_pt = tuple((filter_pos + np.array([dx, dy])).astype(int))
-    cv2.arrowedLine(frame_copy, start_pt, end_pt, (0, 255, 255), 3, cv2.LINE_AA, tipLength=0.3)
+    cv2.arrowedLine(
+        frame_copy, start_pt, end_pt, (0, 255, 255), 3, cv2.LINE_AA, tipLength=0.3
+    )
 
     # Add time text
     time_text = f"t = {current_time:.2f} s"
@@ -335,7 +388,9 @@ def create_filter_overlay_video_fast(
 
     for frame_num in range(n_frames):
         if frame_num % 30 == 0:
-            print(f"  Progress: {frame_num}/{n_frames} frames ({100*frame_num/n_frames:.1f}%)")
+            print(
+                f"  Progress: {frame_num}/{n_frames} frames ({100*frame_num/n_frames:.1f}%)"
+            )
 
         current_time = start_time + frame_num / fps
 
@@ -370,7 +425,12 @@ def create_filter_overlay_video_fast(
         # Create/update plot panel (update every N frames for speed)
         if frame_num % plot_update_rate == 0 or last_plot_img is None:
             last_plot_img = create_plot_panels(
-                data, filter_result, t_filter, current_time, width=plot_width, height=800
+                data,
+                filter_result,
+                t_filter,
+                current_time,
+                width=plot_width,
+                height=800,
             )
 
         # Combine frame and plots side-by-side

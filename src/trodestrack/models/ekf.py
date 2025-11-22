@@ -186,7 +186,9 @@ def _extended_kalman_filter_impl(
                         lambda: t_imu_jax[imu_idx] - t_imu_jax[imu_idx - 1],
                         lambda: dt_imu_mean,
                     )
-                    return predict_step(s, u, dt, config_for_filter, has_vision_t, layout=layout)
+                    return predict_step(
+                        s, u, dt, config_for_filter, has_vision_t, layout=layout
+                    )
 
                 def no_propagate(s):
                     return s
@@ -448,7 +450,9 @@ def update_step(
                     # Return prediction unchanged with zero log-likelihood
                     return EKFState(mean=m_in, cov=P_in), 0.0
 
-                return lax.cond(nis_final < threshold, accept_measurement, reject_measurement)
+                return lax.cond(
+                    nis_final < threshold, accept_measurement, reject_measurement
+                )
 
             def no_gating():
                 """Return update without gating."""
@@ -606,7 +610,9 @@ def extended_kalman_filter(
     Z_cam_led2_jax = jnp.array(Z_cam_led2)
     mask_cam_jax = jnp.array(mask_cam)
     # Precompute clipped confidences device-side for stable shapes
-    conf_cam_jax = None if conf_cam is None else jnp.clip(jnp.array(conf_cam), 1e-2, 1.0)
+    conf_cam_jax = (
+        None if conf_cam is None else jnp.clip(jnp.array(conf_cam), 1e-2, 1.0)
+    )
 
     # Auto-detect LED spacing if not specified
     # Store estimated value to return in result (immutability: do NOT mutate config)
@@ -614,7 +620,9 @@ def extended_kalman_filter(
     config_for_filter: EKFConfig
 
     if ekf_config.led_distance is None:
-        estimated_led_distance = estimate_led_spacing(Z_cam_led1_jax, Z_cam_led2_jax, mask_cam_jax)
+        estimated_led_distance = estimate_led_spacing(
+            Z_cam_led1_jax, Z_cam_led2_jax, mask_cam_jax
+        )
         # Create new config with estimated spacing (do NOT mutate original)
         config_for_filter = replace(ekf_config, led_distance=estimated_led_distance)
     else:
@@ -627,7 +635,9 @@ def extended_kalman_filter(
             Z_cam_led1_jax,
             Z_cam_led2_jax,
             mask_cam_jax,
-            dt_cam=jnp.mean(jnp.diff(t_cam_jax)),  # Keep as JAX scalar for JIT compatibility
+            dt_cam=jnp.mean(
+                jnp.diff(t_cam_jax)
+            ),  # Keep as JAX scalar for JIT compatibility
             led_distance=config_for_filter.led_distance,  # type: ignore[arg-type]
             layout=get_layout(config_for_filter.state_mode),
         )
@@ -636,7 +646,9 @@ def extended_kalman_filter(
     layout = get_layout(config_for_filter.state_mode)
 
     # Compute mean IMU timestep for fallback when imu_idx == 0
-    dt_imu_mean = jnp.mean(jnp.diff(t_imu_jax))  # Keep as JAX scalar for JIT compatibility
+    dt_imu_mean = jnp.mean(
+        jnp.diff(t_imu_jax)
+    )  # Keep as JAX scalar for JIT compatibility
 
     # Precompute IMU index arrays (host-side, using shared utility)
     imu_index_arrays = compute_imu_index_arrays(t_imu, t_cam)

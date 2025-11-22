@@ -171,7 +171,9 @@ class UKFResult(NamedTuple):
 # =============================================================================
 
 
-def compute_sigma_points(mean: jnp.ndarray, cov: jnp.ndarray, n: int, lamb: float) -> jnp.ndarray:
+def compute_sigma_points(
+    mean: jnp.ndarray, cov: jnp.ndarray, n: int, lamb: float
+) -> jnp.ndarray:
     """Compute (2n+1) sigma points for the unscented transform.
 
     Parameters
@@ -213,7 +215,9 @@ def compute_sigma_points(mean: jnp.ndarray, cov: jnp.ndarray, n: int, lamb: floa
     # sigma_pm = [+distances columns, -distances columns] (n, 2n)
     sigma_pm = jnp.concatenate((distances, -distances), axis=1)
     # Broadcast mean across all 2n sigma points: mean[:, None] + sigma_pm
-    sigmas = jnp.concatenate((mean[:, None], mean[:, None] + sigma_pm), axis=1).T  # (2n+1, n)
+    sigmas = jnp.concatenate(
+        (mean[:, None], mean[:, None] + sigma_pm), axis=1
+    ).T  # (2n+1, n)
 
     return sigmas
 
@@ -454,7 +458,9 @@ def update_step(
 
             # Compute innovation covariance S
             meas_deviations = sigmas_meas - z_pred
-            S = jnp.tensordot(w_cov, _outer_product_batch(meas_deviations, meas_deviations), axes=1)
+            S = jnp.tensordot(
+                w_cov, _outer_product_batch(meas_deviations, meas_deviations), axes=1
+            )
 
             # Add measurement noise R from camera model (confidence-scaled)
             R = camera_model.meas_cov(frame_idx)
@@ -689,7 +695,9 @@ def _unscented_kalman_filter_impl(
                         lambda: t_imu_jax[imu_idx] - t_imu_jax[imu_idx - 1],
                         lambda: jnp.array(dt_imu_mean),
                     )
-                    return predict_step(s, u, dt, config_for_filter, has_vision_t, layout=layout)
+                    return predict_step(
+                        s, u, dt, config_for_filter, has_vision_t, layout=layout
+                    )
 
                 def no_propagate(s):
                     return s
@@ -825,7 +833,9 @@ def unscented_kalman_filter(
     Z_cam_led2_jax = jnp.array(Z_cam_led2)
     mask_cam_jax = jnp.array(mask_cam)
     # Precompute clipped confidences device-side for stable shapes
-    conf_cam_jax = None if conf_cam is None else jnp.clip(jnp.array(conf_cam), 1e-2, 1.0)
+    conf_cam_jax = (
+        None if conf_cam is None else jnp.clip(jnp.array(conf_cam), 1e-2, 1.0)
+    )
 
     # Auto-detect LED spacing if not specified
     # Store estimated value to return in result (immutability: do NOT mutate config)
@@ -833,7 +843,9 @@ def unscented_kalman_filter(
     config_for_filter: UKFConfig
 
     if ukf_config.led_distance is None:
-        estimated_led_distance = estimate_led_spacing(Z_cam_led1_jax, Z_cam_led2_jax, mask_cam_jax)
+        estimated_led_distance = estimate_led_spacing(
+            Z_cam_led1_jax, Z_cam_led2_jax, mask_cam_jax
+        )
         # Create new config with estimated spacing (do NOT mutate original)
         config_for_filter = replace(ukf_config, led_distance=estimated_led_distance)
     else:
@@ -846,7 +858,9 @@ def unscented_kalman_filter(
             Z_cam_led1_jax,
             Z_cam_led2_jax,
             mask_cam_jax,
-            dt_cam=jnp.mean(jnp.diff(t_cam_jax)),  # Keep as JAX scalar for JIT compatibility
+            dt_cam=jnp.mean(
+                jnp.diff(t_cam_jax)
+            ),  # Keep as JAX scalar for JIT compatibility
             led_distance=config_for_filter.led_distance,  # type: ignore[arg-type]
             layout=get_layout(config_for_filter.state_mode),
         )
@@ -856,7 +870,9 @@ def unscented_kalman_filter(
     layout = get_layout(config_for_filter.state_mode)
 
     # Compute mean IMU timestep for fallback
-    dt_imu_mean = jnp.mean(jnp.diff(t_imu_jax))  # Keep as JAX scalar for JIT compatibility
+    dt_imu_mean = jnp.mean(
+        jnp.diff(t_imu_jax)
+    )  # Keep as JAX scalar for JIT compatibility
 
     # Precompute IMU index arrays (host-side, using shared utility)
     imu_index_arrays = compute_imu_index_arrays(t_imu, t_cam)

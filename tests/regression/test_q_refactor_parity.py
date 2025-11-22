@@ -6,7 +6,9 @@ from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
 from trodestrack.sim.simple import SimpleSimConfig, simulate_constant_velocity
 
 
-def reference_Q(cfg: EKFConfig, theta: float, dt: float, has_vision: bool) -> jnp.ndarray:
+def reference_Q(
+    cfg: EKFConfig, theta: float, dt: float, has_vision: bool
+) -> jnp.ndarray:
     """Pre-refactor EKF Q assembly (used for parity checks)."""
     dtype = jnp.float32
 
@@ -29,7 +31,9 @@ def reference_Q(cfg: EKFConfig, theta: float, dt: float, has_vision: bool) -> jn
         q_bax = q_bax * cfg.dropout_q_bias_multiplier
         q_bay = q_bay * cfg.dropout_q_bias_multiplier
 
-    Q_proc = jnp.diag(jnp.array([q_px, q_py, q_vx, q_vy, q_th, q_bg, q_bax, q_bay], dtype=dtype))
+    Q_proc = jnp.diag(
+        jnp.array([q_px, q_py, q_vx, q_vy, q_th, q_bg, q_bax, q_bay], dtype=dtype)
+    )
 
     # IMU input noise mapped into state via G
     std_w = cfg.imu_gyro_noise_density * np.sqrt(dt)
@@ -64,7 +68,9 @@ def reference_Q(cfg: EKFConfig, theta: float, dt: float, has_vision: bool) -> jn
         (2.0, 0.2, 0.1, 0.3),  # with dropout
     ],
 )
-def test_ekf_parity_before_after_q_refactor(monkeypatch, duration_s, vx, vy, dropout_prob):
+def test_ekf_parity_before_after_q_refactor(
+    monkeypatch, duration_s, vx, vy, dropout_prob
+):
     # Simulate a short constant-velocity scenario
     sim_cfg = SimpleSimConfig(
         duration_s=duration_s,
@@ -120,11 +126,18 @@ def test_ekf_parity_before_after_q_refactor(monkeypatch, duration_s, vx, vy, dro
     atol = 1e-7
     rtol = 1e-5
 
-    assert jnp.allclose(res_new.filtered_means, res_old.filtered_means, rtol=rtol, atol=atol)
-    assert jnp.allclose(res_new.predicted_means, res_old.predicted_means, rtol=rtol, atol=atol)
+    assert jnp.allclose(
+        res_new.filtered_means, res_old.filtered_means, rtol=rtol, atol=atol
+    )
+    assert jnp.allclose(
+        res_new.predicted_means, res_old.predicted_means, rtol=rtol, atol=atol
+    )
     assert jnp.allclose(
         res_new.filtered_covariances, res_old.filtered_covariances, rtol=rtol, atol=atol
     )
     assert jnp.allclose(
-        res_new.predicted_covariances, res_old.predicted_covariances, rtol=rtol, atol=atol
+        res_new.predicted_covariances,
+        res_old.predicted_covariances,
+        rtol=rtol,
+        atol=atol,
     )

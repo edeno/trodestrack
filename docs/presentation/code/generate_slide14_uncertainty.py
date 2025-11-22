@@ -101,7 +101,9 @@ def generate_slide14():
 
     # Extract position estimates and covariances
     pos_est = np.array(result.filtered_means[:, layout.pos_idx])
-    pos_cov = np.array(result.filtered_covariances[:, layout.pos_idx, :][:, :, layout.pos_idx])
+    pos_cov = np.array(
+        result.filtered_covariances[:, layout.pos_idx, :][:, :, layout.pos_idx]
+    )
 
     # Downsample truth to camera rate
     t_imu = sim["t_imu"]
@@ -136,7 +138,12 @@ def generate_slide14():
 
     # Plot estimated trajectory
     ax.plot(
-        pos_est[:, 0], pos_est[:, 1], linewidth=4.5, color=GREEN, label="EKF estimate", zorder=2
+        pos_est[:, 0],
+        pos_est[:, 1],
+        linewidth=4.5,
+        color=GREEN,
+        label="EKF estimate",
+        zorder=2,
     )
 
     # Plot covariance ellipses at key moments
@@ -212,7 +219,11 @@ def generate_slide14():
             ha="left",
             va="bottom",
             bbox=dict(
-                boxstyle="round,pad=0.5", facecolor="white", alpha=0.9, edgecolor=color, linewidth=4
+                boxstyle="round,pad=0.5",
+                facecolor="white",
+                alpha=0.9,
+                edgecolor=color,
+                linewidth=4,
             ),
             arrowprops=dict(arrowstyle="->", color=color, linewidth=4.5),
             zorder=20,
@@ -302,7 +313,9 @@ def generate_slide14():
             weight="bold",
             ha="center",
             va="center",
-            bbox=dict(boxstyle="circle,pad=0.3", facecolor="white", alpha=0.8, edgecolor=GRAY),
+            bbox=dict(
+                boxstyle="circle,pad=0.3", facecolor="white", alpha=0.8, edgecolor=GRAY
+            ),
         )
 
     # Key insight

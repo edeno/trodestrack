@@ -82,7 +82,9 @@ def main() -> None:
     mask_with_dropout[dropout_start_idx:dropout_end_idx] = False
 
     # Update simulation data with dropout mask
-    sim_data_dropout = {k: (v.copy() if hasattr(v, "copy") else v) for k, v in sim_data.items()}
+    sim_data_dropout = {
+        k: (v.copy() if hasattr(v, "copy") else v) for k, v in sim_data.items()
+    }
     sim_data_dropout["mask_cam"] = mask_with_dropout
 
     # Ensure no usable pixels during blackout (set LEDs to NaN)
@@ -238,8 +240,12 @@ def main() -> None:
     )
 
     # Current position markers
-    (marker_filter,) = ax_arena.plot([], [], "o", color=COLORS["red"], markersize=8, zorder=10)
-    (marker_smooth,) = ax_arena.plot([], [], "o", color=COLORS["blue"], markersize=8, zorder=10)
+    (marker_filter,) = ax_arena.plot(
+        [], [], "o", color=COLORS["red"], markersize=8, zorder=10
+    )
+    (marker_smooth,) = ax_arena.plot(
+        [], [], "o", color=COLORS["blue"], markersize=8, zorder=10
+    )
 
     ax_arena.legend(loc="upper right")
     ax_arena.grid(True, alpha=0.2)
@@ -250,8 +256,12 @@ def main() -> None:
     ax_pos_err.set_ylabel("Position Error (m)")
     ax_pos_err.set_title("Position Error: Filter vs Smoothed")
 
-    ax_pos_err.plot(t_cam, pos_err_filter, color=COLORS["red"], linewidth=2, label="Filter")
-    ax_pos_err.plot(t_cam, pos_err_smooth, color=COLORS["blue"], linewidth=2, label="Smoothed")
+    ax_pos_err.plot(
+        t_cam, pos_err_filter, color=COLORS["red"], linewidth=2, label="Filter"
+    )
+    ax_pos_err.plot(
+        t_cam, pos_err_smooth, color=COLORS["blue"], linewidth=2, label="Smoothed"
+    )
 
     # Highlight dropout interval
     ax_pos_err.axvspan(5.0, 10.0, alpha=0.2, color="gray", label="Blackout")
@@ -275,7 +285,9 @@ def main() -> None:
         ha="center",
     )
 
-    (vline_pos,) = ax_pos_err.plot([], [], "k--", linewidth=1, alpha=0.5, label="Current time")
+    (vline_pos,) = ax_pos_err.plot(
+        [], [], "k--", linewidth=1, alpha=0.5, label="Current time"
+    )
     ax_pos_err.legend(loc="upper left", fontsize=8)
     ax_pos_err.grid(True, alpha=0.2)
 
@@ -285,8 +297,12 @@ def main() -> None:
     ax_heading_err.set_ylabel("Heading Error (deg)")
     ax_heading_err.set_title("Heading Error: Filter vs Smoothed")
 
-    ax_heading_err.plot(t_cam, np.rad2deg(heading_err_filter), color=COLORS["red"], linewidth=2)
-    ax_heading_err.plot(t_cam, np.rad2deg(heading_err_smooth), color=COLORS["blue"], linewidth=2)
+    ax_heading_err.plot(
+        t_cam, np.rad2deg(heading_err_filter), color=COLORS["red"], linewidth=2
+    )
+    ax_heading_err.plot(
+        t_cam, np.rad2deg(heading_err_smooth), color=COLORS["blue"], linewidth=2
+    )
     ax_heading_err.axvspan(5.0, 10.0, alpha=0.2, color="gray")
     (vline_heading,) = ax_heading_err.plot([], [], "k--", linewidth=1, alpha=0.5)
     ax_heading_err.grid(True, alpha=0.2)

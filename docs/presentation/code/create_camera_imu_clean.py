@@ -103,8 +103,12 @@ def render_chunk(
     (trajectory_line,) = axes["video"].plot(
         [], [], "c-", linewidth=1.5, alpha=0.6, label="Trajectory"
     )
-    led1_circle = Circle((0, 0), led_marker_size, color="red", alpha=0.7, label="LED1 (back)")
-    led2_circle = Circle((0, 0), led_marker_size, color="yellow", alpha=0.7, label="LED2 (front)")
+    led1_circle = Circle(
+        (0, 0), led_marker_size, color="red", alpha=0.7, label="LED1 (back)"
+    )
+    led2_circle = Circle(
+        (0, 0), led_marker_size, color="yellow", alpha=0.7, label="LED2 (front)"
+    )
     axes["video"].add_patch(led1_circle)
     axes["video"].add_patch(led2_circle)
     axes["video"].legend(loc="upper right", fontsize=10, framealpha=0.9)
@@ -113,13 +117,23 @@ def render_chunk(
     (gyro_x_line,) = axes["gyro"].plot([], [], "-", linewidth=1.5, label="X", alpha=0.8)
     (gyro_y_line,) = axes["gyro"].plot([], [], "-", linewidth=1.5, label="Y", alpha=0.8)
     (gyro_z_line,) = axes["gyro"].plot([], [], "-", linewidth=1.5, label="Z", alpha=0.8)
-    gyro_marker = axes["gyro"].axvline(0, color="black", linestyle="--", linewidth=1.5, alpha=0.5)
+    gyro_marker = axes["gyro"].axvline(
+        0, color="black", linestyle="--", linewidth=1.5, alpha=0.5
+    )
     axes["gyro"].legend(loc="upper right", fontsize=9)
 
-    (accel_x_line,) = axes["accel"].plot([], [], "-", linewidth=1.5, label="X", alpha=0.8)
-    (accel_y_line,) = axes["accel"].plot([], [], "-", linewidth=1.5, label="Y", alpha=0.8)
-    (accel_z_line,) = axes["accel"].plot([], [], "-", linewidth=1.5, label="Z", alpha=0.8)
-    accel_marker = axes["accel"].axvline(0, color="black", linestyle="--", linewidth=1.5, alpha=0.5)
+    (accel_x_line,) = axes["accel"].plot(
+        [], [], "-", linewidth=1.5, label="X", alpha=0.8
+    )
+    (accel_y_line,) = axes["accel"].plot(
+        [], [], "-", linewidth=1.5, label="Y", alpha=0.8
+    )
+    (accel_z_line,) = axes["accel"].plot(
+        [], [], "-", linewidth=1.5, label="Z", alpha=0.8
+    )
+    accel_marker = axes["accel"].axvline(
+        0, color="black", linestyle="--", linewidth=1.5, alpha=0.5
+    )
     axes["accel"].legend(loc="upper right", fontsize=9)
 
     time_text = axes["video"].text(
@@ -223,7 +237,9 @@ def main():
     if not video_info:
         raise RuntimeError("Could not read video info")
 
-    print(f"\nVideo: {video_info['width']}x{video_info['height']} @ {video_info['fps']:.1f} fps")
+    print(
+        f"\nVideo: {video_info['width']}x{video_info['height']} @ {video_info['fps']:.1f} fps"
+    )
     print(f"Duration: {video_info['duration_s']:.1f}s")
 
     # Configuration
@@ -270,7 +286,9 @@ def main():
     try:
         # Partition frames
         chunk_size = math.ceil(n_frames / max_workers)
-        chunks = [(s, min(n_frames, s + chunk_size)) for s in range(0, n_frames, chunk_size)]
+        chunks = [
+            (s, min(n_frames, s + chunk_size)) for s in range(0, n_frames, chunk_size)
+        ]
 
         with ProcessPoolExecutor(max_workers=max_workers) as ex:
             futs = [

@@ -149,11 +149,15 @@ def create_camera_tracked_video(
 
             # LED1 (red circle)
             cv2.circle(frame, led1_center, led_radius, (0, 0, 255), -1, cv2.LINE_AA)
-            cv2.circle(frame, led1_center, led_radius + 2, (255, 255, 255), 2, cv2.LINE_AA)
+            cv2.circle(
+                frame, led1_center, led_radius + 2, (255, 255, 255), 2, cv2.LINE_AA
+            )
 
             # LED2 (yellow circle)
             cv2.circle(frame, led2_center, led_radius, (0, 255, 255), -1, cv2.LINE_AA)
-            cv2.circle(frame, led2_center, led_radius + 2, (255, 255, 255), 2, cv2.LINE_AA)
+            cv2.circle(
+                frame, led2_center, led_radius + 2, (255, 255, 255), 2, cv2.LINE_AA
+            )
 
             # Add timestamp
             timestamp = pos_df.index[i]
@@ -173,7 +177,9 @@ def create_camera_tracked_video(
             out.write(frame)
 
             if (i + 1) % 100 == 0:
-                print(f"  Processed {i + 1:,} / {n_frames:,} frames ({100*(i+1)/n_frames:.1f}%)")
+                print(
+                    f"  Processed {i + 1:,} / {n_frames:,} frames ({100*(i+1)/n_frames:.1f}%)"
+                )
 
     finally:
         cap.release()

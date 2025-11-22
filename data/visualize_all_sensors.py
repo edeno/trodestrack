@@ -70,7 +70,11 @@ def load_all_imu_data(imu_file: str) -> tuple[np.ndarray, np.ndarray, np.ndarray
 
     # Load and convert gyro (all 3 axes)
     gyro_raw = np.column_stack(
-        [df["Headstage_GyroX"].values, df["Headstage_GyroY"].values, df["Headstage_GyroZ"].values]
+        [
+            df["Headstage_GyroX"].values,
+            df["Headstage_GyroY"].values,
+            df["Headstage_GyroZ"].values,
+        ]
     )
     gyro_raw = gyro_raw[unique_idx]
     gyro_deg_s = gyro_raw * GYRO_SCALE
@@ -134,7 +138,9 @@ def extract_time_window(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Extract data within a time window around center time."""
     half_window = window_s / 2.0
-    mask = (timestamps >= center_time - half_window) & (timestamps <= center_time + half_window)
+    mask = (timestamps >= center_time - half_window) & (
+        timestamps <= center_time + half_window
+    )
     return timestamps[mask], data[mask]
 
 
@@ -216,7 +222,9 @@ def setup_figure(
     ax_video = fig.add_subplot(gs[:, 0])
     ax_video.set_aspect("equal")
     ax_video.axis("off")
-    ax_video.set_title("Video with LED Tracking", fontsize=12, fontweight="bold", pad=10)
+    ax_video.set_title(
+        "Video with LED Tracking", fontsize=12, fontweight="bold", pad=10
+    )
 
     # Gyroscope (right top)
     ax_gyro = fig.add_subplot(gs[0, 1])
@@ -236,7 +244,9 @@ def setup_figure(
     ax_accel.tick_params(labelsize=9)
 
     # Add reference lines
-    ax_accel.axhline(GRAVITY, color="gray", linestyle=":", linewidth=1, alpha=0.5, label="1g")
+    ax_accel.axhline(
+        GRAVITY, color="gray", linestyle=":", linewidth=1, alpha=0.5, label="1g"
+    )
     ax_accel.axhline(-GRAVITY, color="gray", linestyle=":", linewidth=1, alpha=0.5)
 
     axes = {"video": ax_video, "gyro": ax_gyro, "accel": ax_accel}
@@ -305,17 +315,23 @@ def create_comprehensive_video(
     print("\nLoading IMU data (3D gyro + 3D accel)...")
     t_imu, gyro_rad_s, accel_m_s2 = load_all_imu_data(imu_file)
     gyro_deg_s = gyro_rad_s * 180 / np.pi
-    print(f"✓ Loaded {len(t_imu):,} IMU samples at ~{1 / np.median(np.diff(t_imu)):.1f} Hz")
+    print(
+        f"✓ Loaded {len(t_imu):,} IMU samples at ~{1 / np.median(np.diff(t_imu)):.1f} Hz"
+    )
 
     print("\nLoading camera tracking data...")
     t_cam, led1_pixels, led2_pixels = load_camera_data(position_file, meters_per_pixel)
-    print(f"✓ Loaded {len(t_cam):,} camera frames at ~{1 / np.median(np.diff(t_cam)):.1f} Hz")
+    print(
+        f"✓ Loaded {len(t_cam):,} camera frames at ~{1 / np.median(np.diff(t_cam)):.1f} Hz"
+    )
 
     print("\nLoading video metadata...")
     video_info = get_video_info(video_path)
     if not video_info:
         raise RuntimeError("opencv-python required for video")
-    print(f"✓ Video: {video_info['width']}×{video_info['height']} @ {video_info['fps']:.1f} fps")
+    print(
+        f"✓ Video: {video_info['width']}×{video_info['height']} @ {video_info['fps']:.1f} fps"
+    )
 
     # Validate time range
     end_time = start_time + duration
@@ -340,8 +356,12 @@ def create_comprehensive_video(
     video_frame = axes["video"].imshow(
         np.zeros((video_info["height"], video_info["width"], 3), dtype=np.uint8)
     )
-    led1_circle = Circle((0, 0), led_marker_size, color="#FF4444", alpha=0.8, label="LED1 (rear)")
-    led2_circle = Circle((0, 0), led_marker_size, color="#44FFFF", alpha=0.8, label="LED2 (front)")
+    led1_circle = Circle(
+        (0, 0), led_marker_size, color="#FF4444", alpha=0.8, label="LED1 (rear)"
+    )
+    led2_circle = Circle(
+        (0, 0), led_marker_size, color="#44FFFF", alpha=0.8, label="LED2 (front)"
+    )
     axes["video"].add_patch(led1_circle)
     axes["video"].add_patch(led2_circle)
     axes["video"].legend(loc="upper right", fontsize=9, framealpha=0.9)
@@ -351,10 +371,17 @@ def create_comprehensive_video(
     gyro_lines = {}
     for _i, axis in enumerate(["X", "Y", "Z"]):
         (line,) = axes["gyro"].plot(
-            [], [], color=colors_gyro[axis], linewidth=1.8, label=f"Gyro {axis}", alpha=0.9
+            [],
+            [],
+            color=colors_gyro[axis],
+            linewidth=1.8,
+            label=f"Gyro {axis}",
+            alpha=0.9,
         )
         gyro_lines[axis] = line
-    gyro_marker = axes["gyro"].axvline(0, color="black", linestyle="--", linewidth=1.5, alpha=0.6)
+    gyro_marker = axes["gyro"].axvline(
+        0, color="black", linestyle="--", linewidth=1.5, alpha=0.6
+    )
     axes["gyro"].legend(loc="upper right", fontsize=8, framealpha=0.9)
 
     # Initialize accel plot (3 axes)
@@ -362,10 +389,17 @@ def create_comprehensive_video(
     accel_lines = {}
     for _i, axis in enumerate(["X", "Y", "Z"]):
         (line,) = axes["accel"].plot(
-            [], [], color=colors_accel[axis], linewidth=1.8, label=f"Accel {axis}", alpha=0.9
+            [],
+            [],
+            color=colors_accel[axis],
+            linewidth=1.8,
+            label=f"Accel {axis}",
+            alpha=0.9,
         )
         accel_lines[axis] = line
-    accel_marker = axes["accel"].axvline(0, color="black", linestyle="--", linewidth=1.5, alpha=0.6)
+    accel_marker = axes["accel"].axvline(
+        0, color="black", linestyle="--", linewidth=1.5, alpha=0.6
+    )
     axes["accel"].legend(loc="upper right", fontsize=8, framealpha=0.9, ncol=2)
 
     # Time display on video
@@ -377,12 +411,21 @@ def create_comprehensive_video(
         fontsize=13,
         verticalalignment="top",
         fontweight="bold",
-        bbox=dict(boxstyle="round,pad=0.5", facecolor="white", alpha=0.9, edgecolor="black"),
+        bbox=dict(
+            boxstyle="round,pad=0.5", facecolor="white", alpha=0.9, edgecolor="black"
+        ),
     )
 
     def init():
         """Initialize animation."""
-        artists = [video_frame, led1_circle, led2_circle, gyro_marker, accel_marker, time_text]
+        artists = [
+            video_frame,
+            led1_circle,
+            led2_circle,
+            gyro_marker,
+            accel_marker,
+            time_text,
+        ]
         artists.extend(gyro_lines.values())
         artists.extend(accel_lines.values())
         return artists
@@ -431,7 +474,14 @@ def create_comprehensive_video(
         # Update time display
         time_text.set_text(f"t = {current_time:.2f} s")
 
-        artists = [video_frame, led1_circle, led2_circle, gyro_marker, accel_marker, time_text]
+        artists = [
+            video_frame,
+            led1_circle,
+            led2_circle,
+            gyro_marker,
+            accel_marker,
+            time_text,
+        ]
         artists.extend(gyro_lines.values())
         artists.extend(accel_lines.values())
         return artists

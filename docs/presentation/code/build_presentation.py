@@ -68,11 +68,15 @@ class PresentationBuilder:
 
         # Calculated positions (derived from grid)
         self.GRID["title_bottom"] = (
-            self.GRID["margin_top"] + self.GRID["title_height"] + self.GRID["title_bottom_gap"]
+            self.GRID["margin_top"]
+            + self.GRID["title_height"]
+            + self.GRID["title_bottom_gap"]
         )
         self.GRID["content_top"] = self.GRID["title_bottom"]
         self.GRID["content_max_height"] = (
-            self.prs.slide_height - self.GRID["content_top"] - self.GRID["margin_bottom"]
+            self.prs.slide_height
+            - self.GRID["content_top"]
+            - self.GRID["margin_bottom"]
         )
 
     def save(self, output_path):
@@ -115,10 +119,14 @@ class PresentationBuilder:
         fill.fore_color.rgb = COLORS["blue"]
 
         # Section number (large, top-left)
-        section_num_box = slide.shapes.add_textbox(Inches(0.5), Inches(1), Inches(3), Inches(1.5))
+        section_num_box = slide.shapes.add_textbox(
+            Inches(0.5), Inches(1), Inches(3), Inches(1.5)
+        )
         section_num_frame = section_num_box.text_frame
         section_num_frame.text = f"Section {section_number}/{total_sections}"
-        self._format_text(section_num_box, font_size=32, color=COLORS["white"], alpha=0.7)
+        self._format_text(
+            section_num_box, font_size=32, color=COLORS["white"], alpha=0.7
+        )
 
         # Section title (centered, large)
         title_box = slide.shapes.add_textbox(Inches(1), Inches(2), Inches(8), Inches(2))
@@ -126,7 +134,11 @@ class PresentationBuilder:
         title_frame.text = section_title
         title_frame.word_wrap = True
         self._format_text(
-            title_box, font_size=54, bold=True, color=COLORS["white"], align=PP_ALIGN.CENTER
+            title_box,
+            font_size=54,
+            bold=True,
+            color=COLORS["white"],
+            align=PP_ALIGN.CENTER,
         )
 
         return slide
@@ -187,7 +199,9 @@ class PresentationBuilder:
 
                 # Add image
                 try:
-                    slide.shapes.add_picture(str(img_path), img_left, content_top, width=img_width)
+                    slide.shapes.add_picture(
+                        str(img_path), img_left, content_top, width=img_width
+                    )
                 except Exception as e:
                     print(f"Warning: Could not add image {img_path}: {e}")
             else:
@@ -235,7 +249,9 @@ class PresentationBuilder:
                     # Two spaces = level 1 indent
                     indent_level = 1
                     p.text = stripped_text
-                    p.font.size = Pt(base_font_size - 2)  # Slightly smaller for sub-bullets
+                    p.font.size = Pt(
+                        base_font_size - 2
+                    )  # Slightly smaller for sub-bullets
                 else:
                     p.text = bullet_text
                     p.font.size = Pt(base_font_size)
@@ -248,7 +264,9 @@ class PresentationBuilder:
 
             # Warn if content might overflow
             total_chars = sum(len(b) for b in bullets)
-            estimated_lines = sum(len(b) / 50 + 1 for b in bullets)  # ~50 chars per line
+            estimated_lines = sum(
+                len(b) / 50 + 1 for b in bullets
+            )  # ~50 chars per line
             if num_bullets > 8 or total_chars > 600 or estimated_lines > 15:
                 print(
                     f"⚠️  Warning: Slide '{title}' has dense content "
@@ -288,7 +306,9 @@ class PresentationBuilder:
                 - self.GRID["element_gap"]
                 - self.GRID["caption_height"]
             )
-            caption_top = img_top + available_height_for_image + self.GRID["element_gap"]
+            caption_top = (
+                img_top + available_height_for_image + self.GRID["element_gap"]
+            )
         else:
             # No caption: use all available content height
             available_height_for_image = self.GRID["content_max_height"]
@@ -303,7 +323,10 @@ class PresentationBuilder:
             try:
                 # Add image with calculated height
                 pic = slide.shapes.add_picture(
-                    str(img_path), Inches(0.5), img_top, height=available_height_for_image
+                    str(img_path),
+                    Inches(0.5),
+                    img_top,
+                    height=available_height_for_image,
                 )
 
                 # Center horizontally
@@ -325,7 +348,11 @@ class PresentationBuilder:
             caption_frame = caption_box.text_frame
             caption_frame.text = caption
             self._format_text(
-                caption_box, font_size=18, color=COLORS["gray"], align=PP_ALIGN.CENTER, italic=True
+                caption_box,
+                font_size=18,
+                color=COLORS["gray"],
+                align=PP_ALIGN.CENTER,
+                italic=True,
             )
 
         # Speaker notes
@@ -337,7 +364,14 @@ class PresentationBuilder:
         return slide
 
     def _format_text(
-        self, shape, font_size=24, bold=False, color=None, align=None, italic=False, alpha=1.0
+        self,
+        shape,
+        font_size=24,
+        bold=False,
+        color=None,
+        align=None,
+        italic=False,
+        alpha=1.0,
     ):
         """Apply text formatting to a shape"""
         text_frame = shape.text_frame

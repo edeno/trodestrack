@@ -115,7 +115,9 @@ class TestRTSSmoother:
         )
 
         # Check final gyro bias estimate (index 5)
-        true_bias = float(sim["bias_gyro"][0])  # rad/s (constant bias, take first element)
+        true_bias = float(
+            sim["bias_gyro"][0]
+        )  # rad/s (constant bias, take first element)
         filtered_bias = float(filter_result.filtered_means[-1, 5])
         smoothed_bias = float(smoother_result.smoothed_means[-1, 5])
 
@@ -159,7 +161,9 @@ class TestRTSSmoother:
 
         # Compare trace of covariances (sum of variances)
         filter_trace = jnp.trace(filter_result.filtered_covariances, axis1=1, axis2=2)
-        smoother_trace = jnp.trace(smoother_result.smoothed_covariances, axis1=1, axis2=2)
+        smoother_trace = jnp.trace(
+            smoother_result.smoothed_covariances, axis1=1, axis2=2
+        )
 
         # Smoother covariances should be smaller (on average)
         mean_filter_trace = float(jnp.mean(filter_trace))
@@ -312,7 +316,9 @@ class TestSigmaPointSmoother:
 
         # Compare trace of covariances
         filter_trace = jnp.trace(filter_result.filtered_covariances, axis1=1, axis2=2)
-        smoother_trace = jnp.trace(smoother_result.smoothed_covariances, axis1=1, axis2=2)
+        smoother_trace = jnp.trace(
+            smoother_result.smoothed_covariances, axis1=1, axis2=2
+        )
 
         mean_filter_trace = float(jnp.mean(filter_trace))
         mean_smoother_trace = float(jnp.mean(smoother_trace))

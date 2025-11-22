@@ -113,7 +113,9 @@ def add_legend_outside(ax, **kwargs):
     return legend
 
 
-def set_axis_labels(ax, xlabel="", ylabel="", xlabel_size=24, ylabel_size=24, labelpad=10):
+def set_axis_labels(
+    ax, xlabel="", ylabel="", xlabel_size=24, ylabel_size=24, labelpad=10
+):
     """
     Set axis labels with MANDATORY labelpad
 
@@ -126,10 +128,14 @@ def set_axis_labels(ax, xlabel="", ylabel="", xlabel_size=24, ylabel_size=24, la
         labelpad: Padding (MANDATORY: prevents text touching plot)
     """
     if xlabel:
-        ax.set_xlabel(xlabel, fontsize=xlabel_size, fontweight="bold", labelpad=labelpad)
+        ax.set_xlabel(
+            xlabel, fontsize=xlabel_size, fontweight="bold", labelpad=labelpad
+        )
 
     if ylabel:
-        ax.set_ylabel(ylabel, fontsize=ylabel_size, fontweight="bold", labelpad=labelpad)
+        ax.set_ylabel(
+            ylabel, fontsize=ylabel_size, fontweight="bold", labelpad=labelpad
+        )
 
 
 def check_warnings_before_save(output_path):
@@ -207,7 +213,8 @@ def verify_standards_applied(fig, ax):
     # Check 1: constrained_layout enabled
     if not fig.get_constrained_layout():
         issues.append(
-            "❌ MANDATORY: constrained_layout=True not enabled. " "This will cause text overlap!"
+            "❌ MANDATORY: constrained_layout=True not enabled. "
+            "This will cause text overlap!"
         )
 
     # Check 2: Legend placement (if legend exists)
@@ -229,11 +236,13 @@ def verify_standards_applied(fig, ax):
         ylabel = axis.get_ylabel()
         if xlabel and not axis.xaxis.labelpad:
             issues.append(
-                f"⚠️  RECOMMENDED: X-axis label on axis {i} has no labelpad. " f"Use labelpad=10"
+                f"⚠️  RECOMMENDED: X-axis label on axis {i} has no labelpad. "
+                f"Use labelpad=10"
             )
         if ylabel and not axis.yaxis.labelpad:
             issues.append(
-                f"⚠️  RECOMMENDED: Y-axis label on axis {i} has no labelpad. " f"Use labelpad=10"
+                f"⚠️  RECOMMENDED: Y-axis label on axis {i} has no labelpad. "
+                f"Use labelpad=10"
             )
 
     return issues

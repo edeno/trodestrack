@@ -142,17 +142,29 @@ def generate_qa_report(
     # Validation: Check array shapes
     N = t.shape[0]
     if positions_true.shape != (N, 2):
-        raise ValueError(f"Shape mismatch: positions_true {positions_true.shape} vs t {t.shape}")
+        raise ValueError(
+            f"Shape mismatch: positions_true {positions_true.shape} vs t {t.shape}"
+        )
     if positions_est.shape != (N, 2):
-        raise ValueError(f"Shape mismatch: positions_est {positions_est.shape} vs t {t.shape}")
+        raise ValueError(
+            f"Shape mismatch: positions_est {positions_est.shape} vs t {t.shape}"
+        )
     if velocities_true.shape != (N, 2):
-        raise ValueError(f"Shape mismatch: velocities_true {velocities_true.shape} vs t {t.shape}")
+        raise ValueError(
+            f"Shape mismatch: velocities_true {velocities_true.shape} vs t {t.shape}"
+        )
     if velocities_est.shape != (N, 2):
-        raise ValueError(f"Shape mismatch: velocities_est {velocities_est.shape} vs t {t.shape}")
+        raise ValueError(
+            f"Shape mismatch: velocities_est {velocities_est.shape} vs t {t.shape}"
+        )
     if headings_true.shape != (N,):
-        raise ValueError(f"Shape mismatch: headings_true {headings_true.shape} vs t {t.shape}")
+        raise ValueError(
+            f"Shape mismatch: headings_true {headings_true.shape} vs t {t.shape}"
+        )
     if headings_est.shape != (N,):
-        raise ValueError(f"Shape mismatch: headings_est {headings_est.shape} vs t {t.shape}")
+        raise ValueError(
+            f"Shape mismatch: headings_est {headings_est.shape} vs t {t.shape}"
+        )
     if nees.shape[0] != N:
         raise ValueError(f"Shape mismatch: nees {nees.shape} vs t {t.shape}")
 
@@ -174,7 +186,9 @@ def generate_qa_report(
     nees_stats = compute_nees_stats(nees, state_dim=state_dim, confidence=0.95)
 
     if nis is not None and measurement_dim is not None:
-        nis_stats = compute_nis_stats(nis, measurement_dim=measurement_dim, confidence=0.95)
+        nis_stats = compute_nis_stats(
+            nis, measurement_dim=measurement_dim, confidence=0.95
+        )
     else:
         nis_stats = None
 
@@ -196,7 +210,9 @@ def generate_qa_report(
             plt.close(fig_summary)
 
             # Page 2: Position error time series
-            fig_pos, _ = plot_position_error(t, positions_true, positions_est, prd_threshold_m=0.02)
+            fig_pos, _ = plot_position_error(
+                t, positions_true, positions_est, prd_threshold_m=0.02
+            )
             pdf.savefig(fig_pos, bbox_inches="tight")
             plt.close(fig_pos)
 
@@ -218,7 +234,9 @@ def generate_qa_report(
             plt.close(fig_traj)
 
             # Page 6: NEES histogram
-            fig_nees, _ = plot_nees_histogram(nees, state_dim=state_dim, confidence=0.95)
+            fig_nees, _ = plot_nees_histogram(
+                nees, state_dim=state_dim, confidence=0.95
+            )
             pdf.savefig(fig_nees, bbox_inches="tight")
             plt.close(fig_nees)
 
@@ -313,7 +331,9 @@ def _create_summary_page(
     text_lines.append(
         f"95% CI bounds:    [{nees_stats['chi2_lower']:.2f}, {nees_stats['chi2_upper']:.2f}]"
     )
-    text_lines.append(f"Within bounds:    {nees_stats['pct_in_bounds']:.1f}%  (expect ~95%)")
+    text_lines.append(
+        f"Within bounds:    {nees_stats['pct_in_bounds']:.1f}%  (expect ~95%)"
+    )
     text_lines.append("")
 
     # Section 3 (optional): NIS Consistency
@@ -327,7 +347,9 @@ def _create_summary_page(
         text_lines.append(
             f"95% CI bounds:    [{nis_stats['chi2_lower']:.2f}, {nis_stats['chi2_upper']:.2f}]"
         )
-        text_lines.append(f"Within bounds:    {nis_stats['pct_in_bounds']:.1f}%  (expect ~95%)")
+        text_lines.append(
+            f"Within bounds:    {nis_stats['pct_in_bounds']:.1f}%  (expect ~95%)"
+        )
         text_lines.append("")
 
     # Section 4 (optional): Configuration

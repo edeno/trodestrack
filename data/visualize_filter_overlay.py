@@ -130,7 +130,9 @@ def setup_figure(style: OverlayStyle) -> tuple[plt.Figure, dict[str, plt.Axes]]:
     ax_video = fig.add_subplot(gs[:2, :2])
     ax_video.set_aspect("equal")
     ax_video.axis("off")
-    ax_video.set_title("Video with Filter Overlay", fontsize=12, fontweight="bold", pad=10)
+    ax_video.set_title(
+        "Video with Filter Overlay", fontsize=12, fontweight="bold", pad=10
+    )
 
     ax_gyro = fig.add_subplot(gs[0, 2])
     ax_gyro.set_ylabel("Gyro (deg/s)", fontsize=9)
@@ -210,7 +212,9 @@ def create_filter_overlay_video(
     end_time = start_time + duration
     max_time = min(data.t_cam[-1], video_info["duration_s"])
     if end_time > max_time:
-        print(f"Warning: Requested end time {end_time:.1f}s exceeds data ({max_time:.1f}s)")
+        print(
+            f"Warning: Requested end time {end_time:.1f}s exceeds data ({max_time:.1f}s)"
+        )
         end_time = max_time
         duration = max(0.0, end_time - start_time)
         print(f"  Adjusted duration to {duration:.1f}s")
@@ -243,11 +247,15 @@ def create_filter_overlay_video(
     proj = np.einsum("ti,tij,tj->t", u, Cov_v, u)
     radial_rms = 0.5 * (Cov_v[:, 0, 0] + Cov_v[:, 1, 1])  # ≈ mean of Var(vx), Var(vy)
     vel_sigma_mps = np.where(
-        speed > eps, np.sqrt(np.clip(proj, 0.0, None)), np.sqrt(np.clip(radial_rms, 0.0, None))
+        speed > eps,
+        np.sqrt(np.clip(proj, 0.0, None)),
+        np.sqrt(np.clip(radial_rms, 0.0, None)),
     )
     vel_sigma_cms = vel_sigma_mps * 100.0  # m/s -> cm/s
 
-    heading_sigma_deg = np.degrees(np.sqrt(np.clip(P[:, 5, 5], 0.0, None)))  # rad -> deg
+    heading_sigma_deg = np.degrees(
+        np.sqrt(np.clip(P[:, 5, 5], 0.0, None))
+    )  # rad -> deg
     print(
         f"σ_speed cm/s — median: {np.nanmedian(vel_sigma_cms):.2f}, 95th: {np.nanpercentile(vel_sigma_cms,95):.2f}"
     )
@@ -309,7 +317,11 @@ def create_filter_overlay_video(
     def read_one(idx):
         return load_video_frame(video_path, int(idx))
 
-    workers = min(8, (os.cpu_count() or 4)) if config.max_workers is None else config.max_workers
+    workers = (
+        min(8, (os.cpu_count() or 4))
+        if config.max_workers is None
+        else config.max_workers
+    )
 
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futures = {ex.submit(read_one, int(v)): i for i, v in enumerate(vidx)}
@@ -334,10 +346,18 @@ def create_filter_overlay_video(
         [], [], "c-", linewidth=1.5, alpha=0.6, label="Filter trajectory"
     )
     led1_circle = Circle(
-        (0, 0), config.style.led_marker_size, color="red", alpha=0.5, label="LED1 (back)"
+        (0, 0),
+        config.style.led_marker_size,
+        color="red",
+        alpha=0.5,
+        label="LED1 (back)",
     )
     led2_circle = Circle(
-        (0, 0), config.style.led_marker_size, color="yellow", alpha=0.5, label="LED2 (front)"
+        (0, 0),
+        config.style.led_marker_size,
+        color="yellow",
+        alpha=0.5,
+        label="LED2 (front)",
     )
     axes["video"].add_patch(led1_circle)
     axes["video"].add_patch(led2_circle)
@@ -361,27 +381,43 @@ def create_filter_overlay_video(
     (gyro_x_line,) = axes["gyro"].plot([], [], "-", linewidth=1.2, label="X", alpha=0.8)
     (gyro_y_line,) = axes["gyro"].plot([], [], "-", linewidth=1.2, label="Y", alpha=0.8)
     (gyro_z_line,) = axes["gyro"].plot([], [], "-", linewidth=1.2, label="Z", alpha=0.8)
-    gyro_marker = axes["gyro"].axvline(0, color="black", linestyle="--", linewidth=1.5, alpha=0.5)
+    gyro_marker = axes["gyro"].axvline(
+        0, color="black", linestyle="--", linewidth=1.5, alpha=0.5
+    )
     axes["gyro"].legend(loc="upper right", fontsize=7)
 
-    (accel_x_line,) = axes["accel"].plot([], [], "-", linewidth=1.2, label="X", alpha=0.8)
-    (accel_y_line,) = axes["accel"].plot([], [], "-", linewidth=1.2, label="Y", alpha=0.8)
-    (accel_z_line,) = axes["accel"].plot([], [], "-", linewidth=1.2, label="Z", alpha=0.8)
-    accel_marker = axes["accel"].axvline(0, color="black", linestyle="--", linewidth=1.5, alpha=0.5)
+    (accel_x_line,) = axes["accel"].plot(
+        [], [], "-", linewidth=1.2, label="X", alpha=0.8
+    )
+    (accel_y_line,) = axes["accel"].plot(
+        [], [], "-", linewidth=1.2, label="Y", alpha=0.8
+    )
+    (accel_z_line,) = axes["accel"].plot(
+        [], [], "-", linewidth=1.2, label="Z", alpha=0.8
+    )
+    accel_marker = axes["accel"].axvline(
+        0, color="black", linestyle="--", linewidth=1.5, alpha=0.5
+    )
     axes["accel"].legend(loc="upper right", fontsize=7)
 
     # State plots
     (vel_line,) = axes["pos_vel"].plot([], [], "-", linewidth=1.5, label="Speed")
     vel_fill = axes["pos_vel"].fill_between([], [], [], alpha=0.2, label="±1σ")
-    vel_marker = axes["pos_vel"].axvline(0, color="black", linestyle="--", linewidth=1.5, alpha=0.5)
+    vel_marker = axes["pos_vel"].axvline(
+        0, color="black", linestyle="--", linewidth=1.5, alpha=0.5
+    )
 
-    (heading_line_ax,) = axes["heading"].plot([], [], "-", linewidth=1.5, label="Heading")
+    (heading_line_ax,) = axes["heading"].plot(
+        [], [], "-", linewidth=1.5, label="Heading"
+    )
     heading_fill = axes["heading"].fill_between([], [], [], alpha=0.2, label="±1σ")
     heading_marker = axes["heading"].axvline(
         0, color="black", linestyle="--", linewidth=1.5, alpha=0.5
     )
 
-    (unc_line,) = axes["uncertainty"].plot([], [], "-", linewidth=1.5, label="Position σ")
+    (unc_line,) = axes["uncertainty"].plot(
+        [], [], "-", linewidth=1.5, label="Position σ"
+    )
     unc_marker = axes["uncertainty"].axvline(
         0, color="black", linestyle="--", linewidth=1.5, alpha=0.5
     )
@@ -396,7 +432,7 @@ def create_filter_overlay_video(
         bbox=dict(boxstyle="round", facecolor="white", alpha=0.9),
     )
 
-    def init():  # noqa: D401
+    def init():
         """Initialize blit artists."""
         return (
             video_frame,
@@ -424,7 +460,7 @@ def create_filter_overlay_video(
             time_text,
         )
 
-    def update(k: int):  # noqa: D401
+    def update(k: int):
         """Advance all artists to frame index k."""
         current_time = frame_times[k]
         fi = fidx[k]
@@ -488,11 +524,15 @@ def create_filter_overlay_video(
 
         # State windows (use t_filter for alignment with EKF output)
         half_s = config.state_window_s / 2.0
-        mstate = (t_filter >= current_time - half_s) & (t_filter <= current_time + half_s)
+        mstate = (t_filter >= current_time - half_s) & (
+            t_filter <= current_time + half_s
+        )
         ts = t_filter[mstate]
 
         vel_w = vel_mag_cms[mstate]
-        hdg_w = np.degrees(np.arctan2(np.sin(heading_rad[mstate]), np.cos(heading_rad[mstate])))
+        hdg_w = np.degrees(
+            np.arctan2(np.sin(heading_rad[mstate]), np.cos(heading_rad[mstate]))
+        )
         unc_w = pos_std_cm_series[mstate]
 
         # Update uncertainty fills (±2σ)
@@ -504,14 +544,20 @@ def create_filter_overlay_video(
             v_lower = vel_w - vel_sig_w
             v_upper = vel_w + vel_sig_w
             v_verts = np.concatenate(
-                [np.column_stack([ts, v_lower]), np.column_stack([ts[::-1], v_upper[::-1]])]
+                [
+                    np.column_stack([ts, v_lower]),
+                    np.column_stack([ts[::-1], v_upper[::-1]]),
+                ]
             )
             vel_fill.set_verts([v_verts])
 
             h_lower = ((hdg_w - hdg_sig_w + 180.0) % 360.0) - 180.0
             h_upper = ((hdg_w + hdg_sig_w + 180.0) % 360.0) - 180.0
             h_verts = np.concatenate(
-                [np.column_stack([ts, h_lower]), np.column_stack([ts[::-1], h_upper[::-1]])]
+                [
+                    np.column_stack([ts, h_lower]),
+                    np.column_stack([ts[::-1], h_upper[::-1]]),
+                ]
             )
             heading_fill.set_verts([h_verts])
         else:
@@ -520,7 +566,9 @@ def create_filter_overlay_video(
 
         vel_line.set_data(ts, vel_w)
         axes["pos_vel"].set_xlim(current_time - half_s, current_time + half_s)
-        vmax = float(np.max(vel_w) * 1.2) if len(vel_w) else config.limits.vel_max_default
+        vmax = (
+            float(np.max(vel_w) * 1.2) if len(vel_w) else config.limits.vel_max_default
+        )
         axes["pos_vel"].set_ylim(0.0, max(config.limits.vel_max_default, vmax))
         vel_marker.set_xdata([current_time, current_time])
 
@@ -568,7 +616,9 @@ def create_filter_overlay_video(
     )
 
     threads = (
-        config.ffmpeg_threads if config.ffmpeg_threads is not None else min(4, os.cpu_count() or 2)
+        config.ffmpeg_threads
+        if config.ffmpeg_threads is not None
+        else min(4, os.cpu_count() or 2)
     )
     writer = FFMpegWriter(
         fps=fps,
@@ -623,7 +673,9 @@ def _render_parallel_png(
 
     # Partition frames evenly
     chunk_size = math.ceil(n_frames / max_workers)
-    chunks = [(s, min(n_frames, s + chunk_size)) for s in range(0, n_frames, chunk_size)]
+    chunks = [
+        (s, min(n_frames, s + chunk_size)) for s in range(0, n_frames, chunk_size)
+    ]
 
     with ProcessPoolExecutor(max_workers=max_workers) as ex:
         futs = [
@@ -658,7 +710,9 @@ def _render_parallel_png(
         for fut in futs:
             fut.result()
 
-    _ffmpeg_stitch(pattern, output_path, fps, bitrate=config.bitrate_kbps, threads=max_workers)
+    _ffmpeg_stitch(
+        pattern, output_path, fps, bitrate=config.bitrate_kbps, threads=max_workers
+    )
     shutil.rmtree(tmpdir, ignore_errors=True)
 
 
@@ -700,10 +754,18 @@ def _render_chunk(
         [], [], "c-", linewidth=1.5, alpha=0.6, label="Filter trajectory"
     )
     led1_circle = Circle(
-        (0, 0), config.style.led_marker_size, color="red", alpha=0.5, label="LED1 (back)"
+        (0, 0),
+        config.style.led_marker_size,
+        color="red",
+        alpha=0.5,
+        label="LED1 (back)",
     )
     led2_circle = Circle(
-        (0, 0), config.style.led_marker_size, color="yellow", alpha=0.5, label="LED2 (front)"
+        (0, 0),
+        config.style.led_marker_size,
+        color="yellow",
+        alpha=0.5,
+        label="LED2 (front)",
     )
     axes["video"].add_patch(led1_circle)
     axes["video"].add_patch(led2_circle)
@@ -725,24 +787,40 @@ def _render_chunk(
     (gyro_x_line,) = axes["gyro"].plot([], [], "-", linewidth=1.2, label="X", alpha=0.8)
     (gyro_y_line,) = axes["gyro"].plot([], [], "-", linewidth=1.2, label="Y", alpha=0.8)
     (gyro_z_line,) = axes["gyro"].plot([], [], "-", linewidth=1.2, label="Z", alpha=0.8)
-    gyro_marker = axes["gyro"].axvline(0, color="black", linestyle="--", linewidth=1.5, alpha=0.5)
+    gyro_marker = axes["gyro"].axvline(
+        0, color="black", linestyle="--", linewidth=1.5, alpha=0.5
+    )
 
-    (accel_x_line,) = axes["accel"].plot([], [], "-", linewidth=1.2, label="X", alpha=0.8)
-    (accel_y_line,) = axes["accel"].plot([], [], "-", linewidth=1.2, label="Y", alpha=0.8)
-    (accel_z_line,) = axes["accel"].plot([], [], "-", linewidth=1.2, label="Z", alpha=0.8)
-    accel_marker = axes["accel"].axvline(0, color="black", linestyle="--", linewidth=1.5, alpha=0.5)
+    (accel_x_line,) = axes["accel"].plot(
+        [], [], "-", linewidth=1.2, label="X", alpha=0.8
+    )
+    (accel_y_line,) = axes["accel"].plot(
+        [], [], "-", linewidth=1.2, label="Y", alpha=0.8
+    )
+    (accel_z_line,) = axes["accel"].plot(
+        [], [], "-", linewidth=1.2, label="Z", alpha=0.8
+    )
+    accel_marker = axes["accel"].axvline(
+        0, color="black", linestyle="--", linewidth=1.5, alpha=0.5
+    )
 
     (vel_line,) = axes["pos_vel"].plot([], [], "-", linewidth=1.5, label="Speed")
-    vel_marker = axes["pos_vel"].axvline(0, color="black", linestyle="--", linewidth=1.5, alpha=0.5)
+    vel_marker = axes["pos_vel"].axvline(
+        0, color="black", linestyle="--", linewidth=1.5, alpha=0.5
+    )
     vel_fill = axes["pos_vel"].fill_between([], [], [], alpha=0.2, label="±1σ")
 
-    (heading_line_ax,) = axes["heading"].plot([], [], "-", linewidth=1.5, label="Heading")
+    (heading_line_ax,) = axes["heading"].plot(
+        [], [], "-", linewidth=1.5, label="Heading"
+    )
     heading_marker = axes["heading"].axvline(
         0, color="black", linestyle="--", linewidth=1.5, alpha=0.5
     )
     heading_fill = axes["heading"].fill_between([], [], [], alpha=0.2, label="±1σ")
 
-    (unc_line,) = axes["uncertainty"].plot([], [], "-", linewidth=1.5, label="Position σ")
+    (unc_line,) = axes["uncertainty"].plot(
+        [], [], "-", linewidth=1.5, label="Position σ"
+    )
     unc_marker = axes["uncertainty"].axvline(
         0, color="black", linestyle="--", linewidth=1.5, alpha=0.5
     )
@@ -823,14 +901,20 @@ def _render_chunk(
             v_lower = vel_w - vel_sig_w
             v_upper = vel_w + vel_sig_w
             v_verts = np.concatenate(
-                [np.column_stack([ts, v_lower]), np.column_stack([ts[::-1], v_upper[::-1]])]
+                [
+                    np.column_stack([ts, v_lower]),
+                    np.column_stack([ts[::-1], v_upper[::-1]]),
+                ]
             )
             vel_fill.set_verts([v_verts])
 
             h_lower = ((hdg_w - hdg_sig_w + 180.0) % 360.0) - 180.0
             h_upper = ((hdg_w + hdg_sig_w + 180.0) % 360.0) - 180.0
             h_verts = np.concatenate(
-                [np.column_stack([ts, h_lower]), np.column_stack([ts[::-1], h_upper[::-1]])]
+                [
+                    np.column_stack([ts, h_lower]),
+                    np.column_stack([ts[::-1], h_upper[::-1]]),
+                ]
             )
             heading_fill.set_verts([h_verts])
         else:
@@ -839,7 +923,9 @@ def _render_chunk(
 
         vel_line.set_data(ts, vel_w)
         axes["pos_vel"].set_xlim(t - half_s, t + half_s)
-        vmax = float(np.max(vel_w) * 1.2) if len(vel_w) else config.limits.vel_max_default
+        vmax = (
+            float(np.max(vel_w) * 1.2) if len(vel_w) else config.limits.vel_max_default
+        )
         axes["pos_vel"].set_ylim(0.0, max(config.limits.vel_max_default, vmax))
         vel_marker.set_xdata([t, t])
 
@@ -1024,7 +1110,9 @@ def main(*, smoother: bool = False, render_mode: str = "single_process") -> int:
 
 
 def _parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Visualize EKF results with uncertainty overlays.")
+    p = argparse.ArgumentParser(
+        description="Visualize EKF results with uncertainty overlays."
+    )
     p.add_argument(
         "--smooth",
         action="store_true",

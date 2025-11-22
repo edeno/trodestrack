@@ -137,7 +137,9 @@ def test_specific_force_vs_inertial_accel_difference():
     # Expected gravity magnitude in tilted frame
     tilt_roll_rad = np.deg2rad(config.imu_tilt_roll_deg)
     tilt_pitch_rad = np.deg2rad(config.imu_tilt_pitch_deg)
-    g_x, g_y = compute_gravity_in_tilted_frame(tilt_roll_rad, tilt_pitch_rad, config.gravity)
+    g_x, g_y = compute_gravity_in_tilted_frame(
+        tilt_roll_rad, tilt_pitch_rad, config.gravity
+    )
     expected_g_magnitude = np.hypot(g_x, g_y)
 
     # Mean instantaneous magnitude should be close to expected gravity magnitude
@@ -331,7 +333,9 @@ def test_filter_3d_imu_gravity_compensation_at_rest():
     vz_late = vz[half:]
 
     # Mean should be close to zero (gravity compensated)
-    assert np.abs(np.mean(vz_late)) < 0.05, f"vz mean {np.mean(vz_late):.4f} should be ~0"
+    assert (
+        np.abs(np.mean(vz_late)) < 0.05
+    ), f"vz mean {np.mean(vz_late):.4f} should be ~0"
 
     # Std should be small (no vertical motion)
     assert np.std(vz_late) < 0.1, f"vz std {np.std(vz_late):.4f} should be small"

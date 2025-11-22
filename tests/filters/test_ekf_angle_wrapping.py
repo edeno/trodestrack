@@ -61,7 +61,7 @@ def test_wrap_angle_function():
 
 def test_predict_step_wraps_heading():
     """Test that predict_step wraps heading to (-π, π]."""
-    config = EKFConfig()
+    config = EKFConfig(state_mode="2d_full")
 
     # Create state with heading near +π
     mean = jnp.array([0.0, 0.0, 0.0, 0.0, jnp.pi - 0.1, 0.0, 0.0, 0.0])
@@ -91,7 +91,7 @@ def test_predict_step_wraps_heading():
 
 def test_predict_step_wraps_heading_negative():
     """Test that predict_step wraps heading from negative side."""
-    config = EKFConfig()
+    config = EKFConfig(state_mode="2d_full")
 
     # Create state with heading near -π
     mean = jnp.array([0.0, 0.0, 0.0, 0.0, -jnp.pi + 0.1, 0.0, 0.0, 0.0])
@@ -117,8 +117,13 @@ def test_predict_step_wraps_heading_negative():
 
 
 def test_update_step_wraps_heading():
-    """Test that update_step wraps heading after measurement update."""
-    config = EKFConfig()
+    """Test that update_step wraps heading after measurement update.
+
+    Note: Must disable Mahalanobis gating because the huge innovation
+    (prior at 5π, measurement near 0) would be correctly rejected by gating.
+    We want to test the wrapping behavior, not the gating behavior.
+    """
+    config = EKFConfig(state_mode="2d_full", use_mahalanobis_gating=False)
 
     # Create predicted state with large positive heading
     # This simulates accumulated heading from many IMU integrations
@@ -134,7 +139,7 @@ def test_update_step_wraps_heading():
 
     # Update
     camera_model = make_camera_model(z_led1, z_led2, config)
-    state_upd, log_lik = update_step(
+    state_upd, _log_lik = update_step(
         state_pred,
         camera_model,
         frame_idx=0,
@@ -160,7 +165,7 @@ def test_update_step_wraps_heading():
 
 def test_heading_continuity_across_2pi():
     """Test that heading remains continuous when crossing ±π boundary."""
-    config = EKFConfig()
+    config = EKFConfig(state_mode="2d_full")
 
     # Start near π
     mean = jnp.array([0.0, 0.0, 0.0, 0.0, jnp.pi - 0.05, 0.0, 0.0, 0.0])

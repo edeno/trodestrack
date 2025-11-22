@@ -48,7 +48,10 @@ def mock_run_directory(tmp_path: Path) -> Path:
         run_dir / "positions_est.npy",
         np.column_stack([t * 0.1, np.zeros(N)]) + np.random.randn(N, 2) * 0.01,
     )
-    np.save(run_dir / "velocities_true.npy", np.column_stack([np.ones(N) * 0.1, np.zeros(N)]))
+    np.save(
+        run_dir / "velocities_true.npy",
+        np.column_stack([np.ones(N) * 0.1, np.zeros(N)]),
+    )
     np.save(
         run_dir / "velocities_est.npy",
         np.column_stack([np.ones(N) * 0.1, np.zeros(N)]) + np.random.randn(N, 2) * 0.01,
@@ -122,7 +125,10 @@ class TestReportCommand:
 
             # Assert: Command failed with clear error message
             assert result.returncode != 0
-            assert "does not exist" in result.stderr.lower() or "not found" in result.stderr.lower()
+            assert (
+                "does not exist" in result.stderr.lower()
+                or "not found" in result.stderr.lower()
+            )
 
         finally:
             if pdf_path.exists():

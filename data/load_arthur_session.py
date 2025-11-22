@@ -242,7 +242,9 @@ def convert_positions_to_meters(
     return led1_meters, led2_meters
 
 
-def convert_meters_to_pixels(positions_m: np.ndarray, meters_per_pixel: float) -> np.ndarray:
+def convert_meters_to_pixels(
+    positions_m: np.ndarray, meters_per_pixel: float
+) -> np.ndarray:
     """Convert positions from meters to pixels.
 
     Parameters
@@ -391,15 +393,12 @@ def load_arthur_session(
     --------
     >>> # Load with full 3D IMU (default)
     >>> data = load_arthur_session(
-    ...     "arthur20220324_position_info.parquet",
-    ...     "arthur20220324_imu_info.parquet"
+    ...     "arthur20220324_position_info.parquet", "arthur20220324_imu_info.parquet"
     ... )
     >>> print(f"IMU shape: {data.U_imu.shape}")  # (N, 6)
 
     >>> # Load with legacy 2D IMU
-    >>> data_2d = load_arthur_session(
-    ...     "position.parquet", "imu.parquet", imu_mode="2d"
-    ... )
+    >>> data_2d = load_arthur_session("position.parquet", "imu.parquet", imu_mode="2d")
     >>> print(f"IMU shape: {data_2d.U_imu.shape}")  # (N, 3)
 
     Notes
@@ -488,7 +487,9 @@ def load_arthur_session(
     if verbose and imu_mode == "3d":
         accel_mag_3d = np.sqrt(U_imu[:, 3] ** 2 + U_imu[:, 4] ** 2 + U_imu[:, 5] ** 2)
         print("\nData quality check:")
-        print(f"  3D accel magnitude: {accel_mag_3d.mean():.2f} m/s² (expected ~{GRAVITY:.2f})")
+        print(
+            f"  3D accel magnitude: {accel_mag_3d.mean():.2f} m/s² (expected ~{GRAVITY:.2f})"
+        )
 
     # All frames valid (no tracking failures in this dataset)
     mask_cam = np.ones(len(pos_df), dtype=bool)
@@ -541,7 +542,9 @@ def main():
     # Test pixel conversion
     print("\n✓ Testing pixel conversion:")
     led1_pixels = convert_meters_to_pixels(data.Z_cam_led1, data.meters_per_pixel)
-    print(f"  LED1 pixels range: [{led1_pixels[:, 0].min():.1f}, {led1_pixels[:, 0].max():.1f}]")
+    print(
+        f"  LED1 pixels range: [{led1_pixels[:, 0].min():.1f}, {led1_pixels[:, 0].max():.1f}]"
+    )
 
     # Test video loading if available
     video_path = script_dir / "20220324_arthur_02_r1.mp4"

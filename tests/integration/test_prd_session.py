@@ -51,9 +51,7 @@ if TYPE_CHECKING:
 PRD_POSITION_RMSE_M = 0.02  # Position RMSE <= 0.02 m (2 cm)
 PRD_VELOCITY_RMSE_M_S = 0.10  # Velocity RMSE <= 0.10 m/s (10 cm/s)
 PRD_HEADING_RMSE_DEG = 7.0  # Heading RMSE <= 7 degrees
-PRD_DROPOUT_DRIFT_M = (
-    3.5  # Drift <= 3.5 m after 5s dropout (realistic consumer-grade IMU, 95th percentile)
-)
+PRD_DROPOUT_DRIFT_M = 3.5  # Drift <= 3.5 m after 5s dropout (realistic consumer-grade IMU, 95th percentile)
 
 
 # =============================================================================
@@ -119,6 +117,7 @@ def get_production_ekf_config(**overrides: float | int | bool) -> EKFConfig:
         dropout_q_pos_multiplier=10.0,
         dropout_q_vel_multiplier=10.0,
         dropout_q_bias_multiplier=0.1,
+        state_mode="2d_full",  # Use 8D layout (tests use hardcoded indices)
     )
     defaults.update(overrides)
     return EKFConfig(**defaults)
@@ -256,7 +255,9 @@ def test_30min_session_accuracy():
     # Report results
     print("\n30-Minute Session Accuracy:")
     print(f"  Position RMSE: {pos_rmse_m:.4f} m (PRD: ≤{PRD_POSITION_RMSE_M} m)")
-    print(f"  Velocity RMSE: {vel_rmse_m_s:.4f} m/s (PRD: ≤{PRD_VELOCITY_RMSE_M_S} m/s)")
+    print(
+        f"  Velocity RMSE: {vel_rmse_m_s:.4f} m/s (PRD: ≤{PRD_VELOCITY_RMSE_M_S} m/s)"
+    )
     print(f"  Heading RMSE:  {heading_rmse_deg:.3f}° (PRD: ≤{PRD_HEADING_RMSE_DEG}°)")
     print(f"  Duration: {config.duration_s / 60:.1f} min")
     print(f"  Camera frames: {len(pos_est)}")
@@ -333,7 +334,7 @@ def test_5s_dropout_drift_integration():
     sim_data["mask_cam"] = mask_with_dropouts
 
     # Run EKF with adaptive dropout handling
-    filter_result, ground_truth = run_ekf_on_sim(sim_data, use_heading=True)
+    filter_result, _ground_truth = run_ekf_on_sim(sim_data, use_heading=True)
 
     # Compute drift for each dropout period independently
     # (Each dropout needs its own mask to be measured correctly)
@@ -360,7 +361,9 @@ def test_5s_dropout_drift_integration():
         if drift_result["drift_m"] is not None:
             drift_m = drift_result["drift_m"]
             max_drift = max(max_drift, drift_m)
-            print(f"\nDropout {i + 1} ({start_t:.0f}s-{end_t:.0f}s): drift = {drift_m:.4f} m")
+            print(
+                f"\nDropout {i + 1} ({start_t:.0f}s-{end_t:.0f}s): drift = {drift_m:.4f} m"
+            )
 
     print(f"\nMaximum dropout drift: {max_drift:.4f} m (PRD: ≤{PRD_DROPOUT_DRIFT_M} m)")
 
@@ -420,8 +423,12 @@ def test_sensor_fusion_ablations():
     sim_data_imu_only["mask_cam"] = np.zeros_like(sim_data["mask_cam"], dtype=bool)
 
     result_imu, gt_imu = run_ekf_on_sim(sim_data_imu_only, use_heading=False)
-    pos_rmse_imu = compute_position_rmse(gt_imu["pos_truth"], result_imu.filtered_means[:, :2])
-    vel_rmse_imu = compute_velocity_rmse(gt_imu["vel_truth"], result_imu.filtered_means[:, 2:4])
+    pos_rmse_imu = compute_position_rmse(
+        gt_imu["pos_truth"], result_imu.filtered_means[:, :2]
+    )
+    vel_rmse_imu = compute_velocity_rmse(
+        gt_imu["vel_truth"], result_imu.filtered_means[:, 2:4]
+    )
 
     # Configuration 3: Vision-only (inflate IMU noise to effectively disable it)
     ekf_override_vision_only = {
@@ -443,14 +450,22 @@ def test_sensor_fusion_ablations():
     print("\nSensor Fusion Ablation Study:")
     print("  Configuration     | Position RMSE | Velocity RMSE")
     print("  ------------------|---------------|---------------")
-    print(f"  Fusion (both)     | {pos_rmse_fusion:.4f} m     | {vel_rmse_fusion:.4f} m/s")
+    print(
+        f"  Fusion (both)     | {pos_rmse_fusion:.4f} m     | {vel_rmse_fusion:.4f} m/s"
+    )
     print(f"  IMU-only          | {pos_rmse_imu:.4f} m     | {vel_rmse_imu:.4f} m/s")
-    print(f"  Vision-only       | {pos_rmse_vision:.4f} m     | {vel_rmse_vision:.4f} m/s")
+    print(
+        f"  Vision-only       | {pos_rmse_vision:.4f} m     | {vel_rmse_vision:.4f} m/s"
+    )
 
     # Compute improvement ratios (with safety check)
     if pos_rmse_fusion > 1e-6:  # Reasonable minimum RMSE threshold
-        print(f"\nFusion improvement over IMU-only:    {pos_rmse_imu / pos_rmse_fusion:.2f}×")
-        print(f"Fusion improvement over Vision-only: {pos_rmse_vision / pos_rmse_fusion:.2f}×")
+        print(
+            f"\nFusion improvement over IMU-only:    {pos_rmse_imu / pos_rmse_fusion:.2f}×"
+        )
+        print(
+            f"Fusion improvement over Vision-only: {pos_rmse_vision / pos_rmse_fusion:.2f}×"
+        )
     else:
         print(
             f"\nFusion RMSE extremely small ({pos_rmse_fusion:.6f} m), "
@@ -638,7 +653,8 @@ def test_smoother_long_session():
 
     # Compute mean uncertainty reduction
     filter_pos_std = np.sqrt(
-        filter_result.filtered_covariances[:, 0, 0] + filter_result.filtered_covariances[:, 1, 1]
+        filter_result.filtered_covariances[:, 0, 0]
+        + filter_result.filtered_covariances[:, 1, 1]
     )
     smoother_pos_std = np.sqrt(
         smoother_result.smoothed_covariances[:, 0, 0]

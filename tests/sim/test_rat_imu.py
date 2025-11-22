@@ -381,7 +381,9 @@ def test_accel_bias_random_walk() -> None:
         increments = np.diff(bias)
 
         # Zero mean
-        assert np.abs(np.mean(increments)) < 3 * config.accel_bias_rw_density * np.sqrt(dt)
+        assert np.abs(np.mean(increments)) < 3 * config.accel_bias_rw_density * np.sqrt(
+            dt
+        )
 
         # Correct std
         expected_std = config.accel_bias_rw_density * np.sqrt(dt)
@@ -389,7 +391,9 @@ def test_accel_bias_random_walk() -> None:
 
         # Guard against divide-by-zero
         assert expected_std > 1e-10, f"Expected std too small: {expected_std}"
-        assert np.abs(observed_std - expected_std) / expected_std < TOLERANCE_BIAS_RW_STD
+        assert (
+            np.abs(observed_std - expected_std) / expected_std < TOLERANCE_BIAS_RW_STD
+        )
 
 
 # =============================================================================
@@ -595,7 +599,9 @@ def test_led_swap_occurs_when_enabled() -> None:
         ), f"Swap rate {observed_swap_rate:.2%} differs from expected {p:.2%}"
 
     # Verify swaps only occur when both visible
-    assert np.all(both_visible[swap_applied]), "Swaps occurred when LEDs not both visible"
+    assert np.all(
+        both_visible[swap_applied]
+    ), "Swaps occurred when LEDs not both visible"
 
     # Verify that when swaps occur, measurements match swapped truth
     led1_truth = sim["led1_truth_cam"]
@@ -811,7 +817,9 @@ def test_camera_timestamps_relationship(minimal_config) -> None:
 
     # All differences should be positive and close to latency
     assert np.all(diff >= 0)
-    assert np.allclose(diff, minimal_config.cam_latency_s, atol=minimal_config.cam_jitter_s * 3)
+    assert np.allclose(
+        diff, minimal_config.cam_latency_s, atol=minimal_config.cam_jitter_s * 3
+    )
 
 
 # =============================================================================

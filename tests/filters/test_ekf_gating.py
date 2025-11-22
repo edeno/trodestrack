@@ -19,7 +19,7 @@ from trodestrack.models.state_layout import LAYOUT_2D_FULL
 @pytest.fixture
 def ekf_config():
     """Standard EKF configuration."""
-    return EKFConfig()
+    return EKFConfig(state_mode="2d_full")
 
 
 @pytest.fixture
@@ -28,6 +28,7 @@ def ekf_config_with_gating():
     return EKFConfig(
         use_mahalanobis_gating=True,
         mahalanobis_threshold_prob=0.997,  # p=0.997 → very conservative
+        state_mode="2d_full",  # Use 8D layout (tests use hardcoded indices)
     )
 
 
@@ -126,9 +127,16 @@ def test_gating_threshold_calculation():
     assert threshold_4d > threshold_2d
 
 
-def test_gating_disabled_accepts_outlier(ekf_config, initial_state):
-    """Test that with gating disabled, outliers are accepted."""
-    # Very far observation
+def test_gating_disabled_accepts_outlier(initial_state):
+    """Test that with gating disabled, outliers are accepted.
+
+    With Mahalanobis gating disabled, even far outliers should update the state.
+    The Kalman gain determines how much the state moves, but it WILL move.
+    """
+    # Explicitly disable gating
+    ekf_config = EKFConfig(state_mode="2d_full", use_mahalanobis_gating=False)
+
+    # Very far observation (4 meters from state)
     z_led1 = jnp.array([4.98, 4.98])
     z_led2 = jnp.array([5.02, 5.02])
 
@@ -142,10 +150,14 @@ def test_gating_disabled_accepts_outlier(ekf_config, initial_state):
         layout=LAYOUT_2D_FULL,
     )
 
-    # State should be updated (no gating, outlier accepted)
+    # State should be updated significantly (high Kalman gain with low P/R ratio)
+    # With P=0.01 and R~0.0001, K ≈ 0.99, so state should move ~4m * 0.99 ≈ 4m
     assert not jnp.allclose(
         state_upd.mean[:2], initial_state.mean[:2], atol=0.1
     ), "Without gating, outlier should update state"
+
+    # Verify log-likelihood is non-zero (update happened)
+    assert log_lik != 0.0, "Update should produce non-zero log-likelihood"
 
 
 def test_gating_moderate_outlier():
@@ -159,6 +171,7 @@ def test_gating_moderate_outlier():
         use_mahalanobis_gating=True,
         mahalanobis_threshold_prob=0.997,  # Very conservative
         measurement_noise_pos=0.005**2,
+        state_mode="2d_full",  # Use 8D layout (tests use hardcoded indices)
     )
 
     # Moderate outlier: 10cm error (moderate but not huge)
@@ -187,7 +200,11 @@ def test_gating_with_partial_observations():
     cov = jnp.eye(8) * 0.01
     state = EKFState(mean=mean, cov=cov)
 
-    config = EKFConfig(use_mahalanobis_gating=True, mahalanobis_threshold_prob=0.997)
+    config = EKFConfig(
+        use_mahalanobis_gating=True,
+        mahalanobis_threshold_prob=0.997,
+        state_mode="2d_full",
+    )
 
     # LED1 valid, LED2 outlier (NaN)
     # Good LED1 observation
@@ -214,7 +231,11 @@ def test_gating_with_confidence_scaling():
     cov = jnp.eye(8) * 0.01
     state = EKFState(mean=mean, cov=cov)
 
-    config = EKFConfig(use_mahalanobis_gating=True, mahalanobis_threshold_prob=0.997)
+    config = EKFConfig(
+        use_mahalanobis_gating=True,
+        mahalanobis_threshold_prob=0.997,
+        state_mode="2d_full",
+    )
 
     # Moderate outlier (might be rejected with high confidence, accepted with low)
     z_led1 = jnp.array([1.5, 1.5])
@@ -260,6 +281,7 @@ def test_gating_consistency():
     config = EKFConfig(
         use_mahalanobis_gating=True,
         mahalanobis_threshold_prob=0.997,
+        state_mode="2d_full",  # Use 8D layout (tests use hardcoded indices)
     )
 
     # Same observation should give same result

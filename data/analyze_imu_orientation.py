@@ -280,9 +280,9 @@ def correlate_accel_with_velocity(
     for imu_axis in range(3):
         accel_interp = np.interp(t_cam_accel, t_imu, accel_m_s2[:, imu_axis])
         for cam_axis in range(2):
-            correlations[imu_axis, cam_axis] = np.corrcoef(cam_accel[:, cam_axis], accel_interp)[
-                0, 1
-            ]
+            correlations[imu_axis, cam_axis] = np.corrcoef(
+                cam_accel[:, cam_axis], accel_interp
+            )[0, 1]
 
     return correlations
 
@@ -342,7 +342,9 @@ def analyze_imu_orientation(
     heading = compute_heading_from_leds(led1_m, led2_m)
     heading_rate = compute_angular_velocity(t_cam, heading)
 
-    gyro_correlations = correlate_gyro_with_heading(t_cam, heading_rate, t_imu, gyro_rad_s)
+    gyro_correlations = correlate_gyro_with_heading(
+        t_cam, heading_rate, t_imu, gyro_rad_s
+    )
 
     print("\nMethod 1: Correlation of each gyro axis with heading rate from camera:")
     for i, name in enumerate(axis_names):
@@ -357,7 +359,9 @@ def analyze_imu_orientation(
 
     # Method 3: Expected yaw axis should match vertical (gravity) axis
     print("\nMethod 3: Physical expectation:")
-    print(f"  → Yaw rotation should be around vertical axis: {axis_names[gravity_axis]}")
+    print(
+        f"  → Yaw rotation should be around vertical axis: {axis_names[gravity_axis]}"
+    )
 
     # Use gravity axis as yaw axis (physical constraint)
     yaw_axis = gravity_axis
@@ -389,7 +393,9 @@ def analyze_imu_orientation(
     position = (led1_m + led2_m) / 2
     t_vel, velocity = compute_camera_velocity(t_cam, position)
 
-    accel_correlations = correlate_accel_with_velocity(t_vel, velocity, t_imu, accel_m_s2)
+    accel_correlations = correlate_accel_with_velocity(
+        t_vel, velocity, t_imu, accel_m_s2
+    )
 
     print("\nCorrelation matrix (IMU accel axis vs camera velocity):")
     print("                  Camera X    Camera Y")
@@ -413,7 +419,9 @@ def analyze_imu_orientation(
     )
 
     print(f"\n✓ YAW ROTATION (heading): Gyro {axis_names[yaw_axis]}")
-    print(f"  → Positive rotation = {'CCW' if yaw_sign > 0 else 'CW'} when viewed from above")
+    print(
+        f"  → Positive rotation = {'CCW' if yaw_sign > 0 else 'CW'} when viewed from above"
+    )
 
     # Determine horizontal axes (the two that are NOT vertical)
     horizontal_axes = [i for i in range(3) if i != gravity_axis]
@@ -466,7 +474,11 @@ def create_orientation_plot(
         ax = axes[0, i]
         ax.hist(accel_m_s2[:, i], bins=50, alpha=0.7, edgecolor="black")
         ax.axvline(
-            np.mean(accel_m_s2[:, i]), color="red", linestyle="--", linewidth=2, label="Mean"
+            np.mean(accel_m_s2[:, i]),
+            color="red",
+            linestyle="--",
+            linewidth=2,
+            label="Mean",
         )
         ax.axvline(0, color="gray", linestyle=":", linewidth=1)
 
@@ -484,7 +496,11 @@ def create_orientation_plot(
         ax = axes[1, i]
         ax.hist(gyro_deg_s[:, i], bins=50, alpha=0.7, edgecolor="black")
         ax.axvline(
-            np.mean(gyro_deg_s[:, i]), color="red", linestyle="--", linewidth=2, label="Mean"
+            np.mean(gyro_deg_s[:, i]),
+            color="red",
+            linestyle="--",
+            linewidth=2,
+            label="Mean",
         )
         ax.axvline(0, color="gray", linestyle=":", linewidth=1)
 

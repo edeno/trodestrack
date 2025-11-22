@@ -347,4 +347,6 @@ def run_online(args: argparse.Namespace) -> None:
     print("  marginal_loglik.txt: Marginal log-likelihood (scalar)")
     print("  metadata.txt: Run configuration and metadata")
     print("\nFiltering complete!")
-    print("\nNOTE: For improved accuracy, use 'trodestrack smooth' to apply RTS smoothing.")
+    print(
+        "\nNOTE: For improved accuracy, use 'trodestrack smooth' to apply RTS smoothing."
+    )

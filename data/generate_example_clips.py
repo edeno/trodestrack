@@ -114,7 +114,9 @@ def main():
     for i, clip in enumerate(clips, 1):
         output_path = clips_dir / f"{clip['name']}.mp4"
         print(f"[{i}/{len(clips)}] {clip['description']}")
-        print(f"  Time: {clip['start_time']:.1f}s - {clip['start_time'] + clip['duration']:.1f}s")
+        print(
+            f"  Time: {clip['start_time']:.1f}s - {clip['start_time'] + clip['duration']:.1f}s"
+        )
         print(f"  Output: {output_path.name}")
 
         create_filter_overlay_video_fast(
@@ -136,7 +138,9 @@ def main():
     with open(readme_path, "w") as f:
         f.write("# Example Video Clips\n\n")
         f.write("This directory contains example video clips from the Arthur session ")
-        f.write("showing different aspects of the Extended Kalman Filter's performance.\n\n")
+        f.write(
+            "showing different aspects of the Extended Kalman Filter's performance.\n\n"
+        )
         f.write("Each clip shows:\n")
         f.write("- **Video (left)**: Original camera feed with:\n")
         f.write("  - Red circle: LED1 (back of head)\n")

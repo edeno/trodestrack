@@ -188,7 +188,9 @@ def test_constant_velocity_position_linear(config):
     initial = np.array([0.1, 0.1])
     velocity = np.array([0.2, 0.1])
 
-    sim = simulate_constant_velocity(config, initial_position=initial, velocity=velocity, seed=42)
+    sim = simulate_constant_velocity(
+        config, initial_position=initial, velocity=velocity, seed=42
+    )
 
     t = sim["t_imu"]
     X = sim["X_truth"]
@@ -244,7 +246,9 @@ def test_constant_velocity_camera_tracks_position(config):
     initial = np.array([0.1, 0.1])
     velocity = np.array([0.2, 0.1])
 
-    sim = simulate_constant_velocity(config, initial_position=initial, velocity=velocity, seed=42)
+    sim = simulate_constant_velocity(
+        config, initial_position=initial, velocity=velocity, seed=42
+    )
 
     t_cam = sim["t_cam_exp"]
     Z = sim["Z_cam_led1"]
@@ -290,7 +294,9 @@ def test_circular_velocity_tangent(config):
     radius = 0.3
     omega = 1.0
 
-    sim = simulate_circular(config, center=center, radius=radius, angular_velocity=omega, seed=42)
+    sim = simulate_circular(
+        config, center=center, radius=radius, angular_velocity=omega, seed=42
+    )
 
     X = sim["X_truth"]
     x = X[:, 0]
@@ -318,7 +324,9 @@ def test_circular_heading_tangent(config):
     radius = 0.3
     omega = 1.0
 
-    sim = simulate_circular(config, center=center, radius=radius, angular_velocity=omega, seed=42)
+    sim = simulate_circular(
+        config, center=center, radius=radius, angular_velocity=omega, seed=42
+    )
 
     X = sim["X_truth"]
     vx = X[:, 2]
@@ -329,7 +337,9 @@ def test_circular_heading_tangent(config):
     expected_heading = np.arctan2(vy, vx)
 
     # Handle wrapping
-    diff = np.arctan2(np.sin(heading - expected_heading), np.cos(heading - expected_heading))
+    diff = np.arctan2(
+        np.sin(heading - expected_heading), np.cos(heading - expected_heading)
+    )
     assert np.allclose(diff, 0.0, atol=1e-10)
 
 
@@ -359,7 +369,9 @@ def test_circular_accel_has_centripetal(config):
     radius = 0.3
     omega = 1.0
 
-    sim = simulate_circular(config, center=center, radius=radius, angular_velocity=omega, seed=42)
+    sim = simulate_circular(
+        config, center=center, radius=radius, angular_velocity=omega, seed=42
+    )
 
     # World frame centripetal acceleration magnitude: a_c = r*ω²
     expected_accel_mag = radius * omega**2
@@ -376,7 +388,9 @@ def test_circular_camera_tracks_circle(config):
     radius = 0.3
     omega = 1.0
 
-    sim = simulate_circular(config, center=center, radius=radius, angular_velocity=omega, seed=42)
+    sim = simulate_circular(
+        config, center=center, radius=radius, angular_velocity=omega, seed=42
+    )
 
     Z = sim["Z_cam_led1"]
     mask = sim["mask_cam"]
@@ -384,7 +398,9 @@ def test_circular_camera_tracks_circle(config):
     # Valid measurements should be near circle
     Z_valid = Z[mask]
 
-    distance = np.sqrt((Z_valid[:, 0] - center[0]) ** 2 + (Z_valid[:, 1] - center[1]) ** 2)
+    distance = np.sqrt(
+        (Z_valid[:, 0] - center[0]) ** 2 + (Z_valid[:, 1] - center[1]) ** 2
+    )
 
     # Should be close to radius (within a few sigma)
     mean_dist = np.mean(distance)

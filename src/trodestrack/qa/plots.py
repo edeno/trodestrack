@@ -11,6 +11,7 @@ All plots follow Tufte/Gelman principles (minimal chartjunk, maximum data-ink ra
 
 from __future__ import annotations
 
+import matplotlib.colors
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.axes import Axes
@@ -68,11 +69,13 @@ def plot_residuals(
         - Correlated residuals (visible patterns) indicate Q too small or timing issues
     """
     if t.shape[0] != residuals.shape[0]:
-        raise ValueError(f"Shape mismatch: time {t.shape} vs residuals {residuals.shape}")
+        raise ValueError(
+            f"Shape mismatch: time {t.shape} vs residuals {residuals.shape}"
+        )
 
     apply_tufte_style()
 
-    N, D = residuals.shape
+    _N, D = residuals.shape
 
     # Default dimension labels for 2D position residuals
     if dim_labels is None:
@@ -84,7 +87,9 @@ def plot_residuals(
             dim_labels = [f"Dim {i + 1}" for i in range(D)]
 
     # Create subplots: one per dimension, stacked vertically
-    fig, axes = plt.subplots(D, 1, figsize=(8, 2 * D), sharex=True, constrained_layout=True)
+    fig, axes = plt.subplots(
+        D, 1, figsize=(8, 2 * D), sharex=True, constrained_layout=True
+    )
 
     # Handle single dimension case (axes is not a list)
     if D == 1:
@@ -258,7 +263,13 @@ def plot_velocity_error(
     fig, ax = plt.subplots(figsize=(8, 3), constrained_layout=True)
 
     # Plot error
-    ax.plot(t_plot, error_plot, color=COLORS["purple"], linewidth=1.0, label="Velocity Error")
+    ax.plot(
+        t_plot,
+        error_plot,
+        color=COLORS["purple"],
+        linewidth=1.0,
+        label="Velocity Error",
+    )
 
     # Labels
     ax.set_xlabel("Time (s)")
@@ -298,9 +309,11 @@ def plot_heading_error(
     Example:
         >>> import numpy as np
         >>> t = np.linspace(0, 10, 100)
-        >>> heading_true = np.linspace(0, 2*np.pi, 100)
+        >>> heading_true = np.linspace(0, 2 * np.pi, 100)
         >>> heading_est = heading_true + np.random.randn(100) * 0.1
-        >>> fig, ax = plot_heading_error(t, heading_true, heading_est, prd_threshold_deg=7.0)
+        >>> fig, ax = plot_heading_error(
+        ...     t, heading_true, heading_est, prd_threshold_deg=7.0
+        ... )
         >>> plt.close(fig)
 
     Notes:
@@ -308,7 +321,9 @@ def plot_heading_error(
         Angle wrapping ensures errors are in [-π, π] range.
     """
     if headings_true.shape != headings_est.shape:
-        raise ValueError(f"Shape mismatch: true {headings_true.shape} vs est {headings_est.shape}")
+        raise ValueError(
+            f"Shape mismatch: true {headings_true.shape} vs est {headings_est.shape}"
+        )
 
     apply_tufte_style()
 
@@ -329,7 +344,9 @@ def plot_heading_error(
     fig, ax = plt.subplots(figsize=(8, 3), constrained_layout=True)
 
     # Plot error
-    ax.plot(t_plot, error_plot, color=COLORS["orange"], linewidth=1.0, label="Heading Error")
+    ax.plot(
+        t_plot, error_plot, color=COLORS["orange"], linewidth=1.0, label="Heading Error"
+    )
 
     # Plot PRD threshold if provided
     if prd_threshold_deg is not None:
@@ -608,14 +625,16 @@ def plot_covariance_ellipse(
 
     # Check for singular covariance
     if np.any(eigenvalues <= 0):
-        raise ValueError(f"Singular or negative covariance matrix (eigenvalues: {eigenvalues})")
+        raise ValueError(
+            f"Singular or negative covariance matrix (eigenvalues: {eigenvalues})"
+        )
 
     # Ellipse angle (orientation of major axis)
     angle_rad = np.arctan2(eigenvectors[1, 0], eigenvectors[0, 0])
     angle_deg = np.rad2deg(angle_rad)
 
     # Plot ellipses at each sigma level
-    color_rgba = plt.matplotlib.colors.to_rgba(
+    color_rgba = matplotlib.colors.to_rgba(
         color if color in COLORS else COLORS.get(color, color)
     )
 
@@ -639,7 +658,15 @@ def plot_covariance_ellipse(
         ax.add_patch(ellipse)
 
     # Plot mean
-    ax.plot(mean[0], mean[1], "o", color=COLORS["red"], markersize=6, label="Mean", zorder=10)
+    ax.plot(
+        mean[0],
+        mean[1],
+        "o",
+        color=COLORS["red"],
+        markersize=6,
+        label="Mean",
+        zorder=10,
+    )
 
     # Labels
     ax.set_xlabel("X (m)")
@@ -776,7 +803,9 @@ def plot_heading_consistency_from_leds(
         axes[0].set_title(title)
 
     # Bottom: absolute error in degrees (valid frames)
-    axes[1].plot(t[valid], err_deg, color=COLORS["red"], linewidth=1.0, label="|Δθ| (deg)")
+    axes[1].plot(
+        t[valid], err_deg, color=COLORS["red"], linewidth=1.0, label="|Δθ| (deg)"
+    )
     axes[1].set_xlabel("Time (s)")
     axes[1].set_ylabel("Abs error (deg)")
     axes[1].legend(loc="upper right")

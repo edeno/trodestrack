@@ -152,9 +152,17 @@ def main():
     # Row 1: Trajectory
     ax_traj = fig.add_subplot(gs[0, :])
     ax_traj.plot(
-        mid_x, mid_y, ".", color=COLORS["gray"], alpha=0.2, markersize=1, label="Camera (midpoint)"
+        mid_x,
+        mid_y,
+        ".",
+        color=COLORS["gray"],
+        alpha=0.2,
+        markersize=1,
+        label="Camera (midpoint)",
     )
-    ax_traj.plot(pos_x, pos_y, "-", color=COLORS["blue"], linewidth=1.5, label="EKF estimate")
+    ax_traj.plot(
+        pos_x, pos_y, "-", color=COLORS["blue"], linewidth=1.5, label="EKF estimate"
+    )
     ax_traj.set_xlabel("X position (m)")
     ax_traj.set_ylabel("Y position (m)")
     ax_traj.set_title("2D Trajectory (10D State with 3D IMU)", fontweight="bold")
@@ -180,7 +188,9 @@ def main():
     ax_vel_z.axhline(0, color=COLORS["gray"], linestyle="--", linewidth=0.5)
 
     ax_heading = fig.add_subplot(gs[1, 2])
-    ax_heading.plot(t_cam, heading * 180 / np.pi, "-", color=COLORS["purple"], linewidth=1)
+    ax_heading.plot(
+        t_cam, heading * 180 / np.pi, "-", color=COLORS["purple"], linewidth=1
+    )
     ax_heading.set_xlabel("Time (s)")
     ax_heading.set_ylabel("Heading (deg)")
     ax_heading.set_title("Heading Angle", fontweight="bold")
@@ -196,8 +206,12 @@ def main():
     ax_bias_gz.axhline(0, color=COLORS["gray"], linestyle="--", linewidth=0.5)
 
     ax_bias_axy = fig.add_subplot(gs[2, 1])
-    ax_bias_axy.plot(t_cam, bias_ax, "-", color=COLORS["orange"], linewidth=1, label="b_ax")
-    ax_bias_axy.plot(t_cam, bias_ay, "-", color=COLORS["blue"], linewidth=1, label="b_ay")
+    ax_bias_axy.plot(
+        t_cam, bias_ax, "-", color=COLORS["orange"], linewidth=1, label="b_ax"
+    )
+    ax_bias_axy.plot(
+        t_cam, bias_ay, "-", color=COLORS["blue"], linewidth=1, label="b_ay"
+    )
     ax_bias_axy.set_xlabel("Time (s)")
     ax_bias_axy.set_ylabel("Accel bias (m/s²)")
     ax_bias_axy.set_title("Horizontal Accel Biases", fontweight="bold")

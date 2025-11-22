@@ -151,7 +151,9 @@ def print_metrics_table(
     print("-" * 80)
 
 
-def explain_scenario(scenario_name: str, key_challenge: str, what_to_watch: str) -> None:
+def explain_scenario(
+    scenario_name: str, key_challenge: str, what_to_watch: str
+) -> None:
     """Print pedagogical explanation of what to expect from a scenario.
 
     Args:
@@ -324,7 +326,12 @@ def plot_ekf_results(
     pos_err = np.linalg.norm(pos_est - pos_truth_cam, axis=1) * 100  # m→cm
     ax_pos_err.plot(t_cam, pos_err, linewidth=2, color=COLORS["red"], alpha=0.8)
     ax_pos_err.axhline(
-        2.0, linestyle="--", color=COLORS["gray"], linewidth=1, alpha=0.5, label="PRD Target (2 cm)"
+        2.0,
+        linestyle="--",
+        color=COLORS["gray"],
+        linewidth=1,
+        alpha=0.5,
+        label="PRD Target (2 cm)",
     )
     ax_pos_err.fill_between(t_cam, 0, 2.0, alpha=0.1, color=COLORS["green"])
     ax_pos_err.legend(loc="upper right", fontsize=8)
@@ -385,9 +392,16 @@ def plot_ekf_results(
     heading_est = X_est[:, layout.heading_idx]  # (N_cam,)
     heading_truth_cam = X_truth_cam[:, layout.heading_idx]  # (N_cam,)
     heading_err = np.abs(np.degrees(angle_diff(heading_est, heading_truth_cam)))
-    ax_heading_err.plot(t_cam, heading_err, linewidth=2, color=COLORS["orange"], alpha=0.8)
+    ax_heading_err.plot(
+        t_cam, heading_err, linewidth=2, color=COLORS["orange"], alpha=0.8
+    )
     ax_heading_err.axhline(
-        7.0, linestyle="--", color=COLORS["gray"], linewidth=1, alpha=0.5, label="PRD Target (7°)"
+        7.0,
+        linestyle="--",
+        color=COLORS["gray"],
+        linewidth=1,
+        alpha=0.5,
+        label="PRD Target (7°)",
     )
     ax_heading_err.fill_between(t_cam, 0, 7.0, alpha=0.1, color=COLORS["green"])
     ax_heading_err.legend(loc="upper right", fontsize=8)
@@ -449,7 +463,9 @@ def plot_ekf_results(
     ax_accel_bias = fig.add_subplot(gs[2, 0])
     ax_accel_bias.set_xlabel("Time (s)")
     ax_accel_bias.set_ylabel("Accel Bias (m/s²)")
-    ax_accel_bias.set_title("⚙️ Accelerometer Bias Learning", fontweight="bold", loc="left")
+    ax_accel_bias.set_title(
+        "⚙️ Accelerometer Bias Learning", fontweight="bold", loc="left"
+    )
 
     # Extract accel biases using layout (supports 2D or 3D accel)
     accel_bias_idx = layout.bias_accel_idx
@@ -467,17 +483,32 @@ def plot_ekf_results(
             label="True X/Y",
         )
         ax_accel_bias.plot(
-            t_cam, bias_ay_truth, linewidth=1.5, color=COLORS["gray"], alpha=0.4, linestyle="--"
+            t_cam,
+            bias_ay_truth,
+            linewidth=1.5,
+            color=COLORS["gray"],
+            alpha=0.4,
+            linestyle="--",
         )
 
         # EKF estimates
         bias_ax_est = X_est[:, accel_bias_idx[0]]
         bias_ay_est = X_est[:, accel_bias_idx[1]]
         ax_accel_bias.plot(
-            t_cam, bias_ax_est, linewidth=2, color=COLORS["blue"], alpha=0.8, label="EKF X"
+            t_cam,
+            bias_ax_est,
+            linewidth=2,
+            color=COLORS["blue"],
+            alpha=0.8,
+            label="EKF X",
         )
         ax_accel_bias.plot(
-            t_cam, bias_ay_est, linewidth=2, color=COLORS["red"], alpha=0.8, label="EKF Y"
+            t_cam,
+            bias_ay_est,
+            linewidth=2,
+            color=COLORS["red"],
+            alpha=0.8,
+            label="EKF Y",
         )
 
         ax_accel_bias.legend(loc="best", fontsize=8, ncol=2)
@@ -521,12 +552,21 @@ def plot_ekf_results(
         label=f"Expected ({state_dim})",
     )
     ax_nees.axhline(
-        lower_bound, linestyle="--", color=COLORS["red"], linewidth=1, alpha=0.4, label="95% CI"
+        lower_bound,
+        linestyle="--",
+        color=COLORS["red"],
+        linewidth=1,
+        alpha=0.4,
+        label="95% CI",
     )
-    ax_nees.axhline(upper_bound, linestyle="--", color=COLORS["red"], linewidth=1, alpha=0.4)
+    ax_nees.axhline(
+        upper_bound, linestyle="--", color=COLORS["red"], linewidth=1, alpha=0.4
+    )
 
     # Shade acceptable region
-    ax_nees.fill_between(t_cam, lower_bound, upper_bound, alpha=0.1, color=COLORS["green"])
+    ax_nees.fill_between(
+        t_cam, lower_bound, upper_bound, alpha=0.1, color=COLORS["green"]
+    )
 
     ax_nees.legend(loc="upper right", fontsize=8)
     ax_nees.grid(True, alpha=0.2)
@@ -752,7 +792,9 @@ def main() -> None:
     t_cam = sim_stationary["t_cam_exp"]
     t_imu = sim_stationary["t_imu"]
     X_truth = sim_stationary["X_truth"]
-    X_truth_cam = np.column_stack([np.interp(t_cam, t_imu, X_truth[:, i]) for i in range(5)])
+    X_truth_cam = np.column_stack(
+        [np.interp(t_cam, t_imu, X_truth[:, i]) for i in range(5)]
+    )
     from trodestrack.sim.utils import interp_angle
 
     X_truth_cam[:, 4] = interp_angle(t_cam, t_imu, X_truth[:, 4])
@@ -858,7 +900,9 @@ def main() -> None:
     t_cam = sim_const_vel["t_cam_exp"]
     t_imu = sim_const_vel["t_imu"]
     X_truth = sim_const_vel["X_truth"]
-    X_truth_cam = np.column_stack([np.interp(t_cam, t_imu, X_truth[:, i]) for i in range(5)])
+    X_truth_cam = np.column_stack(
+        [np.interp(t_cam, t_imu, X_truth[:, i]) for i in range(5)]
+    )
     X_truth_cam[:, 4] = interp_angle(t_cam, t_imu, X_truth[:, 4])
 
     X_est = np.array(result_const_vel.filtered_means)
@@ -956,7 +1000,9 @@ def main() -> None:
     t_cam = sim_circular["t_cam_exp"]
     t_imu = sim_circular["t_imu"]
     X_truth = sim_circular["X_truth"]
-    X_truth_cam = np.column_stack([np.interp(t_cam, t_imu, X_truth[:, i]) for i in range(5)])
+    X_truth_cam = np.column_stack(
+        [np.interp(t_cam, t_imu, X_truth[:, i]) for i in range(5)]
+    )
     X_truth_cam[:, 4] = interp_angle(t_cam, t_imu, X_truth[:, 4])
 
     X_est = np.array(result_circular.filtered_means)

@@ -176,7 +176,9 @@ def create_camera_imu_video(
     pos_df = pd.read_parquet(position_file)
     led1_pixels = pos_df[["xloc", "yloc"]].values
     led2_pixels = pos_df[["xloc2", "yloc2"]].values
-    pos_timestamps = (pos_df.index.values - pos_df.index.values[0]) / 1e9  # ns to seconds
+    pos_timestamps = (
+        pos_df.index.values - pos_df.index.values[0]
+    ) / 1e9  # ns to seconds
     print(f"  Loaded {len(pos_df):,} frames")
 
     # Load IMU data
@@ -226,7 +228,9 @@ def create_camera_imu_video(
             axes["video"].imshow(frame_rgb)
             axes["video"].set_aspect("equal")
             axes["video"].axis("off")
-            axes["video"].set_title("Camera Tracking", fontsize=14, fontweight="bold", pad=10)
+            axes["video"].set_title(
+                "Camera Tracking", fontsize=14, fontweight="bold", pad=10
+            )
 
             # Draw trajectory trails (fading)
             start_idx = max(0, i - trajectory_length)
@@ -285,7 +289,9 @@ def create_camera_imu_video(
 
             # === IMU PANELS ===
             half_window = imu_window_s / 2.0
-            mask = (t_imu >= current_time - half_window) & (t_imu <= current_time + half_window)
+            mask = (t_imu >= current_time - half_window) & (
+                t_imu <= current_time + half_window
+            )
             t_window = t_imu[mask]
             gyro_window = gyro_deg[mask]
             accel_window = accel_mps2[mask]
@@ -320,10 +326,16 @@ def create_camera_imu_video(
                     color="#2ca02c",
                 )
                 axes["gyro"].axvline(
-                    current_time, color="black", linestyle="--", linewidth=1.5, alpha=0.5
+                    current_time,
+                    color="black",
+                    linestyle="--",
+                    linewidth=1.5,
+                    alpha=0.5,
                 )
 
-            axes["gyro"].set_xlim(current_time - half_window, current_time + half_window)
+            axes["gyro"].set_xlim(
+                current_time - half_window, current_time + half_window
+            )
             axes["gyro"].set_ylim(-200, 200)
             axes["gyro"].set_ylabel("Angular Velocity (deg/s)", fontsize=10)
             axes["gyro"].set_xlabel("Time (s)", fontsize=10)
@@ -362,15 +374,23 @@ def create_camera_imu_video(
                     color="#2ca02c",
                 )
                 axes["accel"].axvline(
-                    current_time, color="black", linestyle="--", linewidth=1.5, alpha=0.5
+                    current_time,
+                    color="black",
+                    linestyle="--",
+                    linewidth=1.5,
+                    alpha=0.5,
                 )
 
-            axes["accel"].set_xlim(current_time - half_window, current_time + half_window)
+            axes["accel"].set_xlim(
+                current_time - half_window, current_time + half_window
+            )
             axes["accel"].set_ylim(-15, 15)
             axes["accel"].set_ylabel("Acceleration (m/s²)", fontsize=10)
             axes["accel"].set_xlabel("Time (s)", fontsize=10)
             axes["accel"].grid(True, alpha=0.3)
-            axes["accel"].set_title("Accelerometer (3-axis)", fontsize=12, fontweight="bold")
+            axes["accel"].set_title(
+                "Accelerometer (3-axis)", fontsize=12, fontweight="bold"
+            )
             axes["accel"].legend(loc="upper right", fontsize=9, framealpha=0.9)
             axes["accel"].tick_params(labelsize=9)
 
@@ -379,7 +399,9 @@ def create_camera_imu_video(
             fig.savefig(out_frame_path, dpi=dpi, bbox_inches="tight", pad_inches=0.1)
 
             if (i + 1) % 100 == 0:
-                print(f"    {i + 1:,} / {n_frames:,} frames ({100 * (i + 1) / n_frames:.1f}%)")
+                print(
+                    f"    {i + 1:,} / {n_frames:,} frames ({100 * (i + 1) / n_frames:.1f}%)"
+                )
 
         cap.release()
         plt.close(fig)

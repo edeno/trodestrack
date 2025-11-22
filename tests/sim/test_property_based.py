@@ -63,7 +63,9 @@ def valid_simple_config(draw):
 
 @given(config=valid_sim_config(), seed=st.integers(min_value=0, max_value=10000))
 @settings(max_examples=20, deadline=5000)
-def test_property_rat_imu_produces_valid_output(config: RatIMUSimConfig, seed: int) -> None:
+def test_property_rat_imu_produces_valid_output(
+    config: RatIMUSimConfig, seed: int
+) -> None:
     """Property: rat_imu simulation always produces valid, finite output."""
     sim = simulate_rat_imu(config, seed=seed)
 
@@ -81,7 +83,9 @@ def test_property_rat_imu_produces_valid_output(config: RatIMUSimConfig, seed: i
     # Policy: require ≥95% of intervals positive
     cam_diffs = np.diff(sim["t_cam_exp"])
     positive_rate = (cam_diffs > 0).mean()
-    assert positive_rate > 0.95, f"Camera time mostly monotonic: {positive_rate:.1%} positive"
+    assert (
+        positive_rate > 0.95
+    ), f"Camera time mostly monotonic: {positive_rate:.1%} positive"
 
     # Arena bounds: reflections work but there can be overshoots due to:
     # 1. Initial state sampling from P0 can place rat outside arena
@@ -104,7 +108,9 @@ def test_property_rat_imu_produces_valid_output(config: RatIMUSimConfig, seed: i
     vx, vy = sim["X_truth"][:, 2], sim["X_truth"][:, 3]
     speed = np.hypot(vx, vy)
     # Allow small overshoot due to numerical integration
-    assert np.all(speed <= config.speed_clip * 1.1), f"Speed exceeds clip: max={speed.max()}"
+    assert np.all(
+        speed <= config.speed_clip * 1.1
+    ), f"Speed exceeds clip: max={speed.max()}"
 
     # Heading wrapping
     theta = sim["X_truth"][:, 4]
@@ -155,7 +161,9 @@ def test_property_rat_imu_different_seeds_differ(seed1: int, seed2: int) -> None
     fs_cam=st.floats(min_value=10.0, max_value=60.0),
 )
 @settings(max_examples=20, deadline=5000)
-def test_property_rat_imu_sample_counts(duration: float, fs_imu: float, fs_cam: float) -> None:
+def test_property_rat_imu_sample_counts(
+    duration: float, fs_imu: float, fs_cam: float
+) -> None:
     """Property: sample counts match configured rates."""
     config = RatIMUSimConfig(duration_s=duration, fs_imu=fs_imu, fs_cam=fs_cam)
 
@@ -169,8 +177,12 @@ def test_property_rat_imu_sample_counts(duration: float, fs_imu: float, fs_cam: 
     actual_T_imu = len(sim["t_imu"])
     actual_T_cam = len(sim["t_cam_exp"])
 
-    assert actual_T_imu == expected_T_imu, f"IMU count: {actual_T_imu} != {expected_T_imu}"
-    assert actual_T_cam == expected_T_cam, f"Cam count: {actual_T_cam} != {expected_T_cam}"
+    assert (
+        actual_T_imu == expected_T_imu
+    ), f"IMU count: {actual_T_imu} != {expected_T_imu}"
+    assert (
+        actual_T_cam == expected_T_cam
+    ), f"Cam count: {actual_T_cam} != {expected_T_cam}"
 
 
 @given(
@@ -218,7 +230,9 @@ def test_property_dropout_rate_bounds(dropout_prob: float, seed: int) -> None:
 
 @given(config=valid_simple_config(), seed=st.integers(min_value=0, max_value=10000))
 @settings(max_examples=15, deadline=3000)
-def test_property_stationary_stays_stationary(config: SimpleSimConfig, seed: int) -> None:
+def test_property_stationary_stays_stationary(
+    config: SimpleSimConfig, seed: int
+) -> None:
     """Property: stationary simulation produces constant position."""
     position = np.array([1.0, 1.0])
     sim = simulate_stationary(config, position=position, seed=seed)
@@ -236,12 +250,16 @@ def test_property_stationary_stays_stationary(config: SimpleSimConfig, seed: int
 
 @given(config=valid_simple_config(), seed=st.integers(min_value=0, max_value=10000))
 @settings(max_examples=15, deadline=3000)
-def test_property_constant_velocity_is_linear(config: SimpleSimConfig, seed: int) -> None:
+def test_property_constant_velocity_is_linear(
+    config: SimpleSimConfig, seed: int
+) -> None:
     """Property: constant velocity produces linear trajectory."""
     initial = np.array([0.2, 0.3])
     velocity = np.array([0.15, 0.10])
 
-    sim = simulate_constant_velocity(config, initial_position=initial, velocity=velocity, seed=seed)
+    sim = simulate_constant_velocity(
+        config, initial_position=initial, velocity=velocity, seed=seed
+    )
 
     t = sim["t_imu"]
     X = sim["X_truth"]
@@ -271,7 +289,9 @@ def test_property_circular_stays_on_circle(
     """Property: circular motion stays on circle."""
     center = np.array([1.0, 1.0])
 
-    sim = simulate_circular(config, center=center, radius=radius, angular_velocity=omega, seed=seed)
+    sim = simulate_circular(
+        config, center=center, radius=radius, angular_velocity=omega, seed=seed
+    )
 
     X = sim["X_truth"]
     x, y = X[:, 0], X[:, 1]
@@ -279,7 +299,9 @@ def test_property_circular_stays_on_circle(
     # Distance from center should equal radius
     distance = np.sqrt((x - center[0]) ** 2 + (y - center[1]) ** 2)
 
-    assert np.allclose(distance, radius, atol=1e-9), f"Not on circle: std={distance.std()}"
+    assert np.allclose(
+        distance, radius, atol=1e-9
+    ), f"Not on circle: std={distance.std()}"
 
 
 # =============================================================================
@@ -319,7 +341,9 @@ def test_property_output_structure_complete(config: RatIMUSimConfig, seed: int) 
         "config",
     }
 
-    assert set(sim.keys()) == expected_keys, f"Missing keys: {expected_keys - set(sim.keys())}"
+    assert (
+        set(sim.keys()) == expected_keys
+    ), f"Missing keys: {expected_keys - set(sim.keys())}"
 
     # Check array dimensions
     T_imu = len(sim["t_imu"])

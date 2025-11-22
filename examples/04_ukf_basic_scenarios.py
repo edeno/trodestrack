@@ -140,9 +140,15 @@ def print_comparison_table(
     ekf_heading = ekf_metrics["heading_rmse_deg"]
     ukf_heading = ukf_metrics["heading_rmse_deg"]
     heading_winner = (
-        "UKF" if ukf_heading < ekf_heading else "EKF" if ekf_heading < ukf_heading else "TIE"
+        "UKF"
+        if ukf_heading < ekf_heading
+        else "EKF"
+        if ekf_heading < ukf_heading
+        else "TIE"
     )
-    heading_improv = f"{abs(ekf_heading - ukf_heading):.2f}°" if heading_winner != "TIE" else "-"
+    heading_improv = (
+        f"{abs(ekf_heading - ukf_heading):.2f}°" if heading_winner != "TIE" else "-"
+    )
     print(
         f"{'Heading RMSE (deg)':<25} {ekf_heading:>12.2f} {ukf_heading:>12.2f} "
         f"{heading_winner:>12} {heading_improv:>15}"
@@ -195,7 +201,9 @@ def print_comparison_table(
         )
 
 
-def explain_scenario(scenario_name: str, nonlinearity_level: str, expected_winner: str) -> None:
+def explain_scenario(
+    scenario_name: str, nonlinearity_level: str, expected_winner: str
+) -> None:
     """Print pedagogical explanation of expected filter behavior.
 
     Args:
@@ -316,7 +324,9 @@ def plot_comparison(
     ekf_pos_err = np.linalg.norm(X_ekf[:, :2] - X_truth_cam[:, :2], axis=1) * 100  # cm
     ukf_pos_err = np.linalg.norm(X_ukf[:, :2] - X_truth_cam[:, :2], axis=1) * 100  # cm
 
-    ax_pos_err.plot(t_cam, ekf_pos_err, linewidth=2, color=COLORS["blue"], alpha=0.7, label="EKF")
+    ax_pos_err.plot(
+        t_cam, ekf_pos_err, linewidth=2, color=COLORS["blue"], alpha=0.7, label="EKF"
+    )
     ax_pos_err.plot(
         t_cam,
         ukf_pos_err,
@@ -359,10 +369,16 @@ def plot_comparison(
     ax_vel_err.set_ylabel("Velocity Error (cm/s)")
     ax_vel_err.set_title("🏃 Velocity Error Comparison", fontweight="bold", loc="left")
 
-    ekf_vel_err = np.linalg.norm(X_ekf[:, 2:4] - X_truth_cam[:, 2:4], axis=1) * 100  # cm/s
-    ukf_vel_err = np.linalg.norm(X_ukf[:, 2:4] - X_truth_cam[:, 2:4], axis=1) * 100  # cm/s
+    ekf_vel_err = (
+        np.linalg.norm(X_ekf[:, 2:4] - X_truth_cam[:, 2:4], axis=1) * 100
+    )  # cm/s
+    ukf_vel_err = (
+        np.linalg.norm(X_ukf[:, 2:4] - X_truth_cam[:, 2:4], axis=1) * 100
+    )  # cm/s
 
-    ax_vel_err.plot(t_cam, ekf_vel_err, linewidth=2, color=COLORS["blue"], alpha=0.7, label="EKF")
+    ax_vel_err.plot(
+        t_cam, ekf_vel_err, linewidth=2, color=COLORS["blue"], alpha=0.7, label="EKF"
+    )
     ax_vel_err.plot(
         t_cam,
         ukf_vel_err,
@@ -391,7 +407,9 @@ def plot_comparison(
     ax_heading_err = fig.add_subplot(gs[1, 1])
     ax_heading_err.set_xlabel("Time (s)")
     ax_heading_err.set_ylabel("Heading Error (deg)")
-    ax_heading_err.set_title("🧭 Heading Error Comparison", fontweight="bold", loc="left")
+    ax_heading_err.set_title(
+        "🧭 Heading Error Comparison", fontweight="bold", loc="left"
+    )
 
     def angle_diff(a, b):
         return np.arctan2(np.sin(a - b), np.cos(a - b))
@@ -492,8 +510,12 @@ def plot_comparison(
     x = np.arange(len(metrics_names))
     width = 0.35
 
-    ax_bar.bar(x - width / 2, ekf_values, width, label="EKF", color=COLORS["blue"], alpha=0.7)
-    ax_bar.bar(x + width / 2, ukf_values, width, label="UKF", color=COLORS["red"], alpha=0.7)
+    ax_bar.bar(
+        x - width / 2, ekf_values, width, label="EKF", color=COLORS["blue"], alpha=0.7
+    )
+    ax_bar.bar(
+        x + width / 2, ukf_values, width, label="UKF", color=COLORS["red"], alpha=0.7
+    )
 
     ax_bar.set_ylabel("RMSE")
     ax_bar.set_xticks(x)
@@ -516,7 +538,9 @@ def plot_comparison(
     ekf_nees = compute_nees(X_truth_cam, X_ekf, P_ekf)
     ukf_nees = compute_nees(X_truth_cam, X_ukf, P_ukf)
 
-    ax_nees.plot(t_cam, ekf_nees, linewidth=1.5, color=COLORS["blue"], alpha=0.6, label="EKF")
+    ax_nees.plot(
+        t_cam, ekf_nees, linewidth=1.5, color=COLORS["blue"], alpha=0.6, label="EKF"
+    )
     ax_nees.plot(
         t_cam,
         ukf_nees,
@@ -543,7 +567,9 @@ def plot_comparison(
     upper = chi2.ppf(0.975, df=state_dim)
     ax_nees.axhline(lower, linestyle=":", color=COLORS["red"], linewidth=1, alpha=0.4)
     ax_nees.axhline(upper, linestyle=":", color=COLORS["red"], linewidth=1, alpha=0.4)
-    ax_nees.fill_between(t_cam, lower, upper, alpha=0.1, color=COLORS["green"], label="95% CI")
+    ax_nees.fill_between(
+        t_cam, lower, upper, alpha=0.1, color=COLORS["green"], label="95% CI"
+    )
 
     ax_nees.legend(loc="upper right", fontsize=8)
     ax_nees.grid(True, alpha=0.2)
@@ -801,7 +827,9 @@ def main() -> None:
     t_cam = sim_stat["t_cam_exp"]
     t_imu = sim_stat["t_imu"]
     X_truth = sim_stat["X_truth"]
-    X_truth_cam = np.column_stack([np.interp(t_cam, t_imu, X_truth[:, i]) for i in range(5)])
+    X_truth_cam = np.column_stack(
+        [np.interp(t_cam, t_imu, X_truth[:, i]) for i in range(5)]
+    )
     X_truth_cam[:, 4] = interp_angle(t_cam, t_imu, X_truth[:, 4])
 
     # Add bias truth
@@ -922,7 +950,9 @@ def main() -> None:
     t_cam = sim_vel["t_cam_exp"]
     t_imu = sim_vel["t_imu"]
     X_truth = sim_vel["X_truth"]
-    X_truth_cam = np.column_stack([np.interp(t_cam, t_imu, X_truth[:, i]) for i in range(5)])
+    X_truth_cam = np.column_stack(
+        [np.interp(t_cam, t_imu, X_truth[:, i]) for i in range(5)]
+    )
     X_truth_cam[:, 4] = interp_angle(t_cam, t_imu, X_truth[:, 4])
     bias_truth_cam = np.column_stack(
         [
@@ -1023,7 +1053,9 @@ def main() -> None:
     t_cam = sim_circ["t_cam_exp"]
     t_imu = sim_circ["t_imu"]
     X_truth = sim_circ["X_truth"]
-    X_truth_cam = np.column_stack([np.interp(t_cam, t_imu, X_truth[:, i]) for i in range(5)])
+    X_truth_cam = np.column_stack(
+        [np.interp(t_cam, t_imu, X_truth[:, i]) for i in range(5)]
+    )
     X_truth_cam[:, 4] = interp_angle(t_cam, t_imu, X_truth[:, 4])
     bias_truth_cam = np.column_stack(
         [
@@ -1107,7 +1139,13 @@ def main() -> None:
         ]:
             ekf_val = ekf_m[ekf_key]
             ukf_val = ukf_m[ukf_key]
-            winner = "UKF ✓" if ukf_val < ekf_val else "EKF ✓" if ekf_val < ukf_val else "TIE"
+            winner = (
+                "UKF ✓"
+                if ukf_val < ekf_val
+                else "EKF ✓"
+                if ekf_val < ukf_val
+                else "TIE"
+            )
             print(
                 f"   {scenario_name:<20} {metric_name:<15} "
                 f"{ekf_val:>10.2f} {unit:<2} {ukf_val:>10.2f} {unit:<2} {winner:>10}"

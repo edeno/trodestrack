@@ -54,8 +54,12 @@ def test_tier0_stationary_perfect_truth(duration, expected_pos_rmse):
     assert pos_rmse == pytest.approx(expected_pos_rmse, abs=1e-10)
 
 
-@pytest.mark.parametrize("duration, velocity_m_s, expected_vel_rmse", [(30.0, 0.10, 0.0)])
-def test_tier0_constant_velocity_perfect_truth(duration, velocity_m_s, expected_vel_rmse):
+@pytest.mark.parametrize(
+    "duration, velocity_m_s, expected_vel_rmse", [(30.0, 0.10, 0.0)]
+)
+def test_tier0_constant_velocity_perfect_truth(
+    duration, velocity_m_s, expected_vel_rmse
+):
     """Tier 0: Constant velocity - ground truth should have zero error."""
     config = SimpleSimConfig(duration_s=duration)
     velocity = np.array([velocity_m_s, 0.0])  # m/s in x-direction
@@ -69,7 +73,9 @@ def test_tier0_constant_velocity_perfect_truth(duration, velocity_m_s, expected_
     assert vel_rmse == pytest.approx(expected_vel_rmse, abs=1e-10)
 
 
-@pytest.mark.parametrize("duration, radius_m, expected_heading_err", [(30.0, 0.50, 0.0)])
+@pytest.mark.parametrize(
+    "duration, radius_m, expected_heading_err", [(30.0, 0.50, 0.0)]
+)
 def test_tier0_circular_perfect_truth(duration, radius_m, expected_heading_err):
     """Tier 0: Circular motion - ground truth should have zero heading error."""
     config = SimpleSimConfig(duration_s=duration)

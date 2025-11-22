@@ -110,7 +110,9 @@ class TestLoad3DIMU:
         )
 
         # Z should be negative (pointing up in body frame)
-        assert accel_z_mean < 0, f"Expected negative Z accel (upward), got {accel_z_mean:.2f} m/s²"
+        assert (
+            accel_z_mean < 0
+        ), f"Expected negative Z accel (upward), got {accel_z_mean:.2f} m/s²"
 
     def test_gyro_units_radians_per_second(self, position_file: str, imu_file: str):
         """Test that gyro output is in rad/s with reasonable range."""
@@ -139,7 +141,9 @@ class TestLoad3DIMU:
         # Should have some non-zero variance (rat is moving)
         assert np.std(gyro_z_deg) > 1.0, "Gyro Z variance too low (rat not moving?)"
 
-    def test_accel_units_meters_per_second_squared(self, position_file: str, imu_file: str):
+    def test_accel_units_meters_per_second_squared(
+        self, position_file: str, imu_file: str
+    ):
         """Test that accel output is in m/s² with reasonable range."""
         data = load_arthur_session(
             position_file=position_file,

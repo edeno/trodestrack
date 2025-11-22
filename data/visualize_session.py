@@ -73,7 +73,9 @@ def extract_time_window(
         Data in window
     """
     half_window = window_s / 2.0
-    mask = (timestamps >= center_time - half_window) & (timestamps <= center_time + half_window)
+    mask = (timestamps >= center_time - half_window) & (
+        timestamps <= center_time + half_window
+    )
     return timestamps[mask], data[mask]
 
 
@@ -196,7 +198,9 @@ def create_video_overlay(
     end_time = start_time + duration
     max_time = min(data.t_cam[-1], video_info["duration_s"])
     if end_time > max_time:
-        print(f"\nWarning: Requested end time {end_time:.1f}s exceeds data ({max_time:.1f}s)")
+        print(
+            f"\nWarning: Requested end time {end_time:.1f}s exceeds data ({max_time:.1f}s)"
+        )
         end_time = max_time
         duration = end_time - start_time
         print(f"  Adjusted duration to {duration:.1f}s")
@@ -217,19 +221,27 @@ def create_video_overlay(
     video_frame = axes["video"].imshow(
         np.zeros((video_info["height"], video_info["width"], 3), dtype=np.uint8)
     )
-    led1_circle = Circle((0, 0), led_marker_size, color="red", alpha=0.7, label="LED1 (back)")
-    led2_circle = Circle((0, 0), led_marker_size, color="cyan", alpha=0.7, label="LED2 (front)")
+    led1_circle = Circle(
+        (0, 0), led_marker_size, color="red", alpha=0.7, label="LED1 (back)"
+    )
+    led2_circle = Circle(
+        (0, 0), led_marker_size, color="cyan", alpha=0.7, label="LED2 (front)"
+    )
     axes["video"].add_patch(led1_circle)
     axes["video"].add_patch(led2_circle)
     axes["video"].legend(loc="upper right", fontsize=8)
 
     # IMU plot elements
     (gyro_line,) = axes["gyro"].plot([], [], "b-", linewidth=1.5, label="Gyro Z")
-    gyro_marker = axes["gyro"].axvline(0, color="red", linestyle="--", linewidth=2, alpha=0.7)
+    gyro_marker = axes["gyro"].axvline(
+        0, color="red", linestyle="--", linewidth=2, alpha=0.7
+    )
 
     (accel_x_line,) = axes["accel"].plot([], [], "r-", linewidth=1.5, label="Accel X")
     (accel_y_line,) = axes["accel"].plot([], [], "g-", linewidth=1.5, label="Accel Y")
-    accel_marker = axes["accel"].axvline(0, color="red", linestyle="--", linewidth=2, alpha=0.7)
+    accel_marker = axes["accel"].axvline(
+        0, color="red", linestyle="--", linewidth=2, alpha=0.7
+    )
     axes["accel"].legend(loc="upper right", fontsize=8)
 
     # Time display
@@ -298,14 +310,18 @@ def create_video_overlay(
 
         # Update gyro plot
         gyro_line.set_data(t_gyro, gyro_window)
-        axes["gyro"].set_xlim(current_time - imu_window_s / 2, current_time + imu_window_s / 2)
+        axes["gyro"].set_xlim(
+            current_time - imu_window_s / 2, current_time + imu_window_s / 2
+        )
         axes["gyro"].set_ylim(gyro_ylim)  # Fixed Y-axis
         gyro_marker.set_xdata([current_time, current_time])
 
         # Update accelerometer plot
         accel_x_line.set_data(t_accel_x, accel_x_window)
         accel_y_line.set_data(t_accel_y, accel_y_window)
-        axes["accel"].set_xlim(current_time - imu_window_s / 2, current_time + imu_window_s / 2)
+        axes["accel"].set_xlim(
+            current_time - imu_window_s / 2, current_time + imu_window_s / 2
+        )
         axes["accel"].set_ylim(accel_ylim)  # Fixed Y-axis
         accel_marker.set_xdata([current_time, current_time])
 

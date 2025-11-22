@@ -18,7 +18,11 @@ import pytest
 from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
 from trodestrack.runtime.offline import rts_smoother
 from trodestrack.sim.rat_imu import RatIMUSimConfig, simulate_rat_imu
-from trodestrack.sim.simple import SimpleSimConfig, simulate_circular, simulate_stationary
+from trodestrack.sim.simple import (
+    SimpleSimConfig,
+    simulate_circular,
+    simulate_stationary,
+)
 
 
 def test_simulation_determinism_rat_imu():
@@ -133,7 +137,9 @@ def test_filter_determinism():
 
     # Results should be identical
     np.testing.assert_array_equal(result1.filtered_means, result2.filtered_means)
-    np.testing.assert_array_equal(result1.filtered_covariances, result2.filtered_covariances)
+    np.testing.assert_array_equal(
+        result1.filtered_covariances, result2.filtered_covariances
+    )
     assert result1.marginal_loglik == result2.marginal_loglik
 
 
@@ -184,7 +190,9 @@ def test_smoother_determinism():
 
     # Results should be identical
     np.testing.assert_array_equal(smoother1.smoothed_means, smoother2.smoothed_means)
-    np.testing.assert_array_equal(smoother1.smoothed_covariances, smoother2.smoothed_covariances)
+    np.testing.assert_array_equal(
+        smoother1.smoothed_covariances, smoother2.smoothed_covariances
+    )
     assert smoother1.marginal_loglik == smoother2.marginal_loglik
 
 
@@ -192,9 +200,7 @@ def test_uv_lock_exists():
     """Verify that uv.lock exists for version pinning."""
     # Check from project root
     lock_file = Path(__file__).parent.parent / "uv.lock"
-    assert (
-        lock_file.exists()
-    ), "uv.lock file not found. Run 'uv sync' to generate lock file for reproducibility."
+    assert lock_file.exists(), "uv.lock file not found. Run 'uv sync' to generate lock file for reproducibility."
 
     # Verify it's not empty
     assert lock_file.stat().st_size > 0, "uv.lock file is empty"
@@ -204,20 +210,20 @@ def test_python_version_file_exists():
     """Verify that .python-version exists for Python version pinning."""
     # Check from project root
     version_file = Path(__file__).parent.parent / ".python-version"
-    assert (
-        version_file.exists()
-    ), ".python-version file not found. This file pins the Python version for reproducibility."
+    assert version_file.exists(), ".python-version file not found. This file pins the Python version for reproducibility."
 
     # Read and verify format
     version = version_file.read_text().strip()
-    assert version.startswith("3."), f"Python version should start with '3.', got: {version}"
+    assert version.startswith(
+        "3."
+    ), f"Python version should start with '3.', got: {version}"
 
 
 def test_ci_workflow_exists():
     """Verify that CI workflow exists with required checks."""
-    # Check from project root
-    ci_file = Path(__file__).parent.parent / ".github" / "workflows" / "ci.yml"
-    assert ci_file.exists(), "CI workflow file (.github/workflows/ci.yml) not found"
+    # Check from project root - tests workflow handles CI checks
+    ci_file = Path(__file__).parent.parent / ".github" / "workflows" / "tests.yml"
+    assert ci_file.exists(), "CI workflow file (.github/workflows/tests.yml) not found"
 
     # Read workflow content
     ci_content = ci_file.read_text()
@@ -226,7 +232,8 @@ def test_ci_workflow_exists():
     assert "mypy" in ci_content, "CI workflow must include mypy type checking"
     assert "ruff" in ci_content, "CI workflow must include ruff linting"
     assert "pytest" in ci_content, "CI workflow must include pytest testing"
-    assert "black" in ci_content, "CI workflow must include black formatting check"
+    # ruff format handles formatting (black removed)
+    assert "ruff format" in ci_content, "CI workflow must include ruff format check"
 
 
 @pytest.mark.parametrize("seed", [0, 42, 123, 999])

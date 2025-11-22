@@ -26,6 +26,7 @@ def test_ukf_heading_measurement_improves_convergence():
         use_heading_measurement=False,
         measurement_noise_pos=0.005**2,
         led_distance=0.04,
+        state_mode="2d_full",  # Use 8D layout (tests use hardcoded indices)
     )
 
     result_no_heading = unscented_kalman_filter(
@@ -45,6 +46,7 @@ def test_ukf_heading_measurement_improves_convergence():
         led_distance=0.04,
         led_distance_tolerance=0.3,
         adaptive_heading_noise=True,
+        state_mode="2d_full",  # Use 8D layout (tests use hardcoded indices)
     )
 
     result_with_heading = unscented_kalman_filter(
@@ -59,7 +61,10 @@ def test_ukf_heading_measurement_improves_convergence():
 
     # Extract heading estimates (align truth to camera times)
     X_truth_at_cam = np.array(
-        [result["X_truth"][np.argmin(np.abs(result["t_imu"] - t_c))] for t_c in result["t_cam_obs"]]
+        [
+            result["X_truth"][np.argmin(np.abs(result["t_imu"] - t_c))]
+            for t_c in result["t_cam_obs"]
+        ]
     )
     theta_truth = X_truth_at_cam[:, 4]
     theta_est_no_heading = np.array(result_no_heading.filtered_means[:, 4])
@@ -235,6 +240,7 @@ def test_ukf_circular_mean_near_wrap_point():
         process_noise_heading=1e-3,  # Moderate uncertainty growth
         led_distance=0.04,
         alpha=1.0,  # Standard sigma-point spread
+        state_mode="2d_full",  # Use 8D layout (tests use hardcoded indices)
     )
 
     # Run UKF
@@ -270,7 +276,9 @@ def test_ukf_circular_mean_near_wrap_point():
     # With circular mean fix, heading RMSE should be reasonable (<10°)
     # Without fix, circular mean error could cause large biases
     print(f"UKF Heading RMSE: {heading_rmse:.2f}°")
-    assert heading_rmse < 10.0, f"Heading RMSE too high: {heading_rmse:.2f}° (circular mean bug?)"
+    assert (
+        heading_rmse < 10.0
+    ), f"Heading RMSE too high: {heading_rmse:.2f}° (circular mean bug?)"
 
     # Check that heading estimates stay bounded in [-π, π]
     assert np.all(heading_est >= -np.pi - 0.01)  # Small tolerance for numerical error

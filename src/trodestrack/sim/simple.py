@@ -223,7 +223,9 @@ def simulate_stationary(
 
     # Ground truth LED positions (before noise/swaps/reflections)
     # Simple sims don't apply swaps or reflections
-    led1_truth_cam = np.column_stack([position[0] * np.ones(T_cam), position[1] * np.ones(T_cam)])
+    led1_truth_cam = np.column_stack(
+        [position[0] * np.ones(T_cam), position[1] * np.ones(T_cam)]
+    )
     led2_truth_cam = np.full((T_cam, 2), np.nan)  # No LED2 in stationary
 
     # Artifact tracking (simple sims don't apply swaps/reflections)
@@ -252,7 +254,9 @@ def simulate_stationary(
         "bias_accel_y": bias_accel_y,
         "yaw_rate_truth": np.zeros(T_imu),
         "accel_world_truth": np.zeros((T_imu, 2)),
-        "accel_body_truth": np.zeros((T_imu, 2)),  # No motion, no tilt → specific force = 0
+        "accel_body_truth": np.zeros(
+            (T_imu, 2)
+        ),  # No motion, no tilt → specific force = 0
         "config": config,
     }
 
@@ -398,7 +402,9 @@ def simulate_constant_velocity(
         "bias_accel_y": bias_accel_y,
         "yaw_rate_truth": np.zeros(T_imu),
         "accel_world_truth": np.zeros((T_imu, 2)),  # No acceleration in world frame
-        "accel_body_truth": np.zeros((T_imu, 2)),  # Constant velocity, no tilt → specific force = 0
+        "accel_body_truth": np.zeros(
+            (T_imu, 2)
+        ),  # Constant velocity, no tilt → specific force = 0
         "config": config,
     }
 

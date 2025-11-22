@@ -82,19 +82,18 @@ uv run mypy src/trodestrack --ignore-missing-imports
 uv run ruff check src/ tests/ --fix
 
 # Formatting
-uv run black src/ tests/
+uv run ruff format src/ tests/
 
 # Format check without modifying files
-uv run black --check src/ tests/
+uv run ruff format --check src/ tests/
 ```
 
 **Pre-commit Hooks:**
 
 The following hooks run automatically on commit:
 
-- `black` - Code formatting
 - `ruff` - Linting and import sorting (with auto-fix)
-- `ruff-format` - Additional formatting checks
+- `ruff-format` - Code formatting
 - `trailing-whitespace` - Remove trailing whitespace
 - `end-of-file-fixer` - Ensure files end with newline
 - `check-yaml` - Validate YAML syntax

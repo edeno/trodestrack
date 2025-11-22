@@ -23,36 +23,36 @@ Create a simple sine wave animation:
 >>> n_frames = 100
 >>> x = np.linspace(0, 4 * np.pi, 200)
 >>> y = np.sin(x)
->>> frame_data = {'x': x, 'y': y, 'n_points': len(x)}
+>>> frame_data = {"x": x, "y": y, "n_points": len(x)}
 >>>
 >>> # Define figure setup (called once per worker)
 >>> def setup_figure():
 ...     fig, ax = plt.subplots(figsize=(10, 6))
 ...     ax.set_xlim(0, 4 * np.pi)
 ...     ax.set_ylim(-1.5, 1.5)
-...     ax.set_xlabel('x')
-...     ax.set_ylabel('sin(x)')
+...     ax.set_xlabel("x")
+...     ax.set_ylabel("sin(x)")
 ...     ax.grid(True, alpha=0.3)
-...     return fig, {'main': ax}
+...     return fig, {"main": ax}
 >>>
 >>> # Define frame rendering (called for each frame)
 >>> def render_frame(fig, axes, frame_idx, data):
-...     ax = axes['main']
+...     ax = axes["main"]
 ...     ax.clear()
-...     n_show = int((frame_idx / 100) * data['n_points'])
-...     ax.plot(data['x'][:n_show], data['y'][:n_show], 'b-', linewidth=2)
+...     n_show = int((frame_idx / 100) * data["n_points"])
+...     ax.plot(data["x"][:n_show], data["y"][:n_show], "b-", linewidth=2)
 ...     ax.set_xlim(0, 4 * np.pi)
 ...     ax.set_ylim(-1.5, 1.5)
-...     ax.set_xlabel('x')
-...     ax.set_ylabel('sin(x)')
+...     ax.set_xlabel("x")
+...     ax.set_ylabel("sin(x)")
 ...     ax.grid(True, alpha=0.3)
-...     ax.set_title(f'Frame {frame_idx + 1}/100')
+...     ax.set_title(f"Frame {frame_idx + 1}/100")
 >>>
 >>> # Create video with 4 parallel workers
 >>> config = VideoConfig(fps=30.0, dpi=100, max_workers=4)
 >>> create_parallel_video(
 ...     n_frames=100,
-...     output_path='sine_wave.mp4',
+...     output_path="sine_wave.mp4",
 ...     render_frame_func=render_frame,
 ...     setup_figure_func=setup_figure,
 ...     frame_data=frame_data,
@@ -174,13 +174,17 @@ def _validate_inputs(
         raise ValueError(f"fps must be positive, got {config.fps}")
 
     if config.dpi < MIN_DPI:
-        raise ValueError(f"dpi must be at least {MIN_DPI} (matplotlib minimum), got {config.dpi}")
+        raise ValueError(
+            f"dpi must be at least {MIN_DPI} (matplotlib minimum), got {config.dpi}"
+        )
 
     if config.bitrate_kbps <= 0:
         raise ValueError(f"bitrate_kbps must be positive, got {config.bitrate_kbps}")
 
     if config.max_workers is not None and config.max_workers < 1:
-        raise ValueError(f"max_workers must be at least 1 or None, got {config.max_workers}")
+        raise ValueError(
+            f"max_workers must be at least 1 or None, got {config.max_workers}"
+        )
 
     # Validate output directory exists
     output_dir = Path(output_path).parent
@@ -321,24 +325,24 @@ def create_parallel_video(
     >>>
     >>> def setup_figure():
     ...     fig = plt.figure(figsize=(8, 6))
-    ...     ax = fig.add_subplot(111, projection='polar')
-    ...     return fig, {'polar': ax}
+    ...     ax = fig.add_subplot(111, projection="polar")
+    ...     return fig, {"polar": ax}
     >>>
     >>> def render_frame(fig, axes, frame_idx, data):
-    ...     ax = axes['polar']
+    ...     ax = axes["polar"]
     ...     ax.clear()
-    ...     theta = data['theta'] + (frame_idx / 100) * 2 * np.pi
-    ...     ax.plot(theta, data['r'], 'b-', linewidth=2)
+    ...     theta = data["theta"] + (frame_idx / 100) * 2 * np.pi
+    ...     ax.plot(theta, data["r"], "b-", linewidth=2)
     ...     ax.set_ylim(0, 1.5)
-    ...     ax.set_title(f'Frame {frame_idx}', pad=20)
+    ...     ax.set_title(f"Frame {frame_idx}", pad=20)
     >>>
     >>> theta = np.linspace(0, 2 * np.pi, 100)
     >>> r = np.abs(np.sin(3 * theta))
-    >>> data = {'theta': theta, 'r': r}
+    >>> data = {"theta": theta, "r": r}
     >>>
     >>> create_parallel_video(
     ...     n_frames=100,
-    ...     output_path='rotating_sine.mp4',
+    ...     output_path="rotating_sine.mp4",
     ...     render_frame_func=render_frame,
     ...     setup_figure_func=setup_figure,
     ...     frame_data=data,
@@ -368,7 +372,9 @@ def create_parallel_video(
 
     # Partition frames evenly across workers
     chunk_size = math.ceil(n_frames / max_workers)
-    chunks = [(s, min(n_frames, s + chunk_size)) for s in range(0, n_frames, chunk_size)]
+    chunks = [
+        (s, min(n_frames, s + chunk_size)) for s in range(0, n_frames, chunk_size)
+    ]
 
     # Use TemporaryDirectory context manager for automatic cleanup (even on SIGINT)
     with tempfile.TemporaryDirectory(prefix="parallel_video_frames_") as tmpdir:

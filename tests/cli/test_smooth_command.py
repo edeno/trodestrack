@@ -165,7 +165,7 @@ def test_smooth_command_saves_required_outputs(synthetic_data_files, temp_output
     smoothed_means = np.loadtxt(output_dir / "smoothed_means.txt")
     n_cam = len(np.loadtxt(input_dir / "t_cam.txt"))
     assert smoothed_means.shape[0] == n_cam
-    assert smoothed_means.shape[1] == 8  # Standard 8D state
+    assert smoothed_means.shape[1] == 10  # Default 10D state (2d_cam_3d_imu)
 
 
 def test_smooth_command_missing_input_file(temp_output_dir):

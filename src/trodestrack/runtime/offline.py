@@ -165,12 +165,16 @@ def _rts_smoother_impl(
         smoothed_mean_next, smoothed_cov_next = carry
         t, filtered_mean, filtered_cov, lin_mean = args
 
-        m_pred, P_pred, G = predict_between_frames(t, filtered_mean, filtered_cov, lin_mean)
+        m_pred, P_pred, G = predict_between_frames(
+            t, filtered_mean, filtered_cov, lin_mean
+        )
 
         # Correct for angle wrapping in heading (if present in layout)
         h_idx = get_heading_index(layout)
         resid = smoothed_mean_next - m_pred
-        resid = resid.at[h_idx].set(jnp.arctan2(jnp.sin(resid[h_idx]), jnp.cos(resid[h_idx])))
+        resid = resid.at[h_idx].set(
+            jnp.arctan2(jnp.sin(resid[h_idx]), jnp.cos(resid[h_idx]))
+        )
 
         smoothed_mean = filtered_mean + G @ resid
         smoothed_cov = filtered_cov + G @ (smoothed_cov_next - P_pred) @ G.T
@@ -178,7 +182,9 @@ def _rts_smoother_impl(
 
         return (smoothed_mean, smoothed_cov), (smoothed_mean, smoothed_cov)
 
-    def run_one_iteration(lin_means_current: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+    def run_one_iteration(
+        lin_means_current: jnp.ndarray,
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
         (_, (smoothed_means_iter, smoothed_covs_iter)) = lax.scan(
             smoother_step,
             (filtered_means[-1], filtered_covs[-1]),
@@ -191,8 +197,12 @@ def _rts_smoother_impl(
             reverse=True,
         )
 
-        smoothed_means_iter = jnp.vstack([smoothed_means_iter, filtered_means[-1][None, ...]])
-        smoothed_covs_iter = jnp.vstack([smoothed_covs_iter, filtered_covs[-1][None, ...]])
+        smoothed_means_iter = jnp.vstack(
+            [smoothed_means_iter, filtered_means[-1][None, ...]]
+        )
+        smoothed_covs_iter = jnp.vstack(
+            [smoothed_covs_iter, filtered_covs[-1][None, ...]]
+        )
 
         return smoothed_means_iter, smoothed_covs_iter
 
@@ -302,7 +312,9 @@ def rts_smoother(
 # =============================================================================
 
 
-def _compute_sigma_points(m: jnp.ndarray, P: jnp.ndarray, n: int, lamb: float) -> jnp.ndarray:
+def _compute_sigma_points(
+    m: jnp.ndarray, P: jnp.ndarray, n: int, lamb: float
+) -> jnp.ndarray:
     """Generate sigma points for unscented transform.
 
     Parameters
@@ -501,7 +513,9 @@ def _sigma_point_smoother_impl(
         t, filtered_mean, filtered_cov = args
 
         # Predict from k to k+1
-        m_pred, P_pred, S_cross = predict_between_frames_sigma(t, filtered_mean, filtered_cov)
+        m_pred, P_pred, S_cross = predict_between_frames_sigma(
+            t, filtered_mean, filtered_cov
+        )
 
         # Compute smoother gain: G = S_cross @ P_pred^{-1}
         G = psd_solve(P_pred, S_cross.T).T
@@ -509,7 +523,9 @@ def _sigma_point_smoother_impl(
         # Correct for angle wrapping in heading (if present in layout)
         h_idx = get_heading_index(layout)
         resid = smoothed_mean_next - m_pred
-        resid = resid.at[h_idx].set(jnp.arctan2(jnp.sin(resid[h_idx]), jnp.cos(resid[h_idx])))
+        resid = resid.at[h_idx].set(
+            jnp.arctan2(jnp.sin(resid[h_idx]), jnp.cos(resid[h_idx]))
+        )
 
         # Smooth mean and covariance
         smoothed_mean = filtered_mean + G @ resid
@@ -607,7 +623,9 @@ def sigma_point_smoother(
         [jnp.array([lamb / (n + lamb)]), jnp.full(2 * n, 1.0 / (2 * (n + lamb)))]
     )
     w_cov_0 = lamb / (n + lamb) + (1 - alpha**2 + beta)
-    w_cov = jnp.concatenate([jnp.array([w_cov_0]), jnp.full(2 * n, 1.0 / (2 * (n + lamb)))])
+    w_cov = jnp.concatenate(
+        [jnp.array([w_cov_0]), jnp.full(2 * n, 1.0 / (2 * (n + lamb)))]
+    )
 
     # Compute mean IMU dt
     dt_imu_mean = jnp.mean(jnp.diff(t_imu_jax))

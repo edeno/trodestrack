@@ -43,7 +43,9 @@ def test_sigma_point_smoother_smoke_2d_cam_3d_imu_layout():
     filter_result = unscented_kalman_filter(
         ukf_config, t_imu, U_imu, t_cam, Z1, Z2, mask, initial_state=None, conf_cam=None
     )
-    smoother_result = sigma_point_smoother(filter_result, ukf_config, t_imu, U_imu, t_cam)
+    smoother_result = sigma_point_smoother(
+        filter_result, ukf_config, t_imu, U_imu, t_cam
+    )
 
     assert filter_result.filtered_means.shape[1] == 10
     assert smoother_result.smoothed_means.shape[1] == 10

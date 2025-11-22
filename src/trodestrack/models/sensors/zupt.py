@@ -88,7 +88,9 @@ class ZUPTModel:
         if measurement_noise <= 0:
             raise ValueError(f"measurement_noise must be > 0, got {measurement_noise}")
         if velocity_threshold < 0:
-            raise ValueError(f"velocity_threshold must be >= 0, got {velocity_threshold}")
+            raise ValueError(
+                f"velocity_threshold must be >= 0, got {velocity_threshold}"
+            )
 
         self.enable_zupt = enable_zupt
         self.velocity_threshold = velocity_threshold

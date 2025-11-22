@@ -99,7 +99,9 @@ def plot_simple_simulations(
         ax = axes[0, col]
 
         # Ground truth path
-        ax.plot(X[:, 0], X[:, 1], "-", linewidth=1.5, color=COLORS["blue"], label="truth")
+        ax.plot(
+            X[:, 0], X[:, 1], "-", linewidth=1.5, color=COLORS["blue"], label="truth"
+        )
 
         # Camera measurements (valid only)
         ax.scatter(
@@ -160,11 +162,15 @@ def plot_simple_simulations(
         # Twin axis for accel magnitude
         ax2 = ax.twinx()
         accel_mag = np.sqrt(U[:, 1] ** 2 + U[:, 2] ** 2)
-        ax2.plot(t_imu, accel_mag, "-", linewidth=0.5, color=COLORS["orange"], alpha=0.7)
+        ax2.plot(
+            t_imu, accel_mag, "-", linewidth=0.5, color=COLORS["orange"], alpha=0.7
+        )
         ax2.set_ylabel("accel mag (m/s²)", color=COLORS["orange"])
         ax2.tick_params(axis="y", labelcolor=COLORS["orange"])
 
-    fig.suptitle("Simple Analytic Simulations (10s duration)", fontsize=11, fontweight="normal")
+    fig.suptitle(
+        "Simple Analytic Simulations (10s duration)", fontsize=11, fontweight="normal"
+    )
 
     return fig
 
@@ -201,9 +207,13 @@ def main() -> None:
         config, position=np.array([0.5, 0.5]), heading=np.pi / 6, seed=42
     )
 
-    print(f"   Position: ({sim_stat['X_truth'][0, 0]:.2f}, {sim_stat['X_truth'][0, 1]:.2f}) m")
+    print(
+        f"   Position: ({sim_stat['X_truth'][0, 0]:.2f}, {sim_stat['X_truth'][0, 1]:.2f}) m"
+    )
     print(f"   Heading: {np.rad2deg(sim_stat['X_truth'][0, 4]):.1f}°")
-    print(f"   Valid camera frames: {sim_stat['mask_cam'].sum()}/{len(sim_stat['mask_cam'])}")
+    print(
+        f"   Valid camera frames: {sim_stat['mask_cam'].sum()}/{len(sim_stat['mask_cam'])}"
+    )
 
     # -------------------------------------------------------------------------
     # 2. Constant Velocity Simulation
@@ -265,7 +275,9 @@ def main() -> None:
 
     # Stationary: position should never change
     pos_std = np.std(sim_stat["X_truth"][:, :2], axis=0)
-    print(f"\nStationary position std: ({pos_std[0]:.2e}, {pos_std[1]:.2e}) m (expect 0)")
+    print(
+        f"\nStationary position std: ({pos_std[0]:.2e}, {pos_std[1]:.2e}) m (expect 0)"
+    )
 
     # Constant velocity: velocity should be constant
     vel_std = np.std(sim_vel["X_truth"][:, 2:4], axis=0)
@@ -274,7 +286,8 @@ def main() -> None:
     # Circular: distance from center should be constant
     center = np.array([0.5, 0.5])
     dist = np.sqrt(
-        (sim_circ["X_truth"][:, 0] - center[0]) ** 2 + (sim_circ["X_truth"][:, 1] - center[1]) ** 2
+        (sim_circ["X_truth"][:, 0] - center[0]) ** 2
+        + (sim_circ["X_truth"][:, 1] - center[1]) ** 2
     )
     dist_std = np.std(dist)
     print(f"Circular radius std: {dist_std:.2e} m (expect 0)")

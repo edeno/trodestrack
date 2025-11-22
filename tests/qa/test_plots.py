@@ -48,7 +48,9 @@ class TestPlotResiduals:
         std = 0.01  # Expected std
 
         # Act
-        fig, axes = plot_residuals(t, residuals, ylabel="Residuals (m)", confidence_std=std)
+        fig, axes = plot_residuals(
+            t, residuals, ylabel="Residuals (m)", confidence_std=std
+        )
 
         # Assert: Check that confidence bands are plotted
         # axhspan adds a PolyCollection to collections
@@ -202,7 +204,7 @@ class TestPlotNEESHistogram:
         nees = np.random.chisquare(df=8, size=500)
 
         # Act
-        fig, ax = plot_nees_histogram(nees, state_dim=8, confidence=0.99)
+        fig, _ax = plot_nees_histogram(nees, state_dim=8, confidence=0.99)
 
         # Assert: Plot should be created successfully
         assert isinstance(fig, plt.Figure)
@@ -320,7 +322,7 @@ class TestPlotCovarianceEllipse:
         # Act/Assert: Should either handle gracefully or raise clear error
         # Implementation can choose to skip ellipse or add regularization
         try:
-            fig, ax = plot_covariance_ellipse(mean, cov)
+            fig, _ax = plot_covariance_ellipse(mean, cov)
             plt.close(fig)
         except (ValueError, np.linalg.LinAlgError):
             # Acceptable to raise error for singular covariance
@@ -367,11 +369,11 @@ class TestIntegration:
         nees = np.random.chisquare(df=8, size=N)
 
         # Act: Create all QA plots
-        fig1, ax1 = plot_position_error(t, pos_true, pos_est, prd_threshold_m=0.02)
-        fig2, ax2 = plot_velocity_error(t, vel_true, vel_est)
-        fig3, axes3 = plot_residuals(t, residuals, confidence_std=0.01)
-        fig4, ax4 = plot_nees_histogram(nees, state_dim=8, confidence=0.95)
-        fig5, ax5 = plot_covariance_ellipse(
+        fig1, _ax1 = plot_position_error(t, pos_true, pos_est, prd_threshold_m=0.02)
+        fig2, _ax2 = plot_velocity_error(t, vel_true, vel_est)
+        fig3, _axes3 = plot_residuals(t, residuals, confidence_std=0.01)
+        fig4, _ax4 = plot_nees_histogram(nees, state_dim=8, confidence=0.95)
+        fig5, _ax5 = plot_covariance_ellipse(
             mean=np.array([0.5, 0.0]),
             cov=np.array([[0.01, 0.0], [0.0, 0.01]]),
             trajectory=pos_true,

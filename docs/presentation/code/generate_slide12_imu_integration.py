@@ -156,7 +156,10 @@ def generate_slide12():
     ax1.set_yticks([])
 
     ax1.set_title(
-        "Timeline: IMU Pre-Integration Between Camera Frames", fontsize=14, weight="bold", pad=8
+        "Timeline: IMU Pre-Integration Between Camera Frames",
+        fontsize=14,
+        weight="bold",
+        pad=8,
     )
     ax1.grid(True, alpha=0.3)
 
@@ -175,11 +178,15 @@ def generate_slide12():
         label="Gyro Z (°/s)",
     )
     ax2_gyro.axhline(0, color=GRAY, linewidth=3, linestyle="--", alpha=0.5)
-    ax2_gyro.set_ylabel("Gyro Z (°/s)", fontsize=13, weight="bold", color=RED, labelpad=8)
+    ax2_gyro.set_ylabel(
+        "Gyro Z (°/s)", fontsize=13, weight="bold", color=RED, labelpad=8
+    )
     ax2_gyro.tick_params(axis="y", labelcolor=RED, labelsize=10)
     ax2_gyro.set_xlim(t_k - 0.005, t_k1 + 0.005)
     ax2_gyro.grid(True, alpha=0.3)
-    ax2_gyro.legend(loc="upper left", fontsize=10, frameon=True, fancybox=False, framealpha=0.95)
+    ax2_gyro.legend(
+        loc="upper left", fontsize=10, frameon=True, fancybox=False, framealpha=0.95
+    )
 
     # Plot accel X, Y on second y-axis
     ax2_accel = ax2.twinx()
@@ -204,9 +211,13 @@ def generate_slide12():
         label="Accel Y (m/s²)",
     )
     ax2_accel.axhline(0, color=GRAY, linewidth=3, linestyle="--", alpha=0.5)
-    ax2_accel.set_ylabel("Accel X, Y (m/s²)", fontsize=13, weight="bold", color=GREEN, labelpad=8)
+    ax2_accel.set_ylabel(
+        "Accel X, Y (m/s²)", fontsize=13, weight="bold", color=GREEN, labelpad=8
+    )
     ax2_accel.tick_params(axis="y", labelcolor=GREEN, labelsize=10)
-    ax2_accel.legend(loc="upper right", fontsize=10, frameon=True, fancybox=False, framealpha=0.95)
+    ax2_accel.legend(
+        loc="upper right", fontsize=10, frameon=True, fancybox=False, framealpha=0.95
+    )
 
     ax2.set_xlabel("Time (s)", fontsize=14, weight="bold")
 
@@ -226,9 +237,23 @@ def generate_slide12():
     )
 
     # Mark start and end positions
-    ax3.plot(X_k[0], X_k[1], "o", color=BLUE, markersize=20, label=f"Frame {cam_idx_k}", zorder=10)
     ax3.plot(
-        X_k1[0], X_k1[1], "s", color=GREEN, markersize=20, label=f"Frame {cam_idx_k1}", zorder=10
+        X_k[0],
+        X_k[1],
+        "o",
+        color=BLUE,
+        markersize=20,
+        label=f"Frame {cam_idx_k}",
+        zorder=10,
+    )
+    ax3.plot(
+        X_k1[0],
+        X_k1[1],
+        "s",
+        color=GREEN,
+        markersize=20,
+        label=f"Frame {cam_idx_k1}",
+        zorder=10,
     )
 
     # Draw velocity vector - RED ARROW

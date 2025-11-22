@@ -71,7 +71,9 @@ def generate_slide21():
     n_dims = len(state_indices)
 
     # Compute errors and NEES
-    errors = np.array(result.filtered_means[:, state_indices] - X_truth_cam[:, state_indices])
+    errors = np.array(
+        result.filtered_means[:, state_indices] - X_truth_cam[:, state_indices]
+    )
 
     # Handle angle wrapping for heading (last index in state_indices)
     errors[:, 4] = np.arctan2(np.sin(errors[:, 4]), np.cos(errors[:, 4]))
@@ -108,7 +110,7 @@ def generate_slide21():
 
     # Plot histogram of NEES values
     bins = np.linspace(0, 20, 50)
-    counts, bin_edges, patches = ax.hist(
+    _counts, _bin_edges, _patches = ax.hist(
         nees_values,
         bins=bins,
         density=True,
@@ -122,7 +124,14 @@ def generate_slide21():
     # Overlay χ² theoretical distribution
     x = np.linspace(0, 20, 200)
     chi2_pdf = stats.chi2.pdf(x, df=n_dims)
-    ax.plot(x, chi2_pdf, linewidth=3, color=RED, label=f"χ² distribution (df={n_dims})", zorder=10)
+    ax.plot(
+        x,
+        chi2_pdf,
+        linewidth=3,
+        color=RED,
+        label=f"χ² distribution (df={n_dims})",
+        zorder=10,
+    )
 
     # Add 95% confidence interval
     chi2_lower = stats.chi2.ppf(0.025, df=n_dims)
@@ -139,12 +148,18 @@ def generate_slide21():
     ax.axvline(chi2_upper, color=ORANGE, linestyle="--", linewidth=4, alpha=0.7)
 
     # Shade the acceptance region
-    ax.axvspan(chi2_lower, chi2_upper, alpha=0.1, color=GREEN, label="Acceptance region")
+    ax.axvspan(
+        chi2_lower, chi2_upper, alpha=0.1, color=GREEN, label="Acceptance region"
+    )
 
     # Add mean NEES line
     mean_nees = np.mean(nees_values)
     ax.axvline(
-        mean_nees, color=GREEN, linestyle="-", linewidth=3, label=f"Mean NEES: {mean_nees:.2f}"
+        mean_nees,
+        color=GREEN,
+        linestyle="-",
+        linewidth=3,
+        label=f"Mean NEES: {mean_nees:.2f}",
     )
 
     # Color-code mean NEES annotation
@@ -235,7 +250,9 @@ def generate_slide21():
 
     # Statistics summary - in legend panel below legend
     percent_in_ci = (
-        100 * np.sum((nees_values >= chi2_lower) & (nees_values <= chi2_upper)) / len(nees_values)
+        100
+        * np.sum((nees_values >= chi2_lower) & (nees_values <= chi2_upper))
+        / len(nees_values)
     )
 
     stats_text = (

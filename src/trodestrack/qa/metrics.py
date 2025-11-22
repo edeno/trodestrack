@@ -23,6 +23,8 @@ from numpy.typing import NDArray
 if TYPE_CHECKING:
     from trodestrack.models.state_layout import StateLayout
 
+from trodestrack.models.state_layout import get_heading_index
+
 
 def compute_position_rmse(
     positions_true: NDArray[np.float64],
@@ -67,7 +69,9 @@ def compute_position_rmse(
         raise ValueError(f"Expected 2D positions, got shape {positions_true.shape}")
 
     # Build validity mask: finite values + optional user-provided mask
-    valid = np.isfinite(positions_true).all(axis=1) & np.isfinite(positions_est).all(axis=1)
+    valid = np.isfinite(positions_true).all(axis=1) & np.isfinite(positions_est).all(
+        axis=1
+    )
     if valid_mask is not None:
         if valid_mask.shape[0] != positions_true.shape[0]:
             raise ValueError(
@@ -79,7 +83,9 @@ def compute_position_rmse(
         raise ValueError("No valid samples remaining after masking and NaN filtering")
 
     errors = positions_true[valid] - positions_est[valid]
-    squared_errors = np.sum(errors**2, axis=1)  # Euclidean distance squared per timestep
+    squared_errors = np.sum(
+        errors**2, axis=1
+    )  # Euclidean distance squared per timestep
     mse = np.mean(squared_errors)
     rmse = np.sqrt(mse)
 
@@ -123,7 +129,9 @@ def compute_velocity_rmse(
         raise ValueError(f"Expected 2D velocities, got shape {velocities_true.shape}")
 
     # Build validity mask: finite values + optional user-provided mask
-    valid = np.isfinite(velocities_true).all(axis=1) & np.isfinite(velocities_est).all(axis=1)
+    valid = np.isfinite(velocities_true).all(axis=1) & np.isfinite(velocities_est).all(
+        axis=1
+    )
     if valid_mask is not None:
         if valid_mask.shape[0] != velocities_true.shape[0]:
             raise ValueError(
@@ -161,14 +169,16 @@ def compute_heading_error(
         Mean absolute error in radians.
 
     Example:
-        >>> true_heading = np.array([0.0, np.pi/2, np.pi])
-        >>> est_heading = np.array([0.1, np.pi/2 + 0.1, np.pi - 0.1])
+        >>> true_heading = np.array([0.0, np.pi / 2, np.pi])
+        >>> est_heading = np.array([0.1, np.pi / 2 + 0.1, np.pi - 0.1])
         >>> mae = compute_heading_error(true_heading, est_heading)
         >>> print(f"{mae:.4f} rad ({np.rad2deg(mae):.2f} deg)")
         0.1000 rad (5.73 deg)
     """
     if headings_true.shape != headings_est.shape:
-        raise ValueError(f"Shape mismatch: true {headings_true.shape} vs est {headings_est.shape}")
+        raise ValueError(
+            f"Shape mismatch: true {headings_true.shape} vs est {headings_est.shape}"
+        )
 
     if headings_true.ndim != 1:
         raise ValueError(f"Expected 1D headings, got shape {headings_true.shape}")
@@ -202,14 +212,16 @@ def compute_heading_rmse(
         Root mean square error in radians.
 
     Example:
-        >>> true_heading = np.array([0.0, np.pi/2, np.pi])
-        >>> est_heading = np.array([0.1, np.pi/2 + 0.1, np.pi - 0.1])
+        >>> true_heading = np.array([0.0, np.pi / 2, np.pi])
+        >>> est_heading = np.array([0.1, np.pi / 2 + 0.1, np.pi - 0.1])
         >>> rmse = compute_heading_rmse(true_heading, est_heading)
         >>> print(f"{rmse:.4f} rad ({np.rad2deg(rmse):.2f} deg)")
         0.1000 rad (5.73 deg)
     """
     if headings_true.shape != headings_est.shape:
-        raise ValueError(f"Shape mismatch: true {headings_true.shape} vs est {headings_est.shape}")
+        raise ValueError(
+            f"Shape mismatch: true {headings_true.shape} vs est {headings_est.shape}"
+        )
 
     if headings_true.ndim != 1:
         raise ValueError(f"Expected 1D headings, got shape {headings_true.shape}")
@@ -291,7 +303,9 @@ def compute_nees(
         NEES values will be incorrectly large when angles wrap through 0°/360°.
     """
     if states_true.shape != states_est.shape:
-        raise ValueError(f"Shape mismatch: true {states_true.shape} vs est {states_est.shape}")
+        raise ValueError(
+            f"Shape mismatch: true {states_true.shape} vs est {states_est.shape}"
+        )
 
     N, D = states_true.shape
 
@@ -303,7 +317,7 @@ def compute_nees(
     # Extract heading index from layout if provided
     if layout is not None:
         if layout.has_heading_2d:
-            heading_idx = int(layout.heading_idx)
+            heading_idx = get_heading_index(layout)
         # For 3D orientations, we don't currently support angle wrapping
         # (would need quaternion or Euler angle handling)
 
@@ -447,14 +461,16 @@ def compute_nis_stats(
         >>> nis = np.random.chisquare(df=4, size=100)
         >>> stats = compute_nis_stats(nis, measurement_dim=4, confidence=0.95)
         >>> # Mean should be approximately measurement_dim for consistent filter
-        >>> 3.0 < stats['mean'] < 5.0
+        >>> 3.0 < stats["mean"] < 5.0
         True
         >>> # Most samples should be within 95% confidence bounds
-        >>> stats['pct_in_bounds'] > 90.0
+        >>> stats["pct_in_bounds"] > 90.0
         True
     """
     lower, upper = chi2_bounds(df=measurement_dim, confidence=confidence)
-    pct_in_bounds = within_envelope(nis, df=measurement_dim, confidence=confidence) * 100.0
+    pct_in_bounds = (
+        within_envelope(nis, df=measurement_dim, confidence=confidence) * 100.0
+    )
 
     return {
         "mean": float(np.mean(nis)),
@@ -577,10 +593,10 @@ def compute_nees_stats(
         >>> nees = np.random.chisquare(df=5, size=100)
         >>> stats = compute_nees_stats(nees, state_dim=5, confidence=0.95)
         >>> # Mean should be approximately state_dim for consistent filter
-        >>> 4.0 < stats['mean'] < 6.0
+        >>> 4.0 < stats["mean"] < 6.0
         True
         >>> # Most samples should be within 95% confidence bounds
-        >>> stats['pct_in_bounds'] > 90.0
+        >>> stats["pct_in_bounds"] > 90.0
         True
     """
     lower, upper = chi2_bounds(df=state_dim, confidence=confidence)
@@ -704,12 +720,12 @@ def within_envelope(
         >>> np.random.seed(42)
         >>> nees_values = np.random.chisquare(df=4, size=1000)
         >>> pct = within_envelope(nees_values, df=4, confidence=0.95)
-        >>> print(f"{pct*100:.1f}% within 95% envelope")
+        >>> print(f"{pct * 100:.1f}% within 95% envelope")
         94.8% within 95% envelope
 
         >>> # With 99% confidence, more values should be within bounds
         >>> pct_99 = within_envelope(nees_values, df=4, confidence=0.99)
-        >>> print(f"{pct_99*100:.1f}% within 99% envelope")
+        >>> print(f"{pct_99 * 100:.1f}% within 99% envelope")
         99.1% within 99% envelope
 
     Notes:
@@ -759,9 +775,9 @@ def compute_dropout_drift(
         >>> valid_mask = (t < 3.0) | (t >= 8.0)  # Dropout from 3-8s
         >>> result = compute_dropout_drift(positions, valid_mask, t, min_duration_s=4.0)
         >>> # Drift should be ~0.5 m (5s * 0.1 m/s)
-        >>> 0.4 < result['drift_m'] < 0.6
+        >>> 0.4 < result["drift_m"] < 0.6
         True
-        >>> np.isclose(result['duration_s'], 5.0, atol=0.1)
+        >>> np.isclose(result["duration_s"], 5.0, atol=0.1)
         True
 
     Notes:

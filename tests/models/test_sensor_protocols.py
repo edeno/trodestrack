@@ -57,7 +57,9 @@ def dual_led_arrays():
     return {
         "z_led1_all": jnp.array([[0.95, 1.98], [1.0, 2.0], [1.0, 2.0]]),
         "z_led2_all": jnp.array([[1.05, 2.02], [1.04, 2.0], [1.03, 2.0]]),
-        "conf_all": jnp.array([[0.9, 0.9, 0.8, 0.8], [0.9, 0.9, 0.8, 0.8], [0.9, 0.9, 0.8, 0.8]]),
+        "conf_all": jnp.array(
+            [[0.9, 0.9, 0.8, 0.8], [0.9, 0.9, 0.8, 0.8], [0.9, 0.9, 0.8, 0.8]]
+        ),
     }
 
 
@@ -100,7 +102,9 @@ def test_camera_model_implements_protocol(layout_2d_full, dual_led_arrays):
     assert isinstance(model, MeasurementModel)
 
 
-def test_heading_model_implements_protocol(heading_config, layout_2d_full, dual_led_arrays):
+def test_heading_model_implements_protocol(
+    heading_config, layout_2d_full, dual_led_arrays
+):
     """HeadingPseudoModel should satisfy MeasurementModel protocol."""
     model = HeadingPseudoModel(
         config=heading_config,
@@ -261,7 +265,9 @@ def test_camera_model_innovation(layout_2d_full, dual_led_arrays, simple_state):
     innovation = model.innovation(frame_idx=0, meas_pred=meas_pred)
 
     # Should be z - h(x)
-    z_obs = jnp.concatenate([dual_led_arrays["z_led1_all"][0], dual_led_arrays["z_led2_all"][0]])
+    z_obs = jnp.concatenate(
+        [dual_led_arrays["z_led1_all"][0], dual_led_arrays["z_led2_all"][0]]
+    )
     expected_innov = z_obs - meas_pred
 
     np.testing.assert_allclose(innovation, expected_innov, atol=1e-10)
@@ -283,7 +289,9 @@ def test_heading_model_meas_dim(heading_config, layout_2d_full, dual_led_arrays)
     assert model.meas_dim == 1
 
 
-def test_heading_model_predict(simple_state, heading_config, layout_2d_full, dual_led_arrays):
+def test_heading_model_predict(
+    simple_state, heading_config, layout_2d_full, dual_led_arrays
+):
     """Heading model should extract heading from state."""
     model = HeadingPseudoModel(
         config=heading_config,
@@ -301,7 +309,9 @@ def test_heading_model_predict(simple_state, heading_config, layout_2d_full, dua
     np.testing.assert_allclose(meas_pred, expected, atol=1e-10)
 
 
-def test_heading_model_jacobian(simple_state, heading_config, layout_2d_full, dual_led_arrays):
+def test_heading_model_jacobian(
+    simple_state, heading_config, layout_2d_full, dual_led_arrays
+):
     """Heading model should return correct Jacobian shape."""
     model = HeadingPseudoModel(
         config=heading_config,
@@ -324,7 +334,9 @@ def test_heading_model_spacing_gate(heading_config, layout_2d_full):
     """Heading model should gate measurements when LED spacing is invalid."""
     # Valid spacing (close to expected 0.04)
     z_led1_valid = jnp.array([[1.0, 2.0], [1.0, 2.0]])
-    z_led2_valid = jnp.array([[1.04, 2.0], [1.10, 2.0]])  # frame 0: valid, frame 1: invalid
+    z_led2_valid = jnp.array(
+        [[1.04, 2.0], [1.10, 2.0]]
+    )  # frame 0: valid, frame 1: invalid
 
     model = HeadingPseudoModel(
         config=heading_config,

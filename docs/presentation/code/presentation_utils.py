@@ -172,7 +172,9 @@ def add_title(ax, title, fontsize=32, color="black", pad=15):
     ax.set_title(title, fontsize=fontsize, fontweight="bold", color=color, pad=pad)
 
 
-def add_legend(ax, fontsize=20, loc="upper left", bbox_to_anchor=(1.02, 1), frameon=True, **kwargs):
+def add_legend(
+    ax, fontsize=20, loc="upper left", bbox_to_anchor=(1.02, 1), frameon=True, **kwargs
+):
     """
     Add large, readable legend OUTSIDE plot area (MANDATORY)
 
@@ -230,7 +232,11 @@ def annotate_with_arrow(
         va="center",
         arrowprops=dict(arrowstyle="->", lw=arrow_width, color=color),
         bbox=dict(
-            boxstyle="round,pad=0.6", facecolor=bbox_color, alpha=0.8, edgecolor=color, linewidth=2
+            boxstyle="round,pad=0.6",
+            facecolor=bbox_color,
+            alpha=0.8,
+            edgecolor=color,
+            linewidth=2,
         ),
         zorder=100,  # Ensure annotation is on top
     )
@@ -280,7 +286,15 @@ def ensure_no_overlap(ax, margin_factor=0.1):
 
 
 def plot_trajectory(
-    ax, x, y, color=COLORS["blue"], linewidth=4, label=None, marker=None, markersize=10, alpha=1.0
+    ax,
+    x,
+    y,
+    color=COLORS["blue"],
+    linewidth=4,
+    label=None,
+    marker=None,
+    markersize=10,
+    alpha=1.0,
 ):
     """Plot trajectory with presentation-optimized styling"""
     return ax.plot(
@@ -315,12 +329,18 @@ def scatter_points(
     )
 
 
-def add_reference_line(ax, value, axis="x", color=COLORS["orange"], linewidth=3, label=None):
+def add_reference_line(
+    ax, value, axis="x", color=COLORS["orange"], linewidth=3, label=None
+):
     """Add horizontal or vertical reference line"""
     if axis == "x":
-        line = ax.axvline(value, color=color, linewidth=linewidth, linestyle="--", label=label)
+        line = ax.axvline(
+            value, color=color, linewidth=linewidth, linestyle="--", label=label
+        )
     else:  # y
-        line = ax.axhline(value, color=color, linewidth=linewidth, linestyle="--", label=label)
+        line = ax.axhline(
+            value, color=color, linewidth=linewidth, linestyle="--", label=label
+        )
     return line
 
 

@@ -88,9 +88,15 @@ def load_imu_data(imu_file: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         ]
     )
 
-    print(f"  Time range: {t_imu[0]:.1f}s to {t_imu[-1]:.1f}s ({t_imu[-1] / 60:.1f} min)")
-    print(f"  Gyro range: X=[{gyro_deg[:, 0].min():.1f}, {gyro_deg[:, 0].max():.1f}] deg/s")
-    print(f"  Accel range: X=[{accel_mps2[:, 0].min():.2f}, {accel_mps2[:, 0].max():.2f}] m/s²")
+    print(
+        f"  Time range: {t_imu[0]:.1f}s to {t_imu[-1]:.1f}s ({t_imu[-1] / 60:.1f} min)"
+    )
+    print(
+        f"  Gyro range: X=[{gyro_deg[:, 0].min():.1f}, {gyro_deg[:, 0].max():.1f}] deg/s"
+    )
+    print(
+        f"  Accel range: X=[{accel_mps2[:, 0].min():.2f}, {accel_mps2[:, 0].max():.2f}] m/s²"
+    )
 
     return t_imu, gyro_deg, accel_mps2
 
@@ -171,7 +177,9 @@ def create_imu_tracking_video(
     pos_df = pd.read_parquet(position_file)
     led1_pixels = pos_df[["xloc", "yloc"]].values
     led2_pixels = pos_df[["xloc2", "yloc2"]].values
-    pos_timestamps = (pos_df.index.values - pos_df.index.values[0]) / 1e9  # ns to seconds
+    pos_timestamps = (
+        pos_df.index.values - pos_df.index.values[0]
+    ) / 1e9  # ns to seconds
     print(f"  Loaded {len(pos_df):,} frames")
 
     # Load IMU data
@@ -224,7 +232,9 @@ def create_imu_tracking_video(
             axes["video"].imshow(frame_rgb)
             axes["video"].set_aspect("equal")
             axes["video"].axis("off")
-            axes["video"].set_title("Camera Tracking", fontsize=14, fontweight="bold", pad=10)
+            axes["video"].set_title(
+                "Camera Tracking", fontsize=14, fontweight="bold", pad=10
+            )
 
             # Draw trajectory
             start_idx = max(0, i - trajectory_length)
@@ -279,7 +289,9 @@ def create_imu_tracking_video(
 
             # === IMU PANELS ===
             half_window = imu_window_s / 2.0
-            mask = (t_imu >= current_time - half_window) & (t_imu <= current_time + half_window)
+            mask = (t_imu >= current_time - half_window) & (
+                t_imu <= current_time + half_window
+            )
             t_window = t_imu[mask]
             gyro_window = gyro_deg[mask]
             accel_window = accel_mps2[mask]
@@ -287,19 +299,40 @@ def create_imu_tracking_video(
             # Gyroscope
             if len(t_window) > 0:
                 axes["gyro"].plot(
-                    t_window, gyro_window[:, 0], "-", linewidth=1.5, label="X", alpha=0.8
+                    t_window,
+                    gyro_window[:, 0],
+                    "-",
+                    linewidth=1.5,
+                    label="X",
+                    alpha=0.8,
                 )
                 axes["gyro"].plot(
-                    t_window, gyro_window[:, 1], "-", linewidth=1.5, label="Y", alpha=0.8
+                    t_window,
+                    gyro_window[:, 1],
+                    "-",
+                    linewidth=1.5,
+                    label="Y",
+                    alpha=0.8,
                 )
                 axes["gyro"].plot(
-                    t_window, gyro_window[:, 2], "-", linewidth=1.5, label="Z", alpha=0.8
+                    t_window,
+                    gyro_window[:, 2],
+                    "-",
+                    linewidth=1.5,
+                    label="Z",
+                    alpha=0.8,
                 )
                 axes["gyro"].axvline(
-                    current_time, color="black", linestyle="--", linewidth=1.5, alpha=0.5
+                    current_time,
+                    color="black",
+                    linestyle="--",
+                    linewidth=1.5,
+                    alpha=0.5,
                 )
 
-            axes["gyro"].set_xlim(current_time - half_window, current_time + half_window)
+            axes["gyro"].set_xlim(
+                current_time - half_window, current_time + half_window
+            )
             axes["gyro"].set_ylim(-200, 200)
             axes["gyro"].set_ylabel("Angular Velocity (deg/s)", fontsize=10)
             axes["gyro"].set_xlabel("Time (s)", fontsize=10)
@@ -311,24 +344,47 @@ def create_imu_tracking_video(
             # Accelerometer
             if len(t_window) > 0:
                 axes["accel"].plot(
-                    t_window, accel_window[:, 0], "-", linewidth=1.5, label="X", alpha=0.8
+                    t_window,
+                    accel_window[:, 0],
+                    "-",
+                    linewidth=1.5,
+                    label="X",
+                    alpha=0.8,
                 )
                 axes["accel"].plot(
-                    t_window, accel_window[:, 1], "-", linewidth=1.5, label="Y", alpha=0.8
+                    t_window,
+                    accel_window[:, 1],
+                    "-",
+                    linewidth=1.5,
+                    label="Y",
+                    alpha=0.8,
                 )
                 axes["accel"].plot(
-                    t_window, accel_window[:, 2], "-", linewidth=1.5, label="Z", alpha=0.8
+                    t_window,
+                    accel_window[:, 2],
+                    "-",
+                    linewidth=1.5,
+                    label="Z",
+                    alpha=0.8,
                 )
                 axes["accel"].axvline(
-                    current_time, color="black", linestyle="--", linewidth=1.5, alpha=0.5
+                    current_time,
+                    color="black",
+                    linestyle="--",
+                    linewidth=1.5,
+                    alpha=0.5,
                 )
 
-            axes["accel"].set_xlim(current_time - half_window, current_time + half_window)
+            axes["accel"].set_xlim(
+                current_time - half_window, current_time + half_window
+            )
             axes["accel"].set_ylim(-15, 15)
             axes["accel"].set_ylabel("Acceleration (m/s²)", fontsize=10)
             axes["accel"].set_xlabel("Time (s)", fontsize=10)
             axes["accel"].grid(True, alpha=0.3)
-            axes["accel"].set_title("Accelerometer (3-axis)", fontsize=12, fontweight="bold")
+            axes["accel"].set_title(
+                "Accelerometer (3-axis)", fontsize=12, fontweight="bold"
+            )
             axes["accel"].legend(loc="upper right", fontsize=8)
             axes["accel"].tick_params(labelsize=9)
 

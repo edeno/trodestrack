@@ -253,7 +253,9 @@ def render_frame_heatmap(fig, axes, frame_idx, data):
     center_y = 0.5 * np.sin(2 * t)
     sigma = 0.5 + 0.3 * np.sin(3 * t)
 
-    Z = np.exp(-((data["X"] - center_x) ** 2 + (data["Y"] - center_y) ** 2) / (2 * sigma**2))
+    Z = np.exp(
+        -((data["X"] - center_x) ** 2 + (data["Y"] - center_y) ** 2) / (2 * sigma**2)
+    )
 
     # Reuse or create image and colorbar (avoid creating multiple colorbars)
     if "im" not in axes:

@@ -75,7 +75,7 @@ def main():
     )
 
     # Plot trajectory during dropout
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    _fig, axes = plt.subplots(2, 2, figsize=(12, 10))
 
     # Position trajectory
     ax = axes[0, 0]
@@ -92,8 +92,16 @@ def main():
     dropout_truth = pos_truth[dropout_start_idx:dropout_end_idx]
     dropout_est = result.filtered_means[dropout_start_idx:dropout_end_idx, :2]
 
-    ax.plot(dropout_truth[:, 0], dropout_truth[:, 1], "r-", linewidth=3, label="Dropout (Truth)")
-    ax.plot(dropout_est[:, 0], dropout_est[:, 1], "m-", linewidth=3, label="Dropout (EKF)")
+    ax.plot(
+        dropout_truth[:, 0],
+        dropout_truth[:, 1],
+        "r-",
+        linewidth=3,
+        label="Dropout (Truth)",
+    )
+    ax.plot(
+        dropout_est[:, 0], dropout_est[:, 1], "m-", linewidth=3, label="Dropout (EKF)"
+    )
 
     ax.scatter(
         [dropout_truth[0, 0]],
@@ -121,7 +129,9 @@ def main():
 
     # Position error over time
     ax = axes[0, 1]
-    pos_error = np.linalg.norm(pos_truth - result.filtered_means[:, :2], axis=1) * 100  # cm
+    pos_error = (
+        np.linalg.norm(pos_truth - result.filtered_means[:, :2], axis=1) * 100
+    )  # cm
     ax.plot(sim_data["t_cam_exp"], pos_error, "b-", linewidth=2)
     ax.axvspan(5.0, 10.0, color="red", alpha=0.2, label="Dropout")
     ax.axhline(15.0, color="red", linestyle="--", label="PRD Limit (15 cm)")
@@ -133,9 +143,15 @@ def main():
 
     # Bias estimates
     ax = axes[1, 0]
-    ax.plot(sim_data["t_cam_exp"], result.filtered_means[:, 5], label="Gyro Bias (rad/s)")
-    ax.plot(sim_data["t_cam_exp"], result.filtered_means[:, 6], label="Accel X Bias (m/s²)")
-    ax.plot(sim_data["t_cam_exp"], result.filtered_means[:, 7], label="Accel Y Bias (m/s²)")
+    ax.plot(
+        sim_data["t_cam_exp"], result.filtered_means[:, 5], label="Gyro Bias (rad/s)"
+    )
+    ax.plot(
+        sim_data["t_cam_exp"], result.filtered_means[:, 6], label="Accel X Bias (m/s²)"
+    )
+    ax.plot(
+        sim_data["t_cam_exp"], result.filtered_means[:, 7], label="Accel Y Bias (m/s²)"
+    )
     ax.axvspan(5.0, 10.0, color="red", alpha=0.2, label="Dropout")
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Bias Estimate")
@@ -151,7 +167,9 @@ def main():
             np.interp(sim_data["t_cam_exp"], t_truth, X_truth[:, 3]),
         ]
     )
-    vel_error = np.linalg.norm(vel_truth - result.filtered_means[:, 2:4], axis=1) * 100  # cm/s
+    vel_error = (
+        np.linalg.norm(vel_truth - result.filtered_means[:, 2:4], axis=1) * 100
+    )  # cm/s
     ax.plot(sim_data["t_cam_exp"], vel_error, "b-", linewidth=2)
     ax.axvspan(5.0, 10.0, color="red", alpha=0.2, label="Dropout")
     ax.set_xlabel("Time (s)")

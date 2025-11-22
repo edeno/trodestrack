@@ -433,9 +433,13 @@ class TestPhysicalRealism:
 
         # Even with high speeds, no tunneling
         assert np.all(px >= 0), f"Tunneling below x=0: min={px.min()}"
-        assert np.all(px <= config.arena_w), f"Tunneling above x={config.arena_w}: max={px.max()}"
+        assert np.all(
+            px <= config.arena_w
+        ), f"Tunneling above x={config.arena_w}: max={px.max()}"
         assert np.all(py >= 0), f"Tunneling below y=0: min={py.min()}"
-        assert np.all(py <= config.arena_h), f"Tunneling above y={config.arena_h}: max={py.max()}"
+        assert np.all(
+            py <= config.arena_h
+        ), f"Tunneling above y={config.arena_h}: max={py.max()}"
 
     def test_boundary_reflection_deterministic(self):
         """Verify that boundary physics are deterministic with same seed."""

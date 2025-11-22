@@ -127,7 +127,9 @@ class TestGenerateQAReport:
 
         pos_true = np.column_stack([np.cos(theta_traj) * 0.3, np.sin(theta_traj) * 0.3])
         pos_est = pos_true + np.random.randn(N, 2) * 0.01
-        vel_true = np.column_stack([-np.sin(theta_traj) * 0.15, np.cos(theta_traj) * 0.15])
+        vel_true = np.column_stack(
+            [-np.sin(theta_traj) * 0.15, np.cos(theta_traj) * 0.15]
+        )
         vel_est = vel_true + np.random.randn(N, 2) * 0.01
         heading_true = theta_traj
         heading_est = heading_true + np.random.randn(N) * 0.1

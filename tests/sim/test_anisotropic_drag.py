@@ -64,7 +64,9 @@ class TestAnisotropicDragBasics:
 
         # Forward velocity should have decayed, but still be significant
         assert v_fwd_final < v_fwd_initial, "Forward velocity should decay"
-        assert v_fwd_final > 0.1 * v_fwd_initial, "Forward velocity should not fully decay in 5s"
+        assert (
+            v_fwd_final > 0.1 * v_fwd_initial
+        ), "Forward velocity should not fully decay in 5s"
 
     def test_pure_lateral_motion_decays_faster(self):
         """Verify pure lateral motion decays faster than pure forward motion."""
@@ -143,7 +145,10 @@ class TestAnisotropicDragBasics:
         # At 45° heading, initial world velocities are vx=vy=0.3
         # In body frame: v_fwd ≈ sqrt(2)*0.3 ≈ 0.424, v_lat ≈ 0
         # Note: There's numerical integration happening before first sample
-        c, s = np.cos(theta[10]), np.sin(theta[10])  # Use sample 10 to avoid initial transient
+        c, s = (
+            np.cos(theta[10]),
+            np.sin(theta[10]),
+        )  # Use sample 10 to avoid initial transient
         v_fwd_body = vx[10] * c + vy[10] * s
         v_lat_body = -vx[10] * s + vy[10] * c
 

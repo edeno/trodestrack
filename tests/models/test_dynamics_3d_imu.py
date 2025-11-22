@@ -171,7 +171,9 @@ def test_dynamics_function_body_to_world_rotation():
     vz_next = next_state[layout.vel_idx[2]]
 
     assert jnp.abs(vx_next) < 1e-6, f"vx should be ~0, got {vx_next}"
-    assert jnp.allclose(vy_next, 1.0 * dt, atol=1e-6), f"vy should be ~{1.0 * dt}, got {vy_next}"
+    assert jnp.allclose(
+        vy_next, 1.0 * dt, atol=1e-6
+    ), f"vy should be ~{1.0 * dt}, got {vy_next}"
     assert jnp.abs(vz_next) < 1e-6, f"vz should be ~0, got {vz_next}"
 
 
@@ -274,7 +276,9 @@ def test_dynamics_function_vision_only_mode():
     assert next_state.shape == (5,)
 
     # Verify no NaNs or Infs (basic sanity check)
-    assert jnp.all(jnp.isfinite(next_state)), "Vision-only mode should produce finite state values"
+    assert jnp.all(
+        jnp.isfinite(next_state)
+    ), "Vision-only mode should produce finite state values"
 
 
 # =============================================================================
@@ -367,8 +371,12 @@ def test_dynamics_function_position_velocity_coupling():
     expected_x = 1.0 * dt + 0.5 * 0.5 * dt**2
     expected_y = 2.0 * dt + 0.5 * 1.0 * dt**2
 
-    assert jnp.allclose(x_next, expected_x, atol=1e-6), f"Expected x={expected_x}, got {x_next}"
-    assert jnp.allclose(y_next, expected_y, atol=1e-6), f"Expected y={expected_y}, got {y_next}"
+    assert jnp.allclose(
+        x_next, expected_x, atol=1e-6
+    ), f"Expected x={expected_x}, got {x_next}"
+    assert jnp.allclose(
+        y_next, expected_y, atol=1e-6
+    ), f"Expected y={expected_y}, got {y_next}"
 
 
 # =============================================================================
@@ -424,4 +432,6 @@ def test_dynamics_function_deterministic():
     result2 = dynamics_function(state, imu, dt, damping, layout)
 
     # Should be bit-for-bit identical (deterministic)
-    assert jnp.array_equal(result1, result2), "dynamics_function should be deterministic"
+    assert jnp.array_equal(
+        result1, result2
+    ), "dynamics_function should be deterministic"

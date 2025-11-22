@@ -210,7 +210,9 @@ def test_default_confidence_is_high(ekf_config, initial_state):
     z_led2 = jnp.array([0.54, 0.5])
 
     # Update without confidence parameter (should default to 1.0)
-    camera_model_default = make_camera_model(z_led1, z_led2, ekf_config, confidence=None)
+    camera_model_default = make_camera_model(
+        z_led1, z_led2, ekf_config, confidence=None
+    )
     state_default, _ = update_step(
         initial_state,
         camera_model_default,

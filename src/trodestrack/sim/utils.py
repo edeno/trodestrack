@@ -119,7 +119,7 @@ def wrap_angle(a: float | np.ndarray) -> float | np.ndarray:
     --------
     >>> wrap_angle(3.5 * np.pi)
     -1.5707963267948966  # ≈ -π/2
-    >>> wrap_angle(np.array([0, np.pi, 2*np.pi, -np.pi]))
+    >>> wrap_angle(np.array([0, np.pi, 2 * np.pi, -np.pi]))
     array([ 0.        ,  3.14159265,  0.        , -3.14159265])
     >>> wrap_angle(1e10)  # Large angle - stable
     -2.073451669556168
@@ -127,7 +127,9 @@ def wrap_angle(a: float | np.ndarray) -> float | np.ndarray:
     return np.arctan2(np.sin(a), np.cos(a))
 
 
-def interp_angle(t_new: np.ndarray, t_old: np.ndarray, angles: np.ndarray) -> np.ndarray:
+def interp_angle(
+    t_new: np.ndarray, t_old: np.ndarray, angles: np.ndarray
+) -> np.ndarray:
     """Interpolate wrapped angles using unwrap → interp → rewrap.
 
     Prevents jumps at ±π by unwrapping before interpolation and rewrapping.
@@ -305,8 +307,10 @@ def ou_step(
     Example:
         >>> rng = np.random.default_rng(42)
         >>> x = 0.0
-        >>> trajectory = [x := ou_step(x, mean=1.0, tau=0.5, sigma=0.1, dt=0.01, rng=rng)
-        ...               for _ in range(100)]
+        >>> trajectory = [
+        ...     x := ou_step(x, mean=1.0, tau=0.5, sigma=0.1, dt=0.01, rng=rng)
+        ...     for _ in range(100)
+        ... ]
         >>> abs(np.mean(trajectory) - 1.0) < 0.5  # Converges toward mean
         True
     """

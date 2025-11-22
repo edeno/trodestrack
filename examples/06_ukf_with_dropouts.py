@@ -93,7 +93,9 @@ def print_comparison_table(
     # Dropout drift
     ekf_drift = ekf_metrics["dropout_drift_m"] * 100
     ukf_drift = ukf_metrics["dropout_drift_m"] * 100
-    drift_winner = "UKF" if ukf_drift < ekf_drift else "EKF" if ekf_drift < ukf_drift else "TIE"
+    drift_winner = (
+        "UKF" if ukf_drift < ekf_drift else "EKF" if ekf_drift < ukf_drift else "TIE"
+    )
     drift_improv = abs(ekf_drift - ukf_drift)
     print(
         f"{'Max Dropout Drift (cm)':<30} {ekf_drift:>12.1f} {ukf_drift:>12.1f} "
@@ -338,7 +340,13 @@ def main() -> None:
         label="Truth",
     )
     ax_traj.plot(
-        X_ekf[:, 0], X_ekf[:, 1], "-", linewidth=2, color=COLORS["blue"], alpha=0.7, label="EKF"
+        X_ekf[:, 0],
+        X_ekf[:, 1],
+        "-",
+        linewidth=2,
+        color=COLORS["blue"],
+        alpha=0.7,
+        label="EKF",
     )
     ax_traj.plot(
         X_ukf[:, 0],
@@ -366,9 +374,17 @@ def main() -> None:
         if not mask_cam[i]:
             ax_pos.axvspan(t_cam[i], t_cam[i + 1], alpha=0.1, color=COLORS["red"])
 
-    ax_pos.plot(t_cam, ekf_pos_err, linewidth=2, color=COLORS["blue"], alpha=0.7, label="EKF")
     ax_pos.plot(
-        t_cam, ukf_pos_err, linewidth=2, color=COLORS["red"], alpha=0.7, linestyle="--", label="UKF"
+        t_cam, ekf_pos_err, linewidth=2, color=COLORS["blue"], alpha=0.7, label="EKF"
+    )
+    ax_pos.plot(
+        t_cam,
+        ukf_pos_err,
+        linewidth=2,
+        color=COLORS["red"],
+        alpha=0.7,
+        linestyle="--",
+        label="UKF",
     )
     ax_pos.axhline(2.0, linestyle=":", color=COLORS["gray"], linewidth=1, alpha=0.5)
     ax_pos.legend(loc="upper right")
@@ -385,8 +401,12 @@ def main() -> None:
     x = np.arange(len(metrics))
     width = 0.35
 
-    ax_bar.bar(x - width / 2, ekf_vals, width, label="EKF", color=COLORS["blue"], alpha=0.7)
-    ax_bar.bar(x + width / 2, ukf_vals, width, label="UKF", color=COLORS["red"], alpha=0.7)
+    ax_bar.bar(
+        x - width / 2, ekf_vals, width, label="EKF", color=COLORS["blue"], alpha=0.7
+    )
+    ax_bar.bar(
+        x + width / 2, ukf_vals, width, label="UKF", color=COLORS["red"], alpha=0.7
+    )
 
     ax_bar.set_xticks(x)
     ax_bar.set_xticklabels(metrics)
@@ -400,10 +420,24 @@ def main() -> None:
     ax_status.set_title("📹 Vision Availability Timeline", fontweight="bold")
 
     ax_status.fill_between(
-        t_cam, 0, 1, where=mask_cam, alpha=0.5, color=COLORS["green"], step="mid", label="Vision"
+        t_cam,
+        0,
+        1,
+        where=mask_cam,
+        alpha=0.5,
+        color=COLORS["green"],
+        step="mid",
+        label="Vision",
     )
     ax_status.fill_between(
-        t_cam, 0, 1, where=~mask_cam, alpha=0.5, color=COLORS["red"], step="mid", label="Dropout"
+        t_cam,
+        0,
+        1,
+        where=~mask_cam,
+        alpha=0.5,
+        color=COLORS["red"],
+        step="mid",
+        label="Dropout",
     )
 
     ax_status.set_yticks([0, 1])
@@ -430,7 +464,9 @@ def main() -> None:
 
     speedup = ukf_time / ekf_time
     pos_improvement = ekf_metrics["pos_rmse_cm"] - ukf_metrics["pos_rmse_cm"]
-    drift_improvement = (ekf_metrics["dropout_drift_m"] - ukf_metrics["dropout_drift_m"]) * 100
+    drift_improvement = (
+        ekf_metrics["dropout_drift_m"] - ukf_metrics["dropout_drift_m"]
+    ) * 100
 
     print(
         f"""

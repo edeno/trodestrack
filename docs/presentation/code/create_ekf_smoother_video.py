@@ -25,14 +25,16 @@ from trodestrack.runtime.offline import rts_smoother
 
 # Add parent directories to path for imports
 script_dir = Path(__file__).parent.resolve()
-repo_root = script_dir.parent.parent.parent  # code -> presentation -> docs -> trodestrack
+repo_root = (
+    script_dir.parent.parent.parent
+)  # code -> presentation -> docs -> trodestrack
 data_dir = repo_root / "data"
 sys.path.insert(0, str(data_dir))
 sys.path.insert(0, str(repo_root / "src"))
 
 
-from load_arthur_session import get_video_info, load_arthur_session  # noqa: E402
-from visualize_filter_overlay import (  # noqa: E402
+from load_arthur_session import get_video_info, load_arthur_session
+from visualize_filter_overlay import (
     OverlayStyle,
     RenderConfig,
     create_filter_overlay_video,
@@ -46,7 +48,9 @@ def main():
     video_path = script_dir.parent / "videos" / "20220324_arthur_02_r1_trimmed.mp4"
     position_file = data_dir / "arthur20220324_position_info.parquet"
     imu_file = data_dir / "arthur20220324_imu_info.parquet"
-    output_path = script_dir.parent / "videos" / "20220324_arthur_02_r1_trimmed_ekf_smoother.mp4"
+    output_path = (
+        script_dir.parent / "videos" / "20220324_arthur_02_r1_trimmed_ekf_smoother.mp4"
+    )
 
     if not video_path.exists():
         print(f"Error: Video file not found: {video_path}")
@@ -66,7 +70,9 @@ def main():
         meters_per_pixel=meters_per_pixel,
         verbose=True,
     )
-    print(f"✓ Loaded {len(data.t_cam):,} camera frames and {len(data.t_imu):,} IMU samples")
+    print(
+        f"✓ Loaded {len(data.t_cam):,} camera frames and {len(data.t_imu):,} IMU samples"
+    )
 
     # Run EKF
     print("\nRunning Extended Kalman Filter (3D IMU)…")

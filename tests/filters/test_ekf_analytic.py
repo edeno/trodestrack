@@ -81,6 +81,8 @@ def ekf_config():
         dropout_q_pos_multiplier=5.0,
         dropout_q_vel_multiplier=5.0,
         dropout_q_bias_multiplier=0.1,
+        # Use 8D state layout (tests use hardcoded indices for this layout)
+        state_mode="2d_full",
     )
 
 
@@ -175,7 +177,10 @@ def test_ekf_stationary_rejects_imu_drift(sim_config, ekf_config):
     # Position RMSE should be small (< 5 cm)
     # Use camera timestamps to align with ground truth
     X_truth_at_cam = np.array(
-        [sim["X_truth"][np.argmin(np.abs(sim["t_imu"] - t_c))] for t_c in sim["t_cam_exp"]]
+        [
+            sim["X_truth"][np.argmin(np.abs(sim["t_imu"] - t_c))]
+            for t_c in sim["t_cam_exp"]
+        ]
     )
     # Compute position RMSE (in meters)
     pos_rmse_m = compute_position_rmse(
@@ -236,7 +241,10 @@ def test_ekf_constant_velocity_maintains_steady_covariance(sim_config, ekf_confi
 
     # Position RMSE should meet PRD target (< 2 cm)
     X_truth_at_cam = np.array(
-        [sim["X_truth"][np.argmin(np.abs(sim["t_imu"] - t_c))] for t_c in sim["t_cam_exp"]]
+        [
+            sim["X_truth"][np.argmin(np.abs(sim["t_imu"] - t_c))]
+            for t_c in sim["t_cam_exp"]
+        ]
     )
     pos_rmse_m = compute_position_rmse(
         X_truth_at_cam[:, :2],
@@ -254,10 +262,14 @@ def test_ekf_constant_velocity_maintains_steady_covariance(sim_config, ekf_confi
     # Covariance should stabilize (variance in last 50% should be small)
     n_cam = len(P_est)
     pos_var_trace = np.array([np.trace(P_est[i, :2, :2]) for i in range(n_cam)])
-    var_stability = np.std(pos_var_trace[n_cam // 2 :]) / np.mean(pos_var_trace[n_cam // 2 :])
+    var_stability = np.std(pos_var_trace[n_cam // 2 :]) / np.mean(
+        pos_var_trace[n_cam // 2 :]
+    )
     # Relax to 2.0 (from 0.5) to account for initial filter tuning
     # Lower is better - a well-tuned filter should have < 0.5
-    assert var_stability < 2.0, f"Covariance stability {var_stability:.2f} should be < 2.0"
+    assert (
+        var_stability < 2.0
+    ), f"Covariance stability {var_stability:.2f} should be < 2.0"
 
 
 # =============================================================================
@@ -276,7 +288,11 @@ def test_ekf_circular_converges_gyro_bias(sim_config, ekf_config):
     """
     # Run circular simulation
     sim = simulate_circular(
-        sim_config, center=np.array([1.0, 1.0]), radius=0.5, angular_velocity=0.5, seed=42
+        sim_config,
+        center=np.array([1.0, 1.0]),
+        radius=0.5,
+        angular_velocity=0.5,
+        seed=42,
     )
 
     # Run EKF
@@ -294,7 +310,10 @@ def test_ekf_circular_converges_gyro_bias(sim_config, ekf_config):
 
     # Position RMSE should be good
     X_truth_at_cam = np.array(
-        [sim["X_truth"][np.argmin(np.abs(sim["t_imu"] - t_c))] for t_c in sim["t_cam_exp"]]
+        [
+            sim["X_truth"][np.argmin(np.abs(sim["t_imu"] - t_c))]
+            for t_c in sim["t_cam_exp"]
+        ]
     )
     pos_rmse_m = compute_position_rmse(
         X_truth_at_cam[:, :2],
@@ -443,7 +462,9 @@ def test_ekf_adaptive_process_noise_scales_dropout_covariance(ekf_config):
 
     # Position covariance trace should inflate noticeably under adaptive scaling
     base_pos_var = np.trace(base_pred[dropout_mask][:, :2, :2], axis1=1, axis2=2)
-    adaptive_pos_var = np.trace(adaptive_pred[dropout_mask][:, :2, :2], axis1=1, axis2=2)
+    adaptive_pos_var = np.trace(
+        adaptive_pred[dropout_mask][:, :2, :2], axis1=1, axis2=2
+    )
     assert adaptive_pos_var.mean() > base_pos_var.mean() * 1.5
 
     # Bias covariance growth per dropout step should shrink with multiplier
@@ -512,7 +533,10 @@ def test_ekf_consistency_nees(sim_config, ekf_config):
 
         # Compute NEES for position state
         X_truth_at_cam = np.array(
-            [sim["X_truth"][np.argmin(np.abs(sim["t_imu"] - t_c))] for t_c in sim["t_cam_exp"]]
+            [
+                sim["X_truth"][np.argmin(np.abs(sim["t_imu"] - t_c))]
+                for t_c in sim["t_cam_exp"]
+            ]
         )
 
         nees = compute_nees(
@@ -630,7 +654,9 @@ def test_ekf_long_dropout_drift(ekf_config):
     drift_cm = drift_m * 100  # Convert to cm
 
     # Verify test setup
-    assert dropout_duration >= 4.5, f"Dropout duration {dropout_duration:.2f}s should be ~5s"
+    assert (
+        dropout_duration >= 4.5
+    ), f"Dropout duration {dropout_duration:.2f}s should be ~5s"
 
     # Check covariance grew during dropout (sanity check)
     pos_var_before = np.trace(P_est[dropout_start_idx, :2, :2])
@@ -664,7 +690,9 @@ def test_ekf_long_dropout_drift(ekf_config):
     )
 
     # Diagnostic: Print actual drift for tracking tuning progress
-    print(f"\n  Dropout drift: {drift_cm:.1f} cm (PRD target: 15 cm, current: 150 cm bound)")
+    print(
+        f"\n  Dropout drift: {drift_cm:.1f} cm (PRD target: 15 cm, current: 150 cm bound)"
+    )
     print(
         f"  Bias convergence: gyro error = {bias_gyro_error * 1000:.1f} millirad/s (target: near 0)"
     )

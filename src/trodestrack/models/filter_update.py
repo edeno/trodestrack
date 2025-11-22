@@ -146,7 +146,9 @@ def ekf_projected_update(
     P_posterior = symmetrize(P_posterior)
 
     # Compute exact NIS and log-likelihood in active subspace
-    nis, log_likelihood = compute_nis_and_loglik(innovation, S4, both_leds, only_led1, only_led2)
+    nis, log_likelihood = compute_nis_and_loglik(
+        innovation, S4, both_leds, only_led1, only_led2
+    )
 
     return FilterState(mean=m_posterior, cov=P_posterior), nis, log_likelihood
 
@@ -299,6 +301,8 @@ def ukf_projected_update(
     P_posterior = symmetrize(P_posterior)
 
     # Compute exact NIS and log-likelihood in active subspace
-    nis, log_likelihood = compute_nis_and_loglik(innovation, S, both_leds, only_led1, only_led2)
+    nis, log_likelihood = compute_nis_and_loglik(
+        innovation, S, both_leds, only_led1, only_led2
+    )
 
     return FilterState(mean=m_posterior, cov=P_posterior), nis, log_likelihood

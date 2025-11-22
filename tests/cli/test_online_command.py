@@ -168,7 +168,7 @@ def test_online_command_saves_required_outputs(synthetic_data_files, temp_output
     filtered_means = np.loadtxt(output_dir / "filtered_means.txt")
     n_cam = len(np.loadtxt(input_dir / "t_cam.txt"))
     assert filtered_means.shape[0] == n_cam
-    assert filtered_means.shape[1] == 8  # Standard 8D state
+    assert filtered_means.shape[1] == 10  # Default 10D state (2d_cam_3d_imu)
 
 
 def test_online_command_missing_input_file(temp_output_dir):

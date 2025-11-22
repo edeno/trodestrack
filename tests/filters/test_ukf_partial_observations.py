@@ -73,11 +73,15 @@ def test_ukf_single_led_no_spurious_covariance_reduction() -> None:
     ), f"Single-LED should not become overconfident (CR-2 bug check): {final_pos_var_led1} > 1e-5"
 
     # Both filters should remain stable (no NaN/Inf)
-    assert np.all(np.isfinite(result_both.filtered_means)), "Dual-LED: means should be finite"
+    assert np.all(
+        np.isfinite(result_both.filtered_means)
+    ), "Dual-LED: means should be finite"
     assert np.all(
         np.isfinite(result_both.filtered_covariances)
     ), "Dual-LED: covariances should be finite"
-    assert np.all(np.isfinite(result_led1.filtered_means)), "Single-LED: means should be finite"
+    assert np.all(
+        np.isfinite(result_led1.filtered_means)
+    ), "Single-LED: means should be finite"
     assert np.all(
         np.isfinite(result_led1.filtered_covariances)
     ), "Single-LED: covariances should be finite"
@@ -148,12 +152,16 @@ def test_ukf_alternating_leds_maintains_stability() -> None:
 
     # Check no collapse (overconfidence)
     # With proper subspace handling, uncertainty should stay reasonable
-    assert np.all(covs[10:] > 1e-5), "Covariance should not collapse to near-zero (overconfidence)"
+    assert np.all(
+        covs[10:] > 1e-5
+    ), "Covariance should not collapse to near-zero (overconfidence)"
 
     # Check stability (no oscillations)
     # Variance should be relatively smooth (no huge jumps)
     cov_diffs = np.abs(np.diff(covs))
-    assert np.percentile(cov_diffs, 95) < 0.1, "Covariance should be stable (no large oscillations)"
+    assert (
+        np.percentile(cov_diffs, 95) < 0.1
+    ), "Covariance should be stable (no large oscillations)"
 
 
 def test_ukf_gradual_led_dropout() -> None:
@@ -182,7 +190,9 @@ def test_ukf_gradual_led_dropout() -> None:
     pre_dropout_var = result.filtered_covariances[dropout_frame - 1, 0, 0]
 
     # After dropout: single-LED (higher uncertainty)
-    post_dropout_var = result.filtered_covariances[dropout_frame + 5, 0, 0]  # Give it a few frames
+    post_dropout_var = result.filtered_covariances[
+        dropout_frame + 5, 0, 0
+    ]  # Give it a few frames
 
     # Uncertainty should increase after LED2 drops out
     assert (
@@ -191,7 +201,9 @@ def test_ukf_gradual_led_dropout() -> None:
 
     # Filter should remain stable (no NaN/Inf)
     assert np.all(np.isfinite(result.filtered_means)), "Means should remain finite"
-    assert np.all(np.isfinite(result.filtered_covariances)), "Covariances should remain finite"
+    assert np.all(
+        np.isfinite(result.filtered_covariances)
+    ), "Covariances should remain finite"
 
 
 def test_ukf_no_leds_skips_update() -> None:
@@ -228,7 +240,9 @@ def test_ukf_no_leds_skips_update() -> None:
 
     # Filter should remain stable
     assert np.all(np.isfinite(result.filtered_means)), "Means should remain finite"
-    assert np.all(np.isfinite(result.filtered_covariances)), "Covariances should remain finite"
+    assert np.all(
+        np.isfinite(result.filtered_covariances)
+    ), "Covariances should remain finite"
 
 
 if __name__ == "__main__":

@@ -67,7 +67,9 @@ def generate_slide05a():
         ax.axis("off")
 
         # Draw IMU chip (simplified)
-        chip = Rectangle((-0.3, -0.15), 0.6, 0.3, facecolor=GRAY, edgecolor="black", linewidth=4)
+        chip = Rectangle(
+            (-0.3, -0.15), 0.6, 0.3, facecolor=GRAY, edgecolor="black", linewidth=4
+        )
         ax.add_patch(chip)
 
         # Draw spring-mass system inside (conceptual)
@@ -127,7 +129,9 @@ def generate_slide05a():
         )
 
         # Title
-        ax.text(0, 1.2, scenario["title"], fontsize=28, weight="bold", ha="center", va="top")
+        ax.text(
+            0, 1.2, scenario["title"], fontsize=28, weight="bold", ha="center", va="top"
+        )
 
         # Reading (what accelerometer outputs) - use transAxes for panel-relative position
         ax.text(
@@ -233,7 +237,9 @@ def generate_slide05b():
         weight="bold",
         color=RED,
         arrowprops=dict(arrowstyle="->", color=RED, linewidth=3),
-        bbox=dict(boxstyle="round,pad=0.5", facecolor="white", edgecolor=RED, linewidth=2),
+        bbox=dict(
+            boxstyle="round,pad=0.5", facecolor="white", edgecolor=RED, linewidth=2
+        ),
         zorder=100,
     )
 

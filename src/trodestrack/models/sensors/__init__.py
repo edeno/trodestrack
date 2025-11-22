@@ -11,8 +11,8 @@ from trodestrack.models.sensors.protocols import MeasurementModel
 from trodestrack.models.sensors.zupt import ZUPTModel
 
 __all__ = [
-    "MeasurementModel",
     "CameraPositionModel",
     "HeadingPseudoModel",
+    "MeasurementModel",
     "ZUPTModel",
 ]

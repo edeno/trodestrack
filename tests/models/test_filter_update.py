@@ -49,7 +49,9 @@ def layout_2d_full():
 def prior_state() -> FilterState:
     """Prior state with realistic mean and covariance."""
     mean = jnp.array([1.0, 2.0, 0.5, 0.3, 0.1, 0.0, 0.0, 0.0])
-    cov = jnp.diag(jnp.array([0.01**2, 0.01**2, 0.1**2, 0.1**2, 0.1**2, 0.05**2, 0.1**2, 0.1**2]))
+    cov = jnp.diag(
+        jnp.array([0.01**2, 0.01**2, 0.1**2, 0.1**2, 0.1**2, 0.05**2, 0.1**2, 0.1**2])
+    )
     return FilterState(mean=mean, cov=cov)
 
 
@@ -111,7 +113,9 @@ def ukf_weights():
 # =============================================================================
 
 
-def test_ekf_projected_update_both_leds(prior_state, measurement_jacobian, measurement_noise_base):
+def test_ekf_projected_update_both_leds(
+    prior_state, measurement_jacobian, measurement_noise_base
+):
     """EKF update with both LEDs valid should use full 4D update."""
     # Arrange: both LEDs valid
     innovation = jnp.array([0.01, 0.02, -0.01, 0.01])
@@ -137,7 +141,9 @@ def test_ekf_projected_update_both_leds(prior_state, measurement_jacobian, measu
     assert nis > 0.0  # Positive definite innovation covariance
 
 
-def test_ekf_projected_update_only_led1(prior_state, measurement_jacobian, measurement_noise_base):
+def test_ekf_projected_update_only_led1(
+    prior_state, measurement_jacobian, measurement_noise_base
+):
     """EKF update with only LED1 should use 2D projected update."""
     # Arrange: only LED1 valid (innovation components for LED2 are zero)
     innovation = jnp.array([0.01, 0.02, 0.0, 0.0])
@@ -163,7 +169,9 @@ def test_ekf_projected_update_only_led1(prior_state, measurement_jacobian, measu
     assert nis > 0.0
 
 
-def test_ekf_projected_update_only_led2(prior_state, measurement_jacobian, measurement_noise_base):
+def test_ekf_projected_update_only_led2(
+    prior_state, measurement_jacobian, measurement_noise_base
+):
     """EKF update with only LED2 should use 2D projected update."""
     # Arrange: only LED2 valid
     innovation = jnp.array([0.0, 0.0, -0.01, 0.01])
@@ -209,12 +217,12 @@ def test_ekf_projected_update_confidence_scaling(
     R_diag_high = measurement_noise_base / conf_high
 
     # Act: update with low confidence
-    state_low, nis_low, log_lik_low = ekf_projected_update(
+    state_low, _nis_low, _log_lik_low = ekf_projected_update(
         prior_state, innovation, measurement_jacobian, R_diag_low, both, led1, led2
     )
 
     # Act: update with high confidence
-    state_high, nis_high, log_lik_high = ekf_projected_update(
+    state_high, _nis_high, _log_lik_high = ekf_projected_update(
         prior_state, innovation, measurement_jacobian, R_diag_high, both, led1, led2
     )
 
@@ -255,7 +263,10 @@ def test_ukf_projected_update_both_leds(
     P_cross = jnp.tensordot(
         w_cov,
         jnp.array(
-            [jnp.outer(sd, md) for sd, md in zip(state_deviations, meas_deviations, strict=False)]
+            [
+                jnp.outer(sd, md)
+                for sd, md in zip(state_deviations, meas_deviations, strict=False)
+            ]
         ),
         axes=1,
     )
@@ -302,13 +313,16 @@ def test_ukf_projected_update_only_led1(
     P_cross = jnp.tensordot(
         w_cov,
         jnp.array(
-            [jnp.outer(sd, md) for sd, md in zip(state_deviations, meas_deviations, strict=False)]
+            [
+                jnp.outer(sd, md)
+                for sd, md in zip(state_deviations, meas_deviations, strict=False)
+            ]
         ),
         axes=1,
     )
 
     # Act
-    state_updated, nis, log_lik = ukf_projected_update(
+    state_updated, nis, _log_lik = ukf_projected_update(
         prior_state, innovation, S, P_cross, both_leds, only_led1, only_led2
     )
 
@@ -341,13 +355,16 @@ def test_ukf_projected_update_only_led2(
     P_cross = jnp.tensordot(
         w_cov,
         jnp.array(
-            [jnp.outer(sd, md) for sd, md in zip(state_deviations, meas_deviations, strict=False)]
+            [
+                jnp.outer(sd, md)
+                for sd, md in zip(state_deviations, meas_deviations, strict=False)
+            ]
         ),
         axes=1,
     )
 
     # Act
-    state_updated, nis, log_lik = ukf_projected_update(
+    state_updated, nis, _log_lik = ukf_projected_update(
         prior_state, innovation, S, P_cross, both_leds, only_led1, only_led2
     )
 
@@ -362,7 +379,9 @@ def test_ukf_projected_update_only_led2(
 # =============================================================================
 
 
-def test_ekf_update_numerical_stability(prior_state, measurement_jacobian, measurement_noise_base):
+def test_ekf_update_numerical_stability(
+    prior_state, measurement_jacobian, measurement_noise_base
+):
     """EKF projected update should maintain numerical stability."""
     # Arrange: realistic innovation
     innovation = jnp.array([0.001, 0.002, -0.001, 0.001])
@@ -397,7 +416,9 @@ def test_ekf_covariance_psd(prior_state, measurement_jacobian, measurement_noise
     assert jnp.all(eigvals >= -1e-9)  # Allow small numerical error
 
 
-def test_ukf_covariance_psd(prior_state, sigma_points, ukf_weights, measurement_noise_base):
+def test_ukf_covariance_psd(
+    prior_state, sigma_points, ukf_weights, measurement_noise_base
+):
     """UKF update should produce positive semi-definite covariance."""
     w_mean, w_cov = ukf_weights
     sigmas_meas = jnp.tile(jnp.array([1.0, 2.0, 1.04, 2.0]), (17, 1))
@@ -415,7 +436,10 @@ def test_ukf_covariance_psd(prior_state, sigma_points, ukf_weights, measurement_
     P_cross = jnp.tensordot(
         w_cov,
         jnp.array(
-            [jnp.outer(sd, md) for sd, md in zip(state_deviations, meas_deviations, strict=False)]
+            [
+                jnp.outer(sd, md)
+                for sd, md in zip(state_deviations, meas_deviations, strict=False)
+            ]
         ),
         axes=1,
     )

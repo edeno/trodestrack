@@ -265,7 +265,12 @@ def main() -> None:
     )
     # Add PRD threshold line manually (2 cm)
     ax1.axhline(
-        0.02, linestyle="--", color="red", linewidth=1, alpha=0.5, label="PRD Target (2 cm)"
+        0.02,
+        linestyle="--",
+        color="red",
+        linewidth=1,
+        alpha=0.5,
+        label="PRD Target (2 cm)",
     )
     ax1.legend()
     fig1.savefig(OUTPUT_DIR / "03b_position_error.png", dpi=150, bbox_inches="tight")
@@ -283,7 +288,12 @@ def main() -> None:
     )
     # Add PRD threshold line manually (10 cm/s = 0.1 m/s)
     ax2.axhline(
-        0.10, linestyle="--", color="red", linewidth=1, alpha=0.5, label="PRD Target (10 cm/s)"
+        0.10,
+        linestyle="--",
+        color="red",
+        linewidth=1,
+        alpha=0.5,
+        label="PRD Target (10 cm/s)",
     )
     ax2.legend()
     fig2.savefig(OUTPUT_DIR / "03b_velocity_error.png", dpi=150, bbox_inches="tight")
@@ -300,7 +310,14 @@ def main() -> None:
         headings_est=headings_est,
     )
     # Add PRD threshold line manually (7°)
-    ax3.axhline(7.0, linestyle="--", color="red", linewidth=1, alpha=0.5, label="PRD Target (7°)")
+    ax3.axhline(
+        7.0,
+        linestyle="--",
+        color="red",
+        linewidth=1,
+        alpha=0.5,
+        label="PRD Target (7°)",
+    )
     ax3.legend()
     fig3.savefig(OUTPUT_DIR / "03b_heading_error.png", dpi=150, bbox_inches="tight")
     plt.close(fig3)
@@ -344,7 +361,7 @@ def main() -> None:
         nees_values.append(nees)
     nees_values = np.array(nees_values)
 
-    fig4, ax4 = plot_nees_histogram(
+    fig4, _ax4 = plot_nees_histogram(
         nees=nees_values,
         state_dim=layout.n,  # Use layout dimension (8D for "2d_full")
     )
@@ -380,7 +397,9 @@ def main() -> None:
     )
     ax5.legend(loc="best")
 
-    fig5.savefig(OUTPUT_DIR / "03b_covariance_ellipse.png", dpi=150, bbox_inches="tight")
+    fig5.savefig(
+        OUTPUT_DIR / "03b_covariance_ellipse.png", dpi=150, bbox_inches="tight"
+    )
     plt.close(fig5)
     print("   💾 Saved: 03b_covariance_ellipse.png")
 

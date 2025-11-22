@@ -16,10 +16,10 @@ from trodestrack.sim.simple import simulate_stationary
 class TestZUPTDetection:
     """Test ZUPT detection logic."""
 
-    def test_zupt_disabled_by_default(self):
-        """ZUPT should be disabled by default (backward compatible)."""
+    def test_zupt_enabled_by_default(self):
+        """ZUPT should be enabled by default for better stationary tracking."""
         config = EKFConfig()
-        assert config.enable_zupt is False
+        assert config.enable_zupt is True
 
     def test_zupt_detection_threshold_configurable(self):
         """ZUPT velocity threshold should be configurable."""
@@ -92,7 +92,9 @@ class TestZUPTStationary:
         truth_vel = np.zeros((len(stationary_sim["t_cam_exp"]), 2))
 
         # Compute velocity RMSE
-        vel_rmse_no_zupt = compute_velocity_rmse(result_no_zupt.filtered_means[:, 2:4], truth_vel)
+        vel_rmse_no_zupt = compute_velocity_rmse(
+            result_no_zupt.filtered_means[:, 2:4], truth_vel
+        )
         vel_rmse_with_zupt = compute_velocity_rmse(
             result_with_zupt.filtered_means[:, 2:4], truth_vel
         )
@@ -132,7 +134,9 @@ class TestZUPTStationary:
 
         # After 3 seconds, velocity std should be small (< 3 cm/s)
         idx_3s = int(3.0 / (1 / 30))
-        assert jnp.all(vel_std[idx_3s] < 0.03), f"Velocity std too high after 3s: {vel_std[idx_3s]}"
+        assert jnp.all(
+            vel_std[idx_3s] < 0.03
+        ), f"Velocity std too high after 3s: {vel_std[idx_3s]}"
 
         # Velocity std should decrease over time (ZUPT is working)
         assert vel_std[-1, 0] < vel_std[idx_3s, 0], "Velocity std did not decrease"
@@ -229,7 +233,9 @@ class TestZUPTNumericalStability:
         truth_vel = np.zeros((len(sim["t_cam_exp"]), 2))
         vel_rmse = compute_velocity_rmse(result.filtered_means[:, 2:4], truth_vel)
 
-        assert vel_rmse < 0.03, f"ZUPT failed during vision dropout: vel RMSE = {vel_rmse:.4f} m/s"
+        assert (
+            vel_rmse < 0.03
+        ), f"ZUPT failed during vision dropout: vel RMSE = {vel_rmse:.4f} m/s"
 
     def test_zupt_jax_jit_compatible(self):
         """ZUPT implementation should be JAX JIT compatible (no Python branching)."""
@@ -310,10 +316,10 @@ class TestUKFZUPT:
             mask_cam=sim["mask_cam"],
         )
 
-    def test_zupt_disabled_by_default(self):
-        """UKF should keep ZUPT disabled unless explicitly enabled."""
+    def test_zupt_enabled_by_default(self):
+        """UKF should have ZUPT enabled by default for better stationary tracking."""
         config = UKFConfig()
-        assert config.enable_zupt is False
+        assert config.enable_zupt is True
 
     def test_zupt_reduces_velocity_drift_stationary(self):
         """UKF ZUPT should suppress velocity drift when stationary."""
@@ -337,7 +343,9 @@ class TestUKFZUPT:
         result_with_zupt = self._run_ukf(sim, config_with_zupt)
 
         truth_vel = np.zeros((len(sim["t_cam_exp"]), 2))
-        vel_rmse_no_zupt = compute_velocity_rmse(result_no_zupt.filtered_means[:, 2:4], truth_vel)
+        vel_rmse_no_zupt = compute_velocity_rmse(
+            result_no_zupt.filtered_means[:, 2:4], truth_vel
+        )
         vel_rmse_with_zupt = compute_velocity_rmse(
             result_with_zupt.filtered_means[:, 2:4], truth_vel
         )

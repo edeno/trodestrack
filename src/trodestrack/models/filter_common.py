@@ -237,7 +237,9 @@ def symmetrize(matrix: jnp.ndarray) -> jnp.ndarray:
     return 0.5 * (matrix + jnp.swapaxes(matrix, -1, -2))
 
 
-def psd_solve(matrix: jnp.ndarray, rhs: jnp.ndarray, diagonal_boost: float = 1e-9) -> jnp.ndarray:
+def psd_solve(
+    matrix: jnp.ndarray, rhs: jnp.ndarray, diagonal_boost: float = 1e-9
+) -> jnp.ndarray:
     """Solve A x = b for PSD matrices via Cholesky factorization.
 
     Parameters
@@ -360,7 +362,9 @@ def rotate_body_accel_to_world(
 
     # Rotation matrix R_z(yaw) for yaw-only rotation (3x3)
     # Only affects x-y plane; z is unchanged
-    R_z = jnp.array([[cos_yaw, -sin_yaw, 0.0], [sin_yaw, cos_yaw, 0.0], [0.0, 0.0, 1.0]])
+    R_z = jnp.array(
+        [[cos_yaw, -sin_yaw, 0.0], [sin_yaw, cos_yaw, 0.0], [0.0, 0.0, 1.0]]
+    )
 
     return R_z @ accel_body
 
@@ -598,7 +602,9 @@ def dynamics_function(
 
         # Update 2D position
         pos = jnp.array([px, py])
-        pos_next = pos + vel * dt + 0.5 * accel_world * dt**2 - 0.5 * damping * vel * dt**2
+        pos_next = (
+            pos + vel * dt + 0.5 * accel_world * dt**2 - 0.5 * damping * vel * dt**2
+        )
 
         # Update state
         next_state = state
@@ -767,10 +773,14 @@ def initialize_state(
 
     # Replace NaN with zero to prevent propagation (only used if marked invalid)
     pos_led1 = jnp.where(
-        jnp.isfinite(led1_obs[first_valid]), led1_obs[first_valid], jnp.array([0.0, 0.0])
+        jnp.isfinite(led1_obs[first_valid]),
+        led1_obs[first_valid],
+        jnp.array([0.0, 0.0]),
     )
     pos_led2 = jnp.where(
-        jnp.isfinite(led2_obs[first_valid]), led2_obs[first_valid], jnp.array([0.0, 0.0])
+        jnp.isfinite(led2_obs[first_valid]),
+        led2_obs[first_valid],
+        jnp.array([0.0, 0.0]),
     )
 
     pos_init = jnp.where(
@@ -991,7 +1001,9 @@ def confidence_to_R_diagonal(
     return base / conf
 
 
-def gaussian_log_likelihood(innovation: jnp.ndarray, covariance: jnp.ndarray) -> jnp.ndarray:
+def gaussian_log_likelihood(
+    innovation: jnp.ndarray, covariance: jnp.ndarray
+) -> jnp.ndarray:
     """Gaussian log-likelihood of an innovation with stability tweaks.
 
     Parameters
@@ -1026,7 +1038,7 @@ def gaussian_log_likelihood(innovation: jnp.ndarray, covariance: jnp.ndarray) ->
     def add_more_jitter():
         jitter_large = 1e-6 * jnp.trace(covariance) / k
         S_jittered = symmetrize(covariance) + jnp.eye(k) * jitter_large
-        sign_j, logdet_j = jnp.linalg.slogdet(S_jittered)
+        _sign_j, logdet_j = jnp.linalg.slogdet(S_jittered)
         return logdet_j
 
     # Use original logdet if sign is positive, otherwise use jittered version
@@ -1422,9 +1434,13 @@ def build_G_matrix_generic(
 
     # Validate consistency between n_accel and vel_idx
     if n_accel == 3 and len(vel_idx) != 3:
-        raise ValueError(f"n_accel=3 requires 3D velocity (len(vel_idx)=3), got {len(vel_idx)}")
+        raise ValueError(
+            f"n_accel=3 requires 3D velocity (len(vel_idx)=3), got {len(vel_idx)}"
+        )
     if n_accel == 2 and len(vel_idx) not in (2, 3):
-        raise ValueError(f"n_accel=2 requires 2D velocity, got len(vel_idx)={len(vel_idx)}")
+        raise ValueError(
+            f"n_accel=2 requires 2D velocity, got len(vel_idx)={len(vel_idx)}"
+        )
 
     G = jnp.zeros((n, n_accel + 1), dtype=dtype)
     theta_arr = jnp.asarray(theta, dtype=dtype)

@@ -25,7 +25,9 @@ class VideoData(TypedDict):
     n_frames: int
 
 
-def prepare_video_data(sim_data: SimOut, fps: int = 30, speedup: float = 1.0) -> VideoData:
+def prepare_video_data(
+    sim_data: SimOut, fps: int = 30, speedup: float = 1.0
+) -> VideoData:
     """Interpolate simulation data to video frame times.
 
     Handles differing sampling rates for IMU (e.g., 200 Hz), camera (e.g., 30 Hz),
@@ -67,7 +69,10 @@ def prepare_video_data(sim_data: SimOut, fps: int = 30, speedup: float = 1.0) ->
 
     # Interpolate IMU measurements (linear)
     U_imu = np.column_stack(
-        [np.interp(t_video, sim_data["t_imu"], sim_data["U_imu"][:, i]) for i in range(3)]
+        [
+            np.interp(t_video, sim_data["t_imu"], sim_data["U_imu"][:, i])
+            for i in range(3)
+        ]
     )
 
     # Interpolate biases (linear)
@@ -78,7 +83,10 @@ def prepare_video_data(sim_data: SimOut, fps: int = 30, speedup: float = 1.0) ->
     # Interpolate ground truth state
     # Position and velocity: linear interpolation
     X_truth = np.column_stack(
-        [np.interp(t_video, sim_data["t_imu"], sim_data["X_truth"][:, i]) for i in range(4)]
+        [
+            np.interp(t_video, sim_data["t_imu"], sim_data["X_truth"][:, i])
+            for i in range(4)
+        ]
         + [
             # Heading: angle-aware interpolation
             interp_angle(t_video, sim_data["t_imu"], sim_data["X_truth"][:, 4])

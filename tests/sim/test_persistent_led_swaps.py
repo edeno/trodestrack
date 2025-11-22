@@ -51,7 +51,9 @@ class TestPersistentLEDSwaps:
 
             # Verify swap blocks last for multiple frames (not single-frame swaps)
             dt_cam = 1.0 / config.fs_cam
-            durations = [(end - start) * dt_cam for start, end in zip(starts, ends, strict=False)]
+            durations = [
+                (end - start) * dt_cam for start, end in zip(starts, ends, strict=False)
+            ]
             mean_duration = np.mean(durations)
 
             # With no dropouts, durations should be close to 1.0s (within 0.5s tolerance)
@@ -95,7 +97,9 @@ class TestPersistentLEDSwaps:
 
         # Per-frame should have more transitions (each frame is independent)
         # Persistent should have fewer transitions (swaps last longer)
-        if np.any(sim_per_frame["swap_applied"]) and np.any(sim_persistent["swap_applied"]):
+        if np.any(sim_per_frame["swap_applied"]) and np.any(
+            sim_persistent["swap_applied"]
+        ):
             # Persistent mode should have fewer transition events
             # (per-frame at 10% prob ~= 0.1 swaps/frame vs persistent at 1 event/s with 0.5s duration)
             assert transitions_persistent < transitions_per_frame, (
@@ -124,7 +128,9 @@ class TestPersistentLEDSwaps:
             ends = np.where(diff == -1)[0]
 
             dt_cam = 1.0 / config.fs_cam
-            durations = [(end - start) * dt_cam for start, end in zip(starts, ends, strict=False)]
+            durations = [
+                (end - start) * dt_cam for start, end in zip(starts, ends, strict=False)
+            ]
 
             # With randomness, we should see variation in durations
             if len(durations) >= 3:
@@ -265,7 +271,9 @@ class TestPersistentLEDSwaps:
 
     def test_negative_duration_std_rejected(self):
         """Verify that negative duration std is rejected."""
-        with pytest.raises(ValueError, match="led_swap_duration_std must be non-negative"):
+        with pytest.raises(
+            ValueError, match="led_swap_duration_std must be non-negative"
+        ):
             RatIMUSimConfig(
                 duration_s=1.0,
                 led_swap_mode="persistent",
