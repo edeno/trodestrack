@@ -2,6 +2,37 @@
 
 ## [Unreleased]
 
+### Session: 2025-11-22 - Documentation Setup
+
+**Added:**
+
+- **MkDocs Documentation Site**
+  - Full documentation setup with MkDocs Material theme
+  - Auto-generated API reference using mkdocstrings
+  - Getting Started guides: Installation, Quick Start, Python API
+  - User Guide: State Layouts, Filter Tuning, Troubleshooting
+  - Examples index with learning path
+  - MathJax support for equations
+  - Dark/light mode toggle
+
+- **GitHub Actions Documentation Workflow**
+  - `.github/workflows/docs.yml` for automated builds
+  - Deploys to GitHub Pages on push to main/master
+  - Builds on PRs for validation
+
+- **Documentation Assets**
+  - `docs/gen_ref_pages.py` - API reference auto-generation
+  - `docs/javascripts/mathjax.js` - Math rendering config
+  - `docs/stylesheets/extra.css` - Custom styling
+  - `docs/includes/abbreviations.md` - Glossary of terms
+
+**Changed:**
+
+- Updated `.gitignore` with MkDocs `site/` directory and additional caches
+  (`.mypy_cache/`, `.ruff_cache/`, `.tox/`, `.nox/`, `.env`)
+
+---
+
 ### Session: 2025-10-13 - Milestone M6 (Performance Tighten): JIT Kernels ✅
 
 **Added:**

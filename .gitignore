@@ -5,15 +5,27 @@ build/
 dist/
 wheels/
 *.egg-info
+*.egg
 
 # Virtual environments
 .venv
+.env
+.env.*
 
 # Testing artifacts
 .pytest_cache/
 .hypothesis/
 .coverage
 htmlcov/
+.tox/
+.nox/
+
+# Type checking / Linting caches
+.mypy_cache/
+.ruff_cache/
+
+# Documentation build output
+site/
 
 # Development artifacts
 .DS_Store

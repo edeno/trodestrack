@@ -1,0 +1,322 @@
+# Python API Guide
+
+This guide covers the core API patterns for using TrodesTrack programmatically.
+
+## Core Workflow
+
+The typical TrodesTrack workflow is:
+
+1. **Load/Generate Data** - Simulation or real sensor data
+2. **Configure Filter** - Set up EKF or UKF parameters
+3. **Run Filter** - Process data through the Kalman filter
+4. **Extract Results** - Use state layouts for dimension-agnostic access
+5. **Analyze/Visualize** - Generate reports or custom plots
+
+## Data Format
+
+TrodesTrack expects data in a dictionary format with specific keys:
+
+```python
+sim = {
+    # Timestamps
+    't_cam_exp': np.array(...),      # (N,) camera exposure times in seconds
+    't_imu': np.array(...),          # (M,) IMU timestamps in seconds
+
+    # Camera measurements
+    'Z_cam_led1': np.array(...),     # (N, 2) LED1 positions [x, y] in meters
+    'Z_cam_led2': np.array(...),     # (N, 2) LED2 positions [x, y] in meters
+    'mask_cam': np.array(...),       # (N,) boolean mask for valid frames
+
+    # IMU measurements
+    'u_imu': np.array(...),          # (M, 3) IMU data [gyro_z, accel_x, accel_y]
+
+    # Optional: ground truth for validation
+    'x_truth': np.array(...),        # (N, 8) true state vectors
+}
+```
+
+## Simulation
+
+### Simple Simulations
+
+For testing and validation, use analytic simulations:
+
+```python
+from trodestrack.sim.simple import (
+    simulate_stationary,
+    simulate_constant_velocity,
+    simulate_circular,
+    SimpleSimConfig,
+)
+
+# Configure simulation
+config = SimpleSimConfig(
+    duration_s=10.0,
+    cam_rate=30.0,        # Hz
+    imu_rate=200.0,       # Hz
+    seed=42,              # Reproducibility
+)
+
+# Stationary rat at (0.5, 0.5) meters
+sim = simulate_stationary(position=[0.5, 0.5], config=config)
+
+# Moving at constant velocity
+sim = simulate_constant_velocity(
+    velocity=[0.2, 0.0],  # m/s
+    config=config
+)
+
+# Circular motion
+sim = simulate_circular(config=config)
+```
+
+### Realistic Rat IMU Simulation
+
+For production-like testing:
+
+```python
+from trodestrack.sim.rat_imu import RatIMUSimConfig, simulate_rat_imu
+
+config = RatIMUSimConfig(
+    duration_s=30.0,                  # 30 second session
+    imu_rate=104.0,                   # SpikeGadgets hardware rate
+    cam_rate=30.0,
+    arena_size=(1.0, 1.0),           # 1m x 1m arena
+
+    # Motion dynamics
+    mean_speed=0.15,                  # m/s
+    velocity_tau=0.5,                 # OU correlation time
+
+    # Sensor noise (SpikeGadgets specs)
+    gyro_noise_density=0.01,          # deg/s/sqrt(Hz)
+    accel_noise_density=0.2,          # mg/sqrt(Hz)
+
+    # Camera artifacts
+    dropout_prob=0.1,                 # 10% dropout rate
+    swap_prob=0.02,                   # 2% LED swap rate
+
+    seed=42,
+)
+
+sim = simulate_rat_imu(config)
+```
+
+## Filter Configuration
+
+### EKF Configuration
+
+```python
+from trodestrack.models.ekf import EKFConfig
+
+cfg = EKFConfig(
+    # State mode (determines state dimension)
+    state_mode="2d_full",             # 8D: [x, y, vx, vy, theta, b_gz, b_ax, b_ay]
+
+    # Process noise
+    process_noise_pos=0.02,           # m^2/s
+    process_noise_vel=2.0,            # m^2/s^3
+    process_noise_heading=0.02,       # rad^2/s
+    process_noise_gyro_bias=2e-6,     # rad^2/s^3
+    process_noise_accel_bias=2e-4,    # m^2/s^5
+
+    # Measurement noise
+    measurement_noise_pos=0.005**2,   # m^2 (5mm)
+    measurement_noise_heading=0.05**2, # rad^2 (~3 deg)
+
+    # Dynamics
+    damping_coeff=0.5,                # 1/s (velocity decay)
+
+    # Robustness features
+    use_mahalanobis_gating=True,      # Reject outliers
+    mahalanobis_threshold_prob=0.997, # 3-sigma gate
+
+    enable_zupt=False,                # Zero-velocity updates
+    zupt_velocity_threshold=0.05,     # m/s
+
+    # Adaptive noise during dropout
+    adaptive_q_during_dropout=True,
+    dropout_q_pos_multiplier=10.0,
+)
+```
+
+### UKF Configuration
+
+```python
+from trodestrack.models.ukf import UKFConfig
+
+# UKF uses same base parameters plus sigma-point settings
+cfg = UKFConfig(
+    state_mode="2d_full",
+    # ... same parameters as EKFConfig ...
+
+    # UKF-specific
+    alpha=1e-3,    # Sigma point spread
+    beta=2.0,      # Prior knowledge (2.0 for Gaussian)
+    kappa=0.0,     # Secondary scaling parameter
+)
+```
+
+## Running Filters
+
+### Extended Kalman Filter
+
+```python
+from trodestrack.models.ekf import extended_kalman_filter, EKFConfig
+
+cfg = EKFConfig()
+result = extended_kalman_filter(cfg, sim)
+
+# Result is a FilterResult namedtuple
+print(f"Filtered means shape: {result.filtered_means.shape}")       # (N, 8)
+print(f"Filtered covariances shape: {result.filtered_covariances.shape}")  # (N, 8, 8)
+```
+
+### Unscented Kalman Filter
+
+```python
+from trodestrack.models.ukf import unscented_kalman_filter, UKFConfig
+
+cfg = UKFConfig()
+result = unscented_kalman_filter(cfg, sim)
+```
+
+### RTS Smoother (Offline)
+
+For offline analysis, the smoother uses future observations:
+
+```python
+from trodestrack.runtime.offline import rts_smoother
+
+# Run forward filter first
+forward_result = extended_kalman_filter(cfg, sim)
+
+# Then run backward smoother
+smoothed_result = rts_smoother(
+    forward_result.filtered_means,
+    forward_result.filtered_covariances,
+    forward_result.transition_matrices,
+    forward_result.process_covariances,
+    cfg,
+    sim
+)
+```
+
+## State Layouts
+
+**Always use state layouts** for dimension-agnostic code:
+
+```python
+from trodestrack.models.state_layout import get_layout
+
+# Get layout from config
+layout = get_layout(cfg.state_mode)
+
+# Extract states (works with any state dimension!)
+positions = result.filtered_means[:, layout.pos_idx]
+velocities = result.filtered_means[:, layout.vel_idx]
+headings = result.filtered_means[:, layout.heading_idx]
+
+# Extract covariances
+P = result.filtered_covariances
+pos_cov = P[:, layout.pos_idx, :][:, :, layout.pos_idx]  # (N, 2, 2)
+pos_std = np.sqrt(np.diagonal(pos_cov, axis1=1, axis2=2))  # (N, 2)
+```
+
+### Available State Modes
+
+| Mode | Dim | State Vector | Use Case |
+|------|-----|--------------|----------|
+| `"2d_full"` | 8D | [x, y, vx, vy, theta, b_gz, b_ax, b_ay] | Standard sensor fusion |
+| `"vision_only"` | 5D | [x, y, vx, vy, theta] | Camera-only tracking |
+| `"2d_cam_3d_imu"` | 10D | [x, y, vx, vy, vz, theta, b_gz, b_ax, b_ay, b_az] | 2D camera + 3D accel |
+| `"3d_euler"` | 15D | [x, y, z, vx, vy, vz, roll, pitch, yaw, ...] | Full 3D tracking |
+
+See [State Layouts](../user-guide/state-layouts.md) for complete documentation.
+
+## QA and Visualization
+
+### Generate QA Report
+
+```python
+from trodestrack.qa.report import generate_filter_report
+
+generate_filter_report(
+    states_fwd=result.filtered_means,
+    states_truth=sim.get('x_truth'),
+    covariances=result.filtered_covariances,
+    config=cfg,
+    output_path="qa_report.pdf"
+)
+```
+
+### Compute Metrics
+
+```python
+from trodestrack.qa.metrics import (
+    compute_rmse,
+    compute_nees,
+    compute_nis,
+)
+
+# Position RMSE
+pos_rmse = compute_rmse(
+    result.filtered_means[:, layout.pos_idx],
+    sim['x_truth'][:, layout.pos_idx]
+)
+print(f"Position RMSE: {pos_rmse * 100:.2f} cm")
+
+# NEES (filter consistency)
+nees = compute_nees(
+    result.filtered_means,
+    result.filtered_covariances,
+    sim['x_truth']
+)
+print(f"Mean NEES: {nees.mean():.2f} (expected: {layout.state_dim})")
+```
+
+### Create Diagnostic Video
+
+```python
+from trodestrack.viz.video import create_diagnostic_video
+
+create_diagnostic_video(
+    sim=sim,
+    fwd=result,
+    output_path="diagnostics.mp4",
+    fps=30,
+    speedup=2.0  # 2x playback speed
+)
+```
+
+## Error Handling
+
+TrodesTrack raises informative errors:
+
+```python
+from trodestrack.models.ekf import EKFConfig
+
+# Invalid state mode
+try:
+    cfg = EKFConfig(state_mode="invalid")
+except ValueError as e:
+    print(f"Error: {e}")  # "Unknown state_mode: invalid"
+
+# Data shape mismatch
+try:
+    result = extended_kalman_filter(cfg, bad_data)
+except ValueError as e:
+    print(f"Error: {e}")  # Informative message about shape mismatch
+```
+
+## Performance Tips
+
+1. **JIT Compilation**: First call is slow (compilation), subsequent calls are fast
+2. **Batch Processing**: Process multiple sessions without recompiling
+3. **GPU Acceleration**: Use `jax.config.update('jax_platform_name', 'gpu')` for large sessions
+4. **State Mode**: Use `"vision_only"` (5D) if you don't need bias estimation
+
+## Next Steps
+
+- **[State Layouts](../user-guide/state-layouts.md)**: Deep dive into dimension-agnostic coding
+- **[Tuning Guide](../user-guide/tuning.md)**: Optimize filter parameters
+- **[API Reference](../reference/)**: Complete API documentation
