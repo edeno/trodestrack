@@ -89,11 +89,11 @@ class FilterCoreConfig:
         "2d_cam_3d_imu" (10D).
     """
 
-    process_noise_pos: float = 0.02
-    process_noise_vel: float = 2.0
-    process_noise_heading: float = 0.02
-    process_noise_gyro_bias: float = 2e-6
-    process_noise_accel_bias: float = 2e-4
+    process_noise_pos: float = 1e-4
+    process_noise_vel: float = 5e-3
+    process_noise_heading: float = 5e-4
+    process_noise_gyro_bias: float = 5e-8
+    process_noise_accel_bias: float = 2e-5
 
     measurement_noise_pos: float = 0.01**2
     measurement_noise_heading: float = 0.05**2
@@ -113,20 +113,20 @@ class FilterCoreConfig:
     adaptive_heading_noise: bool = True
 
     adaptive_q_during_dropout: bool = True
-    dropout_q_pos_multiplier: float = 10.0
-    dropout_q_vel_multiplier: float = 10.0
-    dropout_q_bias_multiplier: float = 0.1
+    dropout_q_pos_multiplier: float = 2.0
+    dropout_q_vel_multiplier: float = 2.0
+    dropout_q_bias_multiplier: float = 0.5
     freeze_bias_during_blackout: bool = True
     reduce_imu_noise_during_blackout: bool = True
     blackout_imu_noise_scale: float = 0.3
 
-    enable_zupt: bool = False
-    zupt_velocity_threshold: float = 0.05
+    enable_zupt: bool = True
+    zupt_velocity_threshold: float = 0.02  # cm/s
     zupt_measurement_noise: float = 0.01**2
 
     # State layout mode (controls state dimension and index mapping)
     # Supported for 2D paths: "2d_full" (8D), "vision_only" (5D), "2d_cam_3d_imu" (10D)
-    state_mode: str = "2d_full"
+    state_mode: str = "2d_cam_3d_imu"
 
     # PyTree support: treat `state_mode` as static auxiliary data.
     _TREE_STATIC_FIELDS: ClassVar[tuple[str, ...]] = ("state_mode",)

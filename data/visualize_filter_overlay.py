@@ -112,7 +112,8 @@ def position_std_cm(P_filter_xy: np.ndarray) -> np.ndarray:
     """
     # P_filter_xy: [T, 2, 2]
     tr = np.trace(P_filter_xy, axis1=1, axis2=2)
-    return np.sqrt(tr) * 100.0  # meters -> cm
+    pos_std = np.sqrt(np.clip(tr, 0.0, None))
+    return pos_std * 100.0  # meters -> cm
 
 
 # --------------------------------------------------------------------------------------
@@ -904,11 +905,12 @@ def main(*, smoother: bool = False, render_mode: str = "single_process") -> int:
     script_dir = Path(__file__).parent
 
     print("Loading session data…")
+    meters_per_pixel = 0.0022  # camera calibration
     data = load_arthur_session(
         position_file=str(script_dir / "arthur20220324_position_info.parquet"),
         imu_file=str(script_dir / "arthur20220324_imu_info.parquet"),
         imu_mode="3d",
-        meters_per_pixel=0.0022,
+        meters_per_pixel=meters_per_pixel,
         verbose=False,
     )
     print(f"✓ Loaded {len(data.t_cam):,} frames and {len(data.t_imu):,} IMU samples\n")
@@ -916,30 +918,43 @@ def main(*, smoother: bool = False, render_mode: str = "single_process") -> int:
     print("Running Extended Kalman Filter with 3D IMU…")
     t0 = time.time()
     ekf_config = EKFConfig(
-        state_mode="2d_cam_3d_imu",  # [x, y, vx, vy, vz, θ, b_gz, b_ax, b_ay, b_az]
-        process_noise_pos=0.10,
-        process_noise_vel=0.2,
-        process_noise_gyro_bias=2e-6,
-        process_noise_accel_bias=2e-4,
-        measurement_noise_pos=0.02**2,
+        # State: [x, y, vx, vy, vz, θ, b_gz, b_ax, b_ay, b_az]
+        state_mode="2d_cam_3d_imu",
+        # --- Process model (how much you allow the state to wander per second) ---
+        process_noise_pos=0.05,  # m RMS per √s  (random walk on position; small but nonzero)
+        process_noise_vel=0.10,  # m/s RMS per √s (lets velocity adapt to turns/sprints)
+        process_noise_gyro_bias=2e-6,  # (rad/s) per √s
+        process_noise_accel_bias=2e-4,  # (m/s^2) per √s
+        # --- Camera measurement model ---
+        # Set this from pixel noise: measurement_noise_pos = (sigma_px * meters_per_pixel)**2
+        # If sigma_px ≈ 1.5 px and mpp ≈ 0.0022 m/px -> (1.5*0.0022)^2 ≈ 1.1e-5 m^2
+        measurement_noise_pos=(2.0 * meters_per_pixel) ** 2,  # m^2
+        # Heading from LED geometry (in radians): 3–8° std is common -> ~0.05–0.14 rad
+        # If your code auto-computes this or uses adaptive noise, keep this enabled:
         use_heading_measurement=True,
-        led_distance_tolerance=0.2,
         adaptive_heading_noise=True,
+        # Robustness to LED glitches / occlusions
+        use_mahalanobis_gating=True,
+        mahalanobis_threshold_prob=0.99,  # gate obvious outliers
+        led_distance_tolerance=0.10,  # meters; ~10 cm allows perspective/slight tracking error
+        # Adaptive Q during camera dropouts (lean on IMU when vision is missing or untrusted)
         adaptive_q_during_dropout=True,
-        dropout_q_pos_multiplier=10.0,
-        dropout_q_vel_multiplier=10.0,
-        freeze_bias_during_blackout=True,
+        dropout_q_pos_multiplier=4.0,
+        dropout_q_vel_multiplier=4.0,
+        # Optionally temper IMU when vision is gone, to avoid drift blow-ups
         reduce_imu_noise_during_blackout=True,
         blackout_imu_noise_scale=0.5,
-        damping_coeff=0.1,
+        # Mild physical damping to suppress tiny oscillations
+        damping_coeff=0.10,
+        # Iterated EKF helps linearization on quick turns
         num_iter=2,
-        led_distance=data.led_distance,
-        use_mahalanobis_gating=True,
-        mahalanobis_threshold_prob=0.99,
+        # Zero-velocity updates (very helpful during brief pauses)
         enable_zupt=True,
-        zupt_velocity_threshold=0.05,
-        zupt_measurement_noise=0.01**2,
+        zupt_velocity_threshold=0.03,  # m/s  (≈ 5 cm/s)
+        zupt_measurement_noise=0.006**2,  # (m/s)^2
     )
+
+    # want to be able to compare IMU prediction, camera prediction (no kalman), camera prediction (with kalman)
 
     result = extended_kalman_filter(
         ekf_config=ekf_config,
@@ -984,7 +999,7 @@ def main(*, smoother: bool = False, render_mode: str = "single_process") -> int:
 
     config = RenderConfig(
         start_time=120.0,
-        duration=30.0,  # 10-second clip
+        duration=60.0,  # 60-second clip
         fps=30.0,
         imu_window_s=2.0,
         state_window_s=5.0,
