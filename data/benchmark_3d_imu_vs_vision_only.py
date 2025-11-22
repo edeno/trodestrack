@@ -341,28 +341,28 @@ def compute_comparison_metrics(vision_only, imu_mode, data):
     v_pos = metrics["vision_only"]["position_rmse_cm"]
     i_pos = metrics["imu_mode"]["position_rmse_cm"]
     print(
-        f"{'Position RMSE (cm)':<35} {v_pos:>15.2f} {i_pos:>15.2f} {((v_pos-i_pos)/v_pos*100):>11.1f}%"
+        f"{'Position RMSE (cm)':<35} {v_pos:>15.2f} {i_pos:>15.2f} {((v_pos - i_pos) / v_pos * 100):>11.1f}%"
     )
 
     # Velocity (IMU should be much better)
     v_vel = metrics["vision_only"]["velocity_rmse_cm_s"]
     i_vel = metrics["imu_mode"]["velocity_rmse_cm_s"]
     print(
-        f"{'Velocity RMSE (cm/s)':<35} {v_vel:>15.2f} {i_vel:>15.2f} {((v_vel-i_vel)/v_vel*100):>11.1f}%"
+        f"{'Velocity RMSE (cm/s)':<35} {v_vel:>15.2f} {i_vel:>15.2f} {((v_vel - i_vel) / v_vel * 100):>11.1f}%"
     )
 
     # Heading
     v_head = metrics["vision_only"]["heading_rmse_deg"]
     i_head = metrics["imu_mode"]["heading_rmse_deg"]
     print(
-        f"{'Heading RMSE (deg)':<35} {v_head:>15.2f} {i_head:>15.2f} {((v_head-i_head)/v_head*100):>11.1f}%"
+        f"{'Heading RMSE (deg)':<35} {v_head:>15.2f} {i_head:>15.2f} {((v_head - i_head) / v_head * 100):>11.1f}%"
     )
 
     # Smoothness (lower is better)
     v_smooth = metrics["vision_only"]["smoothness"]
     i_smooth = metrics["imu_mode"]["smoothness"]
     print(
-        f"{'Trajectory smoothness (m/s²)':<35} {v_smooth:>15.3f} {i_smooth:>15.3f} {((v_smooth-i_smooth)/v_smooth*100):>11.1f}%"
+        f"{'Trajectory smoothness (m/s²)':<35} {v_smooth:>15.3f} {i_smooth:>15.3f} {((v_smooth - i_smooth) / v_smooth * 100):>11.1f}%"
     )
     print("  ↳ (lower is smoother)")
 
@@ -370,14 +370,14 @@ def compute_comparison_metrics(vision_only, imu_mode, data):
     v_unc = metrics["vision_only"]["mean_position_uncertainty_cm"]
     i_unc = metrics["imu_mode"]["mean_position_uncertainty_cm"]
     print(
-        f"{'Mean position uncertainty (cm)':<35} {v_unc:>15.2f} {i_unc:>15.2f} {((v_unc-i_unc)/v_unc*100):>11.1f}%"
+        f"{'Mean position uncertainty (cm)':<35} {v_unc:>15.2f} {i_unc:>15.2f} {((v_unc - i_unc) / v_unc * 100):>11.1f}%"
     )
 
     # Log-likelihood (higher is better)
     v_ll = metrics["vision_only"]["loglik"]
     i_ll = metrics["imu_mode"]["loglik"]
     print(
-        f"{'Marginal log-likelihood':<35} {v_ll:>15.1f} {i_ll:>15.1f} {((i_ll-v_ll)/abs(v_ll)*100):>11.1f}%"
+        f"{'Marginal log-likelihood':<35} {v_ll:>15.1f} {i_ll:>15.1f} {((i_ll - v_ll) / abs(v_ll) * 100):>11.1f}%"
     )
     print("  ↳ (higher is better fit)")
 

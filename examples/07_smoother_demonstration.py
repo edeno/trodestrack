@@ -104,7 +104,7 @@ def main() -> None:
     print(f"  Dropout interval: t={5.0:.1f}s to t={10.0:.1f}s (5.0s duration)")
     print(
         f"  Valid frames: {mask_with_dropout.sum()}/{len(mask_with_dropout)} "
-        f"({100*mask_with_dropout.mean():.1f}%)"
+        f"({100 * mask_with_dropout.mean():.1f}%)"
     )
 
     # Run EKF with blackout-aware filtering
@@ -400,7 +400,7 @@ def main() -> None:
             # Progress indicator
             if (frame + 1) % 50 == 0 or frame == n_frames - 1:
                 pct = 100 * (frame + 1) / n_frames
-                print(f"    Progress: {pct:.1f}% ({frame+1}/{n_frames} frames)")
+                print(f"    Progress: {pct:.1f}% ({frame + 1}/{n_frames} frames)")
 
     plt.close(fig)
 

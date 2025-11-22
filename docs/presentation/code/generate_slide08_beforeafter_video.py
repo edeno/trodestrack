@@ -355,7 +355,7 @@ def generate_slide08():
         ax_left.text(
             1.01,
             0.50,
-            f"Error:\n{vision_error*100:.1f} cm\n\n2σ:\n{2*np.sqrt(vision_cov[frame, 0, 0])*100:.1f} cm",
+            f"Error:\n{vision_error * 100:.1f} cm\n\n2σ:\n{2 * np.sqrt(vision_cov[frame, 0, 0]) * 100:.1f} cm",
             transform=ax_left.transAxes,
             fontsize=14,
             verticalalignment="top",
@@ -473,7 +473,7 @@ def generate_slide08():
         ax_right.text(
             1.01,
             0.50,
-            f"Error:\n{ekf_error*100:.1f} cm\n\n2σ:\n{2*np.sqrt(ekf_cov[frame, 0, 0])*100:.1f} cm",
+            f"Error:\n{ekf_error * 100:.1f} cm\n\n2σ:\n{2 * np.sqrt(ekf_cov[frame, 0, 0]) * 100:.1f} cm",
             transform=ax_right.transAxes,
             fontsize=14,
             verticalalignment="top",

@@ -733,7 +733,7 @@ def plot_vision_robustness(sim_data: dict[str, np.ndarray]) -> plt.Figure:
             color=COLORS["gray"],
             linestyle="--",
             linewidth=1,
-            label=f"expected: {expected_spacing*100:.1f} cm",
+            label=f"expected: {expected_spacing * 100:.1f} cm",
         )
 
         ax_spacing.set_xlabel("time (s)")

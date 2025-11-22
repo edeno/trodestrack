@@ -257,10 +257,10 @@ def create_filter_overlay_video(
         np.sqrt(np.clip(P[:, 5, 5], 0.0, None))
     )  # rad -> deg
     print(
-        f"σ_speed cm/s — median: {np.nanmedian(vel_sigma_cms):.2f}, 95th: {np.nanpercentile(vel_sigma_cms,95):.2f}"
+        f"σ_speed cm/s — median: {np.nanmedian(vel_sigma_cms):.2f}, 95th: {np.nanpercentile(vel_sigma_cms, 95):.2f}"
     )
     print(
-        f"σ_heading deg — median: {np.nanmedian(heading_sigma_deg):.2f}, 95th: {np.nanpercentile(heading_sigma_deg,95):.2f}"
+        f"σ_heading deg — median: {np.nanmedian(heading_sigma_deg):.2f}, 95th: {np.nanpercentile(heading_sigma_deg, 95):.2f}"
     )
 
     # Convert to pixels for overlay

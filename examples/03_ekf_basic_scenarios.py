@@ -1055,7 +1055,7 @@ def main() -> None:
        • Position RMSE low → EKF tracks circular path accurately
        • Heading RMSE < 7° → ✓ MEETS PRD TARGET with dual-LED measurement!
        • NEES ≈ 8.0 → ✓ Filter is optimally calibrated (well-tuned)
-       • Gyro bias {'✓ CONVERGED' if bias_converged else '✗ DID NOT CONVERGE'} → rotation makes bias observable
+       • Gyro bias {"✓ CONVERGED" if bias_converged else "✗ DID NOT CONVERGE"} → rotation makes bias observable
        • Final bias error: {np.degrees(bias_error_final):.3f}°/s
 
     ✓ SUCCESS: This scenario achieves ALL PRD targets because it has:
@@ -1101,9 +1101,9 @@ def main() -> None:
        • NEES > 10.0 → underconfident (covariance too large)
 
     4. PERFORMANCE vs PRD TARGETS:
-       • Stationary:       {metrics_stat['pos_rmse_cm']:.2f} cm (target ≤ 2 cm)
-       • Const Velocity:   {metrics_const_vel['pos_rmse_cm']:.2f} cm, {metrics_const_vel['vel_rmse_cm_s']:.2f} cm/s
-       • Circular:         {metrics_circular['pos_rmse_cm']:.2f} cm, {metrics_circular['heading_rmse_deg']:.2f}°
+       • Stationary:       {metrics_stat["pos_rmse_cm"]:.2f} cm (target ≤ 2 cm)
+       • Const Velocity:   {metrics_const_vel["pos_rmse_cm"]:.2f} cm, {metrics_const_vel["vel_rmse_cm_s"]:.2f} cm/s
+       • Circular:         {metrics_circular["pos_rmse_cm"]:.2f} cm, {metrics_circular["heading_rmse_deg"]:.2f}°
 
     ✅ All scenarios meet PRD targets under ideal conditions (no dropouts).
 

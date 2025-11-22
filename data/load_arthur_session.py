@@ -445,8 +445,8 @@ def load_arthur_session(
         print(f"  IMU: {fs_imu:.1f} Hz")
         print(f"  Camera: {fs_cam:.1f} Hz")
         print("\nDuration:")
-        print(f"  IMU: {t_imu[-1]:.1f} s ({t_imu[-1]/60:.1f} min)")
-        print(f"  Camera: {t_cam[-1]:.1f} s ({t_cam[-1]/60:.1f} min)")
+        print(f"  IMU: {t_imu[-1]:.1f} s ({t_imu[-1] / 60:.1f} min)")
+        print(f"  Camera: {t_cam[-1]:.1f} s ({t_cam[-1] / 60:.1f} min)")
         print(f"  Time overlap: {min(t_imu[-1], t_cam[-1]):.1f} s")
 
     # Convert units to SI
@@ -460,24 +460,24 @@ def load_arthur_session(
         print(f"\nUnit conversions (IMU mode: {imu_mode}):")
         if imu_mode == "2d":
             print(
-                f"  Gyro Z: [{U_imu[:, 0].min()*180/np.pi:.1f}, {U_imu[:, 0].max()*180/np.pi:.1f}] deg/s"
+                f"  Gyro Z: [{U_imu[:, 0].min() * 180 / np.pi:.1f}, {U_imu[:, 0].max() * 180 / np.pi:.1f}] deg/s"
             )
             print(f"  Accel X: [{U_imu[:, 1].min():.2f}, {U_imu[:, 1].max():.2f}] m/s²")
             print(f"  Accel Y: [{U_imu[:, 2].min():.2f}, {U_imu[:, 2].max():.2f}] m/s²")
         else:  # 3d mode
             print(
-                f"  Gyro X: [{U_imu[:, 0].min()*180/np.pi:.1f}, {U_imu[:, 0].max()*180/np.pi:.1f}] deg/s"
+                f"  Gyro X: [{U_imu[:, 0].min() * 180 / np.pi:.1f}, {U_imu[:, 0].max() * 180 / np.pi:.1f}] deg/s"
             )
             print(
-                f"  Gyro Y: [{U_imu[:, 1].min()*180/np.pi:.1f}, {U_imu[:, 1].max()*180/np.pi:.1f}] deg/s"
+                f"  Gyro Y: [{U_imu[:, 1].min() * 180 / np.pi:.1f}, {U_imu[:, 1].max() * 180 / np.pi:.1f}] deg/s"
             )
             print(
-                f"  Gyro Z: [{U_imu[:, 2].min()*180/np.pi:.1f}, {U_imu[:, 2].max()*180/np.pi:.1f}] deg/s"
+                f"  Gyro Z: [{U_imu[:, 2].min() * 180 / np.pi:.1f}, {U_imu[:, 2].max() * 180 / np.pi:.1f}] deg/s"
             )
             print(f"  Accel X: [{U_imu[:, 3].min():.2f}, {U_imu[:, 3].max():.2f}] m/s²")
             print(f"  Accel Y: [{U_imu[:, 4].min():.2f}, {U_imu[:, 4].max():.2f}] m/s²")
             print(f"  Accel Z: [{U_imu[:, 5].min():.2f}, {U_imu[:, 5].max():.2f}] m/s²")
-        print(f"  LED separation: {led_distance*100:.2f} cm")
+        print(f"  LED separation: {led_distance * 100:.2f} cm")
         print(
             f"  Arena: {Z_cam_led1[:, 0].max() - Z_cam_led1[:, 0].min():.2f} × "
             f"{Z_cam_led1[:, 1].max() - Z_cam_led1[:, 1].min():.2f} m"
@@ -536,7 +536,7 @@ def main():
     print(f"  Z_cam_led1: shape {data.Z_cam_led1.shape}, dtype {data.Z_cam_led1.dtype}")
     print(f"  Z_cam_led2: shape {data.Z_cam_led2.shape}, dtype {data.Z_cam_led2.dtype}")
     print(f"  mask_cam: {data.mask_cam.sum():,} / {len(data.mask_cam):,} valid frames")
-    print(f"  led_distance: {data.led_distance*100:.2f} cm")
+    print(f"  led_distance: {data.led_distance * 100:.2f} cm")
     print(f"  meters_per_pixel: {data.meters_per_pixel}")
 
     # Test pixel conversion

@@ -481,7 +481,7 @@ def generate_slide05c():
     ax2.text(
         ekf_pos[-1, 0],
         ekf_pos[-1, 1] + 0.5,
-        f"RMSE: {rmse*100:.1f} cm",
+        f"RMSE: {rmse * 100:.1f} cm",
         fontsize=24,
         weight="bold",
         color=GREEN,
@@ -533,7 +533,7 @@ def generate_slide05c():
         0.5,
         0.02,
         "Kalman filter estimates biases in state vector [x, y, vₓ, vᵧ, θ, b_gz, b_ax, b_ay] → "
-        f"Reduces drift by {drift/rmse:.0f}×!",
+        f"Reduces drift by {drift / rmse:.0f}×!",
         fontsize=13,
         ha="center",
         style="italic",

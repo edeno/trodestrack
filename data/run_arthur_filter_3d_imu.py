@@ -55,7 +55,7 @@ def main():
     )
 
     print("\n✓ Loaded session:")
-    print(f"  Duration: {data.t_cam[-1]:.1f} s ({data.t_cam[-1]/60:.1f} min)")
+    print(f"  Duration: {data.t_cam[-1]:.1f} s ({data.t_cam[-1] / 60:.1f} min)")
     print(f"  Camera: {len(data.t_cam):,} frames at {data.fs_cam:.1f} Hz")
     print(f"  IMU: {len(data.t_imu):,} samples at {data.fs_imu:.1f} Hz")
     print(f"  IMU shape: {data.U_imu.shape} (6 axes: gyro X/Y/Z, accel X/Y/Z)")
@@ -90,7 +90,7 @@ def main():
     )
 
     print(f"  State mode: {ekf_config.state_mode}")
-    print(f"  LED distance: {ekf_config.led_distance*100:.2f} cm")
+    print(f"  LED distance: {ekf_config.led_distance * 100:.2f} cm")
     print(f"  Heading measurement: {ekf_config.use_heading_measurement}")
     print(f"  ZUPT: {ekf_config.enable_zupt}")
 

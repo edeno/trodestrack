@@ -162,7 +162,7 @@ def main():
             f.write(f"**Time**: {clip['start_time']:.1f}s - ")
             f.write(f"{clip['start_time'] + clip['duration']:.1f}s ")
             f.write(
-                f"({clip['start_time']/60:.1f} - {(clip['start_time'] + clip['duration'])/60:.1f} minutes)\n\n"
+                f"({clip['start_time'] / 60:.1f} - {(clip['start_time'] + clip['duration']) / 60:.1f} minutes)\n\n"
             )
             f.write(f"**Duration**: {clip['duration']}s\n\n")
 

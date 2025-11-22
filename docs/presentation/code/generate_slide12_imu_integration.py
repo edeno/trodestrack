@@ -144,7 +144,7 @@ def generate_slide12():
     ax1.text(
         (t_k + t_k1) / 2,
         0.0,
-        f"Δt={(t_k1 - t_k)*1000:.1f}ms\n({len(t_imu_between)} samples)",
+        f"Δt={(t_k1 - t_k) * 1000:.1f}ms\n({len(t_imu_between)} samples)",
         ha="center",
         fontsize=11,
         weight="bold",
@@ -332,7 +332,9 @@ def generate_slide12():
     delta_theta = np.rad2deg(X_k1[4] - X_k[4])
 
     # Compact stats in title
-    stats_str = f"Δx={delta_x*100:.1f}cm, Δy={delta_y*100:.1f}cm, Δθ={delta_theta:.1f}°"
+    stats_str = (
+        f"Δx={delta_x * 100:.1f}cm, Δy={delta_y * 100:.1f}cm, Δθ={delta_theta:.1f}°"
+    )
 
     ax3.set_xlabel("X (m)", fontsize=13, weight="bold", labelpad=8)
     ax3.set_ylabel("Y (m)", fontsize=13, weight="bold", labelpad=8)

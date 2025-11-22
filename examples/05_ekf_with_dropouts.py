@@ -468,14 +468,14 @@ def plot_dropout_scenario(
     # Create summary text
     summary_text = f"""
 Dropout Statistics:
-  • Actual dropout rate: {metrics['actual_dropout_rate']*100:.1f}%
-  • Dropout sequences: {metrics['num_dropout_sequences']}
-  • Max dropout: {metrics['max_dropout_s']:.2f}s
-  • Max drift: {metrics['dropout_drift_m']*100:.1f} cm
+  • Actual dropout rate: {metrics["actual_dropout_rate"] * 100:.1f}%
+  • Dropout sequences: {metrics["num_dropout_sequences"]}
+  • Max dropout: {metrics["max_dropout_s"]:.2f}s
+  • Max drift: {metrics["dropout_drift_m"] * 100:.1f} cm
 
 Performance:
-  • Overall position RMSE: {metrics['pos_rmse_cm']:.2f} cm
-  • PRD target: ≤ 2 cm {'✓ PASS' if metrics['pos_rmse_cm'] <= 2.0 else '✗ FAIL'}
+  • Overall position RMSE: {metrics["pos_rmse_cm"]:.2f} cm
+  • PRD target: ≤ 2 cm {"✓ PASS" if metrics["pos_rmse_cm"] <= 2.0 else "✗ FAIL"}
 
 Robustness Features Active:
   • Adaptive Q during dropouts
@@ -485,7 +485,7 @@ Robustness Features Active:
 
 Key Insight:
   Filter maintains reasonable accuracy
-  despite {metrics['actual_dropout_rate']*100:.0f}% vision loss by using
+  despite {metrics["actual_dropout_rate"] * 100:.0f}% vision loss by using
   IMU integration between camera frames.
 """
 
@@ -506,9 +506,9 @@ Key Insight:
     # -------------------------------------------------------------------------
     title = (
         f"{scenario_name} — EKF Robustness Under Dropouts\n"
-        f"Dropout Rate: {metrics['actual_dropout_rate']*100:.1f}% | "
+        f"Dropout Rate: {metrics['actual_dropout_rate'] * 100:.1f}% | "
         f"Position RMSE: {metrics['pos_rmse_cm']:.2f} cm | "
-        f"Max Drift: {metrics['dropout_drift_m']*100:.1f} cm"
+        f"Max Drift: {metrics['dropout_drift_m'] * 100:.1f} cm"
     )
     fig.suptitle(title, fontsize=12, fontweight="bold", y=0.995)
 
@@ -602,10 +602,12 @@ def main() -> None:
 
         print("\n   Performance Metrics:")
         print("   " + "-" * 76)
-        print(f"   Actual Dropout Rate:     {metrics['actual_dropout_rate']*100:6.1f}%")
+        print(
+            f"   Actual Dropout Rate:     {metrics['actual_dropout_rate'] * 100:6.1f}%"
+        )
         print(f"   Dropout Sequences:       {metrics['num_dropout_sequences']:6d}")
         print(f"   Max Dropout Duration:    {metrics['max_dropout_s']:6.2f} s")
-        print(f"   Max Dropout Drift:       {metrics['dropout_drift_m']*100:6.1f} cm")
+        print(f"   Max Dropout Drift:       {metrics['dropout_drift_m'] * 100:6.1f} cm")
         print(
             f"   Overall Position RMSE:   {metrics['pos_rmse_cm']:6.2f} cm  (target: ≤ 2 cm)"
         )
@@ -630,8 +632,8 @@ def main() -> None:
 
     for scenario_name, dropout_prob, metrics in all_results:
         print(
-            f"   {scenario_name:<25} {dropout_prob*100:>11.0f}% "
-            f"{metrics['dropout_drift_m']*100:>14.1f} "
+            f"   {scenario_name:<25} {dropout_prob * 100:>11.0f}% "
+            f"{metrics['dropout_drift_m'] * 100:>14.1f} "
             f"{metrics['pos_rmse_cm']:>11.2f}"
         )
 

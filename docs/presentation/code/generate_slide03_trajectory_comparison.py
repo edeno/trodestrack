@@ -258,7 +258,7 @@ def generate_slide03():
     # Print statistics
     dropout_rate = 1 - valid_obs.sum() / len(valid_obs)
     num_gaps = len(gap_starts)
-    print(f"  Dropout rate: {dropout_rate*100:.1f}%")
+    print(f"  Dropout rate: {dropout_rate * 100:.1f}%")
     print(f"  Number of gaps: {num_gaps}")
 
 

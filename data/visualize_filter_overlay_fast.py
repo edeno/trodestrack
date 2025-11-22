@@ -389,7 +389,7 @@ def create_filter_overlay_video_fast(
     for frame_num in range(n_frames):
         if frame_num % 30 == 0:
             print(
-                f"  Progress: {frame_num}/{n_frames} frames ({100*frame_num/n_frames:.1f}%)"
+                f"  Progress: {frame_num}/{n_frames} frames ({100 * frame_num / n_frames:.1f}%)"
             )
 
         current_time = start_time + frame_num / fps

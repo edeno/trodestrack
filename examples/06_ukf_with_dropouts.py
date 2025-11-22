@@ -122,7 +122,7 @@ def print_comparison_table(
     speedup = ukf_time_s / ekf_time_s
     print("-" * 80)
     print(
-        f"{'Computation Time (ms)':<30} {ekf_time_s*1000:>12.1f} {ukf_time_s*1000:>12.1f} "
+        f"{'Computation Time (ms)':<30} {ekf_time_s * 1000:>12.1f} {ukf_time_s * 1000:>12.1f} "
         f"{'EKF':>12} {speedup:>10.1f}× slower"
     )
     print("-" * 80)
@@ -136,7 +136,7 @@ def print_comparison_table(
         )
     else:
         print(
-            f"  ✓ EKF wins {2-accuracy_wins}/2 accuracy metrics → EKF sufficient "
+            f"  ✓ EKF wins {2 - accuracy_wins}/2 accuracy metrics → EKF sufficient "
             f"(and {speedup:.1f}× faster)"
         )
 
@@ -213,12 +213,12 @@ def main() -> None:
 
     print_section_header("Running Simulation and Filters")
 
-    print(f"   Simulating with {dropout_prob*100:.0f}% dropout rate...")
+    print(f"   Simulating with {dropout_prob * 100:.0f}% dropout rate...")
     sim = simulate_rat_imu(config=sim_config, seed=42)
 
     print(
         f"   Generated {len(sim['t_cam_exp'])} camera frames, "
-        f"{sim['mask_cam'].sum()} valid ({sim['mask_cam'].mean()*100:.1f}%)"
+        f"{sim['mask_cam'].sum()} valid ({sim['mask_cam'].mean() * 100:.1f}%)"
     )
 
     # Run EKF
@@ -249,8 +249,8 @@ def main() -> None:
     )
     ukf_time = time.time() - t0_ukf
 
-    print(f"   EKF time: {ekf_time*1000:.1f} ms")
-    print(f"   UKF time: {ukf_time*1000:.1f} ms ({ukf_time/ekf_time:.1f}× slower)")
+    print(f"   EKF time: {ekf_time * 1000:.1f} ms")
+    print(f"   UKF time: {ukf_time * 1000:.1f} ms ({ukf_time / ekf_time:.1f}× slower)")
 
     # Compute metrics for both
     t_imu = sim["t_imu"]
@@ -450,7 +450,7 @@ def main() -> None:
         f"UKF vs EKF Under 30% Dropout — Heavy Stress Test\n"
         f"EKF: {ekf_metrics['pos_rmse_cm']:.2f} cm RMSE | "
         f"UKF: {ukf_metrics['pos_rmse_cm']:.2f} cm RMSE | "
-        f"UKF is {ukf_time/ekf_time:.1f}× slower"
+        f"UKF is {ukf_time / ekf_time:.1f}× slower"
     )
     fig.suptitle(title, fontsize=12, fontweight="bold", y=0.98)
 
@@ -473,18 +473,18 @@ def main() -> None:
     📊 SUMMARY:
 
     Accuracy:
-      • Position RMSE: {'UKF better by ' + f'{pos_improvement:.2f} cm' if pos_improvement > 0 else 'EKF better by ' + f'{-pos_improvement:.2f} cm'}
-      • Dropout Drift: {'UKF better by ' + f'{drift_improvement:.1f} cm' if drift_improvement > 0 else 'EKF better by ' + f'{-drift_improvement:.1f} cm'}
+      • Position RMSE: {"UKF better by " + f"{pos_improvement:.2f} cm" if pos_improvement > 0 else "EKF better by " + f"{-pos_improvement:.2f} cm"}
+      • Dropout Drift: {"UKF better by " + f"{drift_improvement:.1f} cm" if drift_improvement > 0 else "EKF better by " + f"{-drift_improvement:.1f} cm"}
 
     Computational Cost:
-      • UKF is {speedup:.1f}× slower ({ekf_time*1000:.1f} ms vs {ukf_time*1000:.1f} ms)
+      • UKF is {speedup:.1f}× slower ({ekf_time * 1000:.1f} ms vs {ukf_time * 1000:.1f} ms)
 
     🎓 KEY TAKEAWAYS:
 
     1. DROPOUT ROBUSTNESS:
        • Both filters handle 30% dropout reasonably well
-       • Differences are {'significant' if abs(pos_improvement) > 0.2 else 'marginal'} (< 0.5 cm)
-       • UKF's nonlinearity handling {'does' if pos_improvement > 0.1 else 'does NOT'} provide meaningful benefit
+       • Differences are {"significant" if abs(pos_improvement) > 0.2 else "marginal"} (< 0.5 cm)
+       • UKF's nonlinearity handling {"does" if pos_improvement > 0.1 else "does NOT"} provide meaningful benefit
 
     2. WHEN DROPOUTS OCCUR:
        • Both filters rely on IMU integration (same physics)
@@ -492,12 +492,12 @@ def main() -> None:
        • Bias estimation quality matters MORE than filter type
 
     3. COMPUTATIONAL TRADEOFF:
-       • {speedup:.1f}× slowdown for {'minimal' if abs(pos_improvement) < 0.2 else 'moderate'} accuracy gain
+       • {speedup:.1f}× slowdown for {"minimal" if abs(pos_improvement) < 0.2 else "moderate"} accuracy gain
        • For real-time: EKF recommended
        • For offline: Consider UKF if every cm matters
 
     4. PRACTICAL RECOMMENDATION:
-       {'✓ Use EKF - faster and nearly as accurate under dropouts' if abs(pos_improvement) < 0.2 else '✓ Consider UKF - accuracy improvement may justify cost for critical applications'}
+       {"✓ Use EKF - faster and nearly as accurate under dropouts" if abs(pos_improvement) < 0.2 else "✓ Consider UKF - accuracy improvement may justify cost for critical applications"}
 
     NEXT STEPS:
     • Run examples/07_smoother_demonstration.py to see how smoothing helps

@@ -170,7 +170,7 @@ def print_comparison_table(
     speedup = ukf_time_s / ekf_time_s
     print("-" * 80)
     print(
-        f"{'Computation Time (ms)':<25} {ekf_time_s*1000:>12.1f} {ukf_time_s*1000:>12.1f} "
+        f"{'Computation Time (ms)':<25} {ekf_time_s * 1000:>12.1f} {ukf_time_s * 1000:>12.1f} "
         f"{'EKF':>12} {f'{speedup:.1f}x slower':>15}"
     )
     print("-" * 80)
@@ -191,7 +191,7 @@ def print_comparison_table(
         )
     elif accuracy_wins <= 1:
         print(
-            f"  ✓ EKF wins {4-accuracy_wins}/4 metrics → EKF is sufficient "
+            f"  ✓ EKF wins {4 - accuracy_wins}/4 metrics → EKF is sufficient "
             f"(and {speedup:.1f}× faster)"
         )
     else:
@@ -773,7 +773,7 @@ def main() -> None:
     Configuration Summary:
       • Same simulation, process noise, measurement noise for both filters
       • EKF: Uses Jacobian linearization (fast)
-      • UKF: Propagates {2*8+1} sigma points (slower but captures nonlinearity)
+      • UKF: Propagates {2 * 8 + 1} sigma points (slower but captures nonlinearity)
       • Alpha = {ukf_config.alpha:.3f}: Sigma-point spread parameter
       • Beta = {ukf_config.beta}: Optimal for Gaussian distributions
     """
@@ -1174,7 +1174,7 @@ def main() -> None:
     3. OVERALL VERDICT:
        • UKF won {ukf_wins}/{total_comparisons} metric comparisons
        • EKF won {total_comparisons - ukf_wins}/{total_comparisons} metric comparisons
-       • {'UKF provides marginal improvements' if ukf_wins > total_comparisons/2 else 'EKF is competitive with UKF'}
+       • {"UKF provides marginal improvements" if ukf_wins > total_comparisons / 2 else "EKF is competitive with UKF"}
 
     4. WHEN TO USE UKF:
        ✓ Highly nonlinear dynamics (tight circular motion, aggressive maneuvers)

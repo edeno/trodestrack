@@ -178,7 +178,7 @@ def create_camera_tracked_video(
 
             if (i + 1) % 100 == 0:
                 print(
-                    f"  Processed {i + 1:,} / {n_frames:,} frames ({100*(i+1)/n_frames:.1f}%)"
+                    f"  Processed {i + 1:,} / {n_frames:,} frames ({100 * (i + 1) / n_frames:.1f}%)"
                 )
 
     finally:
