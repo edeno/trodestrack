@@ -51,9 +51,9 @@ Future: extend to full 3D pose (roll/pitch/yaw) with magnetometer. Also could us
 - **Robustness:** Vision dropout tolerance → ≤3.5 m drift after 5s IMU-only operation.
   - SpikeGadgets IMU specification: Accel noise 0.2 mg/√Hz, gyro noise 0.01 °/s/√Hz
   - Empirical performance with realistic specs (8-seed validation):
-    * Mean drift: 2.3 m
-    * Median drift: 2.2 m
-    * 95th percentile: 3.8 m
+    - Mean drift: 2.3 m
+    - Median drift: 2.2 m
+    - 95th percentile: 3.8 m
   - Requirement set at 3.5 m (realistic bound, ~95th percentile with SpikeGadgets hardware)
 - **Throughput:** Offline smoothing ≥10× realtime on 30 min session (CPU); ≥50× realtime on GPU.
 - **Online:** End-to-end latency ≤33 ms per frame (EKF on CPU).
@@ -85,6 +85,7 @@ Future: extend to full 3D pose (roll/pitch/yaw) with magnetometer. Also could us
 **SpikeGadgets IMU Specifications**
 
 Hardware specifications (source: [SpikeGadgets Product Manual](https://spikegadgets.com/documentation/)):
+
 - 3-axis accelerometer: ±2g range, 16-bit signed integers (0.000061g per LSB)
 - 3-axis gyroscope: ±2000 deg/s range, 16-bit signed integers (0.061 deg/s per LSB)
 - Sensor refresh rate: 104 Hz (both sensors enabled)
