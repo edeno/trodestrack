@@ -109,14 +109,24 @@ def generate_slide14():
     cam_indices = np.clip(cam_indices, 0, len(t_imu) - 1)
     pos_truth = sim["X_truth"][cam_indices, :2]
 
-    # Create figure
-    fig, ax = plt.subplots(figsize=(16, 10))
+    # Create figure with subplot_mosaic - main plot with dedicated legend/stats area on right
+    mosaic = [["main", "legend"]]
+
+    fig, axd = plt.subplot_mosaic(
+        mosaic,
+        figsize=(12, 5.625),
+        constrained_layout=True,
+        gridspec_kw={"width_ratios": [3, 1]},
+    )
+
+    ax = axd["main"]
+    ax_legend = axd["legend"]
 
     # Plot ground truth trajectory
     ax.plot(
         pos_truth[:, 0],
         pos_truth[:, 1],
-        linewidth=2,
+        linewidth=4,
         color=BLUE,
         linestyle="--",
         alpha=0.5,
@@ -126,7 +136,7 @@ def generate_slide14():
 
     # Plot estimated trajectory
     ax.plot(
-        pos_est[:, 0], pos_est[:, 1], linewidth=2.5, color=GREEN, label="EKF estimate", zorder=2
+        pos_est[:, 0], pos_est[:, 1], linewidth=4.5, color=GREEN, label="EKF estimate", zorder=2
     )
 
     # Plot covariance ellipses at key moments
@@ -202,9 +212,9 @@ def generate_slide14():
             ha="left",
             va="bottom",
             bbox=dict(
-                boxstyle="round,pad=0.5", facecolor="white", alpha=0.9, edgecolor=color, linewidth=2
+                boxstyle="round,pad=0.5", facecolor="white", alpha=0.9, edgecolor=color, linewidth=4
             ),
-            arrowprops=dict(arrowstyle="->", color=color, linewidth=2.5),
+            arrowprops=dict(arrowstyle="->", color=color, linewidth=4.5),
             zorder=20,
         )
 
@@ -230,7 +240,7 @@ def generate_slide14():
         marker="o",
         color=GREEN,
         edgecolor="black",
-        linewidth=2,
+        linewidth=4,
         zorder=30,
         label="Start",
     )
@@ -241,26 +251,45 @@ def generate_slide14():
         marker="s",
         color=BLUE,
         edgecolor="black",
-        linewidth=2,
+        linewidth=4,
         zorder=30,
         label="End",
     )
 
     # Labels and title
-    ax.set_xlabel("X (meters)", fontsize=16, weight="bold")
-    ax.set_ylabel("Y (meters)", fontsize=16, weight="bold")
+    ax.set_xlabel("X (meters)", fontsize=18, weight="bold", labelpad=10)
+    ax.set_ylabel("Y (meters)", fontsize=18, weight="bold", labelpad=10)
     ax.set_title(
-        "Uncertainty Evolution: Covariance Ellipses (±2σ)\n"
-        "Growing during dropout, shrinking when camera returns",
+        "Uncertainty Evolution: Covariance Ellipses (±2σ)",
         fontsize=20,
         weight="bold",
+        pad=10,
     )
-    ax.legend(fontsize=13, loc="upper right")
+    # No legend on main plot - will be in dedicated panel
     ax.set_aspect("equal")
     ax.grid(True, alpha=0.3)
 
-    # Add time annotations along trajectory
-    time_markers = [0, 5, 10, 15, 20]
+    # Dedicated legend/stats panel
+    ax_legend.axis("off")
+
+    # Get handles and labels from main plot
+    handles, labels = ax.get_legend_handles_labels()
+
+    # Create legend in dedicated space
+    ax_legend.legend(
+        handles,
+        labels,
+        loc="upper left",
+        fontsize=14,
+        frameon=True,
+        fancybox=False,
+        framealpha=0.95,
+        title="Legend",
+        title_fontsize=16,
+    )
+
+    # Add time annotations along trajectory - reduced to avoid overlap
+    time_markers = [0, 10, 20]  # Reduced from [0, 5, 10, 15, 20] to avoid clutter
     for t_mark in time_markers:
         idx = np.argmin(np.abs(t_cam - t_mark))
         pos = pos_est[idx]
@@ -268,7 +297,7 @@ def generate_slide14():
             pos[0],
             pos[1],
             f"{t_mark}s",
-            fontsize=10,
+            fontsize=16,
             color=GRAY,
             weight="bold",
             ha="center",
@@ -288,8 +317,6 @@ def generate_slide14():
         style="italic",
         bbox=dict(boxstyle="round,pad=0.8", facecolor=BLUE, alpha=0.1),
     )
-
-    plt.tight_layout(rect=[0, 0.06, 1, 1])
     output_path = OUTPUT_DIR / "slide14_uncertainty.png"
     plt.savefig(output_path, dpi=150, bbox_inches="tight", facecolor="white")
     print(f"✓ Saved: {output_path}")

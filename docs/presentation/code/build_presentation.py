@@ -204,15 +204,57 @@ class PresentationBuilder:
             text_frame = text_box.text_frame
             text_frame.word_wrap = True
 
+            # Enable auto-fit to prevent text overflow
+            text_frame.auto_size = None  # Don't auto-resize the text box
+
+            # Estimate appropriate font size based on content amount
+            num_bullets = len(bullets)
+            avg_bullet_length = sum(len(b) for b in bullets) / max(num_bullets, 1)
+
+            # Adjust font size based on content density
+            if num_bullets <= 4 and avg_bullet_length < 60:
+                base_font_size = 24  # Standard
+                spacing = 12
+            elif num_bullets <= 6 and avg_bullet_length < 80:
+                base_font_size = 22  # Slightly smaller
+                spacing = 10
+            elif num_bullets <= 8:
+                base_font_size = 20  # Compact
+                spacing = 8
+            else:
+                base_font_size = 18  # Very compact for many bullets
+                spacing = 6
+
             for i, bullet_text in enumerate(bullets):
                 p = text_frame.paragraphs[0] if i == 0 else text_frame.add_paragraph()
-                p.text = bullet_text
-                p.level = 0
-                p.font.size = Pt(24)
+
+                # Detect indentation level from leading spaces
+                indent_level = 0
+                stripped_text = bullet_text.lstrip()
+                if bullet_text.startswith("  "):
+                    # Two spaces = level 1 indent
+                    indent_level = 1
+                    p.text = stripped_text
+                    p.font.size = Pt(base_font_size - 2)  # Slightly smaller for sub-bullets
+                else:
+                    p.text = bullet_text
+                    p.font.size = Pt(base_font_size)
+
+                p.level = indent_level
                 p.font.name = "Arial"
                 p.font.color.rgb = COLORS["black"]
-                p.space_before = Pt(12)
-                p.space_after = Pt(12)
+                p.space_before = Pt(spacing)
+                p.space_after = Pt(spacing)
+
+            # Warn if content might overflow
+            total_chars = sum(len(b) for b in bullets)
+            estimated_lines = sum(len(b) / 50 + 1 for b in bullets)  # ~50 chars per line
+            if num_bullets > 8 or total_chars > 600 or estimated_lines > 15:
+                print(
+                    f"⚠️  Warning: Slide '{title}' has dense content "
+                    f"({num_bullets} bullets, ~{estimated_lines:.0f} lines). "
+                    "Consider splitting or using sub-bullets."
+                )
 
         # Add speaker notes
         if notes:

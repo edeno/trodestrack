@@ -1,12 +1,12 @@
 """
 Generate visual for Slide 16: Smoother Comparison
 
-Shows 3-panel comparison during dropout:
-- Left: Vision-only (naive extrapolation)
-- Middle: EKF forward-only filter
-- Right: RTS smoother (forward + backward)
+Shows 2-panel comparison during dropout:
+- Left: EKF forward-only filter (real-time)
+- Right: RTS smoother (forward + backward, offline)
 
-Demonstrates the power of offline smoothing for reducing dropout drift.
+Demonstrates the power of offline smoothing: RTS uses future measurements
+in the backward pass to improve estimates during camera dropouts.
 """
 
 from pathlib import Path
@@ -33,7 +33,7 @@ GRAY = "#6C757D"
 
 
 def generate_slide16():
-    """3-panel smoother comparison: vision-only vs EKF vs RTS"""
+    """2-panel smoother comparison: EKF vs RTS (both use IMU during dropout)"""
 
     # Generate simulation with controlled dropout
     np.random.seed(42)
@@ -89,49 +89,40 @@ def generate_slide16():
     pos_ekf = np.array(ekf_result.filtered_means[:, layout.pos_idx])
     pos_rts = np.array(rts_result.smoothed_means[:, layout.pos_idx])
 
-    # Simulate vision-only (last valid observation + velocity extrapolation)
-    # This is a naive baseline: hold last velocity and extrapolate
-    pos_vision = np.zeros_like(pos_truth)
-    vel_vision = np.zeros((len(t_cam), 2))
-
-    # Initialize with first valid observation
-    first_valid_idx = np.where(mask_cam)[0][0]
-    pos_vision[first_valid_idx] = sim["Z_cam_led1"][first_valid_idx]
-    vel_vision[first_valid_idx] = [0.0, 0.0]
-
-    # Forward pass: update when camera is valid, extrapolate when dropout
-    for i in range(first_valid_idx + 1, len(t_cam)):
-        dt = t_cam[i] - t_cam[i - 1]
-        if mask_cam[i]:
-            # Camera available: use measurement
-            pos_vision[i] = sim["Z_cam_led1"][i]
-            # Estimate velocity from position difference
-            vel_vision[i] = (pos_vision[i] - pos_vision[i - 1]) / dt
-        else:
-            # Dropout: extrapolate with last known velocity
-            pos_vision[i] = pos_vision[i - 1] + vel_vision[i - 1] * dt
-            vel_vision[i] = vel_vision[i - 1]  # Hold velocity constant
-
     # Calculate drift at end of dropout period
     dropout_end_idx = np.where(t_cam >= dropout_end)[0][0]
-    drift_vision = np.linalg.norm(pos_vision[dropout_end_idx] - pos_truth[dropout_end_idx])
     drift_ekf = np.linalg.norm(pos_ekf[dropout_end_idx] - pos_truth[dropout_end_idx])
     drift_rts = np.linalg.norm(pos_rts[dropout_end_idx] - pos_truth[dropout_end_idx])
 
-    # Create 3-panel figure
-    fig, axes = plt.subplots(1, 3, figsize=(20, 6.5))
+    # Create 2-panel figure with subplot_mosaic - each panel gets a legend space
+    mosaic = [["panel1", "leg1", "panel2", "leg2"]]
+
+    fig, axd = plt.subplot_mosaic(
+        mosaic,
+        figsize=(16, 7),
+        constrained_layout=True,
+        gridspec_kw={"width_ratios": [4, 1, 4, 1]},
+    )
+
+    axes = [axd["panel1"], axd["panel2"]]
+    leg_axes = [axd["leg1"], axd["leg2"]]
+
+    # Turn off axes for legend panels
+    for ax in leg_axes:
+        ax.axis("off")
 
     # Define zoom window around dropout period
     zoom_start = dropout_start - 2.0
     zoom_end = dropout_end + 2.0
     zoom_mask = (t_cam >= zoom_start) & (t_cam <= zoom_end)
+    dropout_start_idx = np.argmin(np.abs(t_cam - dropout_start))
 
-    # Panel 1: Vision-only
+    # Panel 1: EKF (forward-only)
     ax1 = axes[0]
     ax1.plot(
         pos_truth[zoom_mask, 0],
         pos_truth[zoom_mask, 1],
-        linewidth=2.5,
+        linewidth=4.5,
         color=BLUE,
         linestyle="--",
         alpha=0.7,
@@ -139,71 +130,6 @@ def generate_slide16():
         zorder=1,
     )
     ax1.plot(
-        pos_vision[zoom_mask, 0],
-        pos_vision[zoom_mask, 1],
-        linewidth=3,
-        color=RED,
-        alpha=0.8,
-        label="Vision-only extrapolation",
-        zorder=2,
-    )
-
-    # Highlight dropout region
-    ax1.plot(
-        pos_vision[dropout_mask, 0],
-        pos_vision[dropout_mask, 1],
-        linewidth=5,
-        color=RED,
-        alpha=0.4,
-        zorder=3,
-    )
-
-    # Mark dropout start/end
-    dropout_start_idx = np.argmin(np.abs(t_cam - dropout_start))
-    ax1.scatter(
-        pos_vision[dropout_start_idx, 0],
-        pos_vision[dropout_start_idx, 1],
-        s=150,
-        marker="x",
-        color=ORANGE,
-        linewidths=3,
-        zorder=10,
-    )
-    ax1.scatter(
-        pos_vision[dropout_end_idx, 0],
-        pos_vision[dropout_end_idx, 1],
-        s=150,
-        marker="x",
-        color=ORANGE,
-        linewidths=3,
-        zorder=10,
-    )
-
-    ax1.set_xlabel("X (meters)", fontsize=14, weight="bold")
-    ax1.set_ylabel("Y (meters)", fontsize=14, weight="bold")
-    ax1.set_title(
-        f"Vision-Only Baseline\nDrift @ 5s: {drift_vision:.2f} m",
-        fontsize=16,
-        weight="bold",
-        color=RED,
-    )
-    ax1.legend(fontsize=11, loc="upper right")
-    ax1.set_aspect("equal")
-    ax1.grid(True, alpha=0.3)
-
-    # Panel 2: EKF
-    ax2 = axes[1]
-    ax2.plot(
-        pos_truth[zoom_mask, 0],
-        pos_truth[zoom_mask, 1],
-        linewidth=2.5,
-        color=BLUE,
-        linestyle="--",
-        alpha=0.7,
-        label="Ground truth",
-        zorder=1,
-    )
-    ax2.plot(
         pos_ekf[zoom_mask, 0],
         pos_ekf[zoom_mask, 1],
         linewidth=3,
@@ -214,7 +140,7 @@ def generate_slide16():
     )
 
     # Highlight dropout region
-    ax2.plot(
+    ax1.plot(
         pos_ekf[dropout_mask, 0],
         pos_ekf[dropout_mask, 1],
         linewidth=5,
@@ -224,7 +150,7 @@ def generate_slide16():
     )
 
     # Mark dropout start/end
-    ax2.scatter(
+    ax1.scatter(
         pos_ekf[dropout_start_idx, 0],
         pos_ekf[dropout_start_idx, 1],
         s=150,
@@ -233,7 +159,7 @@ def generate_slide16():
         linewidths=3,
         zorder=10,
     )
-    ax2.scatter(
+    ax1.scatter(
         pos_ekf[dropout_end_idx, 0],
         pos_ekf[dropout_end_idx, 1],
         s=150,
@@ -243,31 +169,42 @@ def generate_slide16():
         zorder=10,
     )
 
-    ax2.set_xlabel("X (meters)", fontsize=14, weight="bold")
-    ax2.set_ylabel("Y (meters)", fontsize=14, weight="bold")
-    ax2.set_title(
-        f"Extended Kalman Filter\nDrift @ 5s: {drift_ekf:.2f} m",
-        fontsize=16,
+    ax1.set_xlabel("X (m)", fontsize=16, weight="bold", labelpad=10)
+    ax1.set_ylabel("Y (m)", fontsize=16, weight="bold", labelpad=10)
+    ax1.set_title(
+        f"EKF Filter (Real-Time)\nDrift: {drift_ekf:.3f}m",
+        fontsize=18,
         weight="bold",
         color=GREEN,
     )
-    ax2.legend(fontsize=11, loc="upper right")
-    ax2.set_aspect("equal")
-    ax2.grid(True, alpha=0.3)
+    ax1.set_aspect("equal")
+    ax1.grid(True, alpha=0.3)
 
-    # Panel 3: RTS Smoother
-    ax3 = axes[2]
-    ax3.plot(
+    # Create legend in dedicated space
+    handles1, labels1 = ax1.get_legend_handles_labels()
+    leg_axes[0].legend(
+        handles1,
+        labels1,
+        loc="center left",
+        fontsize=13,
+        frameon=True,
+        fancybox=False,
+        framealpha=0.95,
+    )
+
+    # Panel 2: RTS Smoother
+    ax2 = axes[1]
+    ax2.plot(
         pos_truth[zoom_mask, 0],
         pos_truth[zoom_mask, 1],
-        linewidth=2.5,
+        linewidth=4.5,
         color=BLUE,
         linestyle="--",
         alpha=0.7,
         label="Ground truth",
         zorder=1,
     )
-    ax3.plot(
+    ax2.plot(
         pos_rts[zoom_mask, 0],
         pos_rts[zoom_mask, 1],
         linewidth=3,
@@ -278,7 +215,7 @@ def generate_slide16():
     )
 
     # Highlight dropout region
-    ax3.plot(
+    ax2.plot(
         pos_rts[dropout_mask, 0],
         pos_rts[dropout_mask, 1],
         linewidth=5,
@@ -288,7 +225,7 @@ def generate_slide16():
     )
 
     # Mark dropout start/end
-    ax3.scatter(
+    ax2.scatter(
         pos_rts[dropout_start_idx, 0],
         pos_rts[dropout_start_idx, 1],
         s=150,
@@ -296,8 +233,9 @@ def generate_slide16():
         color=ORANGE,
         linewidths=3,
         zorder=10,
+        label="Camera measurement",
     )
-    ax3.scatter(
+    ax2.scatter(
         pos_rts[dropout_end_idx, 0],
         pos_rts[dropout_end_idx, 1],
         s=150,
@@ -305,25 +243,37 @@ def generate_slide16():
         color=ORANGE,
         linewidths=3,
         zorder=10,
+        label="Camera measurement",
     )
 
-    ax3.set_xlabel("X (meters)", fontsize=14, weight="bold")
-    ax3.set_ylabel("Y (meters)", fontsize=14, weight="bold")
-    ax3.set_title(
-        f"RTS Smoother (Offline)\nDrift @ 5s: {drift_rts:.2f} m",
-        fontsize=16,
+    ax2.set_xlabel("X (m)", fontsize=16, weight="bold", labelpad=10)
+    ax2.set_ylabel("Y (m)", fontsize=16, weight="bold", labelpad=10)
+    ax2.set_title(
+        f"RTS Smoother (Offline)\nDrift: {drift_rts:.3f}m",
+        fontsize=18,
         weight="bold",
         color=BLUE,
+        pad=10,
     )
-    ax3.legend(fontsize=11, loc="upper right")
-    ax3.set_aspect("equal")
-    ax3.grid(True, alpha=0.3)
+    ax2.set_aspect("equal")
+    ax2.grid(True, alpha=0.3)
 
-    # Match axis limits across all panels
+    # Create legend in dedicated space
+    handles2, labels2 = ax2.get_legend_handles_labels()
+    leg_axes[1].legend(
+        handles2,
+        labels2,
+        loc="center left",
+        fontsize=13,
+        frameon=True,
+        fancybox=False,
+        framealpha=0.95,
+    )
+
+    # Match axis limits across both panels
     all_x = np.concatenate(
         [
             pos_truth[zoom_mask, 0],
-            pos_vision[zoom_mask, 0],
             pos_ekf[zoom_mask, 0],
             pos_rts[zoom_mask, 0],
         ]
@@ -331,7 +281,6 @@ def generate_slide16():
     all_y = np.concatenate(
         [
             pos_truth[zoom_mask, 1],
-            pos_vision[zoom_mask, 1],
             pos_ekf[zoom_mask, 1],
             pos_rts[zoom_mask, 1],
         ]
@@ -345,39 +294,35 @@ def generate_slide16():
 
     # Overall title
     fig.suptitle(
-        "Offline Smoothing: Backward Pass Improves Accuracy\n" "5-second camera dropout (t=12-17s)",
-        fontsize=20,
+        "Offline Smoothing: Backward Pass Uses Future Measurements",
+        fontsize=22,
         weight="bold",
-        y=0.98,
+        y=1.02,
     )
 
-    # Key insight
-    improvement_ekf = (drift_vision - drift_ekf) / drift_vision * 100
-    improvement_rts = (drift_ekf - drift_rts) / drift_ekf * 100
+    # Key insight - compare EKF vs RTS only
+    improvement_pct = (drift_ekf - drift_rts) / drift_ekf * 100
 
     fig.text(
         0.5,
-        0.02,
-        f"Key Insight: EKF reduces drift by {improvement_ekf:.0f}% vs vision-only. "
-        f"RTS smoother reduces drift by {improvement_rts:.0f}% more using future measurements!\n"
-        f"Use RTS smoother offline for best accuracy (PRD target: ≤3.5m @ 5s → {drift_rts:.2f}m ✓)",
-        fontsize=13,
+        -0.09,
+        f"Key Insight: RTS smoother reduces drift by {improvement_pct:.0f}% vs EKF by using future camera measurements!\n"
+        f"Both methods use IMU during dropout, but RTS backward pass retroactively corrects estimates.\n"
+        f"Use RTS smoother offline for best accuracy (EKF: {drift_ekf:.3f}m → RTS: {drift_rts:.3f}m)",
+        fontsize=18,
         ha="center",
         style="italic",
         bbox=dict(boxstyle="round,pad=0.8", facecolor=BLUE, alpha=0.1),
     )
-
-    plt.tight_layout(rect=[0, 0.08, 1, 0.95])
     output_path = OUTPUT_DIR / "slide16_smoother_comparison.png"
     plt.savefig(output_path, dpi=150, bbox_inches="tight", facecolor="white")
     print(f"✓ Saved: {output_path}")
     plt.close()
 
     # Print statistics
-    print(f"  Vision-only drift: {drift_vision:.3f} m")
-    print(f"  EKF drift: {drift_ekf:.3f} m ({improvement_ekf:.1f}% improvement)")
-    print(f"  RTS drift: {drift_rts:.3f} m ({improvement_rts:.1f}% further improvement)")
-    print(f"  Total improvement: {(drift_vision - drift_rts) / drift_vision * 100:.1f}%")
+    print(f"  EKF drift: {drift_ekf:.3f} m")
+    print(f"  RTS drift: {drift_rts:.3f} m ({improvement_pct:.1f}% improvement)")
+    print("  Both methods use IMU during dropout - RTS adds backward pass")
 
 
 if __name__ == "__main__":

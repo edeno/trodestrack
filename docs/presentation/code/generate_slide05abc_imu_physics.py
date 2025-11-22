@@ -8,7 +8,6 @@ Slide 5C: Correction challenges (before/after bias correction)
 
 from pathlib import Path
 
-import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Circle, Rectangle
@@ -32,7 +31,7 @@ GRAY = "#6C757D"
 
 def generate_slide05a():
     """Accelerometer physics: specific force vs acceleration"""
-    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+    fig, axes = plt.subplots(1, 3, figsize=(10, 5.625), constrained_layout=True)
 
     scenarios = [
         {
@@ -53,10 +52,10 @@ def generate_slide05a():
         },
         {
             "title": "Accelerating Right\n(on maze)",
-            "acceleration": np.array([+2.0, 0]),
+            "acceleration": np.array([+4.0, 0]),
             "gravity": np.array([0, -9.81]),
-            "reading": np.array([+2.0, +9.81]),
-            "label": "Accelerometer reads:\n[+2.0, 0, +9.81] m/s²",
+            "reading": np.array([+4.0, +9.81]),
+            "label": "Accelerometer reads:\n[+4.0, 0, +9.81] m/s²",
             "description": "Motion + gravity\nmixed together",
         },
     ]
@@ -68,11 +67,11 @@ def generate_slide05a():
         ax.axis("off")
 
         # Draw IMU chip (simplified)
-        chip = Rectangle((-0.3, -0.15), 0.6, 0.3, facecolor=GRAY, edgecolor="black", linewidth=2)
+        chip = Rectangle((-0.3, -0.15), 0.6, 0.3, facecolor=GRAY, edgecolor="black", linewidth=4)
         ax.add_patch(chip)
 
         # Draw spring-mass system inside (conceptual)
-        mass = Circle((0, 0), 0.08, facecolor=ORANGE, edgecolor="black", linewidth=1.5)
+        mass = Circle((0, 0), 0.08, facecolor=ORANGE, edgecolor="black", linewidth=3.5)
         ax.add_patch(mass)
 
         # Draw acceleration vector (true motion)
@@ -87,14 +86,14 @@ def generate_slide05a():
                 head_length=0.08,
                 fc=BLUE,
                 ec=BLUE,
-                linewidth=2,
+                linewidth=4,
                 label="True acceleration",
             )
             ax.text(
                 scenario["acceleration"][0] * acc_scale * 1.5,
                 scenario["acceleration"][1] * acc_scale * 1.5,
                 "a",
-                fontsize=16,
+                fontsize=24,
                 color=BLUE,
                 weight="bold",
                 ha="center",
@@ -112,7 +111,7 @@ def generate_slide05a():
             head_length=0.08,
             fc=RED,
             ec=RED,
-            linewidth=2,
+            linewidth=4,
             linestyle="--",
             label="Gravity",
         )
@@ -120,7 +119,7 @@ def generate_slide05a():
             scenario["gravity"][0] * grav_scale - 0.25,
             scenario["gravity"][1] * grav_scale,
             "g",
-            fontsize=16,
+            fontsize=24,
             color=RED,
             weight="bold",
             ha="center",
@@ -128,52 +127,43 @@ def generate_slide05a():
         )
 
         # Title
-        ax.text(0, 1.2, scenario["title"], fontsize=18, weight="bold", ha="center", va="top")
+        ax.text(0, 1.2, scenario["title"], fontsize=28, weight="bold", ha="center", va="top")
 
-        # Reading (what accelerometer outputs)
+        # Reading (what accelerometer outputs) - use transAxes for panel-relative position
         ax.text(
-            0,
-            -0.7,
+            0.5,
+            -0.2,
             scenario["label"],
-            fontsize=14,
+            fontsize=20,
             ha="center",
             va="top",
-            bbox=dict(boxstyle="round,pad=0.5", facecolor=GREEN, alpha=0.3),
+            transform=ax.transAxes,  # Panel-relative coordinates
+            bbox=dict(boxstyle="round,pad=0.3", facecolor=GREEN, alpha=0.3),
         )
 
         # Description
         ax.text(
-            0,
-            -1.15,
+            0.5,
+            -0.45,
             scenario["description"],
-            fontsize=12,
+            fontsize=16,
             style="italic",
             ha="center",
             va="top",
+            transform=ax.transAxes,  # Panel-relative coordinates
             color=GRAY,
         )
 
-    # Overall title
-    fig.suptitle(
-        "What Does an Accelerometer REALLY Measure?\n"
-        "Specific Force: f = a - g (not acceleration!)",
-        fontsize=22,
-        weight="bold",
-        y=0.98,
-    )
-
-    # Key insight
+    # Key insight (moved higher to avoid cutting off)
     fig.text(
         0.5,
-        0.02,
-        "Key Challenge: When IMU is tilted, gravity contaminates X/Y axes → Need correction!",
-        fontsize=14,
+        0.00,
+        "Key: When IMU tilted, gravity contaminates X/Y axes → Need correction!",
+        fontsize=16,
         ha="center",
         style="italic",
-        bbox=dict(boxstyle="round,pad=0.8", facecolor=ORANGE, alpha=0.2),
+        bbox=dict(boxstyle="round,pad=0.4", facecolor=ORANGE, alpha=0.2),
     )
-
-    plt.tight_layout(rect=[0, 0.05, 1, 0.95])
     output_path = OUTPUT_DIR / "slide05a_accelerometer_physics.png"
     plt.savefig(output_path, dpi=150, bbox_inches="tight", facecolor="white")
     print(f"✓ Saved: {output_path}")
@@ -186,59 +176,21 @@ def generate_slide05a():
 
 
 def generate_slide05b():
-    """Gyroscope physics: angular velocity and drift"""
-    fig = plt.figure(figsize=(16, 8))
+    """Gyroscope physics: SPLIT INTO CLEAN SINGLE-FOCUS FIGURE
 
-    # Left panel: Gyroscope measurement concept
-    ax1 = plt.subplot(1, 2, 1)
-    ax1.set_xlim(-1.5, 1.5)
-    ax1.set_ylim(-1.5, 1.5)
-    ax1.set_aspect("equal")
-    ax1.axis("off")
-
-    # Draw rat (top-down view, simplified)
-    rat_body = mpatches.Ellipse(
-        (0, 0), 1.2, 0.6, angle=30, facecolor=GRAY, edgecolor="black", linewidth=2
+    Focus: Just the drift plot - one clear message
+    """
+    # Use subplot_mosaic to reserve space for legend on the right
+    mosaic = [["main", "legend"]]
+    fig, axd = plt.subplot_mosaic(
+        mosaic,
+        figsize=(12, 6),
+        constrained_layout=True,
+        gridspec_kw={"width_ratios": [4, 1]},
     )
-    ax1.add_patch(rat_body)
-
-    # Draw headstage
-    headstage = Rectangle((-0.15, 0.25), 0.3, 0.2, facecolor=BLUE, edgecolor="black", linewidth=2)
-    ax1.add_patch(headstage)
-    ax1.text(0, 0.35, "IMU", fontsize=10, weight="bold", ha="center", va="center", color="white")
-
-    # Draw rotation arrow (counterclockwise)
-    from matplotlib.patches import FancyArrowPatch
-
-    rotation_arrow = FancyArrowPatch(
-        (0.7, 0.7),
-        (-0.5, 0.9),
-        arrowstyle="->,head_width=0.4,head_length=0.4",
-        color=ORANGE,
-        linewidth=3,
-        connectionstyle="arc3,rad=0.5",
-    )
-    ax1.add_patch(rotation_arrow)
-    ax1.text(-0.1, 1.1, "ω = +30 °/s", fontsize=16, weight="bold", color=ORANGE, ha="center")
-
-    # Draw Z-axis (pointing up through headstage)
-    ax1.arrow(0, 0.45, 0, 0.5, head_width=0.1, head_length=0.08, fc=GREEN, ec=GREEN, linewidth=2.5)
-    ax1.text(0.15, 0.95, "Z-axis\n(yaw)", fontsize=12, color=GREEN, weight="bold", ha="left")
-
-    # Labels
-    ax1.text(0, -1.3, "Top-Down View: Rat Turning Left", fontsize=16, weight="bold", ha="center")
-    ax1.text(
-        0,
-        -1.55,
-        "Gyroscope measures rotation rate around Z-axis",
-        fontsize=12,
-        style="italic",
-        ha="center",
-        color=GRAY,
-    )
-
-    # Right panel: Integration and drift
-    ax2 = plt.subplot(1, 2, 2)
+    ax = axd["main"]
+    ax_legend = axd["legend"]
+    ax_legend.axis("off")
 
     # Simulate gyro drift
     dt = 0.01
@@ -256,62 +208,83 @@ def generate_slide05b():
     measured_omega = true_omega + gyro_bias + gyro_noise
     measured_heading = np.cumsum(measured_omega) * dt
 
-    # Plot
-    ax2.plot(t, true_heading, linewidth=3, color=BLUE, label="True heading")
-    ax2.plot(
+    # Plot with BOLD, VISIBLE lines
+    ax.plot(t, true_heading, linewidth=5, color=BLUE, label="True heading", zorder=10)
+    ax.plot(
         t,
         measured_heading,
-        linewidth=2,
+        linewidth=5,
         color=RED,
         linestyle="--",
-        label="Gyro integration (with bias)",
+        label="Gyro (with bias)",
+        zorder=10,
     )
 
-    # Highlight drift
-    ax2.fill_between(
-        t, true_heading, measured_heading, alpha=0.3, color=RED, label="Accumulated drift"
-    )
+    # Highlight drift (subtle)
+    ax.fill_between(t, true_heading, measured_heading, alpha=0.2, color=RED, zorder=1)
 
-    # Annotate final error
+    # Annotate final error - simplified and repositioned
     final_error = measured_heading[-1] - true_heading[-1]
-    ax2.annotate(
-        f"Drift: {final_error:.0f}°\n(after 10 sec)",
+    ax.annotate(
+        f"Drift:\n{final_error:.0f}°",
         xy=(t[-1], measured_heading[-1]),
-        xytext=(7, measured_heading[-1] + 30),
-        fontsize=14,
+        xytext=(7, 80),
+        fontsize=18,
         weight="bold",
         color=RED,
-        arrowprops=dict(arrowstyle="->", color=RED, linewidth=2),
+        arrowprops=dict(arrowstyle="->", color=RED, linewidth=3),
+        bbox=dict(boxstyle="round,pad=0.5", facecolor="white", edgecolor=RED, linewidth=2),
+        zorder=100,
     )
 
-    ax2.set_xlabel("Time (s)", fontsize=14, weight="bold")
-    ax2.set_ylabel("Heading (degrees)", fontsize=14, weight="bold")
-    ax2.set_title("Integration: θ = θ₀ + ∫ω dt", fontsize=16, weight="bold")
-    ax2.legend(fontsize=12, loc="upper left")
-    ax2.grid(True, alpha=0.3)
-    ax2.set_xlim(0, 10)
+    # Clean labels - reduced font sizes
+    ax.set_xlabel("Time (s)", fontsize=18, weight="bold", labelpad=10)
+    ax.set_ylabel("Heading (°)", fontsize=18, weight="bold", labelpad=10)
 
-    # Overall title
-    fig.suptitle(
-        "What Does a Gyroscope REALLY Measure?\n"
-        "Angular Velocity (°/s) → Bias causes unbounded drift!",
-        fontsize=22,
+    # Extract legend and place in dedicated panel
+    handles, labels = ax.get_legend_handles_labels()
+    ax_legend.legend(
+        handles,
+        labels,
+        loc="center left",
+        fontsize=16,
+        frameon=True,
+        fancybox=False,
+        framealpha=0.95,
+        edgecolor=RED,
+        title="Legend",
+        title_fontsize=18,
+    )
+
+    ax.grid(True, alpha=0.2, linewidth=1.5)
+    ax.set_xlim(0, 10)
+    ax.set_ylim(0, 135)
+
+    # Remove top/right spines
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_linewidth(2)
+    ax.spines["bottom"].set_linewidth(2)
+    ax.tick_params(labelsize=14, width=2, length=6)
+
+    # Simple, CLEAR title (one message) - reduced font size
+    ax.set_title(
+        "Gyroscope Bias Causes Unbounded Drift",
+        fontsize=24,
         weight="bold",
     )
 
-    # Key specs
+    # Simplified caption - reduced font size
     fig.text(
         0.5,
-        0.02,
-        "SpikeGadgets Specs: Noise 0.01 °/s/√Hz, Bias ~1-5 °/s → "
-        "Without camera correction: ±50° error after 10 seconds!",
-        fontsize=13,
+        -0.05,
+        "Integration: θ = θ + ∫ω dt  •  Bias ~1-5°/s → ±50° error after 10s",
+        fontsize=14,
         ha="center",
         style="italic",
-        bbox=dict(boxstyle="round,pad=0.8", facecolor=ORANGE, alpha=0.2),
+        color=GRAY,
     )
 
-    plt.tight_layout(rect=[0, 0.05, 1, 0.95])
     output_path = OUTPUT_DIR / "slide05b_gyroscope_physics.png"
     plt.savefig(output_path, dpi=150, bbox_inches="tight", facecolor="white")
     print(f"✓ Saved: {output_path}")
@@ -406,14 +379,14 @@ def generate_slide05c():
     naive_pos_cam = naive_pos[cam_indices]
 
     # Create comparison figure
-    fig, axes = plt.subplots(1, 2, figsize=(16, 7))
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5.625), constrained_layout=True)
 
     # Left: Raw integration (with bias)
     ax1 = axes[0]
     ax1.plot(
         naive_pos_cam[:, 0],
         naive_pos_cam[:, 1],
-        linewidth=2,
+        linewidth=4,
         color=RED,
         alpha=0.7,
         label="Naive integration",
@@ -424,7 +397,7 @@ def generate_slide05c():
     ax1.plot(
         X_truth_cam[:, 0],
         X_truth_cam[:, 1],
-        linewidth=2,
+        linewidth=4,
         color=BLUE,
         linestyle="--",
         label="Ground truth",
@@ -449,19 +422,31 @@ def generate_slide05c():
         naive_pos_cam[-1, 0],
         naive_pos_cam[-1, 1] + 0.5,
         f"Drift: {drift:.1f} m",
-        fontsize=14,
+        fontsize=24,
         weight="bold",
         color=RED,
         ha="center",
-        bbox=dict(boxstyle="round,pad=0.5", facecolor="white", alpha=0.8),
+        bbox=dict(boxstyle="round,pad=0.4", facecolor="white", alpha=0.9),
     )
 
-    ax1.set_xlabel("X (meters)", fontsize=14, weight="bold")
-    ax1.set_ylabel("Y (meters)", fontsize=14, weight="bold")
+    ax1.set_xlabel("X (meters)", fontsize=20, weight="bold", labelpad=10)
+    ax1.set_ylabel("Y (meters)", fontsize=20, weight="bold", labelpad=10)
     ax1.set_title(
-        "Before: Raw IMU Integration\n(No Bias Correction)", fontsize=16, weight="bold", color=RED
+        "Before: Raw IMU Integration\n(No Bias Correction)",
+        fontsize=20,
+        weight="bold",
+        color=RED,
+        pad=15,
     )
-    ax1.legend(fontsize=12, loc="upper right")
+    ax1.legend(
+        fontsize=16,
+        loc="upper left",
+        bbox_to_anchor=(1.01, 1.0),
+        frameon=True,
+        fancybox=False,
+        framealpha=0.95,
+        edgecolor=RED,
+    )
     ax1.set_aspect("equal")
     ax1.grid(True, alpha=0.3)
 
@@ -471,7 +456,7 @@ def generate_slide05c():
     ax2.plot(
         ekf_pos[:, 0],
         ekf_pos[:, 1],
-        linewidth=2,
+        linewidth=4,
         color=GREEN,
         alpha=0.8,
         label="EKF (bias-corrected)",
@@ -479,7 +464,7 @@ def generate_slide05c():
     ax2.plot(
         X_truth_cam[:, 0],
         X_truth_cam[:, 1],
-        linewidth=2,
+        linewidth=4,
         color=BLUE,
         linestyle="--",
         label="Ground truth",
@@ -491,19 +476,31 @@ def generate_slide05c():
         ekf_pos[-1, 0],
         ekf_pos[-1, 1] + 0.5,
         f"RMSE: {rmse*100:.1f} cm",
-        fontsize=14,
+        fontsize=24,
         weight="bold",
         color=GREEN,
         ha="center",
-        bbox=dict(boxstyle="round,pad=0.5", facecolor="white", alpha=0.8),
+        bbox=dict(boxstyle="round,pad=0.4", facecolor="white", alpha=0.9),
     )
 
-    ax2.set_xlabel("X (meters)", fontsize=14, weight="bold")
-    ax2.set_ylabel("Y (meters)", fontsize=14, weight="bold")
+    ax2.set_xlabel("X (meters)", fontsize=20, weight="bold", labelpad=10)
+    ax2.set_ylabel("Y (meters)", fontsize=20, weight="bold", labelpad=10)
     ax2.set_title(
-        "After: Kalman Filter\n(Bias Estimated in State)", fontsize=16, weight="bold", color=GREEN
+        "After: Kalman Filter\n(Bias Estimated in State)",
+        fontsize=20,
+        weight="bold",
+        color=GREEN,
+        pad=15,
     )
-    ax2.legend(fontsize=12, loc="upper right")
+    ax2.legend(
+        fontsize=16,
+        loc="upper left",
+        bbox_to_anchor=(1.01, 1.0),
+        frameon=True,
+        fancybox=False,
+        framealpha=0.95,
+        edgecolor=GREEN,
+    )
     ax2.set_aspect("equal")
     ax2.grid(True, alpha=0.3)
 
@@ -521,7 +518,7 @@ def generate_slide05c():
     fig.suptitle(
         "The Correction Challenge: 4 Corrections Needed\n"
         "Gravity removal • Gyro bias • Accel bias • Frame alignment",
-        fontsize=20,
+        fontsize=32,
         weight="bold",
     )
 
@@ -536,8 +533,6 @@ def generate_slide05c():
         style="italic",
         bbox=dict(boxstyle="round,pad=0.8", facecolor=GREEN, alpha=0.2),
     )
-
-    plt.tight_layout(rect=[0, 0.05, 1, 0.95])
     output_path = OUTPUT_DIR / "slide05c_bias_correction.png"
     plt.savefig(output_path, dpi=150, bbox_inches="tight", facecolor="white")
     print(f"✓ Saved: {output_path}")

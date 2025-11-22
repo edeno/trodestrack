@@ -53,9 +53,10 @@ def generate_slide12():
     t_cam = sim["t_cam_exp"]
     X_truth = sim["X_truth"]
 
-    # Find two consecutive camera frames
+    # Find two consecutive camera frames to show realistic IMU sampling
+    # At 30 Hz camera (~33ms) and 104 Hz IMU (~9.6ms), we get 3-4 IMU samples between frames
     cam_idx_k = 3  # Pick 4th camera frame
-    cam_idx_k1 = 4  # 5th camera frame
+    cam_idx_k1 = 4  # 5th camera frame (consecutive frames)
 
     t_k = t_cam[cam_idx_k]
     t_k1 = t_cam[cam_idx_k1]
@@ -75,42 +76,59 @@ def generate_slide12():
     traj_mask = (t_imu >= t_k) & (t_imu <= t_k1)
     traj_segment = X_truth[traj_mask, :2]
 
-    # Create figure with three panels
-    fig = plt.figure(figsize=(18, 10))
+    # Create figure with subplot_mosaic for precise layout control
+    # Layout: 3 rows (timeline, measurements, spatial+equations+legend)
+    mosaic = [
+        ["timeline", "timeline", "timeline", "timeline"],
+        ["measurements", "measurements", "measurements", "measurements"],
+        [
+            "spatial",
+            "spatial",
+            "legend",
+            "equations",
+        ],
+    ]
+
+    fig, axd = plt.subplot_mosaic(
+        mosaic,
+        figsize=(12, 5.625),
+        constrained_layout=True,
+        gridspec_kw={
+            "width_ratios": [1.5, 1.5, 0.6, 0.6],
+            "height_ratios": [1, 1, 3],
+            "hspace": 0.3,
+            "wspace": 0.35,
+        },
+    )
+
+    ax1 = axd["timeline"]
+    ax2 = axd["measurements"]
+    ax3 = axd["spatial"]
+    ax_eq = axd["equations"]
+    ax_legend = axd["legend"]
 
     # ========================================================================
     # Panel 1 (Top): Timeline showing camera frames and IMU samples
     # ========================================================================
-    ax1 = plt.subplot(3, 1, 1)
 
-    # Draw camera frame markers
+    # Draw camera frame markers - simplified labels
     for i, tc in enumerate([t_k, t_k1]):
         ax1.axvline(tc, color=BLUE, linewidth=3, alpha=0.7)
-        label = f"Camera Frame {cam_idx_k if i == 0 else cam_idx_k1}"
+        label = f"Frame {cam_idx_k if i == 0 else cam_idx_k1}"
         ax1.text(
             tc,
-            1.5,
+            1.3,
             label,
             ha="center",
-            fontsize=14,
+            fontsize=12,
             weight="bold",
             color=BLUE,
-            bbox=dict(boxstyle="round,pad=0.5", facecolor="white", alpha=0.8),
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.85),
         )
 
-    # Draw IMU sample markers
-    for i, ti in enumerate(t_imu_between):
-        ax1.axvline(ti, color=ORANGE, linewidth=1.5, alpha=0.5, linestyle="--")
-        if i == 0:  # Label first one
-            ax1.text(
-                ti,
-                -0.5,
-                "IMU samples\n@104 Hz",
-                ha="center",
-                fontsize=11,
-                style="italic",
-                color=ORANGE,
-            )
+    # Draw IMU sample markers - no text labels (legend will explain)
+    for ti in t_imu_between:
+        ax1.axvline(ti, color=ORANGE, linewidth=2, alpha=0.4, linestyle="--")
 
     # Highlight integration interval
     ax1.axhspan(
@@ -122,29 +140,29 @@ def generate_slide12():
         color=GREEN,
     )
 
-    # Labels
+    # Simplified interval label
     ax1.text(
         (t_k + t_k1) / 2,
-        0.5,
-        f"Δt = {(t_k1 - t_k)*1000:.1f} ms\n({len(t_imu_between)} IMU samples)",
+        0.0,
+        f"Δt={(t_k1 - t_k)*1000:.1f}ms\n({len(t_imu_between)} samples)",
         ha="center",
-        fontsize=16,
+        fontsize=11,
         weight="bold",
-        bbox=dict(boxstyle="round,pad=0.8", facecolor=GREEN, alpha=0.3),
+        bbox=dict(boxstyle="round,pad=0.4", facecolor=GREEN, alpha=0.25),
     )
 
     ax1.set_xlim(t_k - 0.005, t_k1 + 0.005)
     ax1.set_ylim(-1, 2)
     ax1.set_yticks([])
-    ax1.set_xlabel("Time (seconds)", fontsize=14, weight="bold")
-    ax1.set_title("Timeline: IMU Pre-Integration Between Camera Frames", fontsize=18, weight="bold")
+
+    ax1.set_title(
+        "Timeline: IMU Pre-Integration Between Camera Frames", fontsize=14, weight="bold", pad=8
+    )
     ax1.grid(True, alpha=0.3)
 
     # ========================================================================
     # Panel 2 (Middle): IMU measurements
     # ========================================================================
-    ax2 = plt.subplot(3, 1, 2)
-
     # Plot gyro Z
     ax2_gyro = ax2
     ax2_gyro.plot(
@@ -152,16 +170,16 @@ def generate_slide12():
         np.rad2deg(U_imu_between[:, 2]),
         "o-",
         color=RED,
-        linewidth=2,
+        linewidth=4,
         markersize=6,
         label="Gyro Z (°/s)",
     )
-    ax2_gyro.axhline(0, color=GRAY, linewidth=1, linestyle="--", alpha=0.5)
-    ax2_gyro.set_ylabel("Gyro Z (°/s)", fontsize=12, weight="bold", color=RED)
-    ax2_gyro.tick_params(axis="y", labelcolor=RED)
+    ax2_gyro.axhline(0, color=GRAY, linewidth=3, linestyle="--", alpha=0.5)
+    ax2_gyro.set_ylabel("Gyro Z (°/s)", fontsize=13, weight="bold", color=RED, labelpad=8)
+    ax2_gyro.tick_params(axis="y", labelcolor=RED, labelsize=10)
     ax2_gyro.set_xlim(t_k - 0.005, t_k1 + 0.005)
     ax2_gyro.grid(True, alpha=0.3)
-    ax2_gyro.legend(loc="upper left", fontsize=11)
+    ax2_gyro.legend(loc="upper left", fontsize=10, frameon=True, fancybox=False, framealpha=0.95)
 
     # Plot accel X, Y on second y-axis
     ax2_accel = ax2.twinx()
@@ -170,7 +188,7 @@ def generate_slide12():
         U_imu_between[:, 0],
         "s-",
         color=GREEN,
-        linewidth=2,
+        linewidth=4,
         markersize=5,
         alpha=0.7,
         label="Accel X (m/s²)",
@@ -180,24 +198,21 @@ def generate_slide12():
         U_imu_between[:, 1],
         "^-",
         color=BLUE,
-        linewidth=2,
+        linewidth=4,
         markersize=5,
         alpha=0.7,
         label="Accel Y (m/s²)",
     )
-    ax2_accel.axhline(0, color=GRAY, linewidth=1, linestyle="--", alpha=0.5)
-    ax2_accel.set_ylabel("Accel X, Y (m/s²)", fontsize=12, weight="bold", color=GREEN)
-    ax2_accel.tick_params(axis="y", labelcolor=GREEN)
-    ax2_accel.legend(loc="upper right", fontsize=11)
+    ax2_accel.axhline(0, color=GRAY, linewidth=3, linestyle="--", alpha=0.5)
+    ax2_accel.set_ylabel("Accel X, Y (m/s²)", fontsize=13, weight="bold", color=GREEN, labelpad=8)
+    ax2_accel.tick_params(axis="y", labelcolor=GREEN, labelsize=10)
+    ax2_accel.legend(loc="upper right", fontsize=10, frameon=True, fancybox=False, framealpha=0.95)
 
-    ax2.set_xlabel("Time (seconds)", fontsize=14, weight="bold")
-    ax2.set_title("IMU Measurements During Integration Interval", fontsize=18, weight="bold")
+    ax2.set_xlabel("Time (s)", fontsize=14, weight="bold")
 
     # ========================================================================
-    # Panel 3 (Bottom): Spatial trajectory with integration equations
+    # Panel 3 (Bottom): Spatial trajectory
     # ========================================================================
-    ax3 = plt.subplot(3, 1, 3)
-
     # Plot trajectory segment
     ax3.plot(
         traj_segment[:, 0],
@@ -216,116 +231,118 @@ def generate_slide12():
         X_k1[0], X_k1[1], "s", color=GREEN, markersize=20, label=f"Frame {cam_idx_k1}", zorder=10
     )
 
-    # Draw velocity vector at start
-    vel_scale = 0.1
-    ax3.arrow(
+    # Draw velocity vector - RED ARROW
+    vel_scale = 0.08
+    _vel_arrow = ax3.arrow(
         X_k[0],
         X_k[1],
         X_k[2] * vel_scale,
         X_k[3] * vel_scale,
-        head_width=0.02,
-        head_length=0.01,
+        head_width=0.008,
+        head_length=0.005,
         fc=RED,
         ec=RED,
-        linewidth=2,
+        linewidth=1,
         zorder=5,
         length_includes_head=True,
-    )
-    ax3.text(
-        X_k[0] + X_k[2] * vel_scale * 0.5,
-        X_k[1] + X_k[3] * vel_scale * 0.5 + 0.03,
-        "v",
-        fontsize=16,
-        weight="bold",
-        color=RED,
-        ha="center",
+        label="Velocity (red)",
     )
 
-    # Draw heading vector at start
-    heading_scale = 0.08
+    # Draw heading vector - GRAY ARROW (shorter than velocity)
+    heading_scale = 0.05  # Make heading arrow shorter
     theta_k = X_k[4]  # X_truth is [x, y, vx, vy, theta]
-    ax3.arrow(
+    _heading_arrow = ax3.arrow(
         X_k[0],
         X_k[1],
         heading_scale * np.cos(theta_k),
         heading_scale * np.sin(theta_k),
-        head_width=0.015,
-        head_length=0.01,
+        head_width=0.008,
+        head_length=0.005,
         fc=GRAY,
         ec=GRAY,
-        linewidth=2,
+        linewidth=1,
         zorder=5,
         length_includes_head=True,
-        alpha=0.7,
-    )
-    ax3.text(
-        X_k[0] + heading_scale * np.cos(theta_k) * 1.5,
-        X_k[1] + heading_scale * np.sin(theta_k) * 1.5,
-        "θ",
-        fontsize=16,
-        weight="bold",
-        color=GRAY,
-        ha="center",
+        label="Heading (gray)",
     )
 
-    # Add integration equations
+    # Equations panel - dedicated space for integration math
+    ax_eq.axis("off")  # Turn off axis for equations panel
+
     equations = [
-        r"$\theta_{k+1} = \theta_k + \int_{t_k}^{t_{k+1}} \omega_z \, dt$",
-        r"$v_{k+1} = v_k + \int_{t_k}^{t_{k+1}} R(\theta) \cdot a \, dt$",
-        r"$x_{k+1} = x_k + \int_{t_k}^{t_{k+1}} v \, dt$",
+        "Integration\nEqs:",
+        "",
+        r"$\theta_{k+1} = \theta_k +$",
+        r"$\int \omega_z dt$",
+        "",
+        r"$v_{k+1} = v_k +$",
+        r"$\int R(\theta)a dt$",
+        "",
+        r"$x_{k+1} = x_k +$",
+        r"$\int v dt$",
     ]
 
     eq_text = "\n".join(equations)
-    ax3.text(
-        0.02,
-        0.98,
+    ax_eq.text(
+        0.5,
+        0.5,
         eq_text,
-        transform=ax3.transAxes,
-        fontsize=14,
-        verticalalignment="top",
-        bbox=dict(boxstyle="round,pad=1.0", facecolor="lightyellow", alpha=0.9),
+        transform=ax_eq.transAxes,
+        fontsize=12,
+        verticalalignment="center",
+        horizontalalignment="center",
+        bbox=dict(
+            boxstyle="round,pad=0.6",
+            facecolor="lightyellow",
+            alpha=0.9,
+            edgecolor=ORANGE,
+            linewidth=1.5,
+        ),
         family="monospace",
     )
 
-    # Show actual state changes
+    # Show actual state changes - moved to title area to avoid overlap
     delta_x = X_k1[0] - X_k[0]
     delta_y = X_k1[1] - X_k[1]
     delta_theta = np.rad2deg(X_k1[4] - X_k[4])
 
-    stats_text = (
-        f"State Changes:\n"
-        f"Δx = {delta_x*100:.2f} cm\n"
-        f"Δy = {delta_y*100:.2f} cm\n"
-        f"Δθ = {delta_theta:.2f}°"
-    )
+    # Compact stats in title
+    stats_str = f"Δx={delta_x*100:.1f}cm, Δy={delta_y*100:.1f}cm, Δθ={delta_theta:.1f}°"
 
-    ax3.text(
-        0.98,
-        0.98,
-        stats_text,
-        transform=ax3.transAxes,
-        fontsize=13,
-        verticalalignment="top",
-        horizontalalignment="right",
-        bbox=dict(boxstyle="round,pad=0.8", facecolor=GREEN, alpha=0.3),
+    ax3.set_xlabel("X (m)", fontsize=13, weight="bold", labelpad=8)
+    ax3.set_ylabel("Y (m)", fontsize=13, weight="bold", labelpad=8)
+    ax3.set_title(
+        f"Spatial: State Propagation\n{stats_str}",
+        fontsize=12,
         weight="bold",
+        pad=8,
     )
-
-    ax3.set_xlabel("X (meters)", fontsize=14, weight="bold")
-    ax3.set_ylabel("Y (meters)", fontsize=14, weight="bold")
-    ax3.set_title("Spatial View: State Propagation via IMU Integration", fontsize=18, weight="bold")
-    ax3.legend(fontsize=12, loc="lower left")
+    ax3.tick_params(labelsize=10)
     ax3.set_aspect("equal")
     ax3.grid(True, alpha=0.3)
 
-    # Overall title
-    fig.suptitle(
-        "The Predict Step: IMU Pre-Integration Between Camera Frames\n"
-        "How TrodesTrack propagates state estimates using high-rate IMU data",
-        fontsize=22,
-        weight="bold",
-        y=0.995,
+    # ========================================================================
+    # Legend Panel (Bottom-Right): Dedicated legend subplot
+    # ========================================================================
+    ax_legend.axis("off")
+
+    # Collect handles and labels from the spatial plot
+    handles, labels = ax3.get_legend_handles_labels()
+
+    # Create legend in dedicated subplot
+    legend = ax_legend.legend(
+        handles,
+        labels,
+        loc="center",
+        fontsize=11,
+        frameon=True,
+        fancybox=False,
+        framealpha=0.95,
+        edgecolor=GRAY,
+        title="Legend",
+        title_fontsize=12,
     )
+    legend.get_title().set_weight("bold")
 
     # Key insight
     fig.text(
@@ -338,10 +355,8 @@ def generate_slide12():
         style="italic",
         bbox=dict(boxstyle="round,pad=0.8", facecolor=ORANGE, alpha=0.2),
     )
-
-    plt.tight_layout(rect=[0, 0.02, 1, 0.98])
     output_path = OUTPUT_DIR / "slide12_imu_integration.png"
-    plt.savefig(output_path, dpi=150, bbox_inches="tight", facecolor="white")
+    plt.savefig(output_path, dpi=150, facecolor="white")
     print(f"✓ Saved: {output_path}")
     plt.close()
 

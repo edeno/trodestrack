@@ -93,8 +93,18 @@ def generate_slide21():
 
     nees_values = np.array(nees_values)
 
-    # Create figure
-    fig, ax = plt.subplots(figsize=(14, 8))
+    # Create figure with subplot_mosaic - main plot with dedicated legend/stats area
+    mosaic = [["main", "legend"]]
+
+    fig, axd = plt.subplot_mosaic(
+        mosaic,
+        figsize=(12, 5.625),
+        constrained_layout=True,
+        gridspec_kw={"width_ratios": [3, 1]},
+    )
+
+    ax = axd["main"]
+    ax_legend = axd["legend"]
 
     # Plot histogram of NEES values
     bins = np.linspace(0, 20, 50)
@@ -105,7 +115,7 @@ def generate_slide21():
         alpha=0.7,
         color=BLUE,
         edgecolor="black",
-        linewidth=1.5,
+        linewidth=3.5,
         label=f"Observed NEES (n={len(nees_values)})",
     )
 
@@ -122,11 +132,11 @@ def generate_slide21():
         chi2_lower,
         color=ORANGE,
         linestyle="--",
-        linewidth=2,
+        linewidth=4,
         alpha=0.7,
         label=f"95% CI: [{chi2_lower:.1f}, {chi2_upper:.1f}]",
     )
-    ax.axvline(chi2_upper, color=ORANGE, linestyle="--", linewidth=2, alpha=0.7)
+    ax.axvline(chi2_upper, color=ORANGE, linestyle="--", linewidth=4, alpha=0.7)
 
     # Shade the acceptance region
     ax.axvspan(chi2_lower, chi2_upper, alpha=0.1, color=GREEN, label="Acceptance region")
@@ -149,7 +159,7 @@ def generate_slide21():
         mean_nees,
         ax.get_ylim()[1] * 0.9,
         f"{mean_nees:.2f}\n{status}",
-        fontsize=14,
+        fontsize=18,
         weight="bold",
         color=mean_color,
         ha="center",
@@ -159,7 +169,7 @@ def generate_slide21():
             facecolor="white",
             alpha=0.9,
             edgecolor=mean_color,
-            linewidth=2,
+            linewidth=4,
         ),
     )
 
@@ -169,68 +179,92 @@ def generate_slide21():
         expected_mean,
         color=RED,
         linestyle=":",
-        linewidth=2,
+        linewidth=4,
         alpha=0.7,
         label=f"Expected mean: {expected_mean}",
     )
 
     # Labels and title
-    ax.set_xlabel("NEES Value", fontsize=16, weight="bold")
-    ax.set_ylabel("Probability Density", fontsize=16, weight="bold")
+    ax.set_xlabel("NEES Value", fontsize=18, weight="bold", labelpad=10)
+    ax.set_ylabel("Probability Density", fontsize=18, weight="bold", labelpad=10)
     ax.set_title(
-        "Normalized Estimation Error Squared (NEES) Test\n"
-        "Quality Assurance: Are uncertainty estimates accurate?",
+        "Normalized Estimation Error Squared (NEES) Test",
         fontsize=20,
         weight="bold",
+        pad=10,
     )
-    ax.legend(fontsize=13, loc="upper right")
+    # No legend on main plot - will be in dedicated panel
     ax.grid(True, alpha=0.3)
     ax.set_xlim(0, 20)
 
-    # Interpretation guide
+    # Dedicated legend/stats panel
+    ax_legend.axis("off")
+
+    # Get handles and labels from main plot
+    handles, labels = ax.get_legend_handles_labels()
+
+    # Create legend in dedicated space
+    ax_legend.legend(
+        handles,
+        labels,
+        loc="upper left",
+        fontsize=12,
+        frameon=True,
+        fancybox=False,
+        framealpha=0.95,
+        title="Legend",
+        title_fontsize=14,
+    )
+
+    # Interpretation guide - moved to smaller stats box to avoid overlap
     interpretation = (
-        "Interpretation:\n"
-        f"• Mean NEES ≈ {n_dims} (df): Perfect calibration\n"
-        f"• Mean NEES < {n_dims}: Overconfident (uncertainty too small)\n"
-        f"• Mean NEES > {n_dims}: Underconfident (uncertainty too large)\n"
-        f"• 95% of values should fall in [{chi2_lower:.1f}, {chi2_upper:.1f}]"
+        f"Mean ≈ {n_dims}: Perfect calibration | "
+        f"Mean < {n_dims}: Overconfident | "
+        f"Mean > {n_dims}: Underconfident"
     )
 
     fig.text(
         0.5,
         0.02,
         interpretation,
-        fontsize=12,
+        fontsize=13,
         ha="center",
         style="italic",
-        family="monospace",
         bbox=dict(boxstyle="round,pad=0.8", facecolor=GRAY, alpha=0.1),
     )
 
-    # Statistics summary
+    # Statistics summary - in legend panel below legend
     percent_in_ci = (
         100 * np.sum((nees_values >= chi2_lower) & (nees_values <= chi2_upper)) / len(nees_values)
     )
 
     stats_text = (
-        f"Statistics:\n"
-        f"Mean: {mean_nees:.2f} | Median: {np.median(nees_values):.2f} | "
-        f"Std: {np.std(nees_values):.2f} | In 95% CI: {percent_in_ci:.1f}%"
+        f"Statistics:\n\n"
+        f"Mean: {mean_nees:.2f}\n"
+        f"Median: {np.median(nees_values):.2f}\n"
+        f"Std: {np.std(nees_values):.2f}\n\n"
+        f"In 95% CI:\n{percent_in_ci:.0f}%\n\n"
+        f"Status:\n{status}"
     )
 
-    ax.text(
-        0.98,
-        0.98,
+    # Place stats box in legend panel
+    ax_legend.text(
+        0.5,
+        0.35,
         stats_text,
-        transform=ax.transAxes,
-        fontsize=11,
+        transform=ax_legend.transAxes,
+        fontsize=12,
         weight="bold",
-        ha="right",
-        va="top",
-        bbox=dict(boxstyle="round,pad=0.6", facecolor="white", alpha=0.9),
+        ha="center",
+        va="center",
+        bbox=dict(
+            boxstyle="round,pad=0.8",
+            facecolor="white",
+            alpha=0.9,
+            edgecolor=mean_color,
+            linewidth=2,
+        ),
     )
-
-    plt.tight_layout(rect=[0, 0.15, 1, 1])
     output_path = OUTPUT_DIR / "slide21_nees_histogram.png"
     plt.savefig(output_path, dpi=150, bbox_inches="tight", facecolor="white")
     print(f"✓ Saved: {output_path}")

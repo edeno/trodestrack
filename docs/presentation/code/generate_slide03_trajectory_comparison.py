@@ -3,8 +3,16 @@ Generate visual for Slide 3: Trajectory Comparison
 
 Shows ground truth vs noisy vision-only observations with dropout gaps.
 Demonstrates the core problem that TrodesTrack solves.
+
+PRESENTATION OPTIMIZED:
+- 16:9 aspect ratio (10" × 5.625")
+- Large fonts (title 32pt, labels 24pt)
+- Bold lines (4pt width)
+- No overlapping elements
 """
 
+# Import presentation utilities
+import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -12,17 +20,18 @@ import numpy as np
 
 from trodestrack.sim.rat_imu import RatIMUSimConfig, simulate_rat_imu
 
-# Set style
-plt.style.use("seaborn-v0_8-darkgrid")
+sys.path.insert(0, str(Path(__file__).parent))
+from presentation_utils import (
+    COLORS,
+    add_title,
+    clean_axis,
+    plot_trajectory,
+    save_presentation_figure,
+    scatter_points,
+)
+
 OUTPUT_DIR = Path(__file__).parent.parent / "visuals"
 OUTPUT_DIR.mkdir(exist_ok=True)
-
-# Color palette
-BLUE = "#2E86AB"
-ORANGE = "#F77F00"
-GREEN = "#06A77D"
-RED = "#D62828"
-GRAY = "#6C757D"
 
 
 def generate_slide03():
@@ -50,92 +59,112 @@ def generate_slide03():
 
     # Noisy camera observations (LED1)
     Z_cam = sim["Z_cam_led1"]
-    mask_led1 = sim["mask_led1"]  # LED1 validity mask
+    mask_led1 = sim["mask_led1"]
 
     # Valid observations only
     valid_obs = mask_led1
     pos_observed = Z_cam[valid_obs, :]
 
-    # Create figure
-    fig, axes = plt.subplots(1, 2, figsize=(18, 7))
+    # Create figure with mosaic layout for better legend control
+    # Layout: Two main panels + two legend panels on right
+    mosaic = """
+    AL
+    BR
+    """
+
+    fig, axd = plt.subplot_mosaic(
+        mosaic,
+        figsize=(12, 5.625),  # Wider for legend space
+        dpi=150,
+        constrained_layout=True,
+        gridspec_kw={"width_ratios": [5, 0.8], "height_ratios": [1, 1]},
+    )
+
+    axes = [axd["A"], axd["B"]]
+    legend_axes = [axd["L"], axd["R"]]
 
     # Left panel: Ground truth (smooth, complete)
     ax1 = axes[0]
-    ax1.plot(
-        pos_truth[:, 0], pos_truth[:, 1], linewidth=3, color=BLUE, label="Ground truth", zorder=10
+    plot_trajectory(
+        ax1,
+        pos_truth[:, 0],
+        pos_truth[:, 1],
+        color=COLORS["blue"],
+        linewidth=4,
+        label="Ground truth",
     )
 
-    # Mark start and end
-    ax1.scatter(
-        pos_truth[0, 0],
-        pos_truth[0, 1],
-        s=200,
-        marker="o",
-        color=GREEN,
-        edgecolor="black",
-        linewidth=2,
-        zorder=20,
+    # Mark start and end (larger markers for visibility)
+    scatter_points(
+        ax1,
+        [pos_truth[0, 0]],
+        [pos_truth[0, 1]],
+        color=COLORS["green"],
+        size=300,
         label="Start",
     )
-    ax1.scatter(
-        pos_truth[-1, 0],
-        pos_truth[-1, 1],
-        s=200,
-        marker="s",
-        color=ORANGE,
-        edgecolor="black",
-        linewidth=2,
-        zorder=20,
+    scatter_points(
+        ax1,
+        [pos_truth[-1, 0]],
+        [pos_truth[-1, 1]],
+        color=COLORS["orange"],
+        size=300,
         label="End",
     )
 
-    ax1.set_xlabel("X (meters)", fontsize=16, weight="bold")
-    ax1.set_ylabel("Y (meters)", fontsize=16, weight="bold")
-    ax1.set_title(
-        "Ground Truth Trajectory\n(What we want to estimate)",
-        fontsize=18,
-        weight="bold",
-        color=BLUE,
-    )
-    ax1.legend(fontsize=14, loc="upper right")
+    # Title with more padding to avoid overlap with suptitle
+    add_title(ax1, "Ground Truth", fontsize=24, color=COLORS["blue"], pad=20)
+    ax1.set_xlabel("X position (m)", fontsize=20, fontweight="bold", labelpad=12)
+    ax1.set_ylabel("Y position (m)", fontsize=20, fontweight="bold", labelpad=12)
+    ax1.tick_params(labelsize=16)  # Larger tick labels
     ax1.set_aspect("equal")
-    ax1.grid(True, alpha=0.3)
+    clean_axis(ax1, grid=False)
+
+    # Move legend to dedicated panel
+    legend_axes[0].axis("off")
+    handles1, labels1 = ax1.get_legend_handles_labels()
+    legend_axes[0].legend(handles1, labels1, loc="center left", fontsize=18, frameon=False)
 
     # Right panel: Noisy observations with gaps
     ax2 = axes[1]
 
-    # Show gaps by plotting ground truth in background (faint)
+    # Show hidden truth in background (very faint)
     ax2.plot(
         pos_truth[:, 0],
         pos_truth[:, 1],
-        linewidth=1,
-        color=GRAY,
+        linewidth=2,
+        color=COLORS["gray"],
         alpha=0.2,
-        linestyle="--",
-        label="Hidden truth",
+        linestyle=":",
+        zorder=1,
     )
 
     # Plot observed points only (with noise, gaps)
-    ax2.scatter(
+    scatter_points(
+        ax2,
         pos_observed[:, 0],
         pos_observed[:, 1],
-        s=30,
-        color=RED,
+        color=COLORS["red"],
+        size=50,
         alpha=0.6,
-        label="Camera observations",
-        zorder=10,
+        label="Camera obs",
     )
 
-    # Highlight dropout regions by finding gaps
-    # Find consecutive observations
+    # Find gaps and annotate ONLY the longest one (avoid overlap)
     obs_indices = np.where(valid_obs)[0]
     gaps = np.diff(obs_indices)
-    gap_starts = obs_indices[:-1][gaps > 1]  # Indices where gaps start
-    gap_ends = obs_indices[1:][gaps > 1]  # Indices where gaps end
+    gap_starts = obs_indices[:-1][gaps > 1]
+    gap_ends = obs_indices[1:][gaps > 1]
 
-    # Mark first few gaps with annotations
-    for _, (start_idx, end_idx) in enumerate(zip(gap_starts[:3], gap_ends[:3], strict=False)):
-        # Get positions at gap boundaries
+    # Find the LONGEST gap only (minimal annotation)
+    if len(gap_starts) > 0:
+        gap_durations = [
+            t_cam[end] - t_cam[start] for start, end in zip(gap_starts, gap_ends, strict=False)
+        ]
+        longest_gap_idx = np.argmax(gap_durations)
+
+        start_idx = gap_starts[longest_gap_idx]
+        end_idx = gap_ends[longest_gap_idx]
         pos_start = pos_truth[start_idx, :]
         pos_end = pos_truth[end_idx, :]
         gap_duration = t_cam[end_idx] - t_cam[start_idx]
@@ -145,110 +174,90 @@ def generate_slide03():
             "",
             xy=pos_end,
             xytext=pos_start,
-            arrowprops=dict(arrowstyle="<->", color=ORANGE, lw=2.5, alpha=0.7),
+            arrowprops=dict(arrowstyle="<->", color=COLORS["orange"], lw=4, alpha=0.9),
+            zorder=50,
         )
 
-        # Label the gap
+        # Label the gap - positioned carefully to avoid data overlap
         mid_pos = (pos_start + pos_end) / 2
+        # Place label ABOVE the trajectory if possible
+        y_offset = 0.5 if mid_pos[1] < pos_truth[:, 1].max() - 0.3 else -0.3
+
         ax2.text(
             mid_pos[0],
-            mid_pos[1] + 0.3,
-            f"Gap: {gap_duration:.1f}s",
-            fontsize=11,
-            weight="bold",
-            color=ORANGE,
+            mid_pos[1] + y_offset,
+            f"{gap_duration:.1f}s gap",
+            fontsize=18,
+            fontweight="bold",
+            color=COLORS["orange"],
             ha="center",
-            va="bottom",
-            bbox=dict(boxstyle="round,pad=0.4", facecolor="white", alpha=0.8, edgecolor=ORANGE),
+            va="center",
+            bbox=dict(
+                boxstyle="round,pad=0.6",
+                facecolor="white",
+                alpha=0.95,
+                edgecolor=COLORS["orange"],
+                linewidth=3,
+            ),
+            zorder=100,
         )
 
     # Mark start and end
-    ax2.scatter(
-        pos_observed[0, 0],
-        pos_observed[0, 1],
-        s=200,
-        marker="o",
-        color=GREEN,
-        edgecolor="black",
-        linewidth=2,
-        zorder=20,
-        label="Start",
+    scatter_points(
+        ax2,
+        [pos_observed[0, 0]],
+        [pos_observed[0, 1]],
+        color=COLORS["green"],
+        size=300,
     )
-    ax2.scatter(
-        pos_observed[-1, 0],
-        pos_observed[-1, 1],
-        s=200,
-        marker="s",
-        color=ORANGE,
-        edgecolor="black",
-        linewidth=2,
-        zorder=20,
-        label="End",
+    scatter_points(
+        ax2,
+        [pos_observed[-1, 0]],
+        [pos_observed[-1, 1]],
+        color=COLORS["orange"],
+        size=300,
     )
 
-    ax2.set_xlabel("X (meters)", fontsize=16, weight="bold")
-    ax2.set_ylabel("Y (meters)", fontsize=16, weight="bold")
-    ax2.set_title(
-        "Vision-Only Observations\n(Noisy + Missing Data)", fontsize=18, weight="bold", color=RED
-    )
-    ax2.legend(fontsize=14, loc="upper right")
+    # Shorter title to avoid overlap
+    add_title(ax2, "Camera Observations", fontsize=24, color=COLORS["red"], pad=20)
+    ax2.set_xlabel("X position (m)", fontsize=20, fontweight="bold", labelpad=12)
+    ax2.set_ylabel("")  # No y-label on right panel (shared with left)
+    ax2.tick_params(labelsize=16)  # Larger tick labels
     ax2.set_aspect("equal")
-    ax2.grid(True, alpha=0.3)
+    clean_axis(ax2, grid=False)
+
+    # Move legend to dedicated panel
+    legend_axes[1].axis("off")
+    handles2, labels2 = ax2.get_legend_handles_labels()
+    legend_axes[1].legend(handles2, labels2, loc="center left", fontsize=18, frameon=False)
 
     # Make axes equal for fair comparison
     all_x = pos_truth[:, 0]
     all_y = pos_truth[:, 1]
-    x_margin = (all_x.max() - all_x.min()) * 0.1
-    y_margin = (all_y.max() - all_y.min()) * 0.1
+    x_margin = (all_x.max() - all_x.min()) * 0.15  # Larger margin to prevent overlap
+    y_margin = (all_y.max() - all_y.min()) * 0.15
 
     for ax in axes:
         ax.set_xlim(all_x.min() - x_margin, all_x.max() + x_margin)
         ax.set_ylim(all_y.min() - y_margin, all_y.max() + y_margin)
 
-    # Overall title
-    fig.suptitle(
-        "The Tracking Problem: Noisy, Incomplete Camera Observations",
-        fontsize=22,
-        weight="bold",
-        y=0.98,
-    )
+    # No suptitle - panel titles are sufficient and avoid overlap
+    # Slide context (PowerPoint slide title) will provide "The Tracking Problem"
+    # Panel titles "Ground Truth" and "Camera Observations" are self-explanatory
 
-    # Key statistics
-    dropout_rate = 1 - valid_obs.sum() / len(valid_obs)
-    num_gaps = len(gap_starts)
-    mean_gap = np.mean(
-        [t_cam[end] - t_cam[start] for start, end in zip(gap_starts, gap_ends, strict=False)]
-    )
-
-    fig.text(
-        0.5,
-        0.02,
-        f"Challenge: {dropout_rate*100:.0f}% dropout rate • "
-        f"{num_gaps} gaps • Average gap: {mean_gap:.1f}s • "
-        f"Camera noise ±2cm • How do we fill in the gaps?",
-        fontsize=14,
-        ha="center",
-        style="italic",
-        bbox=dict(boxstyle="round,pad=0.8", facecolor=ORANGE, alpha=0.2),
-    )
-
-    plt.tight_layout(rect=[0, 0.05, 1, 0.96])
+    # Save
     output_path = OUTPUT_DIR / "slide03_trajectory_comparison.png"
-    plt.savefig(output_path, dpi=150, bbox_inches="tight", facecolor="white")
-    print(f"✓ Saved: {output_path}")
+    save_presentation_figure(output_path)
     plt.close()
 
     # Print statistics
+    dropout_rate = 1 - valid_obs.sum() / len(valid_obs)
+    num_gaps = len(gap_starts)
     print(f"  Dropout rate: {dropout_rate*100:.1f}%")
     print(f"  Number of gaps: {num_gaps}")
-    print(f"  Mean gap duration: {mean_gap:.2f} s")
-    print(f"  Valid observations: {valid_obs.sum()}/{len(valid_obs)}")
 
 
 if __name__ == "__main__":
     print("Generating Slide 3: Trajectory Comparison...")
-    print()
     generate_slide03()
-    print()
     print("✅ Slide 3 visual generated!")
-    print(f"   Output: {OUTPUT_DIR / 'slide03_trajectory_comparison.png'}")
