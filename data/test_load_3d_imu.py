@@ -54,9 +54,9 @@ class TestLoad3DIMU:
         )
 
         # Should have 6 columns: [gyro_x, gyro_y, gyro_z, accel_x, accel_y, accel_z]
-        assert (
-            data.U_imu.shape[1] == 6
-        ), f"Expected 6 IMU channels for 3D mode, got {data.U_imu.shape[1]}"
+        assert data.U_imu.shape[1] == 6, (
+            f"Expected 6 IMU channels for 3D mode, got {data.U_imu.shape[1]}"
+        )
 
         # Should have same number of samples as before
         assert len(data.U_imu) == len(data.t_imu)
@@ -80,9 +80,9 @@ class TestLoad3DIMU:
 
         # Mean magnitude should be close to gravity
         mean_mag = np.mean(accel_mag)
-        assert (
-            9.5 < mean_mag < 10.1
-        ), f"3D accel magnitude {mean_mag:.2f} m/s² not close to gravity (9.81 m/s²)"
+        assert 9.5 < mean_mag < 10.1, (
+            f"3D accel magnitude {mean_mag:.2f} m/s² not close to gravity (9.81 m/s²)"
+        )
 
     def test_gravity_in_z_axis(self, position_file: str, imu_file: str):
         """Test that gravity is primarily in the Z-axis (upright headstage)."""
@@ -110,9 +110,9 @@ class TestLoad3DIMU:
         )
 
         # Z should be negative (pointing up in body frame)
-        assert (
-            accel_z_mean < 0
-        ), f"Expected negative Z accel (upward), got {accel_z_mean:.2f} m/s²"
+        assert accel_z_mean < 0, (
+            f"Expected negative Z accel (upward), got {accel_z_mean:.2f} m/s²"
+        )
 
     def test_gyro_units_radians_per_second(self, position_file: str, imu_file: str):
         """Test that gyro output is in rad/s with reasonable range."""
@@ -173,9 +173,9 @@ class TestLoad3DIMU:
         )
 
         # Should have 3 columns: [gyro_z, accel_x, accel_y]
-        assert (
-            data_2d.U_imu.shape[1] == 3
-        ), f"Expected 3 IMU channels for 2D mode, got {data_2d.U_imu.shape[1]}"
+        assert data_2d.U_imu.shape[1] == 3, (
+            f"Expected 3 IMU channels for 2D mode, got {data_2d.U_imu.shape[1]}"
+        )
 
     def test_3d_vs_2d_consistency(self, position_file: str, imu_file: str):
         """Test that 3D mode's subset matches 2D mode output."""

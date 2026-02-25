@@ -335,22 +335,22 @@ def rotate_body_accel_to_world(
     Parameters
     ----------
     accel_body : jnp.ndarray
-        Acceleration in body frame (3,) [ax, ay, az] in m/s².
+        Acceleration in body frame, shape (3,), as ``[ax, ay, az]`` in m/s².
     yaw_heading : float or jnp.ndarray
         Yaw heading angle (rad). Rotation about vertical (z) axis.
 
     Returns
     -------
     jnp.ndarray
-        Acceleration in world frame (3,) [ax_w, ay_w, az_w] in m/s².
+        Acceleration in world frame, shape (3,), as ``[ax_w, ay_w, az_w]`` in m/s².
 
     Notes
     -----
-    Applies R_z(θ) rotation matrix to the x-y plane while preserving z:
+    Applies R_z(θ) rotation matrix to the x-y plane while preserving z::
 
-    [ax_w]   [cos(θ)  -sin(θ)  0] [ax]
-    [ay_w] = [sin(θ)   cos(θ)  0] [ay]
-    [az_w]   [0        0       1] [az]
+        [ax_w]   [cos(θ)  -sin(θ)  0] [ax]
+        [ay_w] = [sin(θ)   cos(θ)  0] [ay]
+        [az_w]   [0        0       1] [az]
 
     This is the correct transformation for converting IMU measurements from
     the body frame (where the IMU is mounted on the rat) to the world frame

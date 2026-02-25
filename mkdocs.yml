@@ -1,0 +1,87 @@
+site_name: TrodesTrack
+site_description: Sensor-fused 2D rat tracking with JAX EKF/UKF for SpikeGadgets/Trodes
+site_url: https://edeno.github.io/trodestrack
+repo_url: https://github.com/edeno/trodestrack
+repo_name: edeno/trodestrack
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - content.code.copy
+    - toc.follow
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.arithmatex:
+      generic: true
+  - attr_list
+  - md_in_html
+  - abbr
+  - pymdownx.snippets:
+      auto_append:
+        - docs/includes/abbreviations.md
+  - toc:
+      permalink: true
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+extra_css:
+  - stylesheets/extra.css
+
+plugins:
+  - search
+  - gen-files:
+      scripts:
+        - docs/gen_ref_pages.py
+  - literate-nav:
+      nav_file: SUMMARY.md
+  - section-index
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            show_source: true
+            show_root_heading: true
+            heading_level: 2
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - getting-started/index.md
+      - Installation: getting-started/installation.md
+      - Quick Start: getting-started/quickstart.md
+      - Python API: getting-started/python-api.md
+  - User Guide:
+      - user-guide/index.md
+      - State Layouts: user-guide/state-layouts.md
+      - Filter Tuning: user-guide/tuning.md
+      - Troubleshooting: user-guide/troubleshooting.md
+  - Examples: examples/index.md
+  - API Reference: reference/
+  - Changelog: https://github.com/edeno/trodestrack/blob/master/CHANGELOG.md

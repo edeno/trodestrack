@@ -12,8 +12,8 @@ This guide helps you identify and fix problems with Extended Kalman Filter (EKF)
 2. [Symptom Index](#symptom-index)
 3. [Common Problems](#common-problems)
 4. [Data Quality Issues](#data-quality-issues)
-5. [Filter Divergence](#filter-divergence)
-6. [Performance Issues](#performance-issues)
+5. [Filter Divergence](#filter-diverges-to-infinity)
+6. [Performance Issues](#slow-performance)
 7. [Advanced Debugging](#advanced-debugging)
 
 ---
@@ -84,7 +84,7 @@ Click on your symptom to jump to the solution:
 - [Covariance grows unbounded](#covariance-explosion)
 - [Filter runs extremely slowly](#slow-performance)
 - [NEES inconsistent (< 6 or > 10)](#nees-inconsistency)
-- [NaN/Inf in filter output](#nan-inf-output)
+- [NaN/Inf in filter output](#naninf-output)
 
 ---
 
@@ -814,8 +814,7 @@ print(f"Problem: Position RMSE is {compute_position_rmse(...):.4f} m (expected <
 ### Useful Resources
 
 - **[TUNING.md](TUNING.md)** - Parameter selection guide
-- **[PRD.md](PRD.md)** - Mathematical model and requirements
-- **[Examples](examples/README.md)** - Educational examples with expected outputs
+- **[Examples](../examples/)** - Educational examples with expected outputs
 - **[GitHub Issues](https://github.com/edeno/trodestrack/issues)** - Report bugs
 
 ---

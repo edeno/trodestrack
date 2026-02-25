@@ -32,16 +32,12 @@ class SimpleSimConfig:
         duration_s: Simulation duration in seconds
         fs_imu: IMU sampling rate (Hz)
         fs_cam: Camera sampling rate (Hz)
-
-        # Sensor noise parameters
         gyro_noise_density: Gyroscope noise density (rad/s/√Hz)
         accel_noise_density: Accelerometer noise density (m/s²/√Hz)
         gyro_bias_std: Initial gyroscope bias std (rad/s)
         accel_bias_std: Initial accelerometer bias std (m/s²)
         cam_noise_std: Camera position noise std (m)
         cam_dropout_prob: Probability of camera dropout per frame
-
-        # Physical parameters
         gravity: Gravitational acceleration (m/s²)
     """
 
