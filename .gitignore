@@ -24,6 +24,10 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
+# uv caches
+.uv-cache/
+.uv_cache/
+
 # Documentation build output
 site/
 
