@@ -204,9 +204,9 @@ def test_tier0_circular_ekf_heading():
         f"\nCircular Heading RMSE: {heading_rmse_deg:.3f}° (PRD: <={PRD_HEADING_RMSE_DEG}°)"
     )
 
-    assert (
-        heading_rmse_deg <= PRD_HEADING_RMSE_DEG
-    ), f"Heading RMSE {heading_rmse_deg:.3f}° exceeds PRD requirement of {PRD_HEADING_RMSE_DEG}°"
+    assert heading_rmse_deg <= PRD_HEADING_RMSE_DEG, (
+        f"Heading RMSE {heading_rmse_deg:.3f}° exceeds PRD requirement of {PRD_HEADING_RMSE_DEG}°"
+    )
 
 
 # =============================================================================
@@ -243,9 +243,9 @@ def test_tier3_rat_imu_ekf_position():
         f"\nRat IMU Position RMSE: {pos_rmse_m:.4f} m (PRD: <={PRD_POSITION_RMSE_M} m)"
     )
 
-    assert (
-        pos_rmse_m <= PRD_POSITION_RMSE_M
-    ), f"Position RMSE {pos_rmse_m:.4f} m exceeds PRD requirement of {PRD_POSITION_RMSE_M} m"
+    assert pos_rmse_m <= PRD_POSITION_RMSE_M, (
+        f"Position RMSE {pos_rmse_m:.4f} m exceeds PRD requirement of {PRD_POSITION_RMSE_M} m"
+    )
 
 
 @pytest.mark.slow
@@ -316,9 +316,9 @@ def test_tier3_rat_imu_ekf_heading():
         f"\nRat IMU Heading RMSE: {heading_rmse_deg:.3f}° (PRD: <={PRD_HEADING_RMSE_DEG}°)"
     )
 
-    assert (
-        heading_rmse_deg <= PRD_HEADING_RMSE_DEG
-    ), f"Heading RMSE {heading_rmse_deg:.3f}° exceeds PRD requirement of {PRD_HEADING_RMSE_DEG}°"
+    assert heading_rmse_deg <= PRD_HEADING_RMSE_DEG, (
+        f"Heading RMSE {heading_rmse_deg:.3f}° exceeds PRD requirement of {PRD_HEADING_RMSE_DEG}°"
+    )
 
 
 # =============================================================================
@@ -437,9 +437,9 @@ def test_prd_dropout_drift_5s():
     )
 
     assert drift_m is not None, "No qualifying dropout found in simulation"
-    assert (
-        drift_m <= PRD_DROPOUT_DRIFT_M
-    ), f"Dropout drift {drift_m:.4f} m exceeds PRD requirement of {PRD_DROPOUT_DRIFT_M} m after 5s"
+    assert drift_m <= PRD_DROPOUT_DRIFT_M, (
+        f"Dropout drift {drift_m:.4f} m exceeds PRD requirement of {PRD_DROPOUT_DRIFT_M} m after 5s"
+    )
 
 
 @pytest.mark.slow

@@ -97,9 +97,9 @@ class TestJosephUpdate:
 
         # Check PSD: all eigenvalues ≥ 0
         eigvals = jnp.linalg.eigvalsh(P_upd)
-        assert jnp.all(
-            eigvals >= -1e-10
-        ), f"Negative eigenvalues: {eigvals[eigvals < 0]}"
+        assert jnp.all(eigvals >= -1e-10), (
+            f"Negative eigenvalues: {eigvals[eigvals < 0]}"
+        )
 
     def test_joseph_update_near_singular(self):
         """Joseph form handles near-singular covariances gracefully."""

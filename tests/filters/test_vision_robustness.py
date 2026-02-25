@@ -43,9 +43,9 @@ class TestLEDSwap:
         # Verify swap rate is approximately correct (allow variance due to RNG)
         # Expected: 20% of visible frames, allow 10-30% due to randomness
         swap_rate = n_swaps / n_visible
-        assert (
-            0.1 < swap_rate < 0.3
-        ), f"Swap rate {swap_rate:.2%} outside expected range"
+        assert 0.1 < swap_rate < 0.3, (
+            f"Swap rate {swap_rate:.2%} outside expected range"
+        )
 
         # Verify shape and no NaN where both visible
         assert sim["Z_cam_led1"].shape[0] == sim["Z_cam_led2"].shape[0]
@@ -70,12 +70,12 @@ class TestLEDSwap:
         swaps_when_not_both_visible = swap_applied & ~both_visible
 
         # All swaps should occur when both visible
-        assert (
-            np.sum(swaps_when_not_both_visible) == 0
-        ), "Swaps should only occur when both LEDs visible"
-        assert (
-            np.sum(swaps_when_both_visible) > 0
-        ), "Expected some swaps when both LEDs visible"
+        assert np.sum(swaps_when_not_both_visible) == 0, (
+            "Swaps should only occur when both LEDs visible"
+        )
+        assert np.sum(swaps_when_both_visible) > 0, (
+            "Expected some swaps when both LEDs visible"
+        )
 
         # LED1 measurements should be valid when LED1 visible
         assert not np.any(np.isnan(sim["Z_cam_led1"][sim["mask_led1"]]))

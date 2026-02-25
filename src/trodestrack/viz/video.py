@@ -96,7 +96,9 @@ def create_diagnostic_video(
         # With filter results
         >>> from trodestrack.models.ekf import extended_kalman_filter, EKFConfig
         >>> result = extended_kalman_filter(EKFConfig(), ...)
-        >>> create_diagnostic_video(sim, "debug_filter.mp4", filter_results=result, fps=30)
+        >>> create_diagnostic_video(
+        ...     sim, "debug_filter.mp4", filter_results=result, fps=30
+        ... )
         PosixPath('debug_filter.mp4')
     """
     output_path = Path(output_path)

@@ -83,9 +83,9 @@ def test_property_rat_imu_produces_valid_output(
     # Policy: require ≥95% of intervals positive
     cam_diffs = np.diff(sim["t_cam_exp"])
     positive_rate = (cam_diffs > 0).mean()
-    assert (
-        positive_rate > 0.95
-    ), f"Camera time mostly monotonic: {positive_rate:.1%} positive"
+    assert positive_rate > 0.95, (
+        f"Camera time mostly monotonic: {positive_rate:.1%} positive"
+    )
 
     # Arena bounds: reflections work but there can be overshoots due to:
     # 1. Initial state sampling from P0 can place rat outside arena
@@ -96,21 +96,21 @@ def test_property_rat_imu_produces_valid_output(
     # Just verify positions stay reasonable (not wildly out of bounds)
     reasonable_bound = max(config.arena_w, config.arena_h) + 0.5  # Within 50cm of arena
     assert np.all(x >= -reasonable_bound), f"Position x wildly negative: min={x.min()}"
-    assert np.all(
-        x <= config.arena_w + reasonable_bound
-    ), f"Position x wildly positive: max={x.max()}"
+    assert np.all(x <= config.arena_w + reasonable_bound), (
+        f"Position x wildly positive: max={x.max()}"
+    )
     assert np.all(y >= -reasonable_bound), f"Position y wildly negative: min={y.min()}"
-    assert np.all(
-        y <= config.arena_h + reasonable_bound
-    ), f"Position y wildly positive: max={y.max()}"
+    assert np.all(y <= config.arena_h + reasonable_bound), (
+        f"Position y wildly positive: max={y.max()}"
+    )
 
     # Speed limits
     vx, vy = sim["X_truth"][:, 2], sim["X_truth"][:, 3]
     speed = np.hypot(vx, vy)
     # Allow small overshoot due to numerical integration
-    assert np.all(
-        speed <= config.speed_clip * 1.1
-    ), f"Speed exceeds clip: max={speed.max()}"
+    assert np.all(speed <= config.speed_clip * 1.1), (
+        f"Speed exceeds clip: max={speed.max()}"
+    )
 
     # Heading wrapping
     theta = sim["X_truth"][:, 4]
@@ -150,9 +150,9 @@ def test_property_rat_imu_different_seeds_differ(seed1: int, seed2: int) -> None
 
     # Ground truth should differ (OU process is seeded)
     # Allow for extremely rare case where they happen to be close
-    assert not np.allclose(
-        sim1["X_truth"], sim2["X_truth"]
-    ), f"Seeds {seed1} and {seed2} produced identical truth (extremely unlikely)"
+    assert not np.allclose(sim1["X_truth"], sim2["X_truth"]), (
+        f"Seeds {seed1} and {seed2} produced identical truth (extremely unlikely)"
+    )
 
 
 @given(
@@ -177,12 +177,12 @@ def test_property_rat_imu_sample_counts(
     actual_T_imu = len(sim["t_imu"])
     actual_T_cam = len(sim["t_cam_exp"])
 
-    assert (
-        actual_T_imu == expected_T_imu
-    ), f"IMU count: {actual_T_imu} != {expected_T_imu}"
-    assert (
-        actual_T_cam == expected_T_cam
-    ), f"Cam count: {actual_T_cam} != {expected_T_cam}"
+    assert actual_T_imu == expected_T_imu, (
+        f"IMU count: {actual_T_imu} != {expected_T_imu}"
+    )
+    assert actual_T_cam == expected_T_cam, (
+        f"Cam count: {actual_T_cam} != {expected_T_cam}"
+    )
 
 
 @given(
@@ -210,17 +210,17 @@ def test_property_dropout_rate_bounds(dropout_prob: float, seed: int) -> None:
     # For very small dropout_prob (< 0.01), use absolute tolerance instead of relative
     if p < 0.01:
         # Absolute tolerance: allow ±2% deviation for rare events
-        assert (
-            observed_dropout_rate <= 0.02
-        ), f"Dropout rate {observed_dropout_rate:.3f} too high for p={p:.6f}"
+        assert observed_dropout_rate <= 0.02, (
+            f"Dropout rate {observed_dropout_rate:.3f} too high for p={p:.6f}"
+        )
     else:
         sigma = np.sqrt(p * (1 - p) / n)
         lower_bound = max(0.0, dropout_prob - 4 * sigma)
         upper_bound = min(1.0, dropout_prob + 4 * sigma)
 
-        assert (
-            lower_bound <= observed_dropout_rate <= upper_bound
-        ), f"Dropout rate {observed_dropout_rate:.3f} outside [{lower_bound:.3f}, {upper_bound:.3f}]"
+        assert lower_bound <= observed_dropout_rate <= upper_bound, (
+            f"Dropout rate {observed_dropout_rate:.3f} outside [{lower_bound:.3f}, {upper_bound:.3f}]"
+        )
 
 
 # =============================================================================
@@ -299,9 +299,9 @@ def test_property_circular_stays_on_circle(
     # Distance from center should equal radius
     distance = np.sqrt((x - center[0]) ** 2 + (y - center[1]) ** 2)
 
-    assert np.allclose(
-        distance, radius, atol=1e-9
-    ), f"Not on circle: std={distance.std()}"
+    assert np.allclose(distance, radius, atol=1e-9), (
+        f"Not on circle: std={distance.std()}"
+    )
 
 
 # =============================================================================
@@ -341,9 +341,9 @@ def test_property_output_structure_complete(config: RatIMUSimConfig, seed: int) 
         "config",
     }
 
-    assert (
-        set(sim.keys()) == expected_keys
-    ), f"Missing keys: {expected_keys - set(sim.keys())}"
+    assert set(sim.keys()) == expected_keys, (
+        f"Missing keys: {expected_keys - set(sim.keys())}"
+    )
 
     # Check array dimensions
     T_imu = len(sim["t_imu"])

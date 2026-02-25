@@ -199,9 +199,9 @@ def test_ekf_stationary_rejects_imu_drift(sim_config, ekf_config):
     pos_var_mid = np.mean([np.trace(P_est[i, :2, :2]) for i in range(100, 110)])
     pos_var_final = np.mean([np.trace(P_est[i, :2, :2]) for i in range(-10, 0)])
     # Check that variance stays bounded (within 3x of mid-run value to allow for some growth)
-    assert (
-        pos_var_final < 3 * pos_var_mid
-    ), f"Covariance growing unbounded: {pos_var_final:.2e} > 3*{pos_var_mid:.2e}"
+    assert pos_var_final < 3 * pos_var_mid, (
+        f"Covariance growing unbounded: {pos_var_final:.2e} > 3*{pos_var_mid:.2e}"
+    )
     # Check absolute bound (shouldn't exceed 0.5 mm² for stationary with good camera)
     assert pos_var_final < 5e-4, f"Position variance {pos_var_final:.2e} too large"
 
@@ -267,9 +267,9 @@ def test_ekf_constant_velocity_maintains_steady_covariance(sim_config, ekf_confi
     )
     # Relax to 2.0 (from 0.5) to account for initial filter tuning
     # Lower is better - a well-tuned filter should have < 0.5
-    assert (
-        var_stability < 2.0
-    ), f"Covariance stability {var_stability:.2f} should be < 2.0"
+    assert var_stability < 2.0, (
+        f"Covariance stability {var_stability:.2f} should be < 2.0"
+    )
 
 
 # =============================================================================
@@ -392,9 +392,9 @@ def test_ekf_handles_vision_dropout(sim_config, ekf_config):
                 var_before = np.trace(P_est[i - 1, :2, :2])
                 var_during = np.trace(P_est[i, :2, :2])
                 # Allow some tolerance since predict step might be small
-                assert (
-                    var_during >= var_before * 0.99
-                ), f"Covariance should not shrink during dropout (before={var_before:.6f}, during={var_during:.6f})"
+                assert var_during >= var_before * 0.99, (
+                    f"Covariance should not shrink during dropout (before={var_before:.6f}, during={var_during:.6f})"
+                )
 
 
 def test_ekf_adaptive_process_noise_scales_dropout_covariance(ekf_config):
@@ -654,9 +654,9 @@ def test_ekf_long_dropout_drift(ekf_config):
     drift_cm = drift_m * 100  # Convert to cm
 
     # Verify test setup
-    assert (
-        dropout_duration >= 4.5
-    ), f"Dropout duration {dropout_duration:.2f}s should be ~5s"
+    assert dropout_duration >= 4.5, (
+        f"Dropout duration {dropout_duration:.2f}s should be ~5s"
+    )
 
     # Check covariance grew during dropout (sanity check)
     pos_var_before = np.trace(P_est[dropout_start_idx, :2, :2])

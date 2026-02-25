@@ -158,29 +158,29 @@ def test_offline_smoother_throughput():
     )
 
     # Validate PRD requirement
-    assert (
-        speedup >= PRD_OFFLINE_SMOOTHER_SPEEDUP_MIN
-    ), f"Offline smoother speedup {speedup:.1f}× is below PRD requirement {PRD_OFFLINE_SMOOTHER_SPEEDUP_MIN:.1f}×"
+    assert speedup >= PRD_OFFLINE_SMOOTHER_SPEEDUP_MIN, (
+        f"Offline smoother speedup {speedup:.1f}× is below PRD requirement {PRD_OFFLINE_SMOOTHER_SPEEDUP_MIN:.1f}×"
+    )
 
     # Sanity check: verify smoother produced valid results
-    assert smoother_result.smoothed_means.shape[0] == len(
-        sim_data["t_cam_exp"]
-    ), "Smoother output length mismatch"
-    assert (
-        smoother_result.smoothed_means.shape[1] == 8
-    ), "Smoother state dimension should be 8"
-    assert np.all(
-        np.isfinite(smoother_result.smoothed_means)
-    ), "Smoother means contain NaN/Inf"
+    assert smoother_result.smoothed_means.shape[0] == len(sim_data["t_cam_exp"]), (
+        "Smoother output length mismatch"
+    )
+    assert smoother_result.smoothed_means.shape[1] == 8, (
+        "Smoother state dimension should be 8"
+    )
+    assert np.all(np.isfinite(smoother_result.smoothed_means)), (
+        "Smoother means contain NaN/Inf"
+    )
     # Validate smoother covariances
     assert smoother_result.smoothed_covariances.shape == (
         len(sim_data["t_cam_exp"]),
         8,
         8,
     ), "Smoother covariance shape mismatch"
-    assert np.all(
-        np.isfinite(smoother_result.smoothed_covariances)
-    ), "Smoother covariances contain NaN/Inf"
+    assert np.all(np.isfinite(smoother_result.smoothed_covariances)), (
+        "Smoother covariances contain NaN/Inf"
+    )
     # Check positive-definiteness (diagonal elements > 0)
     assert np.all(
         np.diagonal(smoother_result.smoothed_covariances, axis1=1, axis2=2) > 0
@@ -279,12 +279,12 @@ def test_online_ekf_latency():
     )
 
     # Sanity check: verify filter produced valid results
-    assert (
-        filter_result.filtered_means.shape[0] == num_frames
-    ), "Filter output length mismatch"
-    assert (
-        filter_result.filtered_means.shape[1] == 8
-    ), "Filter state dimension should be 8"
-    assert np.all(
-        np.isfinite(filter_result.filtered_means)
-    ), "Filter means contain NaN/Inf"
+    assert filter_result.filtered_means.shape[0] == num_frames, (
+        "Filter output length mismatch"
+    )
+    assert filter_result.filtered_means.shape[1] == 8, (
+        "Filter state dimension should be 8"
+    )
+    assert np.all(np.isfinite(filter_result.filtered_means)), (
+        "Filter means contain NaN/Inf"
+    )

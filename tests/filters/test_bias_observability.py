@@ -173,9 +173,9 @@ def test_circular_bias_converges() -> None:
     # Also verify that the bias estimate is reasonable (not diverging)
     X_est = result.filtered_means
     gyro_bias_estimate = X_est[-1, 5]
-    assert (
-        np.abs(gyro_bias_estimate) < 1.0
-    ), f"Gyro bias estimate {gyro_bias_estimate:.3f} rad/s seems unreasonably large"
+    assert np.abs(gyro_bias_estimate) < 1.0, (
+        f"Gyro bias estimate {gyro_bias_estimate:.3f} rad/s seems unreasonably large"
+    )
 
 
 def test_straight_line_lateral_bias_unobservable() -> None:

@@ -121,9 +121,9 @@ def test_high_confidence_pulls_mean_more(ekf_config, initial_state):
     dist_high = jnp.linalg.norm(state_high.mean[:2] - jnp.array([0.52, 0.5]))
     dist_low = jnp.linalg.norm(state_low.mean[:2] - jnp.array([0.52, 0.5]))
 
-    assert (
-        dist_high < dist_low
-    ), f"High confidence should be closer to observation: {dist_high:.6f} vs {dist_low:.6f}"
+    assert dist_high < dist_low, (
+        f"High confidence should be closer to observation: {dist_high:.6f} vs {dist_low:.6f}"
+    )
 
 
 def test_zero_confidence_smaller_update_than_high(ekf_config, initial_state):
@@ -199,9 +199,9 @@ def test_confidence_per_led_covariance(ekf_config, initial_state):
     cov_both = jnp.trace(state_both.cov[:2, :2])
     cov_led1 = jnp.trace(state_led1.cov[:2, :2])
 
-    assert (
-        cov_both < cov_led1
-    ), f"Both-high covariance {cov_both:.6f} should be < LED1-only {cov_led1:.6f}"
+    assert cov_both < cov_led1, (
+        f"Both-high covariance {cov_both:.6f} should be < LED1-only {cov_led1:.6f}"
+    )
 
 
 def test_default_confidence_is_high(ekf_config, initial_state):
@@ -313,6 +313,6 @@ def test_confidence_affects_log_likelihood(ekf_config, initial_state):
     )
 
     # Log-likelihoods should differ
-    assert not jnp.allclose(
-        ll_high, ll_low, atol=0.1
-    ), f"Confidence should affect log-likelihood: {ll_high:.4f} vs {ll_low:.4f}"
+    assert not jnp.allclose(ll_high, ll_low, atol=0.1), (
+        f"Confidence should affect log-likelihood: {ll_high:.4f} vs {ll_low:.4f}"
+    )

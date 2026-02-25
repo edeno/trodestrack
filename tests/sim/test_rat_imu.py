@@ -328,9 +328,9 @@ def test_accel_white_noise_std() -> None:
 
     # Guard against divide-by-zero and validate tolerance
     assert expected_std > 1e-10, f"Expected std too small: {expected_std}"
-    assert (
-        np.abs(observed_std - expected_std) / expected_std < TOLERANCE_NOISE_STD
-    ), f"Accel noise std {observed_std:.4f} differs from expected {expected_std:.4f}"
+    assert np.abs(observed_std - expected_std) / expected_std < TOLERANCE_NOISE_STD, (
+        f"Accel noise std {observed_std:.4f} differs from expected {expected_std:.4f}"
+    )
 
 
 def test_gyro_bias_random_walk() -> None:
@@ -594,14 +594,14 @@ def test_led_swap_occurs_when_enabled() -> None:
         # Binomial tolerance: within 3 sigma
         p = config.led_swap_prob
         sigma = np.sqrt(p * (1 - p) / num_both_visible)
-        assert (
-            np.abs(observed_swap_rate - p) < 3 * sigma
-        ), f"Swap rate {observed_swap_rate:.2%} differs from expected {p:.2%}"
+        assert np.abs(observed_swap_rate - p) < 3 * sigma, (
+            f"Swap rate {observed_swap_rate:.2%} differs from expected {p:.2%}"
+        )
 
     # Verify swaps only occur when both visible
-    assert np.all(
-        both_visible[swap_applied]
-    ), "Swaps occurred when LEDs not both visible"
+    assert np.all(both_visible[swap_applied]), (
+        "Swaps occurred when LEDs not both visible"
+    )
 
     # Verify that when swaps occur, measurements match swapped truth
     led1_truth = sim["led1_truth_cam"]
@@ -622,12 +622,12 @@ def test_led_swap_occurs_when_enabled() -> None:
         dist_z1_to_truth2 = np.linalg.norm(Z1[idx] - led2_truth[idx])
         dist_z2_to_truth1 = np.linalg.norm(Z2[idx] - led1_truth[idx])
 
-        assert (
-            dist_z1_to_truth2 < noise_tolerance
-        ), f"Swapped Z1 not near led2_truth: dist={dist_z1_to_truth2:.4f}m"
-        assert (
-            dist_z2_to_truth1 < noise_tolerance
-        ), f"Swapped Z2 not near led1_truth: dist={dist_z2_to_truth1:.4f}m"
+        assert dist_z1_to_truth2 < noise_tolerance, (
+            f"Swapped Z1 not near led2_truth: dist={dist_z1_to_truth2:.4f}m"
+        )
+        assert dist_z2_to_truth1 < noise_tolerance, (
+            f"Swapped Z2 not near led1_truth: dist={dist_z2_to_truth1:.4f}m"
+        )
 
 
 def test_led_swap_only_when_both_visible() -> None:
@@ -792,17 +792,17 @@ def test_time_vectors_monotonic(minimal_config) -> None:
     # Jitter is Gaussian, so occasional negative diffs can occur
     cam_exp_diffs = np.diff(sim["t_cam_exp"])
     positive_rate_exp = (cam_exp_diffs > 0).mean()
-    assert (
-        positive_rate_exp > 0.95
-    ), f"Camera exposure time mostly monotonic: {positive_rate_exp:.1%} positive"
+    assert positive_rate_exp > 0.95, (
+        f"Camera exposure time mostly monotonic: {positive_rate_exp:.1%} positive"
+    )
 
     # Observation time = exposure + latency (should also be mostly monotonic)
     # Inherits jitter from exposure time
     cam_obs_diffs = np.diff(sim["t_cam_obs"])
     positive_rate_obs = (cam_obs_diffs > 0).mean()
-    assert (
-        positive_rate_obs > 0.95
-    ), f"Camera observation time mostly monotonic: {positive_rate_obs:.1%} positive"
+    assert positive_rate_obs > 0.95, (
+        f"Camera observation time mostly monotonic: {positive_rate_obs:.1%} positive"
+    )
 
 
 def test_camera_timestamps_relationship(minimal_config) -> None:

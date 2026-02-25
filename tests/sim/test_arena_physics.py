@@ -40,13 +40,13 @@ class TestArenaBoundaries:
 
         # Check all positions are within bounds
         assert np.all(px >= 0.0), f"Found x positions below 0: min={px.min()}"
-        assert np.all(
-            px <= config.arena_w
-        ), f"Found x positions above {config.arena_w}: max={px.max()}"
+        assert np.all(px <= config.arena_w), (
+            f"Found x positions above {config.arena_w}: max={px.max()}"
+        )
         assert np.all(py >= 0.0), f"Found y positions below 0: min={py.min()}"
-        assert np.all(
-            py <= config.arena_h
-        ), f"Found y positions above {config.arena_h}: max={py.max()}"
+        assert np.all(py <= config.arena_h), (
+            f"Found y positions above {config.arena_h}: max={py.max()}"
+        )
 
     def test_wall_collision_reverses_velocity(self):
         """Verify that wall collisions reverse velocity component."""
@@ -130,9 +130,9 @@ class TestArenaBoundaries:
             # Check that velocity reversed and was attenuated
             # v_after ≈ -0.5 * v_before (coefficient of restitution = 0.5)
             if v_before > 0.1:  # Only check if there was significant approach velocity
-                assert (
-                    v_after < 0
-                ), f"Velocity should reverse: v_before={v_before}, v_after={v_after}"
+                assert v_after < 0, (
+                    f"Velocity should reverse: v_before={v_before}, v_after={v_after}"
+                )
                 # Allow 50% tolerance due to integration artifacts
                 expected_v_after = -0.5 * v_before
                 assert abs(v_after - expected_v_after) / abs(expected_v_after) < 0.5, (
@@ -175,9 +175,9 @@ class TestArenaBoundaries:
                 vx_after = vx[idx_corner + 10 : idx_corner + 20].mean()
                 vy_after = vy[idx_corner + 10 : idx_corner + 20].mean()
                 # At least one should definitely reverse (might not hit exactly simultaneously)
-                assert (
-                    vx_after < 0 or vy_after < 0
-                ), "At least one velocity component should reverse after corner collision"
+                assert vx_after < 0 or vy_after < 0, (
+                    "At least one velocity component should reverse after corner collision"
+                )
 
     def test_small_arena_high_activity(self):
         """Verify boundaries work in small arena with high activity."""
@@ -200,20 +200,20 @@ class TestArenaBoundaries:
         py = X_truth[:, 1]
 
         # All positions must be in bounds
-        assert np.all(
-            (px >= 0) & (px <= config.arena_w)
-        ), "X positions out of bounds in small arena"
-        assert np.all(
-            (py >= 0) & (py <= config.arena_h)
-        ), "Y positions out of bounds in small arena"
+        assert np.all((px >= 0) & (px <= config.arena_w)), (
+            "X positions out of bounds in small arena"
+        )
+        assert np.all((py >= 0) & (py <= config.arena_h)), (
+            "Y positions out of bounds in small arena"
+        )
 
         # Should have multiple wall collisions in small space
         # Count frames very close to walls (within 5cm)
         near_walls = (px < 0.05) | (px > 0.45) | (py < 0.05) | (py > 0.45)
         collision_ratio = np.mean(near_walls)
-        assert (
-            collision_ratio > 0.1
-        ), f"Expected frequent wall proximity in small arena, got {collision_ratio:.1%}"
+        assert collision_ratio > 0.1, (
+            f"Expected frequent wall proximity in small arena, got {collision_ratio:.1%}"
+        )
 
     def test_large_arena_free_motion(self):
         """Verify boundaries don't interfere in large arena with typical motion."""
@@ -237,12 +237,12 @@ class TestArenaBoundaries:
         py = X_truth[:, 1]
 
         # All positions must be in bounds
-        assert np.all(
-            (px >= 0) & (px <= config.arena_w)
-        ), "X positions out of bounds in large arena"
-        assert np.all(
-            (py >= 0) & (py <= config.arena_h)
-        ), "Y positions out of bounds in large arena"
+        assert np.all((px >= 0) & (px <= config.arena_w)), (
+            "X positions out of bounds in large arena"
+        )
+        assert np.all((py >= 0) & (py <= config.arena_h)), (
+            "Y positions out of bounds in large arena"
+        )
 
         # Should stay mostly away from boundaries in large arena
         margin = 0.5  # 50cm margin
@@ -254,9 +254,9 @@ class TestArenaBoundaries:
         )
         interior_ratio = np.mean(away_from_walls)
         # Most time should be spent in interior (>60%)
-        assert (
-            interior_ratio > 0.6
-        ), f"Expected mostly interior motion in large arena, got {interior_ratio:.1%}"
+        assert interior_ratio > 0.6, (
+            f"Expected mostly interior motion in large arena, got {interior_ratio:.1%}"
+        )
 
     def test_reflection_preserves_trajectory_continuity(self):
         """Verify that reflections don't cause position discontinuities."""
@@ -433,13 +433,13 @@ class TestPhysicalRealism:
 
         # Even with high speeds, no tunneling
         assert np.all(px >= 0), f"Tunneling below x=0: min={px.min()}"
-        assert np.all(
-            px <= config.arena_w
-        ), f"Tunneling above x={config.arena_w}: max={px.max()}"
+        assert np.all(px <= config.arena_w), (
+            f"Tunneling above x={config.arena_w}: max={px.max()}"
+        )
         assert np.all(py >= 0), f"Tunneling below y=0: min={py.min()}"
-        assert np.all(
-            py <= config.arena_h
-        ), f"Tunneling above y={config.arena_h}: max={py.max()}"
+        assert np.all(py <= config.arena_h), (
+            f"Tunneling above y={config.arena_h}: max={py.max()}"
+        )
 
     def test_boundary_reflection_deterministic(self):
         """Verify that boundary physics are deterministic with same seed."""
@@ -480,6 +480,6 @@ class TestPhysicalRealism:
         diff = np.abs(sim1["X_truth"] - sim2["X_truth"])
         max_diff = diff.max()
 
-        assert (
-            max_diff > 0.01
-        ), f"Different seeds should produce different trajectories, max_diff={max_diff}"
+        assert max_diff > 0.01, (
+            f"Different seeds should produce different trajectories, max_diff={max_diff}"
+        )

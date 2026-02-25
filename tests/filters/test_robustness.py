@@ -226,9 +226,9 @@ class TestOutOfBoundsMeasurements:
         v_mag = np.linalg.norm(velocities, axis=1)
 
         # Max velocity should be reasonable (rat can't exceed ~2 m/s)
-        assert (
-            np.max(v_mag) < 2.0
-        ), f"Filter inferred unrealistic velocity: {np.max(v_mag):.2f} m/s"
+        assert np.max(v_mag) < 2.0, (
+            f"Filter inferred unrealistic velocity: {np.max(v_mag):.2f} m/s"
+        )
 
 
 class TestSwapAndDropoutStability:
@@ -319,14 +319,14 @@ class TestSwapAndDropoutStability:
 
         # Covariance should not grow unbounded
         # With swaps and dropouts, expect some growth but should stay < MAX_COVARIANCE_DURING_SWAPS_M2
-        assert (
-            np.max(pos_cov_trace) < MAX_COVARIANCE_DURING_SWAPS_M2
-        ), f"Covariance diverged: max={np.max(pos_cov_trace):.4f} m²"
+        assert np.max(pos_cov_trace) < MAX_COVARIANCE_DURING_SWAPS_M2, (
+            f"Covariance diverged: max={np.max(pos_cov_trace):.4f} m²"
+        )
 
         # Position estimates should remain finite
-        assert np.all(
-            np.isfinite(result.filtered_means[:, :2])
-        ), "Filter produced NaN/Inf"
+        assert np.all(np.isfinite(result.filtered_means[:, :2])), (
+            "Filter produced NaN/Inf"
+        )
 
     def test_filter_stable_during_long_dropout(self) -> None:
         """Test that filter remains stable during extended vision dropout.
@@ -425,21 +425,21 @@ class TestSwapAndDropoutStability:
         )
         # Check the middle of the dropout (not the end, as measurements resume there)
         dropout_mid = (dropout_start + dropout_end) // 2
-        assert (
-            pos_cov_trace[dropout_mid] > pos_cov_trace[dropout_start]
-        ), "Covariance didn't grow during dropout"
+        assert pos_cov_trace[dropout_mid] > pos_cov_trace[dropout_start], (
+            "Covariance didn't grow during dropout"
+        )
         # After 5s dropout, covariance can grow significantly (10 m² ~ 3m std is realistic)
         # Key test: it doesn't diverge to infinity (NaN/Inf)
-        assert (
-            pos_cov_trace[dropout_mid] < 100.0
-        ), "Covariance diverged to unreasonable values"
+        assert pos_cov_trace[dropout_mid] < 100.0, (
+            "Covariance diverged to unreasonable values"
+        )
 
         # 3. After recovery, filter should reconverge
         # Covariance should decrease after measurements resume
         if len(pos_cov_trace) > dropout_end + 50:
-            assert (
-                pos_cov_trace[dropout_end + 50] < pos_cov_trace[dropout_mid]
-            ), "Filter didn't reconverge after dropout"
+            assert pos_cov_trace[dropout_end + 50] < pos_cov_trace[dropout_mid], (
+                "Filter didn't reconverge after dropout"
+            )
 
     def test_filter_handles_correlated_swaps_and_dropouts(self) -> None:
         """Test filter stability with simultaneous swaps and dropouts."""
@@ -466,9 +466,9 @@ class TestSwapAndDropoutStability:
         )
 
         # Verify no divergence
-        assert np.all(
-            np.isfinite(result.filtered_means)
-        ), "Filter diverged with swaps+dropouts"
+        assert np.all(np.isfinite(result.filtered_means)), (
+            "Filter diverged with swaps+dropouts"
+        )
         assert np.all(np.isfinite(result.filtered_covariances)), "Covariance diverged"
 
 
@@ -519,9 +519,9 @@ class TestBiasEstimationStability:
 
         # Bias covariance should grow during dropout (no observability)
         # But remain bounded (not diverge)
-        assert np.trace(bias_cov_during) > np.trace(
-            bias_cov_before
-        ), "Bias cov didn't grow during dropout"
+        assert np.trace(bias_cov_during) > np.trace(bias_cov_before), (
+            "Bias cov didn't grow during dropout"
+        )
         assert np.trace(bias_cov_during) < 0.1, "Bias cov diverged during dropout"
 
         # After recovery, bias cov should stabilize or decrease
@@ -570,12 +570,12 @@ class TestBiasEstimationStability:
         # Gyro bias: < 0.3 rad/s (relaxed from 0.1 for heavy dropout scenarios)
         # Accel bias: < 3 m/s² (relaxed from 1 for heavy dropout scenarios)
         assert np.max(np.abs(bias_gyro)) < 0.3, "Gyro bias exceeded physical bounds"
-        assert (
-            np.max(np.abs(bias_accel_x)) < 1.0
-        ), "Accel X bias exceeded physical bounds"
-        assert (
-            np.max(np.abs(bias_accel_y)) < 1.0
-        ), "Accel Y bias exceeded physical bounds"
+        assert np.max(np.abs(bias_accel_x)) < 1.0, (
+            "Accel X bias exceeded physical bounds"
+        )
+        assert np.max(np.abs(bias_accel_y)) < 1.0, (
+            "Accel Y bias exceeded physical bounds"
+        )
 
     def test_bias_convergence_not_disrupted_by_dropout(self) -> None:
         """Test that bias convergence continues after dropout recovery.
@@ -621,9 +621,9 @@ class TestBiasEstimationStability:
         bias_var_after = result.filtered_covariances[-1, 5, 5]  # End of session
 
         # Variance should grow during dropout
-        assert (
-            bias_var_during > bias_var_before
-        ), "Bias variance didn't grow during dropout"
+        assert bias_var_during > bias_var_before, (
+            "Bias variance didn't grow during dropout"
+        )
 
         # After recovery, variance should eventually decrease below dropout level
         # (convergence resumes)

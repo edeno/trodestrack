@@ -182,18 +182,18 @@ def test_varying_confidence_across_frames() -> None:
     )
 
     # Filter should not diverge - all covariances finite
-    assert np.all(
-        np.isfinite(result.filtered_covariances)
-    ), "Filter diverged with varying confidence"
+    assert np.all(np.isfinite(result.filtered_covariances)), (
+        "Filter diverged with varying confidence"
+    )
 
     # Variance should remain bounded (not explode)
     variances = np.array([np.trace(P[:2, :2]) for P in result.filtered_covariances])
     assert np.max(variances) < 1.0, f"Variance exploded: max={np.max(variances):.4f} m²"
 
     # Filter should converge overall (final variance < initial variance)
-    assert (
-        variances[-1] < variances[0]
-    ), f"Filter should converge: initial={variances[0]:.6f}, final={variances[-1]:.6f}"
+    assert variances[-1] < variances[0], (
+        f"Filter should converge: initial={variances[0]:.6f}, final={variances[-1]:.6f}"
+    )
 
 
 def test_confidence_affects_log_likelihood() -> None:

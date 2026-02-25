@@ -333,9 +333,9 @@ def test_ukf_circular_motion_bias_convergence(sim_config, ukf_config):
     assert pos_rmse <= 0.02, f"Position RMSE {pos_rmse * 100:.2f} cm exceeds 2 cm"
     # Bias should converge to within 0.015 rad/s (~1.5% of typical gyro range)
     # Threshold relaxed from 0.01 to account for normal UKF variability
-    assert (
-        bias_rmse_late <= 0.015
-    ), f"Gyro bias RMSE {bias_rmse_late * 1000:.2f} mrad/s too large"
+    assert bias_rmse_late <= 0.015, (
+        f"Gyro bias RMSE {bias_rmse_late * 1000:.2f} mrad/s too large"
+    )
 
 
 # =============================================================================
@@ -390,9 +390,9 @@ def test_ukf_vs_ekf_accuracy_stationary(sim_config, ukf_config, ekf_config):
 
     # UKF should be at least as good as EKF (within 10% tolerance)
     # For nearly-linear stationary case, they should be very close
-    assert (
-        ukf_rmse <= ekf_rmse * 1.1
-    ), f"UKF RMSE {ukf_rmse * 100:.2f} cm worse than EKF {ekf_rmse * 100:.2f} cm"
+    assert ukf_rmse <= ekf_rmse * 1.1, (
+        f"UKF RMSE {ukf_rmse * 100:.2f} cm worse than EKF {ekf_rmse * 100:.2f} cm"
+    )
 
 
 def test_ukf_vs_ekf_accuracy_circular(sim_config, ukf_config, ekf_config):
@@ -459,12 +459,12 @@ def test_ukf_vs_ekf_accuracy_circular(sim_config, ukf_config, ekf_config):
 
     # UKF should handle nonlinearity reasonably well compared to EKF
     # Allow 15% tolerance since both filters are good and differences are small
-    assert (
-        ukf_pos_rmse <= ekf_pos_rmse * 1.15
-    ), f"UKF pos RMSE {ukf_pos_rmse * 100:.2f} cm worse than EKF {ekf_pos_rmse * 100:.2f} cm"
-    assert (
-        ukf_heading_rmse <= ekf_heading_rmse * 1.15
-    ), f"UKF heading RMSE {np.degrees(ukf_heading_rmse):.1f}° worse than EKF {np.degrees(ekf_heading_rmse):.1f}°"
+    assert ukf_pos_rmse <= ekf_pos_rmse * 1.15, (
+        f"UKF pos RMSE {ukf_pos_rmse * 100:.2f} cm worse than EKF {ekf_pos_rmse * 100:.2f} cm"
+    )
+    assert ukf_heading_rmse <= ekf_heading_rmse * 1.15, (
+        f"UKF heading RMSE {np.degrees(ukf_heading_rmse):.1f}° worse than EKF {np.degrees(ekf_heading_rmse):.1f}°"
+    )
 
 
 def test_ukf_marginal_loglik_computation(sim_config, ukf_config):
@@ -495,9 +495,9 @@ def test_ukf_marginal_loglik_computation(sim_config, ukf_config):
     assert np.isfinite(result.marginal_loglik), "Marginal log-likelihood is not finite"
     # Log-likelihood should be reasonable (can be positive due to normalization)
     # Reasonable range for 300 timesteps with good measurements
-    assert (
-        -1000 < result.marginal_loglik < 10000
-    ), f"Marginal log-likelihood {result.marginal_loglik} outside reasonable range"
+    assert -1000 < result.marginal_loglik < 10000, (
+        f"Marginal log-likelihood {result.marginal_loglik} outside reasonable range"
+    )
 
 
 def test_ukf_heading_respects_camera_mask(ukf_config):
@@ -542,9 +542,9 @@ def test_ukf_heading_respects_camera_mask(ukf_config):
         config=config_with_heading,
         layout=LAYOUT_2D_FULL,
     )
-    assert np.abs(state_updated.mean[4]) < np.abs(
-        base_state.mean[4]
-    ), "Heading should move toward measurement when observation flag is true"
-    assert (
-        float(log_lik_used) < 0.0
-    ), "Valid measurement should produce negative log-likelihood"
+    assert np.abs(state_updated.mean[4]) < np.abs(base_state.mean[4]), (
+        "Heading should move toward measurement when observation flag is true"
+    )
+    assert float(log_lik_used) < 0.0, (
+        "Valid measurement should produce negative log-likelihood"
+    )

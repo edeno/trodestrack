@@ -276,9 +276,9 @@ def test_ukf_circular_mean_near_wrap_point():
     # With circular mean fix, heading RMSE should be reasonable (<10°)
     # Without fix, circular mean error could cause large biases
     print(f"UKF Heading RMSE: {heading_rmse:.2f}°")
-    assert (
-        heading_rmse < 10.0
-    ), f"Heading RMSE too high: {heading_rmse:.2f}° (circular mean bug?)"
+    assert heading_rmse < 10.0, (
+        f"Heading RMSE too high: {heading_rmse:.2f}° (circular mean bug?)"
+    )
 
     # Check that heading estimates stay bounded in [-π, π]
     assert np.all(heading_est >= -np.pi - 0.01)  # Small tolerance for numerical error

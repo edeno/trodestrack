@@ -52,12 +52,12 @@ def test_filter_core_config_defaults_match_existing_configs() -> None:
     ]
 
     for field in shared_fields:
-        assert getattr(core, field) == getattr(
-            ekf, field
-        ), f"{field} mismatch between FilterCoreConfig and EKFConfig"
-        assert getattr(core, field) == getattr(
-            ukf, field
-        ), f"{field} mismatch between FilterCoreConfig and UKFConfig"
+        assert getattr(core, field) == getattr(ekf, field), (
+            f"{field} mismatch between FilterCoreConfig and EKFConfig"
+        )
+        assert getattr(core, field) == getattr(ukf, field), (
+            f"{field} mismatch between FilterCoreConfig and UKFConfig"
+        )
 
 
 def test_filter_state_namedtuple_parity() -> None:

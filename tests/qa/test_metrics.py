@@ -220,9 +220,9 @@ def test_nees_consistent_filter():
     # Mean NEES should be approximately equal to state dimension
     mean_nees = np.mean(nees)
     # Allow generous tolerance due to finite sample size
-    assert (
-        3.0 < mean_nees < 7.0
-    ), f"Mean NEES {mean_nees:.2f} outside expected range [3, 7]"
+    assert 3.0 < mean_nees < 7.0, (
+        f"Mean NEES {mean_nees:.2f} outside expected range [3, 7]"
+    )
 
 
 def test_nees_overconfident_filter():
@@ -244,9 +244,9 @@ def test_nees_overconfident_filter():
 
     # NEES should be much higher than state_dim (overconfident)
     mean_nees = np.mean(nees)
-    assert (
-        mean_nees > 10.0
-    ), f"Expected high NEES for overconfident filter, got {mean_nees:.2f}"
+    assert mean_nees > 10.0, (
+        f"Expected high NEES for overconfident filter, got {mean_nees:.2f}"
+    )
 
 
 def test_nees_shape_mismatch():
@@ -310,16 +310,16 @@ def test_nees_with_angle_wrapping():
     mean_nees = np.mean(nees)
     max_nees = np.max(nees)
 
-    assert (
-        mean_nees < 1.0
-    ), f"Mean NEES {mean_nees:.2f} too high (should be ~0 for perfect tracking)"
+    assert mean_nees < 1.0, (
+        f"Mean NEES {mean_nees:.2f} too high (should be ~0 for perfect tracking)"
+    )
     assert max_nees < 2.0, f"Max NEES {max_nees:.2f} too high (bug: angle not wrapped)"
 
     # The bug would cause middle sample to have NEES ≈ 3948 (from 360° error)
     # With fix, middle sample should have NEES ≈ 0
-    assert (
-        nees[1] < 1.0
-    ), f"Middle sample NEES {nees[1]:.2f} indicates angle wrapping bug"
+    assert nees[1] < 1.0, (
+        f"Middle sample NEES {nees[1]:.2f} indicates angle wrapping bug"
+    )
 
 
 def test_nees_with_layout_auto_detection():
@@ -371,9 +371,9 @@ def test_nees_with_layout_auto_detection():
     assert max_nees < 2.0, f"Max NEES {max_nees:.2f} too high"
 
     # Middle sample with angle wrapping should still have NEES ≈ 0
-    assert (
-        nees[1] < 1.0
-    ), f"Middle sample NEES {nees[1]:.2f} indicates layout didn't work"
+    assert nees[1] < 1.0, (
+        f"Middle sample NEES {nees[1]:.2f} indicates layout didn't work"
+    )
 
 
 # =============================================================================
@@ -396,9 +396,9 @@ def test_nis_consistent_filter():
 
     # Mean NIS should be approximately equal to measurement dimension
     mean_nis = np.mean(nis)
-    assert (
-        1.0 < mean_nis < 3.0
-    ), f"Mean NIS {mean_nis:.2f} outside expected range [1, 3]"
+    assert 1.0 < mean_nis < 3.0, (
+        f"Mean NIS {mean_nis:.2f} outside expected range [1, 3]"
+    )
 
 
 def test_nis_singular_covariance():

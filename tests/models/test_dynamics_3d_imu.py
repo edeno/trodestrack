@@ -123,9 +123,9 @@ def test_dynamics_function_vertical_acceleration():
     vz_next = next_state[layout.vel_idx[2]]
     expected_vz = 2.0 * dt
 
-    assert jnp.allclose(
-        vz_next, expected_vz, atol=1e-6
-    ), f"Expected vz={expected_vz}, got {vz_next}"
+    assert jnp.allclose(vz_next, expected_vz, atol=1e-6), (
+        f"Expected vz={expected_vz}, got {vz_next}"
+    )
 
     # Horizontal velocities should remain zero
     vx_next = next_state[layout.vel_idx[0]]
@@ -171,9 +171,9 @@ def test_dynamics_function_body_to_world_rotation():
     vz_next = next_state[layout.vel_idx[2]]
 
     assert jnp.abs(vx_next) < 1e-6, f"vx should be ~0, got {vx_next}"
-    assert jnp.allclose(
-        vy_next, 1.0 * dt, atol=1e-6
-    ), f"vy should be ~{1.0 * dt}, got {vy_next}"
+    assert jnp.allclose(vy_next, 1.0 * dt, atol=1e-6), (
+        f"vy should be ~{1.0 * dt}, got {vy_next}"
+    )
     assert jnp.abs(vz_next) < 1e-6, f"vz should be ~0, got {vz_next}"
 
 
@@ -247,9 +247,9 @@ def test_dynamics_function_2d_imu_backward_compatibility():
     vx_next = next_state[layout.vel_idx[0]]
     expected_vx = 1.0 * dt  # ax=1.0 m/s²
 
-    assert jnp.allclose(
-        vx_next, expected_vx, atol=1e-6
-    ), f"Expected vx={expected_vx}, got {vx_next}"
+    assert jnp.allclose(vx_next, expected_vx, atol=1e-6), (
+        f"Expected vx={expected_vx}, got {vx_next}"
+    )
 
 
 def test_dynamics_function_vision_only_mode():
@@ -276,9 +276,9 @@ def test_dynamics_function_vision_only_mode():
     assert next_state.shape == (5,)
 
     # Verify no NaNs or Infs (basic sanity check)
-    assert jnp.all(
-        jnp.isfinite(next_state)
-    ), "Vision-only mode should produce finite state values"
+    assert jnp.all(jnp.isfinite(next_state)), (
+        "Vision-only mode should produce finite state values"
+    )
 
 
 # =============================================================================
@@ -334,9 +334,9 @@ def test_dynamics_function_gyro_bias_integration():
     theta_next = next_state[layout.heading_idx]
     expected_theta = 0.4 * dt
 
-    assert jnp.allclose(
-        theta_next, expected_theta, atol=1e-6
-    ), f"Expected θ={expected_theta}, got {theta_next}"
+    assert jnp.allclose(theta_next, expected_theta, atol=1e-6), (
+        f"Expected θ={expected_theta}, got {theta_next}"
+    )
 
 
 def test_dynamics_function_position_velocity_coupling():
@@ -371,12 +371,12 @@ def test_dynamics_function_position_velocity_coupling():
     expected_x = 1.0 * dt + 0.5 * 0.5 * dt**2
     expected_y = 2.0 * dt + 0.5 * 1.0 * dt**2
 
-    assert jnp.allclose(
-        x_next, expected_x, atol=1e-6
-    ), f"Expected x={expected_x}, got {x_next}"
-    assert jnp.allclose(
-        y_next, expected_y, atol=1e-6
-    ), f"Expected y={expected_y}, got {y_next}"
+    assert jnp.allclose(x_next, expected_x, atol=1e-6), (
+        f"Expected x={expected_x}, got {x_next}"
+    )
+    assert jnp.allclose(y_next, expected_y, atol=1e-6), (
+        f"Expected y={expected_y}, got {y_next}"
+    )
 
 
 # =============================================================================
@@ -413,9 +413,9 @@ def test_dynamics_function_no_nans_with_extreme_inputs():
     next_state = dynamics_function(state, imu, dt, damping, layout)
 
     # Verify no NaNs or Infs
-    assert jnp.all(
-        jnp.isfinite(next_state)
-    ), "dynamics_function produced NaN or Inf with extreme inputs"
+    assert jnp.all(jnp.isfinite(next_state)), (
+        "dynamics_function produced NaN or Inf with extreme inputs"
+    )
 
 
 def test_dynamics_function_deterministic():
@@ -432,6 +432,6 @@ def test_dynamics_function_deterministic():
     result2 = dynamics_function(state, imu, dt, damping, layout)
 
     # Should be bit-for-bit identical (deterministic)
-    assert jnp.array_equal(
-        result1, result2
-    ), "dynamics_function should be deterministic"
+    assert jnp.array_equal(result1, result2), (
+        "dynamics_function should be deterministic"
+    )

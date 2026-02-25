@@ -181,9 +181,9 @@ class TestPersistentLEDSwaps:
 
         # Different seeds should produce different patterns
         # (with high probability given the parameters)
-        assert not np.array_equal(
-            sim1["swap_applied"], sim2["swap_applied"]
-        ), "Different seeds should produce different swap patterns"
+        assert not np.array_equal(sim1["swap_applied"], sim2["swap_applied"]), (
+            "Different seeds should produce different swap patterns"
+        )
 
     def test_zero_swap_rate_produces_no_swaps(self):
         """Verify that led_swap_rate=0 produces no swaps in persistent mode."""

@@ -56,7 +56,9 @@ def compute_position_rmse(
 
         >>> # With validity mask
         >>> valid_mask = np.array([True, False])  # Ignore second sample
-        >>> rmse_masked = compute_position_rmse(true_pos, est_pos, valid_mask=valid_mask)
+        >>> rmse_masked = compute_position_rmse(
+        ...     true_pos, est_pos, valid_mask=valid_mask
+        ... )
         >>> print(f"{rmse_masked:.4f} m")
         0.1414 m
     """
@@ -771,7 +773,9 @@ def compute_dropout_drift(
     Example:
         >>> # Simulate 10s trajectory with 5s dropout at t=3-8s
         >>> t = np.linspace(0, 10, 100)
-        >>> positions = np.column_stack([t * 0.1, np.zeros_like(t)])  # Moving at 0.1 m/s
+        >>> positions = np.column_stack(
+        ...     [t * 0.1, np.zeros_like(t)]
+        ... )  # Moving at 0.1 m/s
         >>> valid_mask = (t < 3.0) | (t >= 8.0)  # Dropout from 3-8s
         >>> result = compute_dropout_drift(positions, valid_mask, t, min_duration_s=4.0)
         >>> # Drift should be ~0.5 m (5s * 0.1 m/s)

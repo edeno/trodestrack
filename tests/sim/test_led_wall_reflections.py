@@ -101,9 +101,9 @@ class TestLEDReflectionGeometry:
         n_reflect_low = np.sum(sim_low["led_reflection_applied"])
         n_reflect_high = np.sum(sim_high["led_reflection_applied"])
 
-        assert (
-            n_reflect_high > n_reflect_low
-        ), "Higher prob should cause more reflections"
+        assert n_reflect_high > n_reflect_low, (
+            "Higher prob should cause more reflections"
+        )
 
     def test_reflection_distance_threshold(self):
         """Reflections only occur within configured distance from walls."""
@@ -133,9 +133,9 @@ class TestLEDReflectionGeometry:
             dist_rat = min(
                 truth_x, cfg.arena_w - truth_x, truth_y, cfg.arena_h - truth_y
             )
-            assert (
-                dist_rat <= cfg.led_wall_reflection_distance
-            ), f"Reflection occurred when rat was {dist_rat:.2f}m from wall (threshold={cfg.led_wall_reflection_distance})"
+            assert dist_rat <= cfg.led_wall_reflection_distance, (
+                f"Reflection occurred when rat was {dist_rat:.2f}m from wall (threshold={cfg.led_wall_reflection_distance})"
+            )
 
 
 class TestReflectionAppliedMask:
@@ -194,9 +194,9 @@ class TestReflectionInteractionWithDropouts:
         # Reflection can only happen if at least one LED is visible
         # (Otherwise the position would be NaN anyway)
         for idx in np.where(reflected)[0]:
-            assert (
-                mask_led1[idx] or mask_led2[idx]
-            ), f"Frame {idx}: reflection applied but both LEDs dropped"
+            assert mask_led1[idx] or mask_led2[idx], (
+                f"Frame {idx}: reflection applied but both LEDs dropped"
+            )
 
     def test_nan_positions_unchanged_by_reflections(self):
         """NaN LED positions (dropouts) should remain NaN after reflections."""

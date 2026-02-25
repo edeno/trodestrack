@@ -333,9 +333,9 @@ def test_filter_3d_imu_gravity_compensation_at_rest():
     vz_late = vz[half:]
 
     # Mean should be close to zero (gravity compensated)
-    assert (
-        np.abs(np.mean(vz_late)) < 0.05
-    ), f"vz mean {np.mean(vz_late):.4f} should be ~0"
+    assert np.abs(np.mean(vz_late)) < 0.05, (
+        f"vz mean {np.mean(vz_late):.4f} should be ~0"
+    )
 
     # Std should be small (no vertical motion)
     assert np.std(vz_late) < 0.1, f"vz std {np.std(vz_late):.4f} should be small"
@@ -396,9 +396,9 @@ def test_filter_3d_imu_detects_vertical_acceleration():
     during_jump = vz[(t_cam_arr >= 1.0) & (t_cam_arr < 1.6)]
 
     # Should show positive velocity (accelerating upward)
-    assert (
-        np.mean(during_jump) > 0.2
-    ), f"vz during jump {np.mean(during_jump):.3f} should be positive"
+    assert np.mean(during_jump) > 0.2, (
+        f"vz during jump {np.mean(during_jump):.3f} should be positive"
+    )
 
 
 def test_filter_3d_imu_reduced_drift_during_occlusion():
@@ -505,9 +505,9 @@ def test_filter_3d_imu_reduced_drift_during_occlusion():
 
     # 3D should be ≤ 2D (or at least not significantly worse)
     # Allow small tolerance for numerical differences
-    assert (
-        drift_3d <= drift_2d * 1.1
-    ), f"3D IMU drift {drift_3d:.3f}m should not be worse than 2D {drift_2d:.3f}m"
+    assert drift_3d <= drift_2d * 1.1, (
+        f"3D IMU drift {drift_3d:.3f}m should not be worse than 2D {drift_2d:.3f}m"
+    )
 
 
 def test_filter_3d_imu_backward_compatible_with_2d():

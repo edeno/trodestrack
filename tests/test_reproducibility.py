@@ -200,7 +200,9 @@ def test_uv_lock_exists():
     """Verify that uv.lock exists for version pinning."""
     # Check from project root
     lock_file = Path(__file__).parent.parent / "uv.lock"
-    assert lock_file.exists(), "uv.lock file not found. Run 'uv sync' to generate lock file for reproducibility."
+    assert lock_file.exists(), (
+        "uv.lock file not found. Run 'uv sync' to generate lock file for reproducibility."
+    )
 
     # Verify it's not empty
     assert lock_file.stat().st_size > 0, "uv.lock file is empty"
@@ -210,13 +212,15 @@ def test_python_version_file_exists():
     """Verify that .python-version exists for Python version pinning."""
     # Check from project root
     version_file = Path(__file__).parent.parent / ".python-version"
-    assert version_file.exists(), ".python-version file not found. This file pins the Python version for reproducibility."
+    assert version_file.exists(), (
+        ".python-version file not found. This file pins the Python version for reproducibility."
+    )
 
     # Read and verify format
     version = version_file.read_text().strip()
-    assert version.startswith(
-        "3."
-    ), f"Python version should start with '3.', got: {version}"
+    assert version.startswith("3."), (
+        f"Python version should start with '3.', got: {version}"
+    )
 
 
 def test_ci_workflow_exists():

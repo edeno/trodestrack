@@ -64,9 +64,9 @@ class TestAnisotropicDragBasics:
 
         # Forward velocity should have decayed, but still be significant
         assert v_fwd_final < v_fwd_initial, "Forward velocity should decay"
-        assert (
-            v_fwd_final > 0.1 * v_fwd_initial
-        ), "Forward velocity should not fully decay in 5s"
+        assert v_fwd_final > 0.1 * v_fwd_initial, (
+            "Forward velocity should not fully decay in 5s"
+        )
 
     def test_pure_lateral_motion_decays_faster(self):
         """Verify pure lateral motion decays faster than pure forward motion."""
@@ -163,9 +163,9 @@ class TestAnisotropicDragBasics:
 
         # Forward component should have decayed but still be significant
         # Relax threshold - with drag_fwd=0.2, after 2s: v_final ≈ v0 * exp(-0.4) ≈ 0.67 * v0
-        assert (
-            v_fwd_final_body > 0.05
-        ), f"Forward velocity should persist: v_fwd_final={v_fwd_final_body:.4f}"
+        assert v_fwd_final_body > 0.05, (
+            f"Forward velocity should persist: v_fwd_final={v_fwd_final_body:.4f}"
+        )
 
 
 class TestAnisotropicDragWithRotation:
@@ -294,9 +294,9 @@ class TestBackwardCompatibility:
         # Check that decay follows exponential (correlation > 0.90)
         # Use first 200 samples to avoid numerical noise at low speeds
         correlation = np.corrcoef(speed[:200], expected_decay[:200])[0, 1]
-        assert (
-            correlation > 0.90
-        ), f"Isotropic drag should produce exponential decay, correlation={correlation:.3f}"
+        assert correlation > 0.90, (
+            f"Isotropic drag should produce exponential decay, correlation={correlation:.3f}"
+        )
 
     def test_legacy_vel_drag_parameter_still_works(self):
         """Verify old vel_drag parameter works (sets both drag_fwd and drag_lat)."""
@@ -325,9 +325,9 @@ class TestBackwardCompatibility:
 
         # Check exponential decay via correlation (more robust than absolute error)
         correlation = np.corrcoef(vx[:200], expected_vx[:200])[0, 1]
-        assert (
-            correlation > 0.98
-        ), f"Legacy vel_drag should produce exponential decay, correlation={correlation:.3f}"
+        assert correlation > 0.98, (
+            f"Legacy vel_drag should produce exponential decay, correlation={correlation:.3f}"
+        )
 
 
 class TestDragPhysicalRealism:
@@ -374,9 +374,9 @@ class TestDragPhysicalRealism:
             # Higher drag -> more decay
             decay_fraction = speed_final / v0
             # With drag_fwd, expect significant decay over 3s
-            assert (
-                decay_fraction < 0.8
-            ), f"{description}: Should have significant decay: decay_fraction={decay_fraction:.3f}"
+            assert decay_fraction < 0.8, (
+                f"{description}: Should have significant decay: decay_fraction={decay_fraction:.3f}"
+            )
 
     def test_anisotropic_drag_energy_dissipation(self):
         """Verify anisotropic drag dissipates energy correctly."""
@@ -539,6 +539,6 @@ class TestDragConfiguration:
 
         # With 50x drag, lateral motion should die out very quickly
         vy_final = np.abs(vy[-100:]).mean()
-        assert (
-            vy_final < 0.01
-        ), f"Extreme lateral drag should kill lateral motion: vy_final={vy_final:.4f}"
+        assert vy_final < 0.01, (
+            f"Extreme lateral drag should kill lateral motion: vy_final={vy_final:.4f}"
+        )

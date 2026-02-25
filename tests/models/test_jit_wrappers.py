@@ -34,36 +34,36 @@ def test_hot_path_modules_expose_jit_metadata(
     """Modules must expose compiled JIT entry points and metadata."""
     module = importlib.import_module(module_name)
 
-    assert hasattr(
-        module, jit_attr
-    ), f"{module_name} should define compiled JIT helper `{jit_attr}` for hot path execution"
-    assert callable(
-        getattr(module, jit_attr)
-    ), f"{module_name}.{jit_attr} should be callable"
+    assert hasattr(module, jit_attr), (
+        f"{module_name} should define compiled JIT helper `{jit_attr}` for hot path execution"
+    )
+    assert callable(getattr(module, jit_attr)), (
+        f"{module_name}.{jit_attr} should be callable"
+    )
 
-    assert hasattr(
-        module, static_attr
-    ), f"{module_name} should declare static argnames via `{static_attr}`"
+    assert hasattr(module, static_attr), (
+        f"{module_name} should declare static argnames via `{static_attr}`"
+    )
     static_argnames = getattr(module, static_attr)
-    assert (
-        "layout" in static_argnames
-    ), f"{module_name} must treat `layout` as static arg; found {static_argnames!r}"
+    assert "layout" in static_argnames, (
+        f"{module_name} must treat `layout` as static arg; found {static_argnames!r}"
+    )
     if module_name == "trodestrack.models.ekf":
-        assert (
-            "config_for_filter" in static_argnames
-        ), f"{module_name} must treat config as static; got {static_argnames!r}"
+        assert "config_for_filter" in static_argnames, (
+            f"{module_name} must treat config as static; got {static_argnames!r}"
+        )
     if module_name == "trodestrack.runtime.offline":
-        assert (
-            "ekf_config" in static_argnames
-        ), f"{module_name} must treat ekf_config as static; got {static_argnames!r}"
-        assert (
-            "num_iter" in static_argnames
-        ), f"{module_name} must treat num_iter as static; got {static_argnames!r}"
+        assert "ekf_config" in static_argnames, (
+            f"{module_name} must treat ekf_config as static; got {static_argnames!r}"
+        )
+        assert "num_iter" in static_argnames, (
+            f"{module_name} must treat num_iter as static; got {static_argnames!r}"
+        )
 
-    assert hasattr(
-        module, donate_attr
-    ), f"{module_name} should declare donated argnums via `{donate_attr}`"
+    assert hasattr(module, donate_attr), (
+        f"{module_name} should declare donated argnums via `{donate_attr}`"
+    )
     donate_argnums = getattr(module, donate_attr)
-    assert isinstance(
-        donate_argnums, tuple
-    ), f"{module_name}.{donate_attr} must be a tuple of donated argument indices"
+    assert isinstance(donate_argnums, tuple), (
+        f"{module_name}.{donate_attr} must be a tuple of donated argument indices"
+    )

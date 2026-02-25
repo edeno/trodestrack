@@ -263,18 +263,18 @@ def test_30min_session_accuracy():
     print(f"  Camera frames: {len(pos_est)}")
 
     # Validate PRD requirements
-    assert (
-        pos_rmse_m <= PRD_POSITION_RMSE_M
-    ), f"Position RMSE {pos_rmse_m:.4f} m exceeds PRD requirement of {PRD_POSITION_RMSE_M} m"
+    assert pos_rmse_m <= PRD_POSITION_RMSE_M, (
+        f"Position RMSE {pos_rmse_m:.4f} m exceeds PRD requirement of {PRD_POSITION_RMSE_M} m"
+    )
 
     assert vel_rmse_m_s <= PRD_VELOCITY_RMSE_M_S, (
         f"Velocity RMSE {vel_rmse_m_s:.4f} m/s exceeds PRD requirement "
         f"of {PRD_VELOCITY_RMSE_M_S} m/s"
     )
 
-    assert (
-        heading_rmse_deg <= PRD_HEADING_RMSE_DEG
-    ), f"Heading RMSE {heading_rmse_deg:.3f}° exceeds PRD requirement of {PRD_HEADING_RMSE_DEG}°"
+    assert heading_rmse_deg <= PRD_HEADING_RMSE_DEG, (
+        f"Heading RMSE {heading_rmse_deg:.3f}° exceeds PRD requirement of {PRD_HEADING_RMSE_DEG}°"
+    )
 
 
 # =============================================================================

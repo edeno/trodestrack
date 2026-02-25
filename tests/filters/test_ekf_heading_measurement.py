@@ -284,18 +284,18 @@ def test_heading_update_respects_camera_mask() -> None:
         np.array(state.cov),
         err_msg="Covariance should remain unchanged when heading update is disabled.",
     )
-    assert log_lik_dropout == pytest.approx(
-        0.0
-    ), "Masked heading update should yield zero log-likelihood."
+    assert log_lik_dropout == pytest.approx(0.0), (
+        "Masked heading update should yield zero log-likelihood."
+    )
 
     # Ensure valid observation produced a non-trivial update (mean or covariance change)
     assert not np.allclose(
         np.array(state_valid.mean),
         np.array(state.mean),
     ), "Valid heading observation should update the state mean."
-    assert log_lik_valid != pytest.approx(
-        0.0
-    ), "Valid heading observation should produce non-zero log-likelihood."
+    assert log_lik_valid != pytest.approx(0.0), (
+        "Valid heading observation should produce non-zero log-likelihood."
+    )
 
 
 def test_heading_update_handles_unknown_led_distance() -> None:
@@ -329,9 +329,9 @@ def test_heading_update_handles_unknown_led_distance() -> None:
         np.array(updated_state.mean),
         np.array(state.mean),
     ), "Heading update should run even when led_distance is None."
-    assert (
-        log_lik != pytest.approx(0.0)
-    ), "Heading update should produce a finite log-likelihood when using observed spacing."
+    assert log_lik != pytest.approx(0.0), (
+        "Heading update should produce a finite log-likelihood when using observed spacing."
+    )
 
 
 def test_auto_detection_estimates_spacing() -> None:
@@ -412,9 +412,9 @@ def test_auto_detection_estimates_spacing() -> None:
     pos_errors = np.linalg.norm(
         result.filtered_means[:, :2] - X_truth_at_cam[:, :2], axis=1
     )
-    assert (
-        np.mean(pos_errors) < 0.05
-    ), "Filter should converge with auto-detected spacing"
+    assert np.mean(pos_errors) < 0.05, (
+        "Filter should converge with auto-detected spacing"
+    )
 
 
 def test_single_led_disables_heading_automatically() -> None:
@@ -479,9 +479,9 @@ def test_single_led_disables_heading_automatically() -> None:
     # Heading uncertainty should be higher than if both LEDs were available
     # (We can't compare directly, but we can check it's reasonable)
     heading_var = result.filtered_covariances[:, 4, 4]
-    assert np.all(
-        np.isfinite(heading_var)
-    ), "Heading variance should be finite (no NaN/inf)"
+    assert np.all(np.isfinite(heading_var)), (
+        "Heading variance should be finite (no NaN/inf)"
+    )
     assert np.all(heading_var > 0), "Heading variance should remain positive"
     assert np.all(heading_var < 1.0), "Heading variance should not explode"
 

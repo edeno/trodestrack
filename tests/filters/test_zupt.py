@@ -101,14 +101,14 @@ class TestZUPTStationary:
 
         # ZUPT should reduce velocity error significantly
         # Expect at least 30% improvement
-        assert (
-            vel_rmse_with_zupt < vel_rmse_no_zupt * 0.7
-        ), f"ZUPT did not reduce velocity RMSE: {vel_rmse_with_zupt:.4f} vs {vel_rmse_no_zupt:.4f}"
+        assert vel_rmse_with_zupt < vel_rmse_no_zupt * 0.7, (
+            f"ZUPT did not reduce velocity RMSE: {vel_rmse_with_zupt:.4f} vs {vel_rmse_no_zupt:.4f}"
+        )
 
         # ZUPT should achieve very low velocity error (< 2 cm/s)
-        assert (
-            vel_rmse_with_zupt < 0.02
-        ), f"ZUPT velocity RMSE too high: {vel_rmse_with_zupt:.4f} m/s"
+        assert vel_rmse_with_zupt < 0.02, (
+            f"ZUPT velocity RMSE too high: {vel_rmse_with_zupt:.4f} m/s"
+        )
 
     def test_zupt_reduces_velocity_uncertainty(self, stationary_sim):
         """ZUPT should reduce velocity covariance during stationary period."""
@@ -134,9 +134,9 @@ class TestZUPTStationary:
 
         # After 3 seconds, velocity std should be small (< 3 cm/s)
         idx_3s = int(3.0 / (1 / 30))
-        assert jnp.all(
-            vel_std[idx_3s] < 0.03
-        ), f"Velocity std too high after 3s: {vel_std[idx_3s]}"
+        assert jnp.all(vel_std[idx_3s] < 0.03), (
+            f"Velocity std too high after 3s: {vel_std[idx_3s]}"
+        )
 
         # Velocity std should decrease over time (ZUPT is working)
         assert vel_std[-1, 0] < vel_std[idx_3s, 0], "Velocity std did not decrease"
@@ -189,9 +189,9 @@ class TestZUPTMoving:
         # ZUPT should NOT reduce velocity estimates to zero
         # Mean velocity should be close to 0.2 m/s
         mean_vx = jnp.mean(result.filtered_means[30:, 2])  # After convergence
-        assert (
-            jnp.abs(mean_vx - 0.2) < 0.05
-        ), f"ZUPT incorrectly activated during motion: mean vx = {mean_vx:.3f}"
+        assert jnp.abs(mean_vx - 0.2) < 0.05, (
+            f"ZUPT incorrectly activated during motion: mean vx = {mean_vx:.3f}"
+        )
 
 
 class TestZUPTNumericalStability:
@@ -233,9 +233,9 @@ class TestZUPTNumericalStability:
         truth_vel = np.zeros((len(sim["t_cam_exp"]), 2))
         vel_rmse = compute_velocity_rmse(result.filtered_means[:, 2:4], truth_vel)
 
-        assert (
-            vel_rmse < 0.03
-        ), f"ZUPT failed during vision dropout: vel RMSE = {vel_rmse:.4f} m/s"
+        assert vel_rmse < 0.03, (
+            f"ZUPT failed during vision dropout: vel RMSE = {vel_rmse:.4f} m/s"
+        )
 
     def test_zupt_jax_jit_compatible(self):
         """ZUPT implementation should be JAX JIT compatible (no Python branching)."""
@@ -350,12 +350,12 @@ class TestUKFZUPT:
             result_with_zupt.filtered_means[:, 2:4], truth_vel
         )
 
-        assert (
-            vel_rmse_with_zupt < vel_rmse_no_zupt * 0.7
-        ), f"UKF ZUPT did not reduce velocity error: {vel_rmse_with_zupt:.4f} vs {vel_rmse_no_zupt:.4f}"
-        assert (
-            vel_rmse_with_zupt < 0.02
-        ), f"UKF ZUPT velocity error too high: {vel_rmse_with_zupt:.4f} m/s"
+        assert vel_rmse_with_zupt < vel_rmse_no_zupt * 0.7, (
+            f"UKF ZUPT did not reduce velocity error: {vel_rmse_with_zupt:.4f} vs {vel_rmse_no_zupt:.4f}"
+        )
+        assert vel_rmse_with_zupt < 0.02, (
+            f"UKF ZUPT velocity error too high: {vel_rmse_with_zupt:.4f} m/s"
+        )
 
     def test_zupt_does_not_activate_during_motion(self):
         """UKF ZUPT should stay inactive when velocity exceeds threshold."""
@@ -381,6 +381,6 @@ class TestUKFZUPT:
         assert vel_rmse < 0.10, f"UKF velocity RMSE too high: {vel_rmse:.4f} m/s"
 
         mean_vx = jnp.mean(result.filtered_means[30:, 2])
-        assert (
-            jnp.abs(mean_vx - 0.2) < 0.05
-        ), f"UKF ZUPT incorrectly suppressed motion: mean vx = {mean_vx:.3f}"
+        assert jnp.abs(mean_vx - 0.2) < 0.05, (
+            f"UKF ZUPT incorrectly suppressed motion: mean vx = {mean_vx:.3f}"
+        )

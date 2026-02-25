@@ -84,9 +84,9 @@ def test_predict_step_wraps_heading():
     # Expected unwrapped value: π - 0.1 + 0.2 = π + 0.1
     # Wrapped: -(π - 0.1) ≈ -3.04
     expected_wrapped = wrap_angle((jnp.pi - 0.1) + omega_z * dt)
-    assert jnp.allclose(
-        theta_pred, expected_wrapped, atol=0.05
-    ), f"Heading {theta_pred} should be close to {expected_wrapped}"
+    assert jnp.allclose(theta_pred, expected_wrapped, atol=0.05), (
+        f"Heading {theta_pred} should be close to {expected_wrapped}"
+    )
 
 
 def test_predict_step_wraps_heading_negative():
@@ -158,9 +158,9 @@ def test_update_step_wraps_heading():
     # the filter should pull it toward 0, but it might stay near ±π due to
     # the ambiguity in wrapped angles and measurement uncertainty.
     # The key test is that it's wrapped to valid range.
-    assert (
-        jnp.abs(theta_upd) <= jnp.pi
-    ), f"Heading {theta_upd} should be in valid range after wrapping"
+    assert jnp.abs(theta_upd) <= jnp.pi, (
+        f"Heading {theta_upd} should be in valid range after wrapping"
+    )
 
 
 def test_heading_continuity_across_2pi():
@@ -182,9 +182,9 @@ def test_heading_continuity_across_2pi():
 
     # Should wrap to negative side: (π - 0.05) + 0.1 = π + 0.05 -> wraps to -(π - 0.05)
     expected = wrap_angle((jnp.pi - 0.05) + 0.1)
-    assert jnp.allclose(
-        theta_pred, expected, atol=0.01
-    ), f"Heading {theta_pred} should wrap correctly to {expected}"
+    assert jnp.allclose(theta_pred, expected, atol=0.01), (
+        f"Heading {theta_pred} should wrap correctly to {expected}"
+    )
 
     # Check continuity: difference should be ~0.1 rad (unwrapped)
     # but after wrapping, the wrapped difference might be large

@@ -76,9 +76,9 @@ def test_gating_accepts_good_measurement(ekf_config_with_gating, initial_state):
 
     # State should be updated (measurement accepted)
     # Allow some tolerance since update might be small if observation = prediction
-    assert not jnp.allclose(
-        state_upd.mean, initial_state.mean, atol=1e-8
-    ), "Good measurement should update state (covariance or heading change)"
+    assert not jnp.allclose(state_upd.mean, initial_state.mean, atol=1e-8), (
+        "Good measurement should update state (covariance or heading change)"
+    )
 
     # Log-likelihood should be non-zero (measurement used)
     assert log_lik != 0.0
@@ -102,12 +102,12 @@ def test_gating_rejects_outlier_measurement(ekf_config_with_gating, initial_stat
     )
 
     # State should remain unchanged (measurement rejected)
-    assert jnp.allclose(
-        state_upd.mean, initial_state.mean, atol=1e-6
-    ), "Outlier should be rejected, state unchanged"
-    assert jnp.allclose(
-        state_upd.cov, initial_state.cov, atol=1e-6
-    ), "Outlier should be rejected, covariance unchanged"
+    assert jnp.allclose(state_upd.mean, initial_state.mean, atol=1e-6), (
+        "Outlier should be rejected, state unchanged"
+    )
+    assert jnp.allclose(state_upd.cov, initial_state.cov, atol=1e-6), (
+        "Outlier should be rejected, covariance unchanged"
+    )
 
     # Log-likelihood should be zero (measurement rejected)
     assert log_lik == 0.0, "Rejected measurement should have zero log-likelihood"
@@ -152,9 +152,9 @@ def test_gating_disabled_accepts_outlier(initial_state):
 
     # State should be updated significantly (high Kalman gain with low P/R ratio)
     # With P=0.01 and R~0.0001, K ≈ 0.99, so state should move ~4m * 0.99 ≈ 4m
-    assert not jnp.allclose(
-        state_upd.mean[:2], initial_state.mean[:2], atol=0.1
-    ), "Without gating, outlier should update state"
+    assert not jnp.allclose(state_upd.mean[:2], initial_state.mean[:2], atol=0.1), (
+        "Without gating, outlier should update state"
+    )
 
     # Verify log-likelihood is non-zero (update happened)
     assert log_lik != 0.0, "Update should produce non-zero log-likelihood"
