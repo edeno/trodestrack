@@ -53,6 +53,14 @@ extra_javascript:
 extra_css:
   - stylesheets/extra.css
 
+not_in_nav: |
+  /TROUBLESHOOTING.md
+  /TUNING.md
+  /includes/**
+
+exclude_docs: |
+  presentation/
+
 plugins:
   - search
   - gen-files:
