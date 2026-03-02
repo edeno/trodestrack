@@ -151,6 +151,7 @@ def _extended_kalman_filter_impl(
     """Core EKF implementation staged under ``jax.jit``."""
     n_cam = int(t_cam_jax.shape[0])
 
+    # led_distance guaranteed non-None by caller assert (see extended_kalman_filter)
     camera_model = CameraPositionModel(
         led_distance=config_for_filter.led_distance,  # type: ignore[arg-type]
         measurement_noise_base=config_for_filter.measurement_noise_pos,
@@ -630,6 +631,9 @@ def extended_kalman_filter(
         config_for_filter = ekf_config
 
     # Initialize state
+    assert config_for_filter.led_distance is not None, (
+        "led_distance must be set or auto-detected before filter"
+    )
     if initial_state is None:
         initial_state = initialize_state(
             Z_cam_led1_jax,
@@ -638,7 +642,7 @@ def extended_kalman_filter(
             dt_cam=jnp.mean(
                 jnp.diff(t_cam_jax)
             ),  # Keep as JAX scalar for JIT compatibility
-            led_distance=config_for_filter.led_distance,  # type: ignore[arg-type]
+            led_distance=config_for_filter.led_distance,
             layout=get_layout(config_for_filter.state_mode),
         )
 

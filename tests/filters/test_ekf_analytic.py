@@ -672,27 +672,15 @@ def test_ekf_long_dropout_drift(ekf_config):
     bias_gyro_error = np.abs(bias_gyro_est - bias_gyro_true)
 
     # PRD requirement: drift ≤ 15 cm after 5s dropout
-    # TODO: Currently failing (~110 cm) due to poor bias convergence
-    #       Bias estimate has WRONG SIGN even after 20s of circular motion
-    #       This reveals fundamental tuning issue that needs investigation:
-    #       - Possible sign error in dynamics or measurement model
-    #       - IMU noise injection (G @ Q_u @ G^T) may be too large
-    #       - Bias random walk Q may prevent convergence
-    #       - May need IEKF (num_iter > 1) for nonlinear circular dynamics
-    #
-    # Relaxed bound for now (150 cm) while investigating root cause
-    assert drift_cm < 150.0, (
-        f"Position drift {drift_cm:.2f} cm exceeds relaxed bound of 150 cm "
+    assert drift_cm < 15.0, (
+        f"Position drift {drift_cm:.2f} cm exceeds PRD target of 15 cm "
         f"for {dropout_duration:.2f}s dropout ({dropout_frames} frames)\n"
         f"  Gyro bias error before dropout: {bias_gyro_error:.4f} rad/s "
-        f"(true: {bias_gyro_true:.4f}, est: {bias_gyro_est:.4f})\n"
-        f"  NOTE: Bias has wrong sign - suggests systematic issue in filter."
+        f"(true: {bias_gyro_true:.4f}, est: {bias_gyro_est:.4f})"
     )
 
     # Diagnostic: Print actual drift for tracking tuning progress
-    print(
-        f"\n  Dropout drift: {drift_cm:.1f} cm (PRD target: 15 cm, current: 150 cm bound)"
-    )
+    print(f"\n  Dropout drift: {drift_cm:.1f} cm (PRD target: 15 cm)")
     print(
         f"  Bias convergence: gyro error = {bias_gyro_error * 1000:.1f} millirad/s (target: near 0)"
     )

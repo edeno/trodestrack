@@ -212,7 +212,7 @@ ignore_missing_imports = true # Scientific libraries often lack stubs
 
 [[tool.mypy.overrides]]
 module = ["tests", "tests.*"]
-ignore_errors = true
+disallow_untyped_defs = false
 
 [[tool.mypy.overrides]]
 module = "docs.*"

@@ -26,7 +26,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - Uses src-layout: `src/trodestrack/__init__.py`
 - Entry point configured as `trodestrack = "trodestrack:main"` in pyproject.toml
-- Build system uses `uv_build` backend (modern Python packaging)
+- Build system uses `hatchling` backend (see pyproject.toml `[build-system]`)
 
 **Python Version:**
 

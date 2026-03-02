@@ -121,7 +121,7 @@ class FilterCoreConfig:
     blackout_imu_noise_scale: float = 0.3
 
     enable_zupt: bool = True
-    zupt_velocity_threshold: float = 0.02  # cm/s
+    zupt_velocity_threshold: float = 0.02  # m/s
     zupt_measurement_noise: float = 0.01**2
 
     # State layout mode (controls state dimension and index mapping)
@@ -1327,53 +1327,6 @@ def compute_imu_index_arrays(
 # =============================================================================
 # IMU Noise Propagation Matrices
 # =============================================================================
-
-
-def build_G_matrix(theta: float | Array, dt: float | Array) -> jnp.ndarray:
-    """IMU input noise propagation matrix G for standard 8-state model.
-
-    Parameters
-    ----------
-    theta : float
-        Heading angle (rad).
-    dt : float
-        Time step (s).
-
-    Returns
-    -------
-    jnp.ndarray
-        G matrix (8, 3) mapping IMU noise [ω_z, f_x, f_y] to state.
-
-    Notes
-    -----
-    State: [x, y, vx, vy, θ, b_gz, b_ax, b_ay]. Input: [ω_z, f_x, f_y].
-    Dependencies:
-    - θₖ₊₁ = θₖ + (ω_z − b_gz) dt  → ∂θ/∂ω_z = dt
-    - vₖ₊₁ = vₖ + R(θ)(f − b_a) dt → ∂v/∂f = R(θ) dt
-    - pₖ₊₁ = pₖ + v dt + 0.5 R(θ)(f − b_a) dt² → ∂p/∂f = R(θ) 0.5 dt²
-    """
-    theta_arr = jnp.asarray(theta)
-    dt_arr = jnp.asarray(dt)
-
-    # 2D rotation matrix R(θ)
-    c, s = jnp.cos(theta_arr), jnp.sin(theta_arr)
-    R_2d = jnp.array([[c, -s], [s, c]])
-
-    # Initialize G matrix: state (8) × input (3)
-    # Rows: [x, y, vx, vy, θ, b_gz, b_ax, b_ay]
-    # Cols: [ω_z, f_x, f_y]
-    G = jnp.zeros((8, 3))
-
-    # Heading depends on gyro: ∂θ/∂ω_z = dt
-    G = G.at[4, 0].set(dt_arr)
-
-    # Velocity depends on accelerometer via rotation: ∂v/∂f = R(θ) * dt
-    G = G.at[2:4, 1:3].set(R_2d * dt_arr)
-
-    # Position depends on accelerometer: ∂p/∂f = R(θ) * 0.5 * dt²
-    G = G.at[0:2, 1:3].set(R_2d * (0.5 * dt_arr * dt_arr))
-
-    return G
 
 
 def build_G_matrix_generic(

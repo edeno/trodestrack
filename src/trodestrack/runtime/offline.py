@@ -32,7 +32,7 @@ from trodestrack.models.filter_common import (
 )
 from trodestrack.models.process_noise import assemble_Q
 from trodestrack.models.state_layout import StateLayout, get_heading_index, get_layout
-from trodestrack.models.ukf import UKFConfig, UKFResult
+from trodestrack.models.ukf import UKFConfig, UKFResult, compute_sigma_points
 
 # =============================================================================
 # Smoother Result Types
@@ -53,7 +53,8 @@ class SmootherResult(NamedTuple):
 
     Notes
     -----
-    n is the state dimension (8 for standard 2D, 10+ for extended layouts).
+    n is the state dimension (e.g. 8 for 2d_full, 5 for vision_only,
+    10 for 2d_cam_3d_imu).  See ``StateLayout`` for all supported modes.
     """
 
     smoothed_means: jnp.ndarray  # (N_cam, n)
@@ -312,53 +313,11 @@ def rts_smoother(
 # =============================================================================
 
 
-def _compute_sigma_points(
-    m: jnp.ndarray, P: jnp.ndarray, n: int, lamb: float
-) -> jnp.ndarray:
-    """Generate sigma points for unscented transform.
-
-    Parameters
-    ----------
-    m : jnp.ndarray
-        Mean (n,).
-    P : jnp.ndarray
-        Covariance (n, n).
-    n : int
-        State dimension.
-    lamb : float
-        UKF lambda parameter.
-
-    Returns
-    -------
-    jnp.ndarray
-        Sigma points (2n+1, n).
-    """
-    # Regularize covariance for Cholesky
-    P_reg = symmetrize(P)
-
-    # Compute Cholesky decomposition
-    L = jnp.linalg.cholesky(P_reg)
-    scale = jnp.sqrt(n + lamb)
-
-    # Generate sigma points
-    sigmas = [m]  # Mean point
-    for i in range(n):
-        sigmas.append(m + scale * L[:, i])  # Positive direction
-        sigmas.append(m - scale * L[:, i])  # Negative direction
-
-    return jnp.array(sigmas)
-
-
-def _outer_product(a: jnp.ndarray, b: jnp.ndarray) -> jnp.ndarray:
-    """Compute outer product a ⊗ b."""
-    return jnp.outer(a, b)
-
-
 # =============================================================================
 # Sigma-Point Smoother for UKF
 # =============================================================================
 
-SIGMA_POINT_SMOOTHER_STATIC_ARGNAMES = ("layout", "ukf_config")
+SIGMA_POINT_SMOOTHER_STATIC_ARGNAMES = ("mask_is_provided", "layout", "ukf_config")
 # Donate filtered_means (arg 0) and filtered_covs (arg 1) to enable buffer reuse
 # in scan carry iterations. These arrays are large (N_cam, n) and (N_cam, n, n)
 # and are never used after smoother returns.
@@ -373,11 +332,12 @@ def _sigma_point_smoother_impl(
     t_cam_jax: jnp.ndarray,
     imu_index_arrays: jnp.ndarray,
     dt_imu_mean: jnp.ndarray,
-    mask_cam_jax: jnp.ndarray | None,
+    mask_cam_jax: jnp.ndarray,
     w_mean: jnp.ndarray,
     w_cov: jnp.ndarray,
     lamb: float,
     *,
+    mask_is_provided: bool,
     layout: StateLayout,
     ukf_config: UKFConfig,
 ) -> tuple[jnp.ndarray, jnp.ndarray]:
@@ -388,6 +348,7 @@ def _sigma_point_smoother_impl(
     """
     n_cam = filtered_means.shape[0]
     n = filtered_means.shape[1]
+    has_mask = jnp.asarray(mask_is_provided, dtype=bool)
 
     def f(x, u, dt):
         return dynamics_function(x, u, dt, ukf_config.damping_coeff, layout)
@@ -409,7 +370,7 @@ def _sigma_point_smoother_impl(
         # Blackout-aware noise scaling (mirrors EKF RTS smoother)
         # Use target-frame rule to match forward filter behavior
         # Apply blackout scaling based on vision availability at target frame (t_idx+1)
-        in_blackout = (mask_cam_jax is not None) and (~mask_cam_jax[t_idx + 1])
+        in_blackout = has_mask & (~mask_cam_jax[t_idx + 1])
 
         # Compute cross-covariance between filtered[k] and predicted[k+1]
         # by propagating sigma points through all IMU steps.
@@ -431,7 +392,7 @@ def _sigma_point_smoother_impl(
                 )
 
                 # Generate sigma points
-                sigmas = _compute_sigma_points(x_s, P_s, n, lamb)
+                sigmas = compute_sigma_points(x_s, P_s, n, lamb)
 
                 # Propagate sigma points
                 def prop_fn(x):
@@ -457,7 +418,7 @@ def _sigma_point_smoother_impl(
                 deviations = sigmas_prop - m_pred
                 P_pred = jnp.tensordot(
                     w_cov,
-                    vmap(_outer_product, in_axes=(0, 0))(deviations, deviations),
+                    vmap(jnp.outer, in_axes=(0, 0))(deviations, deviations),
                     axes=1,
                 )
                 P_pred = P_pred + Q_total
@@ -475,7 +436,7 @@ def _sigma_point_smoother_impl(
         # Compute cross-covariance for smoother gain
         # We do one more sigma-point transform from x_k to x_pred
         # This gives us the cross-covariance P(x_k, x_pred)
-        sigmas_k = _compute_sigma_points(x_k, P_k, n, lamb)
+        sigmas_k = compute_sigma_points(x_k, P_k, n, lamb)
 
         # Propagate these sigma points through all IMU steps
         def propagate_sigma_through_all_imu(sigma_start):
@@ -502,7 +463,7 @@ def _sigma_point_smoother_impl(
         dev_k = sigmas_k - x_k
         dev_pred = sigmas_pred - x_pred
         S_cross = jnp.tensordot(
-            w_cov, vmap(_outer_product, in_axes=(0, 0))(dev_k, dev_pred), axes=1
+            w_cov, vmap(jnp.outer, in_axes=(0, 0))(dev_k, dev_pred), axes=1
         )
 
         return x_pred, P_pred, S_cross
@@ -603,13 +564,17 @@ def sigma_point_smoother(
     U_imu_jax = jnp.array(U_imu)
     t_cam_jax = jnp.array(t_cam)
 
-    # Convert mask_cam to JAX if provided
-    mask_cam_jax = jnp.array(mask_cam) if mask_cam is not None else None
-
     # Copy filtered arrays before donation to avoid invalidating filter_result
     # Buffer donation enables efficient reuse through scan iterations inside JIT
     filtered_means = filter_result.filtered_means.copy()  # (N_cam, n)
     filtered_covs = filter_result.filtered_covariances.copy()  # (N_cam, n, n)
+
+    # Convert mask_cam to JAX (sentinel all-True when not provided, matching EKF smoother)
+    mask_is_provided = mask_cam is not None
+    if mask_is_provided:
+        mask_cam_jax = jnp.array(mask_cam, dtype=bool)
+    else:
+        mask_cam_jax = jnp.ones(filtered_means.shape[0], dtype=bool)
     n = filtered_means.shape[1]  # Derive state dimension from data
 
     # Compute UKF sigma-point weights (dimension-dependent)
@@ -649,6 +614,7 @@ def sigma_point_smoother(
         w_mean,
         w_cov,
         lamb,
+        mask_is_provided=mask_is_provided,
         layout=layout,
         ukf_config=ukf_config,
     )

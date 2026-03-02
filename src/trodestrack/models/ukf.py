@@ -367,7 +367,6 @@ def predict_step(
     # Add process noise Q using shared assembly for parity with EKF/smoothers
     # Use predicted heading θ⁺ for tighter alignment between dynamics and Q
     dtype = m.dtype
-    h_idx = get_heading_index(layout)
     Q = assemble_Q(
         config,
         theta=m_pred[h_idx],  # Use predicted heading, not current
@@ -649,6 +648,7 @@ def _unscented_kalman_filter_impl(
     """Core UKF implementation staged under ``jax.jit``."""
     n_cam = int(t_cam_jax.shape[0])
 
+    # led_distance guaranteed non-None by caller assert (see unscented_kalman_filter)
     # Instantiate measurement models with preallocated arrays
     camera_model = CameraPositionModel(
         led_distance=config_for_filter.led_distance,  # type: ignore[arg-type]
@@ -853,6 +853,9 @@ def unscented_kalman_filter(
         config_for_filter = ukf_config
 
     # Initialize state (reuse EKF initialization)
+    assert config_for_filter.led_distance is not None, (
+        "led_distance must be set or auto-detected before filter"
+    )
     if initial_state is None:
         ekf_init = initialize_state(
             Z_cam_led1_jax,
@@ -861,7 +864,7 @@ def unscented_kalman_filter(
             dt_cam=jnp.mean(
                 jnp.diff(t_cam_jax)
             ),  # Keep as JAX scalar for JIT compatibility
-            led_distance=config_for_filter.led_distance,  # type: ignore[arg-type]
+            led_distance=config_for_filter.led_distance,
             layout=get_layout(config_for_filter.state_mode),
         )
         initial_state = UKFState(mean=ekf_init.mean, cov=ekf_init.cov)

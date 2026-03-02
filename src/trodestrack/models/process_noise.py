@@ -5,7 +5,7 @@ from typing import Any, cast
 import jax.numpy as jnp
 from jax import Array
 
-from trodestrack.models.filter_common import symmetrize
+from trodestrack.models.filter_common import build_G_matrix_generic, symmetrize
 from trodestrack.models.state_layout import (
     LAYOUT_REGISTRY,
     StateLayout,
@@ -55,12 +55,7 @@ def build_Q_rate(config: Any, n: int, dtype: Any = jnp.float32) -> jnp.ndarray:
     etc. If ``n`` does not match any known layout, falls back to a uniform
     diagonal with ``process_noise_pos``.
     """
-    # Try to find matching layout
-    layout = None
-    for mode_layout in LAYOUT_REGISTRY.values():
-        if mode_layout.n == n:
-            layout = mode_layout
-            break
+    layout = _get_layout_for_dimension(n)
 
     if layout is None:
         # Fallback for unknown dimensions
@@ -260,8 +255,6 @@ def assemble_Q(
     else:
         if layout is not None and layout.has_biases:
             # Use layout to build dimension-agnostic G matrix
-            from trodestrack.models.filter_common import build_G_matrix_generic
-
             # For 2D heading, use scalar heading_idx; for 3D, skip IMU mapping for now
             if layout.has_heading_2d:
                 pos_pair = (layout.pos_idx[0], layout.pos_idx[1])
