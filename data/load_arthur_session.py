@@ -80,6 +80,35 @@ class SessionData:
     fs_cam: float
     meters_per_pixel: float
 
+    @property
+    def U_imu_for_filter(self) -> np.ndarray:
+        """IMU view in the 3- or 4-channel form consumed by the trodestrack filters.
+
+        ``trodestrack.models.filter_common.dynamics_function`` accepts either:
+
+        - 3 channels ``[ω_z, f_x, f_y]``                   (2D branch)
+        - 4 channels ``[ω_z, f_x, f_y, f_z]``              (3D branch, used by
+          3D-velocity layouts such as ``LAYOUT_2D_CAM_3D_IMU``)
+
+        The 3D-mode loader, by contrast, exposes the full 6-axis sensor data
+        ``[ω_x, ω_y, ω_z, f_x, f_y, f_z]``. This helper returns the filter-ready
+        slice without modifying ``U_imu`` itself (so downstream analyses that
+        want the full 3D gyro/accel can still read ``U_imu`` directly):
+
+        - 3 columns  → returned unchanged (already filter-ready).
+        - 6 columns  → columns [2, 3, 4, 5] = ``[ω_z, f_x, f_y, f_z]``.
+        - anything else → ``ValueError`` (unsupported layout).
+        """
+        ncols = self.U_imu.shape[1]
+        if ncols == 3:
+            return self.U_imu
+        if ncols == 6:
+            return self.U_imu[:, 2:6]
+        raise ValueError(
+            f"SessionData.U_imu has {ncols} columns; expected 3 (2D mode) or "
+            f"6 (3D mode) from load_arthur_session."
+        )
+
 
 def find_unique_samples(values: np.ndarray) -> np.ndarray:
     """Find indices where values change (removes sample-and-hold repeats).

@@ -204,7 +204,9 @@ def run_3d_imu_mode(data, verbose=True):
     result = extended_kalman_filter(
         ekf_config=config,
         t_imu=data.t_imu,
-        U_imu=data.U_imu,  # Full 6-axis IMU
+        # Loader exposes 6 sensor channels; dynamics only consumes 4
+        # [ω_z, f_x, f_y, f_z], so slice via the SessionData helper.
+        U_imu=data.U_imu_for_filter,
         t_cam=data.t_cam,
         Z_cam_led1=data.Z_cam_led1,
         Z_cam_led2=data.Z_cam_led2,

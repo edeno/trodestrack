@@ -299,6 +299,97 @@ def joseph_update(
     return symmetrize(I_minus_KH @ cov_prior @ I_minus_KH.T + gain @ R @ gain.T)
 
 
+def validate_imu_input_shape(
+    U_imu,
+    layout: StateLayout,
+    *,
+    func_name: str = "Kalman filter",
+) -> None:
+    """Validate that ``U_imu`` has a shape ``dynamics_function`` can consume.
+
+    Raises a ``ValueError`` with an actionable message if the shape is wrong.
+    This is a cheap check performed at the filter/smoother entrypoint so that
+    silent channel misinterpretations (the classic "6-channel IMU from the
+    loader into a 4-channel 3D-IMU filter" bug, where ``dynamics_function``
+    auto-detects 3D from ``imu.shape[0] >= 4`` and reads wrong columns) fail
+    loudly at ingress rather than propagating into plausible-looking but
+    incorrect estimates.
+
+    Parameters
+    ----------
+    U_imu : array-like
+        IMU measurements intended to be passed into the filter.
+    layout : StateLayout
+        State layout used by the filter. Only ``vel_idx`` is inspected, to
+        catch the specific case of a 4-channel (3D IMU) array combined with a
+        2D-velocity state layout (which silently drops ``f_z``).
+    func_name : str, optional
+        Name of the caller, used as a prefix in error messages.
+
+    Raises
+    ------
+    ValueError
+        If ``U_imu`` is not 2-D, or has other than 3 or 4 channels, or carries
+        4 channels into a 2D-velocity layout.
+
+    Notes
+    -----
+    Expected channel conventions (matching ``dynamics_function`` in this
+    module):
+
+    - 3 channels ``[ω_z (rad/s), f_x (m/s²), f_y (m/s²)]`` — runs the 2D
+      branch. Valid for any layout.
+    - 4 channels ``[ω_z, f_x, f_y, f_z]`` — runs the 3D branch. Valid only
+      when ``layout`` has 3D velocity (e.g. ``LAYOUT_2D_CAM_3D_IMU``).
+    """
+    arr = np.asarray(U_imu)
+
+    if arr.ndim != 2:
+        raise ValueError(
+            f"{func_name}: U_imu must be a 2-D array of shape "
+            f"(N_imu, n_channels); got ndim={arr.ndim}, shape={arr.shape}."
+        )
+
+    got = arr.shape[1]
+    has_3d_velocity = len(layout.vel_idx) >= 3
+
+    if got in (3, 4):
+        if got == 4 and not has_3d_velocity:
+            raise ValueError(
+                f"{func_name}: U_imu has 4 channels [ω_z, f_x, f_y, f_z] but "
+                f"the state layout has only 2D velocity; f_z would be "
+                f"silently dropped. Use a 3D-velocity state_mode (e.g. "
+                f"'2d_cam_3d_imu') or slice U_imu to 3 channels "
+                f"[ω_z, f_x, f_y]."
+            )
+        return
+
+    # Wrong channel count — build a helpful message.
+    msg = (
+        f"{func_name}: U_imu has {got} channels; expected 3 "
+        f"[ω_z, f_x, f_y] (2D IMU) or 4 [ω_z, f_x, f_y, f_z] (3D IMU). "
+        f"Selected state_mode maps to a "
+        f"{'3D-velocity' if has_3d_velocity else '2D-velocity'} layout."
+    )
+    if got == 6:
+        # Most common real-data tripwire: load_arthur_session(mode='3d')
+        # returns 6 channels [ω_x, ω_y, ω_z, f_x, f_y, f_z]; the filter wants
+        # only the yaw gyro + accel triad.
+        if has_3d_velocity:
+            msg += (
+                " Hint: load_arthur_session(mode='3d') returns 6 channels "
+                "[ω_x, ω_y, ω_z, f_x, f_y, f_z]; select columns [2, 3, 4, 5] "
+                "to get [ω_z, f_x, f_y, f_z] before passing to the filter."
+            )
+        else:
+            msg += (
+                " Hint: load_arthur_session(mode='3d') returns 6 channels; "
+                "select columns [2, 3, 4] to get [ω_z, f_x, f_y] for 2D "
+                "filtering, or pass mode='2d' when loading."
+            )
+    raise ValueError(msg)
+
+
 def wrap_angle(theta: jnp.ndarray) -> jnp.ndarray:
     """Wrap angles to (-π, π] using numerically stable trigonometric method.
 

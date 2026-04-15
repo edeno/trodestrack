@@ -39,6 +39,7 @@ from trodestrack.models.filter_common import (
     initialize_state,
     symmetrize,
     update_zupt,
+    validate_imu_input_shape,
     wrap_angle,
 )
 from trodestrack.models.filter_update import ukf_projected_update
@@ -582,7 +583,13 @@ def update_heading(
         innov = innovation_vec[0]
 
         # Innovation covariance (1D)
-        heading_deviations = sigmas_heading - h_pred
+        # Wrap heading deviations to (-π, π] for correct angular variance.
+        # h_pred is the circular mean (atan2, always wrapped), but sigmas_heading
+        # may be on the opposite side of the ±π boundary. Without this wrap, near
+        # the wrap boundary the unwrapped deviations are ~2π instead of ~0 and
+        # S is inflated by ~(2π)², collapsing the Kalman gain toward zero.
+        # This mirrors the wrap applied in predict_step (see around line 362).
+        heading_deviations = wrap_angle(sigmas_heading - h_pred)
         S = jnp.dot(w_cov, heading_deviations**2) + R_heading
 
         # Cross-covariance between state and heading measurement
@@ -825,6 +832,13 @@ def unscented_kalman_filter(
     UKFResult
         Filtered and predicted states at camera times, and log-likelihood.
     """
+    # Validate IMU input shape early so silent channel mismatches fail loudly.
+    validate_imu_input_shape(
+        U_imu,
+        get_layout(ukf_config.state_mode),
+        func_name="unscented_kalman_filter",
+    )
+
     # Convert to JAX arrays
     t_imu_jax = jnp.array(t_imu)
     U_imu_jax = jnp.array(U_imu)

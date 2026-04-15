@@ -1042,10 +1042,13 @@ def main(*, smoother: bool = False, render_mode: str = "single_process") -> int:
 
     # want to be able to compare IMU prediction, camera prediction (no kalman), camera prediction (with kalman)
 
+    # 3D-mode loader returns 6 sensor channels; the filter dynamics only
+    # consumes 4 [ω_z, f_x, f_y, f_z], so slice via SessionData helper.
+    U_imu_filter = data.U_imu_for_filter
     result = extended_kalman_filter(
         ekf_config=ekf_config,
         t_imu=data.t_imu,
-        U_imu=data.U_imu,
+        U_imu=U_imu_filter,
         t_cam=data.t_cam,
         Z_cam_led1=data.Z_cam_led1,
         Z_cam_led2=data.Z_cam_led2,
@@ -1059,7 +1062,7 @@ def main(*, smoother: bool = False, render_mode: str = "single_process") -> int:
         print("Running RTS smoother…")
         t1 = time.time()
         result = rts_smoother(
-            result, ekf_config, t_imu=data.t_imu, U_imu=data.U_imu, t_cam=data.t_cam
+            result, ekf_config, t_imu=data.t_imu, U_imu=U_imu_filter, t_cam=data.t_cam
         )
         print(
             f"✓ Smoothing complete in {time.time() - t1:.1f}s: {len(result.smoothed_means):,} timesteps\n"

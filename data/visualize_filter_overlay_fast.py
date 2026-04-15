@@ -486,7 +486,8 @@ def main():
     filter_result = extended_kalman_filter(
         ekf_config=ekf_config,
         t_imu=data.t_imu,
-        U_imu=data.U_imu,
+        # 3D-mode loader returns 6 sensor channels; filter dynamics uses only 4.
+        U_imu=data.U_imu_for_filter,
         t_cam=data.t_cam,
         Z_cam_led1=data.Z_cam_led1,
         Z_cam_led2=data.Z_cam_led2,

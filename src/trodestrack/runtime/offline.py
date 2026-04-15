@@ -29,6 +29,7 @@ from trodestrack.models.filter_common import (
     dynamics_function,
     psd_solve,
     symmetrize,
+    validate_imu_input_shape,
 )
 from trodestrack.models.process_noise import assemble_Q
 from trodestrack.models.state_layout import StateLayout, get_heading_index, get_layout
@@ -264,6 +265,13 @@ def rts_smoother(
         Smoothed means and covariances at camera times; log-likelihood copied
         from the forward EKF pass.
     """
+    # Validate IMU input shape early so silent channel mismatches fail loudly.
+    validate_imu_input_shape(
+        U_imu,
+        get_layout(ekf_config.state_mode),
+        func_name="rts_smoother",
+    )
+
     # Convert to JAX arrays
     t_imu_jax = jnp.array(t_imu)
     U_imu_jax = jnp.array(U_imu)
@@ -559,6 +567,13 @@ def sigma_point_smoother(
     - Helps tighten how hard post-gap vision "pulls" backward through gaps
     - Mirrors EKF RTS smoother behavior for consistency
     """
+    # Validate IMU input shape early so silent channel mismatches fail loudly.
+    validate_imu_input_shape(
+        U_imu,
+        get_layout(ukf_config.state_mode),
+        func_name="sigma_point_smoother",
+    )
+
     # Convert to JAX arrays
     t_imu_jax = jnp.array(t_imu)
     U_imu_jax = jnp.array(U_imu)

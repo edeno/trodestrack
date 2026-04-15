@@ -366,10 +366,13 @@ ekf_config = EKFConfig(
 )
 
 # Run filter
+# NOTE: data.U_imu is [N × 6] in 3D mode ([ω_x, ω_y, ω_z, f_x, f_y, f_z]),
+# but the filter's dynamics consumes only the yaw gyro + accel triad
+# [ω_z, f_x, f_y, f_z]. Use data.U_imu_for_filter to get that 4-channel view.
 result = extended_kalman_filter(
     ekf_config=ekf_config,
     t_imu=data.t_imu,
-    U_imu=data.U_imu,  # [N × 6] for 3D mode
+    U_imu=data.U_imu_for_filter,  # [N × 4] for 3D mode, sliced from 6
     t_cam=data.t_cam,
     Z_cam_led1=data.Z_cam_led1,
     Z_cam_led2=data.Z_cam_led2,

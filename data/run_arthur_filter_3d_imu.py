@@ -102,7 +102,9 @@ def main():
     result = extended_kalman_filter(
         ekf_config=ekf_config,
         t_imu=data.t_imu,
-        U_imu=data.U_imu,  # [N × 6] for 3D IMU
+        # Loader returns 6-ch [ω_x, ω_y, ω_z, f_x, f_y, f_z] in 3D mode; the
+        # filter's dynamics consumes only 4 channels [ω_z, f_x, f_y, f_z].
+        U_imu=data.U_imu_for_filter,
         t_cam=data.t_cam,
         Z_cam_led1=data.Z_cam_led1,
         Z_cam_led2=data.Z_cam_led2,

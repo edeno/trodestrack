@@ -49,6 +49,7 @@ from trodestrack.models.filter_common import (
     psd_solve,
     symmetrize,
     update_zupt,
+    validate_imu_input_shape,
     wrap_angle,
 )
 from trodestrack.models.filter_update import ekf_projected_update
@@ -603,6 +604,13 @@ def extended_kalman_filter(
     EKFResult
         Filtered and predicted states at camera times, and log-likelihood.
     """
+    # Validate IMU input shape early so silent channel mismatches fail loudly.
+    validate_imu_input_shape(
+        U_imu,
+        get_layout(ekf_config.state_mode),
+        func_name="extended_kalman_filter",
+    )
+
     # Convert to JAX arrays
     t_imu_jax = jnp.array(t_imu)
     U_imu_jax = jnp.array(U_imu)
