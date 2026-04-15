@@ -544,7 +544,9 @@ def sigma_point_smoother(
     t_imu : np.ndarray
         IMU timestamps (N_imu,) in seconds.
     U_imu : np.ndarray
-        IMU measurements [ω_z(rad/s), f_x(m/s^2), f_y(m/s^2)] (N_imu, 3 or 6).
+        IMU measurements. Either 3 channels ``[ω_z, f_x, f_y]`` for 2D layouts
+        or 4 channels ``[ω_z, f_x, f_y, f_z]`` for 3D-velocity layouts
+        (e.g. ``2d_cam_3d_imu``).
     t_cam : np.ndarray
         Camera timestamps (N_cam,) in seconds.
     mask_cam : np.ndarray | None, optional

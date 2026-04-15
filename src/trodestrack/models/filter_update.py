@@ -6,7 +6,7 @@ This module implements reusable update functions for EKF and UKF implementations
 from __future__ import annotations
 
 import jax.numpy as jnp
-from jax import vmap
+from jax import lax
 
 from trodestrack.models.filter_common import (
     FilterState,
@@ -70,14 +70,23 @@ def ekf_projected_update(
        - 4D path: v = S^{-1} @ innovation (both LEDs)
        - 2D path: v = M^T (M S M^T)^{-1} (M @ innovation) (single LED)
     3. Update mean: m⁺ = m⁻ + (P H^T) @ v
-    4. Joseph-form covariance: P⁺ = P⁻ - (P H^T) @ S_eff^{-1} @ (H P⁻)
+    4. Joseph-form covariance: P⁺ = (I - K H_eff) P⁻ (I - K H_eff)^T + K R_eff K^T
+       where (K, H_eff, R_eff) live in the active measurement subspace (4D if
+       both LEDs are valid, 2D subspace via selector M otherwise).
     5. Compute NIS and log-likelihood in active subspace (2D or 4D)
 
     **Numerical Stability:**
 
-    - Uses vectorized lifted inverse (`vmap`) for covariance update
-    - All operations maintain static shapes for JAX tracing
-    - Symmetrization after covariance update to enforce PSD
+    - Joseph form: covariance update is the sum of two structurally PSD terms
+      (congruence of PSD prior + Gram of gain @ chol(R)), so the posterior
+      stays PSD even when the prior is ill-conditioned or the innovation
+      covariance is nearly singular. The equivalent subtraction form
+      ``P - K S K^T`` can produce a small negative eigenvalue under the same
+      conditions because floating-point cancellation propagates unchecked.
+    - Single-LED case projects H and R into the 2D active subspace before
+      applying Joseph so the closed-loop ``I - K H_eff`` has the right rank.
+    - Symmetrization after covariance update to absorb any remaining
+      floating-point asymmetry.
 
     **Parity Targets:**
 
@@ -111,38 +120,45 @@ def ekf_projected_update(
     (8, 8)
     """
     m_prior, P_prior = state_prior.mean, state_prior.cov
+    n = P_prior.shape[0]
 
     # Innovation covariance S (always 4×4)
     HP = jacobian_H @ P_prior  # (4, n)
-    S4 = HP @ jacobian_H.T + jnp.diag(R_diag)  # (4, 4)
+    R4 = jnp.diag(R_diag)  # (4, 4)
+    S4 = HP @ jacobian_H.T + R4  # (4, 4)
 
     # Lifted inverse: v = S_eff^{-1} @ innovation
-    # Automatically handles 2D/4D based on LED validity
+    # Automatically handles 2D/4D based on LED validity. Used for mean update
+    # only; the Joseph covariance update works directly with (K, H_eff, R_eff)
+    # in the active subspace.
     v = apply_lifted_inverse(S4, innovation, both_leds, only_led1, only_led2)
 
-    # Kalman update without forming K explicitly
-    # δx = (P H^T) @ v
+    # Kalman update (mean): δx = (P H^T) @ v
     PH_t = P_prior @ jacobian_H.T  # (n, 4)
-    delta_x = PH_t @ v  # (n,)
+    m_posterior = m_prior + PH_t @ v
 
-    # Update mean
-    m_posterior = m_prior + delta_x
+    # Joseph form of the covariance update. Two branches:
+    #   - Both LEDs valid: work in the full 4-D measurement space.
+    #   - Single LED valid: project through selector M into 2-D subspace so
+    #     that (I - K H_sub) has the correct rank-2 deflation.
+    identity = jnp.eye(n)
 
-    # Joseph-form covariance update using vectorized lifted inverse
-    # P⁺ = P⁻ - (P H^T) @ S_eff^{-1} @ (H P⁻)
-    # Apply lifted inverse to each column of HP
-    # Note: Uses 1e-9 diagonal jitter in psd_solve for numerical stability
-    # This balances accuracy vs. robustness for near-singular covariances
-    def apply_inv_to_col(col: jnp.ndarray) -> jnp.ndarray:
-        """Apply S_eff^{-1} to a column vector (4,) → (4,)."""
-        return apply_lifted_inverse(S4, col, both_leds, only_led1, only_led2)
+    def joseph_4d() -> jnp.ndarray:
+        K4 = psd_solve(S4, PH_t.T).T  # (n, 4)
+        closed_loop = identity - K4 @ jacobian_H
+        return closed_loop @ P_prior @ closed_loop.T + K4 @ R4 @ K4.T
 
-    # Vectorize over columns (axis 1)
-    inv_S_HP = vmap(apply_inv_to_col, in_axes=1, out_axes=1)(HP)  # (4, n)
+    def joseph_2d() -> jnp.ndarray:
+        M = make_led_selector(only_led1, only_led2)  # (2, 4)
+        H_sub = M @ jacobian_H  # (2, n)
+        R_sub = M @ R4 @ M.T  # (2, 2)
+        S_sub = M @ S4 @ M.T  # (2, 2)
+        PH_sub = PH_t @ M.T  # (n, 2)
+        K_sub = psd_solve(S_sub, PH_sub.T).T  # (n, 2)
+        closed_loop = identity - K_sub @ H_sub
+        return closed_loop @ P_prior @ closed_loop.T + K_sub @ R_sub @ K_sub.T
 
-    # Complete Joseph form
-    PH_t_inv_S_HP = PH_t @ inv_S_HP  # (n, n)
-    P_posterior = P_prior - PH_t_inv_S_HP
+    P_posterior = lax.cond(both_leds, joseph_4d, joseph_2d)
     P_posterior = symmetrize(P_posterior)
 
     # Compute exact NIS and log-likelihood in active subspace
@@ -204,7 +220,12 @@ def ukf_projected_update(
        - 4D path: K = P_cross @ S^{-1}
        - 2D path: K_sub = P_cross_sub @ S_sub^{-1}, then lift to 4D via M^T
     2. **Mean update:** m⁺ = m⁻ + K @ innovation_active
-    3. **Covariance update:** P⁺ = P⁻ - K @ S_active @ K^T
+    3. **Covariance update:** P⁺ = P⁻ - (K L)(K L)^T with L L^T = S_active
+       (Cholesky of the active-subspace innovation covariance). This is the
+       square-root style equivalent of ``P⁻ - K S K^T`` -- algebraically the
+       same in exact arithmetic, but the subtrahend is structurally symmetric
+       PSD by construction (it is a Gram matrix), so floating-point rounding
+       cannot introduce asymmetry into the subtrahend itself.
     4. **NIS and log-likelihood:** Computed in active subspace (2D or 4D)
 
     **Projection details:**
@@ -222,6 +243,12 @@ def ukf_projected_update(
     - Symmetrization after covariance update
     - All branches return identical shapes for JAX tracing
     - Uses Cholesky-based solves for inversion
+    - Unlike the EKF projected update, full Joseph form ``(I − K C) P (I − K C)^T
+      + K R K^T`` is not used here because the UKF has no explicit measurement
+      Jacobian. The statistical linearization ``C = P_cross^T P^{-1}`` would
+      reintroduce an explicit inverse of the prior covariance, partially
+      defeating the numerical improvement. The sqrt-style subtraction keeps
+      the subtrahend PSD without that cost.
 
     **Parity Targets:**
 
@@ -251,45 +278,48 @@ def ukf_projected_update(
     >>> state_post.mean.shape
     (8,)
     """
-    from jax import lax
-
     m_prior, P_prior = state_prior.mean, state_prior.cov
 
-    # Kalman gain and covariance update using lifted subspace operator
+    # Kalman gain and covariance update using lifted subspace operator.
     # Project to active measurement subspace (2D or 4D) to avoid spurious
-    # covariance reduction from missing observations
-    #
-    # Algorithm:
+    # covariance reduction from missing observations:
     #   - Both LEDs: standard 4D update
     #   - Single LED: compute in 2D subspace, lift back to 4D
-
-    # Project innovation, covariance, and cross-correlation to active subspace
+    # Each branch returns:
+    #   K_lifted   (n, 4)  — gain applied to a 4-D lifted innovation
+    #   innov_lift (4,)    — lifted innovation (zeros outside active subspace)
+    #   subtrahend (n, n)  — structurally PSD Gram matrix (K_active @ L)(K_active @ L)^T
+    #                        where L L^T = S_active. Replaces the less stable
+    #                        direct product K @ S_active @ K^T.
     M = make_led_selector(only_led1, only_led2)  # (2, 4)
+    # Jitter used in both branches to harden Cholesky for near-singular S.
+    jitter_4 = 1e-12 * jnp.eye(4)
+    jitter_2 = 1e-12 * jnp.eye(2)
 
     def compute_in_full_space():
         """Both LEDs valid: standard 4D update."""
         K_full = psd_solve(S, P_cross.T).T  # (n, 4)
-        innov_4d = innovation  # (4,)
-        return K_full, innov_4d, S
+        L = jnp.linalg.cholesky(symmetrize(S) + jitter_4)  # (4, 4)
+        KL = K_full @ L  # (n, 4)
+        subtrahend = KL @ KL.T  # (n, n), PSD by construction
+        return K_full, innovation, subtrahend
 
     def compute_in_subspace():
         """Single LED valid: compute in 2D subspace, lift to 4D."""
-        # Project to 2D subspace
         S_sub = M @ S @ M.T  # (2, 2)
         P_cross_sub = P_cross @ M.T  # (n, 2)
         innov_sub = M @ innovation  # (2,)
 
-        # Compute gain in subspace
         K_sub = psd_solve(S_sub, P_cross_sub.T).T  # (n, 2)
+        L_sub = jnp.linalg.cholesky(symmetrize(S_sub) + jitter_2)  # (2, 2)
+        KL_sub = K_sub @ L_sub  # (n, 2)
+        subtrahend = KL_sub @ KL_sub.T  # (n, n), PSD by construction
 
-        # Lift back to 4D (pad with zeros)
-        K_lifted = K_sub @ M  # (n, 4) - only affects active dims
+        K_lifted = K_sub @ M  # (n, 4) — only affects active dims
         innov_lifted = M.T @ innov_sub  # (4,)
-        S_lifted = M.T @ S_sub @ M  # (4, 4) - only active block
+        return K_lifted, innov_lifted, subtrahend
 
-        return K_lifted, innov_lifted, S_lifted
-
-    K, innov_active, S_active = lax.cond(
+    K, innov_active, ksk_subtrahend = lax.cond(
         both_leds,
         compute_in_full_space,
         compute_in_subspace,
@@ -297,7 +327,7 @@ def ukf_projected_update(
 
     # Apply update in full n-dimensional state space
     m_posterior = m_prior + K @ innov_active
-    P_posterior = P_prior - K @ S_active @ K.T
+    P_posterior = P_prior - ksk_subtrahend
     P_posterior = symmetrize(P_posterior)
 
     # Compute exact NIS and log-likelihood in active subspace

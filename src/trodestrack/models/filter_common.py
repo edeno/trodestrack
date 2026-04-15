@@ -131,6 +131,32 @@ class FilterCoreConfig:
     # PyTree support: treat `state_mode` as static auxiliary data.
     _TREE_STATIC_FIELDS: ClassVar[tuple[str, ...]] = ("state_mode",)
 
+    # Probabilities supported by chi2_threshold's closed-form table.
+    _SUPPORTED_MAHALANOBIS_PROBS: ClassVar[tuple[float, ...]] = (
+        0.95,
+        0.975,
+        0.99,
+        0.997,
+    )
+
+    def __post_init__(self) -> None:
+        """Validate configuration fields at construction.
+
+        Why: ``chi2_threshold`` only has closed-form values for the four listed
+        probabilities and silently falls back to the 95% threshold for anything
+        else. That silent fallback is easy to miss in tuning experiments, so we
+        catch the mistake at config construction when gating is enabled.
+        """
+        if self.use_mahalanobis_gating:
+            prob = self.mahalanobis_threshold_prob
+            supported = self._SUPPORTED_MAHALANOBIS_PROBS
+            if not any(abs(prob - p) < 1e-3 for p in supported):
+                raise ValueError(
+                    f"mahalanobis_threshold_prob={prob!r} is not in the closed-form "
+                    f"table supported by chi2_threshold. Choose one of {supported} "
+                    f"or set use_mahalanobis_gating=False."
+                )
+
     def tree_flatten(self) -> tuple[tuple, dict]:
         """Flatten config for JAX PyTree registration.
 

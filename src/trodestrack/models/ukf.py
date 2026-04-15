@@ -22,7 +22,7 @@ References:
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import NamedTuple
+from typing import ClassVar, NamedTuple
 
 import jax
 import jax.numpy as jnp
@@ -80,12 +80,45 @@ class UKFConfig(FilterCoreConfig):
     beta: float = 2.0  # Prior knowledge (2 = Gaussian optimal)
     kappa: float = 1.0  # Secondary scaling
 
+    # Floor on (n + λ) = α²(n + κ). Below this, sigma-point weights
+    # w_mean[0] = λ/(n+λ) exceed ≈100 in magnitude and covariance
+    # reconstruction loses precision to catastrophic cancellation. Example:
+    # with α=1e-3, κ=0, n=10, (n+λ) ≈ 1e-5 and w_mean[0] ≈ -1e6.
+    _MIN_N_PLUS_LAMBDA: ClassVar[float] = 1e-2
+
+    def __post_init__(self) -> None:
+        """Validate UKF scaling parameters don't produce degenerate weights."""
+        # Parent-class validation (mahalanobis_threshold_prob etc.)
+        super().__post_init__()
+
+        # Need the layout dimension to check (n + λ); imported here to avoid a
+        # top-level cycle (state_layout is pulled in by the shared config).
+        from trodestrack.models.state_layout import get_layout
+
+        layout = get_layout(self.state_mode)
+        n = layout.n
+        n_plus_lambda = self.alpha**2 * (n + self.kappa)
+        if n_plus_lambda < self._MIN_N_PLUS_LAMBDA:
+            min_alpha = (self._MIN_N_PLUS_LAMBDA / (n + self.kappa)) ** 0.5
+            raise ValueError(
+                f"UKFConfig would produce degenerate sigma-point weights for "
+                f"state_mode='{self.state_mode}' (n={n}): "
+                f"(n + λ) = α²(n + κ) = {n_plus_lambda:.3e} < "
+                f"{self._MIN_N_PLUS_LAMBDA:.0e}. With these values, "
+                f"w_mean[0] = λ/(n+λ) ≈ {-n / n_plus_lambda:.1e}, which causes "
+                f"catastrophic cancellation when reconstructing covariance. "
+                f"Use alpha ≥ {min_alpha:.3f} (or raise kappa)."
+            )
+
     @classmethod
     def conservative(cls, **kwargs) -> UKFConfig:
-        """Conservative UKF preset with small alpha for numerical stability.
+        """Conservative UKF preset with moderate spread for numerical stability.
 
-        Uses alpha=1e-3 so sigma points stay very close to the mean, minimizing
-        risk of numerical issues with non-PSD covariances or extreme nonlinearities.
+        Uses alpha=0.5 and kappa=0, giving (n + λ) = 0.25·n. Sigma points stay
+        closer to the mean than the default, which dampens nonlinearity
+        distortion, while keeping weights at O(1) magnitude (w_mean[0] ≈ -3 at
+        n=10) so covariance reconstruction stays stable.
+
         Recommended for:
             - High-rate IMU (>200 Hz) with small dt
             - Initial development/debugging
@@ -99,12 +132,18 @@ class UKFConfig(FilterCoreConfig):
         Returns
         -------
         UKFConfig
-            Preset with alpha=1e-3, beta=2.0, kappa=0.0.
+            Preset with alpha=0.5, beta=2.0, kappa=0.0.
 
         Example:
             >>> config = UKFConfig.conservative(use_mahalanobis_gating=True)
+
+        Note
+        ----
+        Prior versions of this preset used alpha=1e-3 which produces extreme
+        weights (O(10⁶)) at state dimension n=10 and is rejected at runtime by
+        the __post_init__ guard.
         """
-        return cls(alpha=1e-3, beta=2.0, kappa=0.0, **kwargs)
+        return cls(alpha=0.5, beta=2.0, kappa=0.0, **kwargs)
 
     @classmethod
     def aggressive(cls, **kwargs) -> UKFConfig:
