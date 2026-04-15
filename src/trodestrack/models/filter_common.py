@@ -1031,10 +1031,12 @@ def update_zupt(
     mean, cov = state
     n = mean.shape[0]
 
-    # Determine layout from state dimension
-    # Find matching layout in registry (same logic as legacy zupt_model)
-    # Assumption: unique mapping from state dimension to layout
-    # If multiple layouts share same dimension, the first match wins
+    # Determine layout from state dimension. We look up in LAYOUT_REGISTRY
+    # (assumed unique per dimension in the codebase). If the dimension does
+    # not match any registered layout we raise: silently assuming `2d_full`
+    # used to mask genuine state-layout wiring bugs, producing numerically
+    # finite but semantically wrong ZUPT updates (wrong velocity indices,
+    # wrong measurement Jacobian).
     from trodestrack.models.state_layout import LAYOUT_REGISTRY
 
     layout = None
@@ -1044,10 +1046,12 @@ def update_zupt(
             break
 
     if layout is None:
-        # Fallback: assume 2d_full layout
-        from trodestrack.models.state_layout import get_layout
-
-        layout = get_layout("2d_full")
+        known = sorted({lay.n for lay in LAYOUT_REGISTRY.values()})
+        raise ValueError(
+            f"update_zupt: state dimension n={n} does not match any registered "
+            f"StateLayout. Known dimensions: {known}. Check that the FilterState "
+            f"was built from the same state_mode the rest of the pipeline uses."
+        )
 
     # Create ZUPT model (fully pure, no mutable state)
     zupt_model = ZUPTModel(

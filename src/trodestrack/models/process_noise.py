@@ -51,14 +51,21 @@ def build_Q_rate(config: Any, n: int, dtype: Any = jnp.float32) -> jnp.ndarray:
 
     Notes
     -----
-    Supported layouts include 5D (vision-only), 8D (2D full), 10D (2D cam + 3D IMU),
-    etc. If ``n`` does not match any known layout, falls back to a uniform
-    diagonal with ``process_noise_pos``.
+    Supported layouts include 5D (vision-only), 8D (2D full), 10D (2D cam +
+    3D IMU), etc. If ``n`` does not match any known layout, falls back to a
+    uniform diagonal filled with ``process_noise_pos``.
+
+    This permissive fallback is **intentional** for state-dimension
+    extensibility -- see ``tests/runtime/test_offline_state_dim.py`` -- so
+    that the smoother infrastructure can be exercised with experimental state
+    layouts that have not yet been registered. Filter/smoother entrypoints
+    validate ``state_mode`` against the registry; hitting this branch is only
+    possible via low-level calls with a non-registry dimension.
     """
     layout = _get_layout_for_dimension(n)
 
     if layout is None:
-        # Fallback for unknown dimensions
+        # Extensibility fallback (see docstring note above).
         return jnp.diag(jnp.full(n, config.process_noise_pos, dtype=dtype))
 
     # Build diagonal using layout

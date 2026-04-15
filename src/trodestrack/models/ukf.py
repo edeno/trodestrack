@@ -645,13 +645,21 @@ def update_heading(
         # Wrap heading after update
         m_upd = m_upd.at[h_idx].set(wrap_angle(m_upd[h_idx]))
 
-        # Update covariance
-        # Standard UKF update: P⁺ = P⁻ - K S Kᵀ where K = P_cross / S
-        # Note: For scalar measurements in UKF, the Joseph form reduces to standard form
-        # because K P_cross + P_cross^T K^T = 2 K P_cross = 2 K² S = 2 K S K^T
-        # So Joseph form: P⁺ = P⁻ - 2 K P_cross + K S K^T = P⁻ - K S K^T (standard)
-        P_upd = P - jnp.outer(K, K) * S
-        P_upd = symmetrize(P_upd)  # Ensure symmetry for numerical stability
+        # Update covariance using explicit Joseph form for the scalar heading
+        # measurement. The measurement Jacobian is H = e_{h_idx}^T (selects the
+        # heading component), so (I - K H) is the identity with K subtracted
+        # from the h_idx column. Joseph:
+        #     P⁺ = (I - K H) P (I - K H)^T + K R K^T
+        # is algebraically equivalent to the subtraction form ``P - K S K^T``
+        # for scalar S, but in finite precision it is strictly more robust --
+        # both right-hand terms are structurally PSD, so rounding cannot
+        # introduce negative eigenvalues even when the predicted heading
+        # variance is near R_heading.
+        n_state = P.shape[0]
+        # jnp.eye(n).at[:, h_idx].add(-K) places column h_idx = e_{h_idx} - K.
+        I_minus_KH = jnp.eye(n_state, dtype=P.dtype).at[:, h_idx].add(-K)
+        P_upd = I_minus_KH @ P @ I_minus_KH.T + jnp.outer(K, K) * R_heading
+        P_upd = symmetrize(P_upd)  # Absorb any residual float rounding asymmetry
 
         # Log-likelihood
         log_lik = -0.5 * (jnp.log(2 * jnp.pi) + jnp.log(S) + innov**2 / S)
