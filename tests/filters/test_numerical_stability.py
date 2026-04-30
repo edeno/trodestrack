@@ -63,6 +63,21 @@ def _sym_err(P: jnp.ndarray) -> float:
     return float(np.linalg.norm(P_np - P_np.T, ord="fro"))
 
 
+@pytest.mark.parametrize(
+    "gravity_body",
+    [
+        (0.0, 9.81),
+        (0.0, 0.0, 9.81, 0.0),
+        (0.0, np.nan, 9.81),
+        (0.0, np.inf, 9.81),
+    ],
+)
+def test_config_rejects_invalid_imu_gravity_body(gravity_body):
+    """Gravity calibration must be an explicit finite 3-vector."""
+    with pytest.raises(ValueError, match="imu_gravity_body"):
+        EKFConfig(imu_gravity_body=gravity_body)
+
+
 # -----------------------------------------------------------------------------
 # EKF projected update: PSD under conditioning stress
 # -----------------------------------------------------------------------------

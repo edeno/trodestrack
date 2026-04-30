@@ -73,6 +73,43 @@ def test_ekf_smoke_vision_only_shapes() -> None:
     assert filter_result.predicted_means.shape == (3, get_layout("vision_only").n)
 
 
+def test_ekf_vision_only_ignores_imu_during_dropout() -> None:
+    ekf_config = EKFConfig(
+        state_mode="vision_only",
+        led_distance=0.04,
+        use_heading_measurement=False,
+        enable_zupt=False,
+        use_mahalanobis_gating=False,
+    )
+
+    t_cam = np.array([0.0, 0.1, 0.2], dtype=np.float32)
+    t_imu = np.array([0.0, 0.05, 0.1, 0.15, 0.2], dtype=np.float32)
+    U_imu = np.tile(np.array([[1.0, 2.0, -3.0]], dtype=np.float32), (5, 1))
+
+    Z1 = np.array([[0.0, 0.0], [np.nan, np.nan], [np.nan, np.nan]], dtype=np.float32)
+    Z2 = Z1 + np.array([0.04, 0.0], dtype=np.float32)
+    Z2[1:] = np.nan
+    mask = np.array([True, False, False])
+
+    filter_result = extended_kalman_filter(
+        ekf_config, t_imu, U_imu, t_cam, Z1, Z2, mask, initial_state=None, conf_cam=None
+    )
+    layout = get_layout("vision_only")
+
+    # Initial velocity is zero because only one valid camera frame is available.
+    # Nonzero IMU samples must not move position or heading in vision-only mode.
+    np.testing.assert_allclose(
+        np.asarray(filter_result.filtered_means[:, layout.pos_idx]),
+        np.array([[0.02, 0.0], [0.02, 0.0], [0.02, 0.0]]),
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(
+        np.asarray(filter_result.filtered_means[:, layout.heading_idx]),
+        np.zeros(3),
+        atol=1e-6,
+    )
+
+
 def test_ukf_smoke_2d_cam_3d_imu_shapes() -> None:
     ukf_config = UKFConfig(
         state_mode="2d_cam_3d_imu", led_distance=0.04, use_heading_measurement=False

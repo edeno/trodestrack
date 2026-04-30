@@ -135,8 +135,8 @@ def build_input_noise_cov(
         raise ValueError(f"n_accel must be 2 or 3, got {n_accel}")
 
     dt_arr = jnp.asarray(dt, dtype=dtype)
-    sg = (config.imu_gyro_noise_density * jnp.sqrt(dt_arr)) ** 2
-    sa = (config.imu_accel_noise_density * jnp.sqrt(dt_arr)) ** 2
+    sg = config.imu_gyro_noise_density**2 / dt_arr
+    sa = config.imu_accel_noise_density**2 / dt_arr
 
     # Build diagonal: [sg, sa, sa, ...] with n_accel accelerometer axes
     diag = jnp.concatenate(

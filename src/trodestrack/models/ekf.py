@@ -303,7 +303,14 @@ def predict_step(
 
     # Dynamics function with fixed parameters
     def f(x):
-        return dynamics_function(x, u_imu, dt_imu, config.damping_coeff, layout)
+        return dynamics_function(
+            x,
+            u_imu,
+            dt_imu,
+            config.damping_coeff,
+            layout,
+            gravity_body=config.imu_gravity_body,
+        )
 
     # Jacobian
     F = jacfwd(f)

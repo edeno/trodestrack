@@ -32,6 +32,7 @@ def test_filter_core_config_defaults_match_existing_configs() -> None:
         "measurement_noise_heading",
         "imu_gyro_noise_density",
         "imu_accel_noise_density",
+        "imu_gravity_body",
         "damping_coeff",
         "led_distance",
         "use_mahalanobis_gating",
@@ -84,6 +85,18 @@ def test_initialize_state_returns_filter_state() -> None:
     assert isinstance(state, FilterState)
     assert state.mean.shape == (8,)
     assert state.cov.shape == (8, 8)
+
+
+def test_initialize_state_ignores_partial_coordinate_nan_leds() -> None:
+    """Initialization should not treat one finite LED coordinate as a 2D position."""
+    led1 = jnp.array([[0.0, jnp.nan], [1.0, 2.0]])
+    led2 = jnp.array([[jnp.nan, 0.0], [1.04, 2.0]])
+    mask = jnp.array([True, True])
+
+    state = initialize_state(led1, led2, mask, dt_cam=1.0 / 30.0, led_distance=0.04)
+
+    np.testing.assert_allclose(state.mean[:2], [1.02, 2.0], atol=1e-6)
+    np.testing.assert_allclose(state.mean[4], 0.0, atol=1e-6)
 
 
 def test_update_zupt_accepts_filter_configs() -> None:

@@ -264,11 +264,11 @@ def test_dynamics_function_vision_only_mode():
     state = state.at[layout.vel_idx[0]].set(1.0)  # vx = 1.0 m/s
     state = state.at[layout.vel_idx[1]].set(0.5)  # vy = 0.5 m/s
 
-    # Minimal IMU (zeros, should not be used in vision-only mode)
-    imu = jnp.array([0.0, 0.0, 0.0])
+    # Nonzero IMU should not be used in vision-only mode.
+    imu = jnp.array([10.0, 20.0, -30.0])
 
     dt = 0.1
-    damping = 0.1  # Apply damping
+    damping = 0.1
 
     next_state = dynamics_function(state, imu, dt, damping, layout)
 
@@ -279,6 +279,56 @@ def test_dynamics_function_vision_only_mode():
     assert jnp.all(jnp.isfinite(next_state)), (
         "Vision-only mode should produce finite state values"
     )
+    assert jnp.allclose(next_state[layout.pos_idx[0]], 0.1, atol=1e-6)
+    assert jnp.allclose(next_state[layout.pos_idx[1]], 0.05, atol=1e-6)
+    assert jnp.allclose(next_state[layout.vel_idx[0]], 1.0, atol=1e-6)
+    assert jnp.allclose(next_state[layout.vel_idx[1]], 0.5, atol=1e-6)
+    assert jnp.allclose(next_state[layout.heading_idx], 0.0, atol=1e-6)
+
+
+def test_dynamics_function_2d_calibrated_gravity_body_at_rest():
+    """Horizontal gravity projection should not become motion when calibrated."""
+    layout = LAYOUT_2D_FULL
+    state = jnp.zeros(layout.n)
+    gravity_body = jnp.array([-0.34, 0.51, 9.8])
+    imu = jnp.array([0.0, gravity_body[0], gravity_body[1]])
+
+    next_state = dynamics_function(
+        state,
+        imu,
+        dt=0.1,
+        damping=0.0,
+        layout=layout,
+        gravity_body=gravity_body,
+    )
+
+    assert jnp.allclose(next_state[layout.vel_idx[0]], 0.0, atol=1e-6)
+    assert jnp.allclose(next_state[layout.vel_idx[1]], 0.0, atol=1e-6)
+    assert jnp.allclose(next_state[layout.pos_idx[0]], 0.0, atol=1e-6)
+    assert jnp.allclose(next_state[layout.pos_idx[1]], 0.0, atol=1e-6)
+
+
+def test_dynamics_function_3d_calibrated_gravity_body_at_rest():
+    """3D IMU mode should subtract calibrated stationary accelerometer reading."""
+    layout = LAYOUT_2D_CAM_3D_IMU
+    state = jnp.zeros(layout.n)
+    gravity_body = jnp.array([-0.34, 0.51, 9.79])
+    imu = jnp.array([0.0, gravity_body[0], gravity_body[1], gravity_body[2]])
+
+    next_state = dynamics_function(
+        state,
+        imu,
+        dt=0.1,
+        damping=0.0,
+        layout=layout,
+        gravity_body=gravity_body,
+    )
+
+    assert jnp.allclose(next_state[layout.vel_idx[0]], 0.0, atol=1e-6)
+    assert jnp.allclose(next_state[layout.vel_idx[1]], 0.0, atol=1e-6)
+    assert jnp.allclose(next_state[layout.vel_idx[2]], 0.0, atol=1e-6)
+    assert jnp.allclose(next_state[layout.pos_idx[0]], 0.0, atol=1e-6)
+    assert jnp.allclose(next_state[layout.pos_idx[1]], 0.0, atol=1e-6)
 
 
 # =============================================================================

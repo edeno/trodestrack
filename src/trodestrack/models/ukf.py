@@ -377,7 +377,14 @@ def predict_step(
 
     # Propagate sigma points through dynamics
     def f(x):
-        return dynamics_function(x, u_imu, dt_imu, config.damping_coeff, layout)
+        return dynamics_function(
+            x,
+            u_imu,
+            dt_imu,
+            config.damping_coeff,
+            layout,
+            gravity_body=config.imu_gravity_body,
+        )
 
     sigmas_prop = vmap(f)(sigmas)  # (17, 8)
 

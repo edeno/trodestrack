@@ -325,8 +325,8 @@ class CameraPositionModel:
         z_led2 = self.z_led2_all[frame_idx]
 
         # Determine LED validity
-        led1_valid = jnp.isfinite(z_led1[0])
-        led2_valid = jnp.isfinite(z_led2[0])
+        led1_valid = jnp.isfinite(z_led1).all()
+        led2_valid = jnp.isfinite(z_led2).all()
 
         both_leds = led1_valid & led2_valid
         only_led1 = led1_valid & (~led2_valid)

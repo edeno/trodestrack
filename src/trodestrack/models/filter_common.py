@@ -44,6 +44,9 @@ class FilterCoreConfig:
         IMU gyro noise density (rad/s/√Hz). Default: 0.01 deg/s/√Hz (SpikeGadgets spec).
     imu_accel_noise_density : float
         IMU accel noise density (m/s²/√Hz). Default: 0.2 mg/√Hz (SpikeGadgets spec).
+    imu_gravity_body : tuple[float, float, float]
+        Expected accelerometer reading when stationary, in body/sensor axes
+        (m/s²). Default assumes level mounting with gravity on +z.
 
     damping_coeff : float
         Linear velocity damping coefficient (1/s) in dynamics model.
@@ -101,6 +104,7 @@ class FilterCoreConfig:
     # SpikeGadgets IMU noise specifications (Product Manual)
     imu_gyro_noise_density: float = 0.00017453  # 0.01 deg/s/√Hz → rad/s/√Hz
     imu_accel_noise_density: float = 0.00196133  # 0.2 mg/√Hz → 0.0002g * 9.80665
+    imu_gravity_body: tuple[float, float, float] = (0.0, 0.0, 9.81)
 
     damping_coeff: float = 0.2
     led_distance: float | None = 0.04
@@ -156,6 +160,13 @@ class FilterCoreConfig:
                     f"table supported by chi2_threshold. Choose one of {supported} "
                     f"or set use_mahalanobis_gating=False."
                 )
+
+        gravity = np.asarray(self.imu_gravity_body, dtype=float)
+        if gravity.shape != (3,) or not np.all(np.isfinite(gravity)):
+            raise ValueError(
+                "imu_gravity_body must be a length-3 finite sequence "
+                f"[g_x, g_y, g_z] in m/s²; got {self.imu_gravity_body!r}."
+            )
 
     def tree_flatten(self) -> tuple[tuple, dict]:
         """Flatten config for JAX PyTree registration.
@@ -263,8 +274,24 @@ def symmetrize(matrix: jnp.ndarray) -> jnp.ndarray:
     return 0.5 * (matrix + jnp.swapaxes(matrix, -1, -2))
 
 
+def adaptive_diagonal_boost(
+    matrix: jnp.ndarray,
+    *,
+    absolute_floor: float = 1e-9,
+    relative_scale: float = 1e-6,
+) -> jnp.ndarray:
+    """Return a scale-aware diagonal boost for PSD Cholesky operations."""
+
+    mean_diag = jnp.trace(matrix) / matrix.shape[-1]
+    relative_boost = relative_scale * jnp.maximum(jnp.abs(mean_diag), 1.0)
+    return jnp.maximum(jnp.asarray(absolute_floor, dtype=matrix.dtype), relative_boost)
+
+
 def psd_solve(
-    matrix: jnp.ndarray, rhs: jnp.ndarray, diagonal_boost: float = 1e-9
+    matrix: jnp.ndarray,
+    rhs: jnp.ndarray,
+    diagonal_boost: float = 1e-9,
+    relative_diagonal_boost: float = 1e-6,
 ) -> jnp.ndarray:
     """Solve A x = b for PSD matrices via Cholesky factorization.
 
@@ -283,7 +310,13 @@ def psd_solve(
         Solution x with shape matching rhs.
     """
 
-    stabilized = symmetrize(matrix) + diagonal_boost * jnp.eye(matrix.shape[-1])
+    matrix = symmetrize(matrix)
+    boost = adaptive_diagonal_boost(
+        matrix,
+        absolute_floor=diagonal_boost,
+        relative_scale=relative_diagonal_boost,
+    )
+    stabilized = matrix + boost * jnp.eye(matrix.shape[-1], dtype=matrix.dtype)
     chol, lower = cho_factor(stabilized, lower=True)
     return cho_solve((chol, lower), rhs)
 
@@ -579,6 +612,7 @@ def dynamics_function(
     dt: float,
     damping: float,
     layout: StateLayout,
+    gravity_body: tuple[float, float, float] | jnp.ndarray | None = None,
 ) -> jnp.ndarray:
     """Constant-acceleration dynamics with linear damping (layout-aware).
 
@@ -600,6 +634,9 @@ def dynamics_function(
         Linear velocity damping coefficient (1/s).
     layout : StateLayout
         State index mapping.
+    gravity_body : tuple[float, float, float] or jnp.ndarray, optional
+        Expected stationary accelerometer reading in body/sensor axes (m/s²).
+        Defaults to ``[0, 0, 9.81]`` for level mounting.
 
     Returns
     -------
@@ -643,6 +680,20 @@ def dynamics_function(
     vx, vy = state[vx_i], state[vy_i]
     theta = state[h_idx]
 
+    # Vision-only layouts do not integrate IMU channels. During dropouts they
+    # extrapolate from camera-derived velocity only.
+    if not layout.has_biases:
+        next_state = state
+        next_state = next_state.at[px_i].set(px + vx * dt)
+        next_state = next_state.at[py_i].set(py + vy * dt)
+        return next_state
+
+    gravity_body_vec = (
+        jnp.array([0.0, 0.0, 9.81])
+        if gravity_body is None
+        else jnp.asarray(gravity_body)
+    )
+
     # Detect IMU dimension: 3-element (2D) or 4-element (3D)
     imu_is_3d = imu.shape[0] >= 4
 
@@ -668,14 +719,12 @@ def dynamics_function(
         # Extract 3D accelerations from IMU
         fx, fy, fz = imu[1], imu[2], imu[3]
 
-        # Remove biases (body frame)
+        # Remove biases and calibrated stationary gravity reading (body frame)
         accel_body = jnp.array([fx - b_ax, fy - b_ay, fz - b_az])
+        accel_body_kinematic = accel_body - gravity_body_vec
 
-        # Rotate from body frame to world frame using current heading
-        accel_world = rotate_body_accel_to_world(accel_body, theta)
-
-        # Compensate for gravity (remove [0, 0, g] from world-frame measurement)
-        accel_kinematic = gravity_compensate(accel_world, g=9.81)
+        # Rotate kinematic acceleration from body frame to world frame.
+        accel_kinematic = rotate_body_accel_to_world(accel_body_kinematic, theta)
 
         # Update 3D velocity with damping
         vel = jnp.array([vx, vy, vz])
@@ -706,12 +755,13 @@ def dynamics_function(
         # 2D IMU mode: [ω_z, fx, fy] (backward compatible)
         fx, fy = imu[1], imu[2]
         accel_body = jnp.array([fx - b_ax, fy - b_ay])
+        accel_body_kinematic = accel_body - gravity_body_vec[:2]
 
         # 2D rotation (yaw only)
         cos_t = jnp.cos(theta)
         sin_t = jnp.sin(theta)
         R = jnp.array([[cos_t, -sin_t], [sin_t, cos_t]])
-        accel_world = R @ accel_body
+        accel_world = R @ accel_body_kinematic
 
         # Update 2D velocity
         vel = jnp.array([vx, vy])
@@ -875,8 +925,8 @@ def initialize_state(
 
     # Find frames with valid observation mask AND finite LED observations
     # (the mask alone isn't sufficient -- LEDs can be NaN even when observation_mask=True)
-    led1_finite_mask = jnp.isfinite(led1_obs[:, 0])
-    led2_finite_mask = jnp.isfinite(led2_obs[:, 0])
+    led1_finite_mask = jnp.isfinite(led1_obs).all(axis=1)
+    led2_finite_mask = jnp.isfinite(led2_obs).all(axis=1)
     any_led_finite = led1_finite_mask | led2_finite_mask
     valid_with_data = observation_mask & any_led_finite
 
@@ -885,8 +935,8 @@ def initialize_state(
     first_valid = valid_indices[0] if has_valid_obs else 0
 
     # Check LED validity at first valid frame
-    led1_valid = jnp.isfinite(led1_obs[first_valid, 0]) if has_valid_obs else False
-    led2_valid = jnp.isfinite(led2_obs[first_valid, 0]) if has_valid_obs else False
+    led1_valid = jnp.isfinite(led1_obs[first_valid]).all() if has_valid_obs else False
+    led2_valid = jnp.isfinite(led2_obs[first_valid]).all() if has_valid_obs else False
 
     # Replace NaN with zero to prevent propagation (only used if marked invalid)
     pos_led1 = jnp.where(
@@ -918,10 +968,10 @@ def initialize_state(
         led1_1, led2_1 = led1_obs[idx1], led2_obs[idx1]
         led1_2, led2_2 = led1_obs[idx2], led2_obs[idx2]
 
-        led1_1_valid = jnp.isfinite(led1_1[0])
-        led2_1_valid = jnp.isfinite(led2_1[0])
-        led1_2_valid = jnp.isfinite(led1_2[0])
-        led2_2_valid = jnp.isfinite(led2_2[0])
+        led1_1_valid = jnp.isfinite(led1_1).all()
+        led2_1_valid = jnp.isfinite(led2_1).all()
+        led1_2_valid = jnp.isfinite(led1_2).all()
+        led2_2_valid = jnp.isfinite(led2_2).all()
 
         pos1 = jnp.where(
             led1_1_valid & led2_1_valid,
@@ -1214,7 +1264,7 @@ def compute_nis_and_loglik(
     # 4D branch: both LEDs valid
     def compute_4d():
         S4s = symmetrize(S4)
-        eps = jnp.asarray(1e-9, dtype=S4s.dtype)
+        eps = adaptive_diagonal_boost(S4s)
         L4 = jnp.linalg.cholesky(S4s + eps * jnp.eye(4, dtype=S4s.dtype))
         x4 = cho_solve((L4, True), innov4)
         nis = jnp.dot(innov4, x4)
@@ -1228,7 +1278,7 @@ def compute_nis_and_loglik(
         S2 = M2 @ symmetrize(S4) @ M2.T  # (2, 2)
         innov2 = M2 @ innov4  # (2,)
 
-        eps = jnp.asarray(1e-9, dtype=S2.dtype)
+        eps = adaptive_diagonal_boost(S2)
         L2 = jnp.linalg.cholesky(S2 + eps * jnp.eye(2, dtype=S2.dtype))
         x2 = cho_solve((L2, True), innov2)
         nis = jnp.dot(innov2, x2)
