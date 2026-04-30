@@ -2,8 +2,8 @@
 
 ## Status
 
-Implementation started. Milestone 1 quaternion utilities are the first
-implementation slice.
+Implementation started. Milestone 1 quaternion utilities and Milestone 2 IMU
+calibration diagnostics have initial implementations.
 
 ## Context and Evidence
 
