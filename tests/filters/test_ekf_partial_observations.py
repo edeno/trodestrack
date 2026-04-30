@@ -163,6 +163,26 @@ def test_update_no_leds_valid(ekf_config, initial_state):
     assert log_lik == 0.0
 
 
+def test_update_partial_coordinate_nan_skips_measurement(ekf_config, initial_state):
+    """A LED with only one finite coordinate is not a valid 2D observation."""
+    z_led1 = jnp.array([0.98, jnp.nan])
+    z_led2 = jnp.array([jnp.nan, 1.0])
+
+    camera_model = make_camera_model(z_led1, z_led2, ekf_config)
+    state_upd, log_lik = update_step(
+        initial_state,
+        camera_model,
+        frame_idx=0,
+        observation_is_valid=True,
+        config=ekf_config,
+        layout=LAYOUT_2D_FULL,
+    )
+
+    assert jnp.allclose(state_upd.mean, initial_state.mean)
+    assert jnp.allclose(state_upd.cov, initial_state.cov)
+    assert log_lik == 0.0
+
+
 def test_update_mask_false(ekf_config, initial_state):
     """Test that update is skipped when mask is False."""
     # Valid observations but mask is False

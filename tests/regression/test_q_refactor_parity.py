@@ -36,8 +36,8 @@ def reference_Q(
     )
 
     # IMU input noise mapped into state via G
-    std_w = cfg.imu_gyro_noise_density * np.sqrt(dt)
-    std_f = cfg.imu_accel_noise_density * np.sqrt(dt)
+    std_w = cfg.imu_gyro_noise_density / np.sqrt(dt)
+    std_f = cfg.imu_accel_noise_density / np.sqrt(dt)
     Qu = jnp.diag(jnp.array([std_w**2, std_f**2, std_f**2], dtype=dtype))
 
     if cfg.reduce_imu_noise_during_blackout and (not has_vision):

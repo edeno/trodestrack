@@ -95,7 +95,14 @@ def _rts_smoother_impl(
     n = filtered_means.shape[1]
 
     def f(x, u, dt):
-        return dynamics_function(x, u, dt, ekf_config.damping_coeff, layout)
+        return dynamics_function(
+            x,
+            u,
+            dt,
+            ekf_config.damping_coeff,
+            layout,
+            gravity_body=ekf_config.imu_gravity_body,
+        )
 
     F_jac = jacfwd(f, argnums=0)
     has_mask = jnp.asarray(mask_is_provided, dtype=bool)
@@ -359,7 +366,14 @@ def _sigma_point_smoother_impl(
     has_mask = jnp.asarray(mask_is_provided, dtype=bool)
 
     def f(x, u, dt):
-        return dynamics_function(x, u, dt, ukf_config.damping_coeff, layout)
+        return dynamics_function(
+            x,
+            u,
+            dt,
+            ukf_config.damping_coeff,
+            layout,
+            gravity_body=ukf_config.imu_gravity_body,
+        )
 
     # Process noise assembly handled via assemble_Q per step
 

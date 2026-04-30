@@ -225,6 +225,23 @@ def test_camera_model_single_led_subspace(layout_2d_full, single_led1_arrays):
     np.testing.assert_allclose(selector, expected_M, atol=1e-10)
 
 
+def test_camera_model_partial_coordinate_nan_is_invalid(layout_2d_full):
+    """A LED requires both x and y coordinates to be finite."""
+    model = CameraPositionModel(
+        led_distance=0.04,
+        measurement_noise_base=0.005**2,
+        layout=layout_2d_full,
+        z_led1_all=jnp.array([[0.95, jnp.nan]]),
+        z_led2_all=jnp.array([[jnp.nan, 2.02]]),
+    )
+
+    both_leds, only_led1, only_led2, _ = model.subspace(frame_idx=0)
+
+    assert not both_leds
+    assert not only_led1
+    assert not only_led2
+
+
 def test_camera_model_dual_led_subspace(layout_2d_full, dual_led_arrays):
     """Camera model should return (2, 4) selector for dual LED (ignored by update)."""
     model = CameraPositionModel(

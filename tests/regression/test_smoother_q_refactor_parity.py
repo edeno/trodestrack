@@ -33,8 +33,8 @@ def reference_Q(config: Any, theta: float, dt: float, has_vision: bool) -> jnp.n
         jnp.array([q_px, q_py, q_vx, q_vy, q_th, q_bg, q_bax, q_bay], dtype=dtype)
     )
     # IMU input mapping
-    std_w = config.imu_gyro_noise_density * np.sqrt(dt)
-    std_f = config.imu_accel_noise_density * np.sqrt(dt)
+    std_w = config.imu_gyro_noise_density / np.sqrt(dt)
+    std_f = config.imu_accel_noise_density / np.sqrt(dt)
     Qu = jnp.diag(jnp.array([std_w**2, std_f**2, std_f**2], dtype=dtype))
     if getattr(config, "reduce_imu_noise_during_blackout", False) and (not has_vision):
         Qu = Qu * config.blackout_imu_noise_scale

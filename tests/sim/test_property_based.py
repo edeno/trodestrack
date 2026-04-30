@@ -210,7 +210,7 @@ def test_property_dropout_rate_bounds(dropout_prob: float, seed: int) -> None:
     # For very small dropout_prob (< 0.01), use absolute tolerance instead of relative
     if p < 0.01:
         # Absolute tolerance: allow ±2% deviation for rare events
-        assert observed_dropout_rate <= 0.02, (
+        assert observed_dropout_rate <= 0.02 + 1e-12, (
             f"Dropout rate {observed_dropout_rate:.3f} too high for p={p:.6f}"
         )
     else:

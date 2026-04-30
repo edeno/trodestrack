@@ -41,8 +41,8 @@ def reference_Q(
     )
 
     # IMU input noise mapped into state via G
-    std_w = cfg.imu_gyro_noise_density * np.sqrt(dt)
-    std_f = cfg.imu_accel_noise_density * np.sqrt(dt)
+    std_w = cfg.imu_gyro_noise_density / np.sqrt(dt)
+    std_f = cfg.imu_accel_noise_density / np.sqrt(dt)
     Qu = jnp.diag(jnp.array([std_w**2, std_f**2, std_f**2], dtype=dtype))
 
     if cfg.reduce_imu_noise_during_blackout and (not has_vision):
@@ -141,14 +141,32 @@ def test_build_input_noise_cov_supports_3d_accel():
     assert jnp.allclose(Qu, jnp.diag(jnp.diag(Qu)), atol=1e-8)
 
     # Gyro noise
-    sg = (cfg.imu_gyro_noise_density * np.sqrt(dt)) ** 2
+    sg = (cfg.imu_gyro_noise_density / np.sqrt(dt)) ** 2
     assert jnp.allclose(Qu[0, 0], sg, rtol=1e-6)
 
     # Accel noise (all 3 axes should be equal)
-    sa = (cfg.imu_accel_noise_density * np.sqrt(dt)) ** 2
+    sa = (cfg.imu_accel_noise_density / np.sqrt(dt)) ** 2
     assert jnp.allclose(Qu[1, 1], sa, rtol=1e-6)
     assert jnp.allclose(Qu[2, 2], sa, rtol=1e-6)
     assert jnp.allclose(Qu[3, 3], sa, rtol=1e-6)
+
+
+def test_input_noise_cov_matches_density_to_sample_std():
+    """Noise density conversion must match simulator per-sample convention."""
+    from trodestrack.models.process_noise import build_input_noise_cov
+    from trodestrack.sim.utils import density_to_sample_std
+
+    cfg = EKFConfig()
+    dt = 1.0 / 200.0
+
+    Qu = build_input_noise_cov(cfg, dt, n_accel=2, dtype=jnp.float32)
+
+    gyro_var = density_to_sample_std(cfg.imu_gyro_noise_density, dt) ** 2
+    accel_var = density_to_sample_std(cfg.imu_accel_noise_density, dt) ** 2
+
+    assert jnp.allclose(Qu[0, 0], gyro_var, rtol=1e-6)
+    assert jnp.allclose(Qu[1, 1], accel_var, rtol=1e-6)
+    assert jnp.allclose(Qu[2, 2], accel_var, rtol=1e-6)
 
 
 def test_assemble_Q_for_10d_state_with_3d_accel():
