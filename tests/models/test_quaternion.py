@@ -52,6 +52,13 @@ def test_quaternion_multiply_by_conjugate_gives_identity() -> None:
     np.testing.assert_allclose(identity, [1.0, 0.0, 0.0, 0.0], atol=1e-6)
 
 
+def test_rotation_vector_integer_input_promotes_to_float() -> None:
+    quat = quaternion_from_rotation_vector(jnp.array([0, 0, 0]))
+
+    assert jnp.issubdtype(quat.dtype, jnp.floating)
+    np.testing.assert_allclose(quat, [1.0, 0.0, 0.0, 0.0], atol=1e-7)
+
+
 def test_quaternion_inverse_handles_non_unit_quaternion() -> None:
     quat = jnp.array([2.0, 0.2, -0.4, 0.6])
 

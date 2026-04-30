@@ -144,6 +144,7 @@ def quaternion_from_rotation_vector(
     """
 
     rotvec = jnp.asarray(rotation_vector)
+    rotvec = rotvec.astype(jnp.result_type(rotvec, jnp.float32))
     angle = jnp.linalg.norm(rotvec, axis=-1, keepdims=True)
     half_angle = 0.5 * angle
     angle_safe = jnp.maximum(angle, jnp.asarray(small_angle_threshold, rotvec.dtype))
@@ -170,7 +171,8 @@ def integrate_body_gyro(
     omega_body : jnp.ndarray
         Body-frame angular velocity, shape ``(..., 3)`` in rad/s.
     dt : float or jnp.ndarray
-        Time step in seconds. May broadcast across leading dimensions.
+        Time step in seconds. Must be scalar or have shape
+        ``omega_body.shape[:-1]``.
 
     Returns
     -------
