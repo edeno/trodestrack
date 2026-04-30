@@ -141,6 +141,56 @@ def test_ekf_projected_update_both_leds(
     assert nis > 0.0  # Positive definite innovation covariance
 
 
+def test_ekf_projected_update_long_dropout_covariance_is_finite():
+    """Large post-dropout covariance should not NaN in the dual-LED update."""
+    mean = jnp.array([2.6156974, -1.1438828, 0.37141255, -0.4567405, 2.909768])
+    cov = jnp.array(
+        [
+            [436.50372, 0.0, 0.0, 0.0, 0.0],
+            [0.0, 436.50372, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 50.585873, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 50.585873, 0.0],
+            [0.0, 0.0, 0.0, 0.0, 0.25282606],
+        ],
+        dtype=jnp.float32,
+    )
+    state = FilterState(mean=mean, cov=cov)
+
+    led_distance = 0.0475
+    half_spacing = led_distance / 2.0
+    theta = mean[4]
+    H = jnp.zeros((4, 5), dtype=jnp.float32)
+    H = H.at[0, 0].set(1.0)
+    H = H.at[1, 1].set(1.0)
+    H = H.at[2, 0].set(1.0)
+    H = H.at[3, 1].set(1.0)
+    H = H.at[0, 4].set(half_spacing * jnp.sin(theta))
+    H = H.at[1, 4].set(-half_spacing * jnp.cos(theta))
+    H = H.at[2, 4].set(-half_spacing * jnp.sin(theta))
+    H = H.at[3, 4].set(half_spacing * jnp.cos(theta))
+
+    innovation = jnp.array(
+        [-1.637808, 1.9589384, -1.5893868, 1.9018271],
+        dtype=jnp.float32,
+    )
+    R_diag = jnp.full(4, 0.005**2, dtype=jnp.float32)
+
+    updated, nis, log_lik = ekf_projected_update(
+        state,
+        innovation,
+        H,
+        R_diag,
+        both_leds=True,
+        only_led1=False,
+        only_led2=False,
+    )
+
+    assert jnp.isfinite(updated.mean).all()
+    assert jnp.isfinite(updated.cov).all()
+    assert jnp.isfinite(nis)
+    assert jnp.isfinite(log_lik)
+
+
 def test_ekf_projected_update_only_led1(
     prior_state, measurement_jacobian, measurement_noise_base
 ):

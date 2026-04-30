@@ -274,8 +274,24 @@ def symmetrize(matrix: jnp.ndarray) -> jnp.ndarray:
     return 0.5 * (matrix + jnp.swapaxes(matrix, -1, -2))
 
 
+def adaptive_diagonal_boost(
+    matrix: jnp.ndarray,
+    *,
+    absolute_floor: float = 1e-9,
+    relative_scale: float = 1e-6,
+) -> jnp.ndarray:
+    """Return a scale-aware diagonal boost for PSD Cholesky operations."""
+
+    mean_diag = jnp.trace(matrix) / matrix.shape[-1]
+    relative_boost = relative_scale * jnp.maximum(jnp.abs(mean_diag), 1.0)
+    return jnp.maximum(jnp.asarray(absolute_floor, dtype=matrix.dtype), relative_boost)
+
+
 def psd_solve(
-    matrix: jnp.ndarray, rhs: jnp.ndarray, diagonal_boost: float = 1e-9
+    matrix: jnp.ndarray,
+    rhs: jnp.ndarray,
+    diagonal_boost: float = 1e-9,
+    relative_diagonal_boost: float = 1e-6,
 ) -> jnp.ndarray:
     """Solve A x = b for PSD matrices via Cholesky factorization.
 
@@ -294,7 +310,13 @@ def psd_solve(
         Solution x with shape matching rhs.
     """
 
-    stabilized = symmetrize(matrix) + diagonal_boost * jnp.eye(matrix.shape[-1])
+    matrix = symmetrize(matrix)
+    boost = adaptive_diagonal_boost(
+        matrix,
+        absolute_floor=diagonal_boost,
+        relative_scale=relative_diagonal_boost,
+    )
+    stabilized = matrix + boost * jnp.eye(matrix.shape[-1], dtype=matrix.dtype)
     chol, lower = cho_factor(stabilized, lower=True)
     return cho_solve((chol, lower), rhs)
 
@@ -1242,7 +1264,7 @@ def compute_nis_and_loglik(
     # 4D branch: both LEDs valid
     def compute_4d():
         S4s = symmetrize(S4)
-        eps = jnp.asarray(1e-9, dtype=S4s.dtype)
+        eps = adaptive_diagonal_boost(S4s)
         L4 = jnp.linalg.cholesky(S4s + eps * jnp.eye(4, dtype=S4s.dtype))
         x4 = cho_solve((L4, True), innov4)
         nis = jnp.dot(innov4, x4)
@@ -1256,7 +1278,7 @@ def compute_nis_and_loglik(
         S2 = M2 @ symmetrize(S4) @ M2.T  # (2, 2)
         innov2 = M2 @ innov4  # (2,)
 
-        eps = jnp.asarray(1e-9, dtype=S2.dtype)
+        eps = adaptive_diagonal_boost(S2)
         L2 = jnp.linalg.cholesky(S2 + eps * jnp.eye(2, dtype=S2.dtype))
         x2 = cho_solve((L2, True), innov2)
         nis = jnp.dot(innov2, x2)
