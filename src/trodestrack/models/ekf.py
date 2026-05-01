@@ -1213,20 +1213,6 @@ def _mahalanobis_distance_masked(
     return jnp.dot(innovation_masked, solved)
 
 
-def _chi2_threshold_active(
-    dof: int,
-    prob: float,
-    *,
-    dtype: jnp.dtype,
-) -> jnp.ndarray:
-    """Return a chi-square gate for any positive active measurement dimension."""
-    from scipy.stats import chi2
-
-    if dof < 1:
-        raise ValueError(f"dof must be >= 1; got {dof}.")
-    return jnp.asarray(chi2.ppf(prob, df=dof), dtype=dtype)
-
-
 def _chi2_threshold_table(
     max_dof: int,
     prob: float,

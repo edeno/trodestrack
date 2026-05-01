@@ -6,7 +6,7 @@ import numpy as np
 
 from trodestrack.models.ekf import (
     EKFConfig,
-    _chi2_threshold_active,
+    _chi2_threshold_table,
     _extended_kalman_filter_3d_core,
     _gravity_direction_prediction,
     extended_kalman_filter,
@@ -821,10 +821,10 @@ def test_ekf_3d_zupt_updates_velocity_when_enabled() -> None:
 def test_ekf_3d_chi2_threshold_supports_more_than_three_leds() -> None:
     from scipy.stats import chi2
 
-    threshold = _chi2_threshold_active(12, 0.997, dtype=jnp.float32)
+    table = _chi2_threshold_table(12, 0.997, dtype=jnp.float32)
 
     np.testing.assert_allclose(
-        np.asarray(threshold),
+        np.asarray(table[12]),
         chi2.ppf(0.997, df=12),
         rtol=1e-6,
     )

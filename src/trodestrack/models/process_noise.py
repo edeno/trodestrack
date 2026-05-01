@@ -365,5 +365,4 @@ def assemble_Q(
             row_mask = jnp.ones((n,), dtype=dtype).at[bias_indices].set(freeze_factor)
             Q = Q * row_mask[:, None] * row_mask[None, :]
 
-    # Symmetrize for numerical hygiene
-    return 0.5 * (Q + Q.T)
+    return symmetrize(Q)

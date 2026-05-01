@@ -533,4 +533,4 @@ def _quaternion_to_roll_pitch_yaw(
 
 
 def _wrap_angle(angle: NDArray[np.float64] | float) -> NDArray[np.float64] | float:
-    return (angle + np.pi) % (2.0 * np.pi) - np.pi
+    return np.arctan2(np.sin(angle), np.cos(angle))

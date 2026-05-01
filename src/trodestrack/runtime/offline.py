@@ -33,6 +33,7 @@ from trodestrack.models.filter_common import (
     state_yaw,
     symmetrize,
     validate_imu_input_shape,
+    wrap_angle,
 )
 from trodestrack.models.process_noise import assemble_Q
 from trodestrack.models.state_layout import StateLayout, get_heading_index, get_layout
@@ -243,9 +244,7 @@ def _rts_smoother_impl(
         if layout.has_heading_2d:
             h_idx = get_heading_index(layout)
             resid = smoothed_mean_next_aligned - m_pred
-            resid = resid.at[h_idx].set(
-                jnp.arctan2(jnp.sin(resid[h_idx]), jnp.cos(resid[h_idx]))
-            )
+            resid = resid.at[h_idx].set(wrap_angle(resid[h_idx]))
         elif layout.has_quaternion_orientation:
             quat_idx = jnp.array(layout.heading_idx, dtype=jnp.int32)
             sign = jnp.where(
@@ -583,12 +582,9 @@ def _sigma_point_smoother_impl(
         # Compute smoother gain: G = S_cross @ P_pred^{-1}
         G = psd_solve(P_pred, S_cross.T).T
 
-        # Correct for angle wrapping in heading (if present in layout)
         h_idx = get_heading_index(layout)
         resid = smoothed_mean_next - m_pred
-        resid = resid.at[h_idx].set(
-            jnp.arctan2(jnp.sin(resid[h_idx]), jnp.cos(resid[h_idx]))
-        )
+        resid = resid.at[h_idx].set(wrap_angle(resid[h_idx]))
 
         # Smooth mean and covariance
         smoothed_mean = filtered_mean + G @ resid
