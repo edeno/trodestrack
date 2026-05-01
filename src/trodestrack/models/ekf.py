@@ -56,8 +56,12 @@ from trodestrack.models.filter_common import (
 )
 from trodestrack.models.filter_update import ekf_projected_update
 from trodestrack.models.process_noise import assemble_Q
-from trodestrack.models.quaternion import rotate_vector_world_to_body
+from trodestrack.models.quaternion import (
+    rotate_vector_body_to_world,
+    rotate_vector_world_to_body,
+)
 from trodestrack.models.sensors.camera_position import CameraPositionModel
+from trodestrack.models.sensors.camera_position_3d import Camera3DPositionModel
 from trodestrack.models.sensors.heading_pseudo import (
     HEADING_GATE_THRESHOLD,
     HeadingPseudoModel,
@@ -118,6 +122,16 @@ class EKFResult(NamedTuple):
     predicted_covariances: jnp.ndarray  # (N_cam, n, n)
     marginal_loglik: float
     estimated_led_distance: float | None
+
+
+class EKF3DResult(NamedTuple):
+    """EKF filtering result for 3D camera + 6-DOF IMU mode."""
+
+    filtered_means: jnp.ndarray
+    filtered_covariances: jnp.ndarray
+    predicted_means: jnp.ndarray
+    predicted_covariances: jnp.ndarray
+    marginal_loglik: float
 
 
 class EKFComputationResult(NamedTuple):
@@ -323,13 +337,51 @@ def predict_step(
 
     if layout.has_quaternion_orientation:
         # Autodiff through the quaternion exponential is singular at exactly
-        # zero rotation. Use a conservative transition Jacobian for this
-        # experimental branch: constant-velocity x/y dynamics plus identity
-        # orientation/bias propagation. Quaternion process noise is still
-        # injected through Q below.
+        # zero rotation. Use a first-order transition Jacobian for this
+        # experimental branch so IMU biases can become observable from later
+        # camera updates without tracing through the quaternion exponential.
         F_x = jnp.eye(m.shape[0], dtype=m.dtype)
-        F_x = F_x.at[layout.pos_idx[0], layout.vel_idx[0]].set(dt_imu)
-        F_x = F_x.at[layout.pos_idx[1], layout.vel_idx[1]].set(dt_imu)
+        use_accel_translation = config.enable_experimental_accel_translation
+        dt_arr = jnp.asarray(dt_imu, dtype=m.dtype)
+        if use_accel_translation:
+            vel_self = 1.0 - config.damping_coeff * dt_arr
+            pos_vel = dt_arr - 0.5 * config.damping_coeff * dt_arr**2
+        else:
+            vel_self = 1.0
+            pos_vel = dt_arr
+        for pos_i, vel_i in zip(layout.pos_idx, layout.vel_idx, strict=True):
+            F_x = F_x.at[vel_i, vel_i].set(vel_self)
+            F_x = F_x.at[pos_i, vel_i].set(pos_vel)
+
+        quat_idx = jnp.array(layout.heading_idx, dtype=jnp.int32)
+        gyro_bias_idx = jnp.array(layout.bias_gyro_idx, dtype=jnp.int32)
+        qw, qx, qy, qz = m[quat_idx]
+        quat_gyro_matrix = jnp.array(
+            [
+                [-qx, -qy, -qz],
+                [qw, -qz, qy],
+                [qz, qw, -qx],
+                [-qy, qx, qw],
+            ],
+            dtype=m.dtype,
+        )
+        F_x = F_x.at[quat_idx[:, None], gyro_bias_idx[None, :]].set(
+            -0.5 * dt_arr * quat_gyro_matrix
+        )
+
+        if use_accel_translation:
+            basis_body = jnp.eye(3, dtype=m.dtype)
+            rotation_world_from_body = rotate_vector_body_to_world(
+                m_pred[quat_idx],
+                basis_body,
+            ).T
+            for dim, (pos_i, vel_i) in enumerate(
+                zip(layout.pos_idx, layout.vel_idx, strict=True)
+            ):
+                for axis, bias_i in enumerate(layout.bias_accel_idx):
+                    coeff = -rotation_world_from_body[dim, axis]
+                    F_x = F_x.at[vel_i, bias_i].set(dt_arr * coeff)
+                    F_x = F_x.at[pos_i, bias_i].set(0.5 * dt_arr**2 * coeff)
     else:
         # Jacobian
         F = jacfwd(f)
@@ -353,6 +405,11 @@ def predict_step(
         n=m.shape[0],
         has_vision=has_vision,
         dtype=m.dtype,
+        orientation_quaternion=(
+            m_pred[jnp.array(layout.heading_idx, dtype=jnp.int32)]
+            if layout.has_quaternion_orientation
+            else None
+        ),
     )
 
     # Predict covariance
@@ -818,4 +875,289 @@ def extended_kalman_filter(
         predicted_covariances=computation.predicted_covariances,
         marginal_loglik=float(computation.marginal_loglik),
         estimated_led_distance=estimated_led_distance,
+    )
+
+
+def extended_kalman_filter_3d(
+    ekf_config: EKFConfig,
+    t_imu: np.ndarray,
+    U_imu: np.ndarray,
+    t_cam: np.ndarray,
+    Z_cam_leds: np.ndarray,
+    led_offsets_body: np.ndarray,
+    mask_cam_leds: np.ndarray | None = None,
+    initial_state: EKFState | None = None,
+    conf_cam: np.ndarray | None = None,
+) -> EKF3DResult:
+    """Run the experimental 3D camera + 6-DOF IMU EKF.
+
+    This is the first full-3D filter path. It intentionally lives beside the
+    existing 2D entry point because the camera measurement shape is different:
+    ``Z_cam_leds`` is ``(n_cam, n_leds, 3)`` and ``led_offsets_body`` is
+    ``(n_leds, 3)``.
+
+    Notes
+    -----
+    The state mode must be ``"3d_cam_6dof_imu"``. Accelerometer translation is
+    enabled internally for this mode and remains disabled by default for 2D
+    quaternion modes.
+    """
+    if ekf_config.state_mode != "3d_cam_6dof_imu":
+        raise ValueError(
+            "extended_kalman_filter_3d requires "
+            "EKFConfig(state_mode='3d_cam_6dof_imu')."
+        )
+
+    layout = get_layout(ekf_config.state_mode)
+    validate_imu_input_shape(
+        U_imu,
+        layout,
+        func_name="extended_kalman_filter_3d",
+    )
+    config_for_filter = ekf_config
+
+    t_imu_jax = jnp.asarray(t_imu)
+    U_imu_jax = jnp.asarray(U_imu)
+    t_cam_jax = jnp.asarray(t_cam)
+    Z_cam_leds_jax = jnp.asarray(Z_cam_leds)
+    led_offsets_body_jax = jnp.asarray(led_offsets_body)
+    mask_cam_leds_jax = (
+        None if mask_cam_leds is None else jnp.asarray(mask_cam_leds, dtype=bool)
+    )
+    conf_cam_jax = (
+        None if conf_cam is None else jnp.clip(jnp.asarray(conf_cam), 1e-2, 1.0)
+    )
+
+    camera_model = Camera3DPositionModel(
+        led_offsets_body=led_offsets_body_jax,
+        measurement_noise_base=config_for_filter.measurement_noise_pos,
+        layout=layout,
+        z_leds_all=Z_cam_leds_jax,
+        mask_leds_all=mask_cam_leds_jax,
+        conf_all=conf_cam_jax,
+    )
+
+    if initial_state is None:
+        initial_state = _initialize_3d_state(
+            Z_cam_leds_jax,
+            led_offsets_body_jax,
+            layout=layout,
+            mask_cam_leds=mask_cam_leds_jax,
+        )
+
+    dt_imu_mean = jnp.mean(jnp.diff(t_imu_jax))
+    imu_index_arrays = np.asarray(compute_imu_index_arrays(t_imu, t_cam))
+
+    state = initial_state
+    filtered_means = []
+    filtered_covariances = []
+    predicted_means = []
+    predicted_covariances = []
+    marginal_loglik = jnp.asarray(0.0, dtype=state.mean.dtype)
+
+    for t_idx in range(t_cam_jax.shape[0]):
+        has_vision = jnp.any(camera_model.valid_coordinates(t_idx))
+        if t_idx > 0:
+            for imu_idx in imu_index_arrays[t_idx]:
+                if imu_idx < 0:
+                    continue
+                dt = (
+                    t_imu_jax[imu_idx] - t_imu_jax[imu_idx - 1]
+                    if imu_idx > 0
+                    else dt_imu_mean
+                )
+                state = predict_step(
+                    state,
+                    U_imu_jax[imu_idx],
+                    dt,
+                    config_for_filter,
+                    has_vision=has_vision,
+                    layout=layout,
+                )
+
+        predicted_means.append(state.mean)
+        predicted_covariances.append(state.cov)
+
+        if bool(has_vision):
+            state, log_lik = _update_camera_3d(
+                state,
+                camera_model,
+                t_idx,
+                layout,
+                config_for_filter,
+            )
+            marginal_loglik = marginal_loglik + log_lik
+
+        state, log_lik_zupt = update_zupt(state, config_for_filter)
+        marginal_loglik = marginal_loglik + log_lik_zupt
+
+        filtered_means.append(state.mean)
+        filtered_covariances.append(state.cov)
+
+    return EKF3DResult(
+        filtered_means=jnp.stack(filtered_means),
+        filtered_covariances=jnp.stack(filtered_covariances),
+        predicted_means=jnp.stack(predicted_means),
+        predicted_covariances=jnp.stack(predicted_covariances),
+        marginal_loglik=float(marginal_loglik),
+    )
+
+
+def _initialize_3d_state(
+    Z_cam_leds: jnp.ndarray,
+    led_offsets_body: jnp.ndarray,
+    *,
+    layout: StateLayout,
+    mask_cam_leds: jnp.ndarray | None,
+) -> EKFState:
+    """Initialize a 3D quaternion state from the first usable camera frame."""
+    valid_leds = jnp.isfinite(Z_cam_leds).all(axis=2)
+    if mask_cam_leds is not None:
+        valid_leds = valid_leds & mask_cam_leds
+
+    counts = jnp.sum(valid_leds, axis=1)
+    frame_idx = int(np.argmax(np.asarray(counts > 0)))
+    has_valid = bool(np.asarray(counts[frame_idx] > 0))
+
+    mean = jnp.zeros(layout.n)
+    quat_idx = jnp.array(layout.heading_idx, dtype=jnp.int32)
+    pos_idx = jnp.array(layout.pos_idx, dtype=jnp.int32)
+    mean = mean.at[quat_idx].set(jnp.array([1.0, 0.0, 0.0, 0.0]))
+
+    if has_valid:
+        frame_valid = valid_leds[frame_idx]
+        denom = jnp.maximum(jnp.sum(frame_valid), 1)
+        centroid_world = (
+            jnp.sum(
+                jnp.where(frame_valid[:, None], Z_cam_leds[frame_idx], 0.0),
+                axis=0,
+            )
+            / denom
+        )
+        centroid_body = (
+            jnp.sum(
+                jnp.where(frame_valid[:, None], led_offsets_body, 0.0),
+                axis=0,
+            )
+            / denom
+        )
+        mean = mean.at[pos_idx].set(centroid_world - centroid_body)
+
+    cov = jnp.eye(layout.n) * 1.0
+    for idx in layout.pos_idx:
+        cov = cov.at[idx, idx].set(0.05**2)
+    for idx in layout.vel_idx:
+        cov = cov.at[idx, idx].set(0.2**2)
+    for idx in layout.heading_idx:
+        cov = cov.at[idx, idx].set(0.5**2)
+    for idx in layout.bias_gyro_idx:
+        cov = cov.at[idx, idx].set(0.05**2)
+    for idx in layout.bias_accel_idx:
+        cov = cov.at[idx, idx].set(0.1**2)
+    return EKFState(mean=mean, cov=cov)
+
+
+def _update_camera_3d(
+    state: EKFState,
+    camera_model: Camera3DPositionModel,
+    frame_idx: int,
+    layout: StateLayout,
+    config: EKFConfig,
+) -> tuple[EKFState, jnp.ndarray]:
+    """Apply one gated, optionally iterated 3D LED camera EKF update."""
+    valid = np.asarray(camera_model.valid_coordinates(frame_idx))
+    active = np.nonzero(valid)[0]
+    if active.size == 0:
+        return state, jnp.asarray(0.0, dtype=state.mean.dtype)
+
+    state_iter = state
+    innovation = jnp.zeros(camera_model.meas_dim, dtype=state.mean.dtype)
+    S = jnp.eye(camera_model.meas_dim, dtype=state.mean.dtype)
+    for _ in range(config.num_iter):
+        state_iter, innovation, S = _camera_3d_linear_update(
+            state,
+            state_iter.mean,
+            camera_model,
+            frame_idx,
+            layout,
+        )
+
+    log_lik = _gaussian_log_likelihood_active(innovation, S, active)
+    if config.use_mahalanobis_gating:
+        nis = _mahalanobis_distance_active(innovation, S, active)
+        threshold = _chi2_threshold_active(
+            active.size,
+            config.mahalanobis_threshold_prob,
+            dtype=state.mean.dtype,
+        )
+        if not bool(nis < threshold):
+            return state, jnp.asarray(0.0, dtype=state.mean.dtype)
+
+    return state_iter, log_lik
+
+
+def _camera_3d_linear_update(
+    prior_state: EKFState,
+    linearization_mean: jnp.ndarray,
+    camera_model: Camera3DPositionModel,
+    frame_idx: int,
+    layout: StateLayout,
+) -> tuple[EKFState, jnp.ndarray, jnp.ndarray]:
+    """Apply one IEKF linearized 3D camera update from the fixed prior."""
+    mean_prior, cov_prior = prior_state.mean, prior_state.cov
+    meas_pred = camera_model.predict(linearization_mean)
+    innovation = camera_model.innovation(frame_idx, meas_pred)
+    H = camera_model.jacobian(linearization_mean, frame_idx)
+    R = camera_model.meas_cov(frame_idx)
+    corrected_innovation = innovation + H @ (linearization_mean - mean_prior)
+    S = H @ cov_prior @ H.T + R
+    K = psd_solve(S, H @ cov_prior).T
+    mean_upd = mean_prior + K @ corrected_innovation
+    mean_upd = normalize_state_orientation(mean_upd, layout)
+    cov_upd = joseph_update(cov_prior, K, H, R)
+    return EKFState(mean=mean_upd, cov=cov_upd), corrected_innovation, S
+
+
+def _mahalanobis_distance_active(
+    innovation: jnp.ndarray,
+    covariance: jnp.ndarray,
+    active_indices: np.ndarray,
+) -> jnp.ndarray:
+    """Mahalanobis distance on active measurement coordinates only."""
+    innov_active = innovation[active_indices]
+    cov_active = covariance[active_indices[:, None], active_indices[None, :]]
+    solved = psd_solve(cov_active, innov_active)
+    return jnp.dot(innov_active, solved)
+
+
+def _chi2_threshold_active(
+    dof: int,
+    prob: float,
+    *,
+    dtype: jnp.dtype,
+) -> jnp.ndarray:
+    """Return a chi-square gate for any positive active measurement dimension."""
+    from scipy.stats import chi2
+
+    if dof < 1:
+        raise ValueError(f"dof must be >= 1; got {dof}.")
+    return jnp.asarray(chi2.ppf(prob, df=dof), dtype=dtype)
+
+
+def _gaussian_log_likelihood_active(
+    innovation: jnp.ndarray,
+    covariance: jnp.ndarray,
+    active_indices: np.ndarray,
+) -> jnp.ndarray:
+    """Gaussian log likelihood on active measurement coordinates only."""
+    innov_active = innovation[active_indices]
+    cov_active = covariance[active_indices[:, None], active_indices[None, :]]
+    dim = innov_active.shape[0]
+    solved = psd_solve(cov_active, innov_active)
+    sign, logdet = jnp.linalg.slogdet(symmetrize(cov_active))
+    logdet = jnp.where(sign > 0, logdet, jnp.asarray(0.0, dtype=innovation.dtype))
+    return -0.5 * (
+        dim * jnp.log(jnp.asarray(2.0 * np.pi, dtype=innovation.dtype))
+        + logdet
+        + jnp.dot(innov_active, solved)
     )

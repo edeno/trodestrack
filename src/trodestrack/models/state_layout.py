@@ -267,6 +267,14 @@ Note: Requires quaternion normalization constraint |q| = 1
 """
 
 
+LAYOUT_3D_CAM_6DOF_IMU = LAYOUT_3D_QUAT
+"""Full 3D camera with 6-DOF IMU fusion.
+
+Alias for ``LAYOUT_3D_QUAT`` with the explicit state-mode name used by the
+tilt/orientation implementation plan.
+"""
+
+
 # =============================================================================
 # Lookup Table
 # =============================================================================
@@ -279,6 +287,7 @@ LAYOUT_REGISTRY = {
     "2d_cam_6dof_imu_orientation": LAYOUT_2D_CAM_6DOF_IMU_ORIENTATION,
     "3d_euler": LAYOUT_3D_EULER,
     "3d_quat": LAYOUT_3D_QUAT,
+    "3d_cam_6dof_imu": LAYOUT_3D_CAM_6DOF_IMU,
 }
 """Lookup table mapping mode strings to StateLayout instances.
 
@@ -297,7 +306,8 @@ def get_layout(mode: str) -> StateLayout:
     ----------
     mode : str
         One of {"2d_full", "vision_only", "imu_only", "2d_cam_3d_imu",
-        "3d_euler", "3d_quat"}.
+        "2d_cam_6dof_imu_orientation", "3d_euler", "3d_quat",
+        "3d_cam_6dof_imu"}.
 
     Returns
     -------

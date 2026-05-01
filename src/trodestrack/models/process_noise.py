@@ -6,6 +6,7 @@ import jax.numpy as jnp
 from jax import Array
 
 from trodestrack.models.filter_common import build_G_matrix_generic, symmetrize
+from trodestrack.models.quaternion import rotate_vector_body_to_world
 from trodestrack.models.state_layout import (
     LAYOUT_REGISTRY,
     StateLayout,
@@ -166,6 +167,7 @@ def assemble_Q(
     dtype=jnp.float32,
     G_override: jnp.ndarray | None = None,
     Qu_override: jnp.ndarray | None = None,
+    orientation_quaternion: jnp.ndarray | None = None,
 ) -> jnp.ndarray:
     """Assemble total process noise matrix.
 
@@ -187,6 +189,10 @@ def assemble_Q(
         Optional precomputed input mapping matrix G (n, 3).
     Qu_override : jnp.ndarray | None, optional
         Optional IMU input covariance (3, 3).
+    orientation_quaternion : jnp.ndarray | None, optional
+        Scalar-first body-to-world quaternion used to map full 3-axis
+        accelerometer input noise for quaternion layouts. If omitted, yaw-only
+        mapping is used as a conservative planar approximation.
 
     Returns
     -------
@@ -304,21 +310,32 @@ def assemble_Q(
                     G = G.at[row, col].set(half_dt)
 
                 if getattr(config, "enable_experimental_accel_translation", False):
-                    c, s = jnp.cos(theta), jnp.sin(theta)
                     accel_col = n_gyro
                     dt_arr = jnp.asarray(dt, dtype=dtype)
                     half_dt2 = 0.5 * dt_arr**2
-                    px_i, py_i = layout.pos_idx[0], layout.pos_idx[1]
-                    vx_i, vy_i = layout.vel_idx[0], layout.vel_idx[1]
+                    if orientation_quaternion is None:
+                        c, s = jnp.cos(theta), jnp.sin(theta)
+                        rotation_world_from_body = jnp.array(
+                            [
+                                [c, -s, 0.0],
+                                [s, c, 0.0],
+                                [0.0, 0.0, 1.0],
+                            ],
+                            dtype=dtype,
+                        )
+                    else:
+                        rotation_world_from_body = rotate_vector_body_to_world(
+                            orientation_quaternion,
+                            jnp.eye(3, dtype=dtype),
+                        ).T
 
-                    G = G.at[vx_i, accel_col + 0].set(dt_arr * c)
-                    G = G.at[vx_i, accel_col + 1].set(-dt_arr * s)
-                    G = G.at[vy_i, accel_col + 0].set(dt_arr * s)
-                    G = G.at[vy_i, accel_col + 1].set(dt_arr * c)
-                    G = G.at[px_i, accel_col + 0].set(half_dt2 * c)
-                    G = G.at[px_i, accel_col + 1].set(-half_dt2 * s)
-                    G = G.at[py_i, accel_col + 0].set(half_dt2 * s)
-                    G = G.at[py_i, accel_col + 1].set(half_dt2 * c)
+                    for dim, (pos_i, vel_i) in enumerate(
+                        zip(layout.pos_idx, layout.vel_idx, strict=True)
+                    ):
+                        for axis in range(3):
+                            coeff = rotation_world_from_body[dim, axis]
+                            G = G.at[vel_i, accel_col + axis].set(dt_arr * coeff)
+                            G = G.at[pos_i, accel_col + axis].set(half_dt2 * coeff)
 
                 Q = Q_rate + G @ Qu @ G.T
             else:

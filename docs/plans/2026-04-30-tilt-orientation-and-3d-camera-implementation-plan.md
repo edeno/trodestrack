@@ -2,10 +2,17 @@
 
 ## Status
 
-Implementation started. Milestones 1-4 have initial implementations:
+Implementation started. Milestones 1-6 have initial implementations:
 quaternion utilities, IMU calibration diagnostics, standalone orientation-only
 estimation, and an experimental 2D camera + 6-DOF IMU orientation EKF mode
-with gated gravity-direction roll/pitch updates.
+with gated gravity-direction roll/pitch updates. Milestone 5 adds a standalone
+3D camera measurement model. Milestone 6 adds an experimental
+`3d_cam_6dof_imu` EKF entry point with full 3D position/velocity propagation,
+quaternion orientation propagation, 3D LED updates, 3D camera IEKF iterations,
+Mahalanobis gating, ZUPT, and first-order IMU-bias covariance coupling on
+synthetic data. Synthetic bias recovery and 3D dropout comparisons are covered
+by regression tests. RTS smoothing and real 3D dataset validation remain
+pending.
 
 ## Context and Evidence
 
@@ -302,7 +309,7 @@ For 3D data:
 3. Land orientation-only estimator and run Arthur validation.
 4. Add `2d_cam_6dof_imu_orientation` as experimental.
 5. Add 3D camera measurement model behind tests.
-6. Add `3d_cam_6dof_imu` after synthetic 3D validation.
+6. Add experimental `3d_cam_6dof_imu` after synthetic 3D validation.
 7. Promote any mode only after held-out real-data checks show improvement.
 
 ## Documentation Updates
@@ -321,14 +328,13 @@ For 3D data:
 - Should orientation filtering use a direct EKF or an error-state formulation
   after the first prototype?
 
-## Recommended First Implementation Slice
+## Recommended Next Implementation Slice
 
-Implement Milestone 1 and Milestone 2 first:
+Extend Milestone 6 validation before promotion:
 
-- Quaternion utilities.
-- Calibration diagnostics.
-- No changes to EKF defaults.
-- No accelerometer translation.
+- Add RTS smoother support only after the filter path passes those synthetic
+  checks.
+- Run the smallest representative real 3D dataset once available.
 
-This gives immediate evidence about orientation feasibility while avoiding
-regressions in the current 2D tracking workflow.
+This keeps the new 3D path experimental until it demonstrates recovery beyond
+camera-only tracking on held-out intervals.

@@ -6,6 +6,7 @@ from trodestrack.models.state_layout import (
     LAYOUT_2D_CAM_3D_IMU,
     LAYOUT_2D_CAM_6DOF_IMU_ORIENTATION,
     LAYOUT_2D_FULL,
+    LAYOUT_3D_CAM_6DOF_IMU,
     LAYOUT_3D_EULER,
     LAYOUT_3D_QUAT,
     LAYOUT_REGISTRY,
@@ -114,6 +115,13 @@ def test_layout_3d_quat_properties():
     assert layout.spatial_dim == 3
     assert layout.has_heading_2d is False
     assert layout.has_orientation_3d is True
+    assert layout.has_quaternion_orientation is True
+
+
+def test_layout_3d_cam_6dof_imu_is_3d_quaternion_alias():
+    """The plan-facing 3D mode uses the 16D quaternion layout."""
+    assert LAYOUT_3D_CAM_6DOF_IMU is LAYOUT_3D_QUAT
+    assert get_layout("3d_cam_6dof_imu") is LAYOUT_3D_CAM_6DOF_IMU
 
 
 # =============================================================================
@@ -182,6 +190,7 @@ def test_all_layouts_have_no_overlapping_indices():
         LAYOUT_2D_CAM_6DOF_IMU_ORIENTATION,
         LAYOUT_3D_EULER,
         LAYOUT_3D_QUAT,
+        LAYOUT_3D_CAM_6DOF_IMU,
     ]
 
     for layout in layouts_to_test:
@@ -249,6 +258,7 @@ def test_get_layout_by_name():
     )
     assert get_layout("3d_euler") is LAYOUT_3D_EULER
     assert get_layout("3d_quat") is LAYOUT_3D_QUAT
+    assert get_layout("3d_cam_6dof_imu") is LAYOUT_3D_CAM_6DOF_IMU
 
 
 def test_get_layout_raises_for_unknown_name():
@@ -267,6 +277,7 @@ def test_layout_registry_completeness():
         "2d_cam_6dof_imu_orientation",
         "3d_euler",
         "3d_quat",
+        "3d_cam_6dof_imu",
     ]
 
     for key in expected_keys:

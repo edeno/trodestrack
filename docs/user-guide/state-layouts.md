@@ -1,6 +1,6 @@
 # State Layouts
 
-TrodesTrack uses an explicit **state layout system** to eliminate hardcoded dimension assumptions and support multiple tracking modes (5D, 8D, 10D, 15D states).
+TrodesTrack uses an explicit **state layout system** to eliminate hardcoded dimension assumptions and support multiple tracking modes (5D, 8D, 10D, 14D, 15D, and 16D states).
 
 !!! tip "Best Practice"
     Always use state layouts instead of magic indices like `[:, 0:2]`.
@@ -178,6 +178,61 @@ Indices:
 ```
 
 **Use when:** You need 3D tracking without gimbal lock issues.
+
+### `"3d_cam_6dof_imu"` (16D)
+
+Experimental full 3D camera + 6-DOF IMU EKF mode. This mode uses the same
+state layout as `"3d_quat"` and is exposed as a separate name so callers can
+opt into the 3D camera filter path explicitly.
+
+```
+State vector: [x, y, z, vx, vy, vz, qw, qx, qy, qz, b_gx, b_gy, b_gz, b_ax, b_ay, b_az]
+
+Indices:
+- pos_idx: [0, 1, 2]
+- vel_idx: [3, 4, 5]
+- quaternion_idx: [6, 7, 8, 9]  # [w, x, y, z]
+- gyro_bias_idx: [10, 11, 12]
+- accel_bias_idx: [13, 14, 15]
+```
+
+**Use when:** You have 3D LED observations and want to call
+`extended_kalman_filter_3d`.
+
+The 3D EKF expects 6-channel IMU inputs `[gx, gy, gz, ax, ay, az]`, 3D LED
+observations shaped `(n_time, n_leds, 3)`, and body-frame LED offsets shaped
+`(n_leds, 3)`. The experimental path supports camera IEKF iterations,
+Mahalanobis gating, and ZUPT. Translational accelerometer integration is
+controlled by `enable_experimental_accel_translation`; leave it off for
+camera/gyro-only comparisons and turn it on for accel-enabled 3D validation.
+It currently has synthetic coverage only; treat it as experimental until
+representative real 3D data passes dropout and bias-recovery checks.
+
+## 3D Camera Measurement Convention
+
+The experimental 3D camera measurement model is `Camera3DPositionModel`, used
+by the `extended_kalman_filter_3d` entry point.
+
+Inputs:
+
+```python
+Z_cam_leds.shape == (n_time, n_leds, 3)
+mask_cam_leds.shape == (n_time, n_leds)
+led_offsets_body.shape == (n_leds, 3)
+```
+
+- `Z_cam_leds[t, i]` is LED `i` observed in world coordinates `[x, y, z]`.
+- `mask_cam_leds[t, i]` marks whole-LED visibility.
+- Individual missing coordinates may also be represented with `NaN`; those
+  coordinates are ignored independently.
+- `led_offsets_body[i]` is the fixed LED offset in the body/headstage frame.
+- Predictions use the 3D position and scalar-first body-to-world quaternion
+  from the `"3d_cam_6dof_imu"` state layout.
+
+The model keeps a fixed flattened measurement shape of `n_leds * 3`. Missing
+LEDs or coordinates receive large measurement variance and zero residual, so
+future JAX filter loops can keep static shapes while ignoring partial
+observations.
 
 ## Layout Object Reference
 

@@ -240,6 +240,35 @@ def test_assemble_Q_14d_accel_translation_uses_accel_noise_density():
     assert Q_high[3, 3] > Q_low[3, 3]
 
 
+def test_assemble_Q_16d_3d_mode_maps_accel_noise_to_z_velocity():
+    """Full 3D mode should include z accel input noise in Q."""
+    from trodestrack.models.process_noise import assemble_Q
+
+    cfg_low = EKFConfig(
+        state_mode="3d_cam_6dof_imu",
+        enable_experimental_accel_translation=True,
+        imu_accel_noise_density=1e-6,
+        adaptive_q_during_dropout=False,
+        reduce_imu_noise_during_blackout=False,
+        freeze_bias_during_blackout=False,
+    )
+    cfg_high = EKFConfig(
+        state_mode="3d_cam_6dof_imu",
+        enable_experimental_accel_translation=True,
+        imu_accel_noise_density=1.0,
+        adaptive_q_during_dropout=False,
+        reduce_imu_noise_during_blackout=False,
+        freeze_bias_during_blackout=False,
+    )
+
+    Q_low = assemble_Q(cfg_low, theta=0.0, dt=0.01, n=16, has_vision=True)
+    Q_high = assemble_Q(cfg_high, theta=0.0, dt=0.01, n=16, has_vision=True)
+
+    assert Q_high[3, 3] > Q_low[3, 3]
+    assert Q_high[4, 4] > Q_low[4, 4]
+    assert Q_high[5, 5] > Q_low[5, 5]
+
+
 def test_assemble_Q_for_10d_state_with_3d_accel():
     """Test assemble_Q() with 10D state (2D pos + 3D vel + 3D accel bias)."""
     from trodestrack.models.process_noise import assemble_Q

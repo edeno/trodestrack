@@ -21,6 +21,7 @@ from trodestrack.models.quaternion import (
     quaternion_from_rotation_vector,
     quaternion_to_yaw,
     rotate_vector_body_to_world,
+    rotate_vector_world_to_body,
 )
 from trodestrack.models.state_layout import StateLayout, get_heading_index, get_layout
 
@@ -796,27 +797,30 @@ def dynamics_function(
         omega_body = imu[:3] - gyro_bias
         quat_next = integrate_body_gyro(state[quat_idx], omega_body, dt)
 
-        vel = jnp.array([vx, vy])
-        if enable_experimental_accel_translation:
-            accel_body_kinematic = imu[3:6] - accel_bias - gravity_body_vec
+        pos_idx = jnp.array(layout.pos_idx, dtype=jnp.int32)
+        vel_idx = jnp.array(layout.vel_idx, dtype=jnp.int32)
+        pos = state[pos_idx]
+        vel = state[vel_idx]
+        use_accel_translation = enable_experimental_accel_translation
+        if use_accel_translation:
+            expected_gravity_body = rotate_vector_world_to_body(
+                quat_next,
+                gravity_body_vec.astype(state.dtype),
+            )
+            accel_body_kinematic = imu[3:6] - accel_bias - expected_gravity_body
             accel_world = rotate_vector_body_to_world(quat_next, accel_body_kinematic)
-            accel_xy = accel_world[:2]
-            vel_next = vel + accel_xy * dt - damping * vel * dt
+            accel = accel_world[: layout.spatial_dim]
+            vel_next = vel + accel * dt - damping * vel * dt
             pos_next = (
-                jnp.array([px, py])
-                + vel * dt
-                + 0.5 * accel_xy * dt**2
-                - 0.5 * damping * vel * dt**2
+                pos + vel * dt + 0.5 * accel * dt**2 - 0.5 * damping * vel * dt**2
             )
         else:
             vel_next = vel
-            pos_next = jnp.array([px, py]) + vel * dt
+            pos_next = pos + vel * dt
 
         next_state = state
-        next_state = next_state.at[px_i].set(pos_next[0])
-        next_state = next_state.at[py_i].set(pos_next[1])
-        next_state = next_state.at[vx_i].set(vel_next[0])
-        next_state = next_state.at[vy_i].set(vel_next[1])
+        next_state = next_state.at[pos_idx].set(pos_next)
+        next_state = next_state.at[vel_idx].set(vel_next)
         next_state = next_state.at[quat_idx].set(quat_next)
         return next_state
 
@@ -1272,7 +1276,8 @@ def update_zupt(
     # Log-likelihood
     log_det = jnp.linalg.slogdet(S)[1]
     innov_quad = innovation @ psd_solve(S, innovation)
-    log_likelihood = -0.5 * (2 * jnp.log(2 * jnp.pi) + log_det + innov_quad)
+    meas_dim = innovation.shape[0]
+    log_likelihood = -0.5 * (meas_dim * jnp.log(2 * jnp.pi) + log_det + innov_quad)
 
     # Zero out log-likelihood when ZUPT is gated out (derive from same R)
     # R diagonal is 1e6 when disabled (moving or ZUPT off)

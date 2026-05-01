@@ -41,7 +41,7 @@ class ZUPTModel:
     Attributes
     ----------
     meas_dim : int
-        Measurement dimension (always 2 for 2D velocity).
+        Measurement dimension, matching ``len(layout.vel_idx)``.
 
     Notes
     -----
@@ -55,10 +55,10 @@ class ZUPTModel:
     - Pure functions (no mutable state) safe for jax.jit and lax.scan
 
     **Integration with Filter:**
-    - `predict(state_mean)` extracts [vx, vy] from state
+    - `predict(state_mean)` extracts velocity components from state
     - `meas_cov_from_pred(meas_pred)` computes R based on velocity magnitude (PURE)
-    - `innovation(frame_idx, meas_pred)` returns -[vx, vy] (measuring zero velocity)
-    - `jacobian(state_mean)` returns velocity selector matrix H (2, n)
+    - `innovation(frame_idx, meas_pred)` returns ``-velocity``
+    - `jacobian(state_mean)` returns velocity selector matrix H
 
     Examples
     --------
@@ -100,11 +100,11 @@ class ZUPTModel:
 
     @property
     def meas_dim(self) -> int:
-        """Measurement dimension (2 for 2D velocity)."""
-        return 2
+        """Measurement dimension, matching the layout velocity dimension."""
+        return len(self.layout.vel_idx)
 
     def predict(self, state_mean: jnp.ndarray) -> jnp.ndarray:
-        """Extract velocity [vx, vy] from state.
+        """Extract velocity components from state.
 
         Parameters
         ----------
@@ -114,13 +114,13 @@ class ZUPTModel:
         Returns
         -------
         jnp.ndarray
-            Velocity prediction (2,) [vx, vy] in m/s.
+            Velocity prediction, shape ``(len(layout.vel_idx),)`` in m/s.
         """
-        vx_idx, vy_idx = self.layout.vel_idx[0], self.layout.vel_idx[1]
-        return jnp.array([state_mean[vx_idx], state_mean[vy_idx]], dtype=self.dtype)
+        vel_idx = jnp.array(self.layout.vel_idx, dtype=jnp.int32)
+        return state_mean[vel_idx].astype(self.dtype)
 
     def jacobian(self, state_mean: jnp.ndarray) -> jnp.ndarray:
-        """Return velocity selector matrix H (2, n).
+        """Return velocity selector matrix H.
 
         Parameters
         ----------
@@ -130,18 +130,16 @@ class ZUPTModel:
         Returns
         -------
         jnp.ndarray
-            Jacobian H (2, n) selecting [vx, vy] from state.
+            Jacobian H selecting all layout velocity components from state.
 
         Notes
         -----
-        H is a sparse matrix with H[0, vx_idx] = 1, H[1, vy_idx] = 1.
+        H is a sparse matrix with one selector row per velocity index.
         """
         n = state_mean.shape[0]
-        vx_idx, vy_idx = self.layout.vel_idx[0], self.layout.vel_idx[1]
-
-        H = jnp.zeros((2, n), dtype=self.dtype)
-        H = H.at[0, vx_idx].set(1.0)
-        H = H.at[1, vy_idx].set(1.0)
+        H = jnp.zeros((self.meas_dim, n), dtype=self.dtype)
+        for row, vel_idx in enumerate(self.layout.vel_idx):
+            H = H.at[row, vel_idx].set(1.0)
         return H
 
     def meas_cov_from_pred(self, meas_pred: jnp.ndarray) -> jnp.ndarray:
@@ -150,14 +148,14 @@ class ZUPTModel:
         Parameters
         ----------
         meas_pred : jnp.ndarray
-            Predicted velocity (2,) [vx, vy] from `predict()`.
+            Predicted velocity from `predict()`.
 
         Returns
         -------
         jnp.ndarray
-            Measurement covariance R (2, 2) diagonal matrix.
-            - Stationary + enabled: R = diag([measurement_noise, measurement_noise])
-            - Moving or disabled: R = diag([1e6, 1e6]) (gated out)
+            Diagonal measurement covariance R with one row/column per velocity.
+            - Stationary + enabled: diagonal entries are ``measurement_noise``.
+            - Moving or disabled: diagonal entries are ``1e6`` (gated out).
 
         Notes
         -----
@@ -186,7 +184,7 @@ class ZUPTModel:
             jnp.asarray(1e6, dtype=self.dtype),
         )
 
-        return jnp.diag(jnp.array([R_scalar, R_scalar], dtype=self.dtype))
+        return jnp.eye(self.meas_dim, dtype=self.dtype) * R_scalar
 
     def meas_cov(self, frame_idx: int) -> jnp.ndarray:
         """Protocol-compliant fallback for meas_cov (NOT RECOMMENDED).
@@ -212,7 +210,10 @@ class ZUPTModel:
         Filters should call `meas_cov_from_pred(meas_pred)` after `predict()`.
         """
         # Always gate out - caller should use meas_cov_from_pred() instead
-        return jnp.diag(jnp.array([1e6, 1e6], dtype=self.dtype))
+        return jnp.eye(self.meas_dim, dtype=self.dtype) * jnp.asarray(
+            1e6,
+            dtype=self.dtype,
+        )
 
     def innovation(self, frame_idx: int, meas_pred: jnp.ndarray) -> jnp.ndarray:
         """Compute innovation (0 - h(x)) for ZUPT.
@@ -222,12 +223,12 @@ class ZUPTModel:
         frame_idx : int
             Frame index (unused for ZUPT, included for protocol compliance).
         meas_pred : jnp.ndarray
-            Predicted velocity (2,) [vx, vy] from `predict()`.
+            Predicted velocity from `predict()`.
 
         Returns
         -------
         jnp.ndarray
-            Innovation (2,) = -[vx, vy] (measuring zero velocity).
+            Innovation equal to ``-meas_pred`` (measuring zero velocity).
 
         Notes
         -----
@@ -252,12 +253,11 @@ class ZUPTModel:
         only_led2 : bool
             Always False (not applicable for ZUPT).
         selector : jnp.ndarray
-            Identity matrix (2, 2) for protocol consistency.
+            Identity matrix for protocol consistency.
 
         Notes
         -----
-        ZUPT doesn't use LED selection logic. Returns (2, 2) identity for consistency.
-        Filter update primitives check `both_leds=True` → direct 2D update.
-        Camera uses (2, 4) selector; heading uses (1, 1); ZUPT uses (2, 2).
+        ZUPT does not use LED selection logic. Returns an identity selector
+        matching the velocity dimension.
         """
-        return True, False, False, jnp.eye(2, dtype=self.dtype)
+        return True, False, False, jnp.eye(self.meas_dim, dtype=self.dtype)
