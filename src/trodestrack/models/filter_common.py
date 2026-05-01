@@ -89,8 +89,8 @@ class FilterCoreConfig:
     blackout_imu_noise_scale : float
         Scale applied to IMU noise during blackout when enabled.
     enable_experimental_accel_translation : bool
-        If True, allow the experimental 2D camera + 6-DOF IMU orientation mode
-        to integrate accelerometer samples into x/y velocity. Default is False.
+        If True, allow experimental quaternion-orientation modes to integrate
+        accelerometer samples into velocity. Default is False.
     use_gravity_orientation_update : bool
         If True, quaternion-orientation EKF modes use a gated accelerometer
         gravity-direction pseudo-measurement to constrain roll/pitch.
@@ -431,8 +431,8 @@ def validate_imu_input_shape(
     Raises
     ------
     ValueError
-        If ``U_imu`` is not 2-D, or has other than 3 or 4 channels, or carries
-        4 channels into a 2D-velocity layout.
+        If ``U_imu`` is not 2-D, has an unsupported channel count, or carries
+        channels into a layout that would misinterpret or silently drop them.
 
     Notes
     -----
@@ -444,7 +444,8 @@ def validate_imu_input_shape(
     - 4 channels ``[ω_z, f_x, f_y, f_z]`` — runs the 3D branch. Valid only
       when ``layout`` has 3D velocity (e.g. ``LAYOUT_2D_CAM_3D_IMU``).
     - 6 channels ``[ω_x, ω_y, ω_z, f_x, f_y, f_z]`` — runs the experimental
-      6-DOF orientation branch. Valid only for quaternion-orientation layouts.
+      6-DOF orientation branch. Valid only for quaternion-orientation layouts,
+      including ``3d_cam_6dof_imu``.
     """
     arr = np.asarray(U_imu)
 
@@ -740,7 +741,7 @@ def dynamics_function(
 
     For 3D IMU mode:
         f_world = R₃ₓ₃(θ) @ f_body
-        a_kinematic = f_world - [0, 0, g]  (gravity compensation)
+        a_kinematic = f_world - gravity_world  (gravity compensation)
         vₖ₊₁ = vₖ + (a_kinematic − γ vₖ) dt
         pₖ₊₁ = pₖ + vₖ dt + 1/2 (a_kinematic − γ vₖ) dt²
 
