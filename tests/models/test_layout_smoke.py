@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 
 from trodestrack.models.ekf import (
     EKFConfig,
     _chi2_threshold_active,
+    _extended_kalman_filter_3d_core,
     _gravity_direction_prediction,
     extended_kalman_filter,
     extended_kalman_filter_3d,
@@ -13,6 +15,7 @@ from trodestrack.models.ekf import (
 )
 from trodestrack.models.filter_common import (
     FilterState,
+    compute_imu_index_arrays,
     dynamics_function,
     initialize_state,
     measurement_function,
@@ -487,6 +490,66 @@ def test_ekf_3d_cam_6dof_imu_recovers_synthetic_pose() -> None:
         jnp.clip(jnp.abs(jnp.dot(final_quat, true_quat)), -1.0, 1.0)
     )
     assert float(orientation_error) < 5e-3
+
+
+def test_ekf_3d_core_traces_with_jax_scalar_loglik() -> None:
+    layout = get_layout("3d_cam_6dof_imu")
+    config = EKFConfig(
+        state_mode="3d_cam_6dof_imu",
+        measurement_noise_pos=1e-4,
+        enable_zupt=False,
+        use_mahalanobis_gating=True,
+        use_gravity_orientation_update=False,
+    )
+    led_offsets = jnp.array(
+        [
+            [-0.03, 0.0, 0.0],
+            [0.03, 0.0, 0.0],
+            [0.0, 0.025, 0.02],
+        ],
+        dtype=jnp.float32,
+    )
+    t_cam = np.array([0.0, 0.1, 0.2], dtype=np.float32)
+    t_imu = np.array([0.0, 0.05, 0.1, 0.15, 0.2], dtype=np.float32)
+    t_cam_jax = jnp.asarray(t_cam)
+    t_imu_jax = jnp.asarray(t_imu)
+    z_leds_one = jnp.array([0.0, 0.0, 0.2], dtype=jnp.float32)[None, :] + led_offsets
+    z_leds = jnp.repeat(
+        z_leds_one[None, :, :],
+        t_cam.shape[0],
+        axis=0,
+    )
+    U_imu = jnp.zeros((t_imu.shape[0], 6), dtype=jnp.float32).at[:, 5].set(9.81)
+    mean = jnp.zeros(layout.n, dtype=jnp.float32)
+    mean = mean.at[jnp.array(layout.heading_idx)].set(jnp.array([1.0, 0.0, 0.0, 0.0]))
+    mean = mean.at[jnp.array(layout.pos_idx)].set(jnp.array([0.0, 0.0, 0.2]))
+    initial_state = FilterState(mean=mean, cov=jnp.eye(layout.n, dtype=jnp.float32))
+    imu_index_arrays = compute_imu_index_arrays(t_imu, t_cam)
+
+    def run_core(U_imu_arg: jnp.ndarray, z_leds_arg: jnp.ndarray) -> jnp.ndarray:
+        result = _extended_kalman_filter_3d_core(
+            config,
+            t_imu_jax,
+            U_imu_arg,
+            t_cam_jax,
+            z_leds_arg,
+            led_offsets,
+            None,
+            None,
+            initial_state,
+            imu_index_arrays,
+            layout=layout,
+        )
+        return result.marginal_loglik
+
+    jaxpr = jax.make_jaxpr(run_core)(U_imu, z_leds)
+    primitive_names = {eqn.primitive.name for eqn in jaxpr.jaxpr.eqns}
+    loglik = jax.jit(run_core)(U_imu, z_leds)
+
+    assert "scan" in primitive_names
+    assert "nonzero" not in primitive_names
+    assert loglik.shape == ()
+    assert np.isfinite(float(loglik))
 
 
 def test_dynamics_3d_quaternion_preserves_calibrated_gravity_direction() -> None:

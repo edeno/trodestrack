@@ -135,6 +135,16 @@ class EKF3DResult(NamedTuple):
     marginal_loglik: float
 
 
+class EKF3DComputationResult(NamedTuple):
+    """Internal 3D EKF outputs produced by the traceable core."""
+
+    filtered_means: jnp.ndarray
+    filtered_covariances: jnp.ndarray
+    predicted_means: jnp.ndarray
+    predicted_covariances: jnp.ndarray
+    marginal_loglik: jnp.ndarray
+
+
 class EKFComputationResult(NamedTuple):
     """Internal EKF outputs produced by the JIT implementation."""
 
@@ -937,15 +947,6 @@ def extended_kalman_filter_3d(
         None if conf_cam is None else jnp.clip(jnp.asarray(conf_cam), 1e-2, 1.0)
     )
 
-    camera_model = Camera3DPositionModel(
-        led_offsets_body=led_offsets_body_jax,
-        measurement_noise_base=config_for_filter.measurement_noise_pos,
-        layout=layout,
-        z_leds_all=Z_cam_leds_jax,
-        mask_leds_all=mask_cam_leds_jax,
-        conf_all=conf_cam_jax,
-    )
-
     if initial_state is None:
         initial_state = _initialize_3d_state(
             Z_cam_leds_jax,
@@ -954,8 +955,54 @@ def extended_kalman_filter_3d(
             mask_cam_leds=mask_cam_leds_jax,
         )
 
-    dt_imu_mean = jnp.mean(jnp.diff(t_imu_jax))
     imu_index_arrays = compute_imu_index_arrays(t_imu, t_cam)
+    computation = _extended_kalman_filter_3d_core(
+        config_for_filter,
+        t_imu_jax,
+        U_imu_jax,
+        t_cam_jax,
+        Z_cam_leds_jax,
+        led_offsets_body_jax,
+        mask_cam_leds_jax,
+        conf_cam_jax,
+        initial_state,
+        imu_index_arrays,
+        layout=layout,
+    )
+
+    return EKF3DResult(
+        filtered_means=computation.filtered_means,
+        filtered_covariances=computation.filtered_covariances,
+        predicted_means=computation.predicted_means,
+        predicted_covariances=computation.predicted_covariances,
+        marginal_loglik=float(computation.marginal_loglik),
+    )
+
+
+def _extended_kalman_filter_3d_core(
+    config_for_filter: EKFConfig,
+    t_imu_jax: jnp.ndarray,
+    U_imu_jax: jnp.ndarray,
+    t_cam_jax: jnp.ndarray,
+    Z_cam_leds_jax: jnp.ndarray,
+    led_offsets_body_jax: jnp.ndarray,
+    mask_cam_leds_jax: jnp.ndarray | None,
+    conf_cam_jax: jnp.ndarray | None,
+    initial_state: EKFState,
+    imu_index_arrays: jnp.ndarray,
+    *,
+    layout: StateLayout,
+) -> EKF3DComputationResult:
+    """Traceable 3D EKF implementation returning JAX arrays and scalar."""
+    camera_model = Camera3DPositionModel(
+        led_offsets_body=led_offsets_body_jax,
+        measurement_noise_base=config_for_filter.measurement_noise_pos,
+        layout=layout,
+        z_leds_all=Z_cam_leds_jax,
+        mask_leds_all=mask_cam_leds_jax,
+        conf_all=conf_cam_jax,
+    )
+    dt_imu_mean = jnp.mean(jnp.diff(t_imu_jax))
     chi2_thresholds = _chi2_threshold_table(
         camera_model.meas_dim,
         config_for_filter.mahalanobis_threshold_prob,
@@ -1033,12 +1080,12 @@ def extended_kalman_filter_3d(
         scan_outputs
     )
 
-    return EKF3DResult(
+    return EKF3DComputationResult(
         filtered_means=filtered_means,
         filtered_covariances=filtered_covariances,
         predicted_means=predicted_means,
         predicted_covariances=predicted_covariances,
-        marginal_loglik=float(marginal_loglik),
+        marginal_loglik=marginal_loglik,
     )
 
 

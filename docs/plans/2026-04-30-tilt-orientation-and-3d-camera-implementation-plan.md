@@ -17,6 +17,10 @@ Current Milestone 6 cleanup status:
 - The 3D EKF camera-frame loop and per-frame IMU propagation now use nested
   `jax.lax.scan`; the remaining fixed-shape camera gating uses masked
   likelihood/NIS helpers instead of dynamic active-index slicing.
+- The public 3D EKF wrapper delegates to `_extended_kalman_filter_3d_core`,
+  which returns JAX arrays and a JAX scalar log-likelihood for future tracing
+  and JIT work; the wrapper keeps Python API validation and `float()` result
+  formatting.
 - Gravity-direction updates preserve the full calibrated world-frame
   `imu_gravity_body` vector, including non-vertical x/y components, so the
   orientation pseudo-measurement matches translational gravity compensation.
@@ -254,6 +258,7 @@ Tasks:
 - [x] Add process noise assembly for quaternion, 3D gyro bias, and 3D accel bias.
 - [x] Add 3D camera IEKF iterations, Mahalanobis gating, and ZUPT.
 - [x] Convert the 3D EKF camera and IMU time loops to `jax.lax.scan`.
+- [x] Extract a traceable `_extended_kalman_filter_3d_core` with JAX outputs.
 - [ ] Add RTS smoother support only after the filter path is validated.
 - [ ] Validate against the smallest representative real 3D dataset once
   available.
@@ -265,6 +270,8 @@ Tests:
 - [x] Bias recovery is tested under known injected biases.
 - [x] Tilted calibrated gravity vector is preserved by the gravity update.
 - [x] Gravity gate uses bias-corrected gyro norm.
+- [x] The private 3D core traces with `jax.make_jaxpr` and JITs with scalar
+  JAX log-likelihood output.
 - [ ] Full real-data 3D tests run on the smallest representative future dataset
   before expanding.
 
