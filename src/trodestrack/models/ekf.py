@@ -158,6 +158,8 @@ EXTENDED_KALMAN_FILTER_STATIC_ARGNAMES = ("layout", "config_for_filter")
 # XLA cannot reuse donated buffers when shapes differ. Donation only helps when input
 # buffers can be reused for outputs of matching shape/dtype.
 EXTENDED_KALMAN_FILTER_DONATE_ARGNUMS: tuple[int, ...] = ()
+EXTENDED_KALMAN_FILTER_3D_STATIC_ARGNAMES = ("layout", "config_for_filter")
+EXTENDED_KALMAN_FILTER_3D_DONATE_ARGNUMS: tuple[int, ...] = ()
 
 
 def _extended_kalman_filter_impl(
@@ -925,7 +927,7 @@ def extended_kalman_filter_3d(
     # Uses NumPy interval construction, so keep it outside the traceable core.
     # The padded result has static shape for the nested IMU ``lax.scan``.
     imu_index_arrays = compute_imu_index_arrays(t_imu, t_cam)
-    computation = _extended_kalman_filter_3d_core(
+    computation = _extended_kalman_filter_3d_jit(
         config_for_filter,
         t_imu_jax,
         U_imu_jax,
@@ -964,10 +966,10 @@ def _extended_kalman_filter_3d_core(
 ) -> EKF3DComputationResult:
     """Traceable 3D EKF implementation returning JAX arrays and scalar.
 
-    The public wrapper calls this eagerly to preserve the current API. Callers
-    that need compiled execution should wrap this core explicitly with
-    ``jax.jit``, treating ``config_for_filter`` and ``layout`` as static or
-    closed-over arguments.
+    The public wrapper stages this through ``_extended_kalman_filter_3d_jit``
+    and converts only the final log-likelihood scalar back to Python ``float``.
+    Callers that need a pure-JAX result can use this core or the private JIT
+    helper directly in tests and benchmarks.
     """
     camera_model = Camera3DPositionModel(
         led_offsets_body=led_offsets_body_jax,
@@ -1062,6 +1064,13 @@ def _extended_kalman_filter_3d_core(
         predicted_covariances=predicted_covariances,
         marginal_loglik=marginal_loglik,
     )
+
+
+_extended_kalman_filter_3d_jit = jax.jit(
+    _extended_kalman_filter_3d_core,
+    static_argnames=EXTENDED_KALMAN_FILTER_3D_STATIC_ARGNAMES,
+    donate_argnums=EXTENDED_KALMAN_FILTER_3D_DONATE_ARGNUMS,
+)
 
 
 def _initialize_3d_state(

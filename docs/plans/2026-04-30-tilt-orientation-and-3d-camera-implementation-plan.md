@@ -43,6 +43,14 @@ Current Milestone 6 cleanup status:
   parity plus a warmed 60 s scan-throughput check. Local evidence improved from
   the pre-vectorization Python-loop baseline of about `56k IMU samples/s` to
   about `810k IMU samples/s` after the JAX `lax.scan` refactor.
+- 3D EKF now uses a private module-level JIT helper from the public wrapper,
+  with JIT-boundary evidence recorded in
+  `tests/benchmark/test_ekf_3d_core_jit.py`: a deterministic 61-frame /
+  401-IMU-sample case compares eager core output to the module-level jitted
+  core. Local timing was about `1.4-1.7 s` eager, `0.8-0.9 s`
+  first JIT call, and `0.005 s` warmed JIT. The nested JAXPR inspection showed
+  2 scans and 0 `nonzero` primitives, so the current core remains traceable
+  without dynamic-shape masking.
 
 Real 3D dataset validation remains pending.
 
