@@ -35,9 +35,9 @@ Current Milestone 6 cleanup status:
   transition Jacobian helper, with prediction and Q-contribution parity tests
   guarding against future drift. Perfect-input RTS idempotence is covered on a
   longer synthetic quaternion sequence.
-- Previous full-suite evidence before the latest RTS smoother changes:
-  `647 passed, 1 skipped,
-  1 xfailed, 4 known All-NaN slice warnings` in the config immutability tests.
+- Current full-suite evidence after the RTS smoother and gravity-convention
+  cleanup: `656 passed, 1 skipped, 1 xfailed, 4 known All-NaN slice warnings`
+  in the config immutability tests.
 
 Real 3D dataset validation remains pending.
 

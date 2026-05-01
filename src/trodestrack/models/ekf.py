@@ -884,8 +884,9 @@ def extended_kalman_filter_3d(
     Notes
     -----
     The state mode must be ``"3d_cam_6dof_imu"``. Accelerometer translation is
-    enabled internally for this mode and remains disabled by default for 2D
-    quaternion modes.
+    controlled by ``enable_experimental_accel_translation``; leave it disabled
+    for camera/gyro-only comparisons and enable it explicitly for accel-enabled
+    validation.
     """
     if ekf_config.state_mode != "3d_cam_6dof_imu":
         raise ValueError(

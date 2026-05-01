@@ -33,6 +33,7 @@ site/
 
 # Development artifacts
 .DS_Store
+.claude/
 *.zip
 
 # IDE/Editor files

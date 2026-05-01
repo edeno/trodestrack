@@ -53,8 +53,9 @@ class FilterCoreConfig:
     imu_accel_noise_density : float
         IMU accel noise density (m/s²/√Hz). Default: 0.2 mg/√Hz (SpikeGadgets spec).
     imu_gravity_body : tuple[float, float, float]
-        Expected accelerometer reading when stationary, in body/sensor axes
-        (m/s²). Default assumes level mounting with gravity on +z.
+        Expected gravity vector in the tracking/world frame (m/s²). The field
+        keeps its legacy name for API compatibility. Default assumes level
+        mounting with gravity on +z.
 
     damping_coeff : float
         Linear velocity damping coefficient (1/s) in dynamics model.
@@ -191,7 +192,8 @@ class FilterCoreConfig:
         if gravity.shape != (3,) or not np.all(np.isfinite(gravity)):
             raise ValueError(
                 "imu_gravity_body must be a length-3 finite sequence "
-                f"[g_x, g_y, g_z] in m/s²; got {self.imu_gravity_body!r}."
+                f"[g_x, g_y, g_z] in world-frame m/s²; got "
+                f"{self.imu_gravity_body!r}."
             )
         if self.gravity_orientation_measurement_noise <= 0:
             raise ValueError(
@@ -717,8 +719,9 @@ def dynamics_function(
     layout : StateLayout
         State index mapping.
     gravity_body : tuple[float, float, float] or jnp.ndarray, optional
-        Expected stationary accelerometer reading in body/sensor axes (m/s²).
-        Defaults to ``[0, 0, 9.81]`` for level mounting.
+        Expected gravity vector in the tracking/world frame (m/s²). The
+        parameter keeps its legacy name for API compatibility. Defaults to
+        ``[0, 0, 9.81]`` for level mounting.
     enable_experimental_accel_translation : bool, default False
         For quaternion orientation layouts, whether to integrate accelerometer
         samples into x/y velocity. Default False keeps position dynamics
@@ -771,7 +774,7 @@ def dynamics_function(
         next_state = next_state.at[py_i].set(py + vy * dt)
         return next_state
 
-    gravity_body_vec = (
+    gravity_world_vec = (
         jnp.array([0.0, 0.0, 9.81])
         if gravity_body is None
         else jnp.asarray(gravity_body)
@@ -805,7 +808,7 @@ def dynamics_function(
         if use_accel_translation:
             expected_gravity_body = rotate_vector_world_to_body(
                 quat_next,
-                gravity_body_vec.astype(state.dtype),
+                gravity_world_vec.astype(state.dtype),
             )
             accel_body_kinematic = imu[3:6] - accel_bias - expected_gravity_body
             accel_world = rotate_vector_body_to_world(quat_next, accel_body_kinematic)
@@ -851,12 +854,10 @@ def dynamics_function(
         # Extract 3D accelerations from IMU
         fx, fy, fz = imu[1], imu[2], imu[3]
 
-        # Remove biases and calibrated stationary gravity reading (body frame)
+        # Remove biases, rotate to world frame, then subtract calibrated world gravity.
         accel_body = jnp.array([fx - b_ax, fy - b_ay, fz - b_az])
-        accel_body_kinematic = accel_body - gravity_body_vec
-
-        # Rotate kinematic acceleration from body frame to world frame.
-        accel_kinematic = rotate_body_accel_to_world(accel_body_kinematic, theta)
+        accel_world = rotate_body_accel_to_world(accel_body, theta)
+        accel_kinematic = accel_world - gravity_world_vec
 
         # Update 3D velocity with damping
         vel = jnp.array([vx, vy, vz])
@@ -886,14 +887,11 @@ def dynamics_function(
     else:
         # 2D IMU mode: [ω_z, fx, fy] (backward compatible)
         fx, fy = imu[1], imu[2]
-        accel_body = jnp.array([fx - b_ax, fy - b_ay])
-        accel_body_kinematic = accel_body - gravity_body_vec[:2]
+        accel_body = jnp.array([fx - b_ax, fy - b_ay, 0.0])
 
         # 2D rotation (yaw only)
-        cos_t = jnp.cos(theta)
-        sin_t = jnp.sin(theta)
-        R = jnp.array([[cos_t, -sin_t], [sin_t, cos_t]])
-        accel_world = R @ accel_body_kinematic
+        accel_world_3d = rotate_body_accel_to_world(accel_body, theta)
+        accel_world = accel_world_3d[:2] - gravity_world_vec[:2]
 
         # Update 2D velocity
         vel = jnp.array([vx, vy])

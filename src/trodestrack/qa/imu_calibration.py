@@ -316,7 +316,12 @@ def estimate_accel_gravity_body(
     accel_xyz: NDArray[np.floating],
     stationary_mask: NDArray[np.bool_],
 ) -> NDArray[np.float64]:
-    """Estimate stationary accelerometer gravity vector in body/sensor axes."""
+    """Estimate stationary accelerometer gravity vector in body/sensor axes.
+
+    This diagnostic reports the raw stationary sensor-frame reading. The EKF
+    configuration field ``imu_gravity_body`` keeps a legacy name but is
+    interpreted by the tracking dynamics as a world-frame gravity vector.
+    """
 
     accel_arr = np.asarray(accel_xyz, dtype=float)
     if accel_arr.ndim != 2 or accel_arr.shape[1] != 3:

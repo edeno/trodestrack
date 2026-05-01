@@ -15,8 +15,9 @@ Tests ensure:
 
 Note:
     These tests use mock dynamics that work with arbitrary dimensions.
-    The actual dynamics_function in ekf.py is hardcoded to 8D (separate issue).
-    This test validates that the SMOOTHER INFRASTRUCTURE is dimension-agnostic.
+    The mock dynamics below deliberately accepts the same keyword surface as the
+    runtime dynamics function while keeping arbitrary state dimensions. This
+    test validates that the SMOOTHER INFRASTRUCTURE is dimension-agnostic.
 
 PRD Reference:
     - Section 15: Extensibility (3D Roadmap)
@@ -46,6 +47,7 @@ def mock_dynamics_function(
     damping: float,
     layout=None,
     gravity_body=None,
+    enable_experimental_accel_translation: bool = False,
 ) -> jnp.ndarray:
     """Mock dynamics that work with any state dimension.
 

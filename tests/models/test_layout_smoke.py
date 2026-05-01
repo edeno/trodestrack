@@ -559,7 +559,7 @@ def test_dynamics_3d_quaternion_preserves_calibrated_gravity_direction() -> None
     layout = get_layout("3d_cam_6dof_imu")
     state = jnp.zeros(layout.n)
     state = state.at[jnp.array(layout.heading_idx)].set(jnp.array([1.0, 0.0, 0.0, 0.0]))
-    gravity_body = jnp.array([1.0, 0.0, 9.76])
+    gravity_world = jnp.array([1.0, 0.0, 9.76])
     imu = jnp.array([0.0, 0.0, 0.0, 1.0, 0.0, 9.76])
 
     next_state = dynamics_function(
@@ -568,7 +568,7 @@ def test_dynamics_3d_quaternion_preserves_calibrated_gravity_direction() -> None
         dt=0.1,
         damping=0.0,
         layout=layout,
-        gravity_body=gravity_body,
+        gravity_body=gravity_world,
         enable_experimental_accel_translation=True,
     )
 
@@ -584,10 +584,46 @@ def test_dynamics_3d_quaternion_preserves_calibrated_gravity_direction() -> None
     )
 
 
+def test_dynamics_3d_quaternion_uses_world_frame_gravity_vector() -> None:
+    layout = get_layout("3d_cam_6dof_imu")
+    quat_idx = jnp.array(layout.heading_idx)
+    state = jnp.zeros(layout.n)
+    true_quat = quaternion_from_rotation_vector(jnp.array([0.2, -0.1, 0.35]))
+    gravity_world = jnp.array([0.4, -0.3, 9.79])
+    stationary_accel_body = rotate_vector_world_to_body(true_quat, gravity_world)
+    state = state.at[quat_idx].set(true_quat)
+    imu = jnp.concatenate(
+        [jnp.zeros(3, dtype=jnp.float32), stationary_accel_body.astype(jnp.float32)]
+    )
+
+    next_state = dynamics_function(
+        state,
+        imu,
+        dt=0.1,
+        damping=0.0,
+        layout=layout,
+        gravity_body=gravity_world,
+        enable_experimental_accel_translation=True,
+    )
+
+    np.testing.assert_allclose(
+        np.asarray(next_state[jnp.array(layout.vel_idx)]),
+        0.0,
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(
+        np.asarray(next_state[jnp.array(layout.pos_idx)]),
+        0.0,
+        atol=1e-6,
+    )
+
+
 def test_gravity_direction_update_preserves_calibrated_tilt() -> None:
     layout = get_layout("3d_cam_6dof_imu")
+    quat_idx = jnp.array(layout.heading_idx)
     state = jnp.zeros(layout.n)
-    state = state.at[jnp.array(layout.heading_idx)].set(jnp.array([1.0, 0.0, 0.0, 0.0]))
+    quat = quaternion_from_rotation_vector(jnp.array([0.15, -0.25, 0.2]))
+    state = state.at[quat_idx].set(quat)
     gravity_world = jnp.array([0.5, 0.0, 9.79])
 
     prediction = _gravity_direction_prediction(
@@ -599,13 +635,18 @@ def test_gravity_direction_update_preserves_calibrated_tilt() -> None:
         layout=layout,
     )
 
-    expected = gravity_world / jnp.linalg.norm(gravity_world)
+    expected_body = rotate_vector_world_to_body(quat, gravity_world)
+    expected = expected_body / jnp.linalg.norm(expected_body)
     np.testing.assert_allclose(
         np.asarray(prediction),
         np.asarray(expected),
         atol=1e-7,
     )
-    assert float(prediction[0]) > 0.04
+    assert not np.allclose(
+        np.asarray(prediction),
+        np.asarray(gravity_world / jnp.linalg.norm(gravity_world)),
+        atol=1e-4,
+    )
 
 
 def test_predict_step_3d_quaternion_couples_bias_covariance() -> None:
