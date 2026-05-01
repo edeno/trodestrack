@@ -25,6 +25,7 @@ from jax import jacfwd, lax, vmap
 
 from trodestrack.models.ekf import EKF3DResult, EKFConfig, EKFResult
 from trodestrack.models.filter_common import (
+    build_quaternion_transition_jacobian,
     compute_imu_index_arrays,
     dynamics_function,
     normalize_state_orientation,
@@ -34,7 +35,6 @@ from trodestrack.models.filter_common import (
     validate_imu_input_shape,
 )
 from trodestrack.models.process_noise import assemble_Q
-from trodestrack.models.quaternion import rotate_vector_body_to_world
 from trodestrack.models.state_layout import StateLayout, get_heading_index, get_layout
 from trodestrack.models.ukf import UKFConfig, UKFResult, compute_sigma_points
 
@@ -108,57 +108,21 @@ def _transition_mean_and_jacobian(
         )
 
     mean_pred = f(state_mean)
-    linearization_pred = f(linearization_mean)
 
     if not layout.has_quaternion_orientation:
         return mean_pred, jacfwd(f)(linearization_mean)
 
-    n = state_mean.shape[0]
-    dtype = state_mean.dtype
-    F_x = jnp.eye(n, dtype=dtype)
-    dt_arr = jnp.asarray(dt_imu, dtype=dtype)
-    use_accel_translation = ekf_config.enable_experimental_accel_translation
-
-    if use_accel_translation:
-        vel_self = 1.0 - ekf_config.damping_coeff * dt_arr
-        pos_vel = dt_arr - 0.5 * ekf_config.damping_coeff * dt_arr**2
-    else:
-        vel_self = 1.0
-        pos_vel = dt_arr
-
-    for pos_i, vel_i in zip(layout.pos_idx, layout.vel_idx, strict=True):
-        F_x = F_x.at[vel_i, vel_i].set(vel_self)
-        F_x = F_x.at[pos_i, vel_i].set(pos_vel)
-
-    quat_idx = jnp.array(layout.heading_idx, dtype=jnp.int32)
-    gyro_bias_idx = jnp.array(layout.bias_gyro_idx, dtype=jnp.int32)
-    qw, qx, qy, qz = linearization_mean[quat_idx]
-    quat_gyro_matrix = jnp.array(
-        [
-            [-qx, -qy, -qz],
-            [qw, -qz, qy],
-            [qz, qw, -qx],
-            [-qy, qx, qw],
-        ],
-        dtype=dtype,
+    linearization_pred = f(linearization_mean)
+    F_x = build_quaternion_transition_jacobian(
+        linearization_mean,
+        linearization_pred,
+        dt_imu,
+        ekf_config.damping_coeff,
+        layout,
+        enable_experimental_accel_translation=(
+            ekf_config.enable_experimental_accel_translation
+        ),
     )
-    F_x = F_x.at[quat_idx[:, None], gyro_bias_idx[None, :]].set(
-        -0.5 * dt_arr * quat_gyro_matrix
-    )
-
-    if use_accel_translation:
-        basis_body = jnp.eye(3, dtype=dtype)
-        rotation_world_from_body = rotate_vector_body_to_world(
-            linearization_pred[quat_idx],
-            basis_body,
-        ).T
-        for dim, (pos_i, vel_i) in enumerate(
-            zip(layout.pos_idx, layout.vel_idx, strict=True)
-        ):
-            for axis, bias_i in enumerate(layout.bias_accel_idx):
-                coeff = -rotation_world_from_body[dim, axis]
-                F_x = F_x.at[vel_i, bias_i].set(dt_arr * coeff)
-                F_x = F_x.at[pos_i, bias_i].set(0.5 * dt_arr**2 * coeff)
 
     return normalize_state_orientation(mean_pred, layout), F_x
 

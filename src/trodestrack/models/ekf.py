@@ -41,6 +41,7 @@ from jax import jacfwd, lax, tree_util
 from trodestrack.models.filter_common import (
     FilterCoreConfig,
     FilterState,
+    build_quaternion_transition_jacobian,
     chi2_threshold,
     compute_imu_index_arrays,
     dynamics_function,
@@ -57,10 +58,7 @@ from trodestrack.models.filter_common import (
 )
 from trodestrack.models.filter_update import ekf_projected_update
 from trodestrack.models.process_noise import assemble_Q
-from trodestrack.models.quaternion import (
-    rotate_vector_body_to_world,
-    rotate_vector_world_to_body,
-)
+from trodestrack.models.quaternion import rotate_vector_world_to_body
 from trodestrack.models.sensors.camera_position import CameraPositionModel
 from trodestrack.models.sensors.camera_position_3d import Camera3DPositionModel
 from trodestrack.models.sensors.heading_pseudo import (
@@ -351,48 +349,16 @@ def predict_step(
         # zero rotation. Use a first-order transition Jacobian for this
         # experimental branch so IMU biases can become observable from later
         # camera updates without tracing through the quaternion exponential.
-        F_x = jnp.eye(m.shape[0], dtype=m.dtype)
-        use_accel_translation = config.enable_experimental_accel_translation
-        dt_arr = jnp.asarray(dt_imu, dtype=m.dtype)
-        if use_accel_translation:
-            vel_self = 1.0 - config.damping_coeff * dt_arr
-            pos_vel = dt_arr - 0.5 * config.damping_coeff * dt_arr**2
-        else:
-            vel_self = 1.0
-            pos_vel = dt_arr
-        for pos_i, vel_i in zip(layout.pos_idx, layout.vel_idx, strict=True):
-            F_x = F_x.at[vel_i, vel_i].set(vel_self)
-            F_x = F_x.at[pos_i, vel_i].set(pos_vel)
-
-        quat_idx = jnp.array(layout.heading_idx, dtype=jnp.int32)
-        gyro_bias_idx = jnp.array(layout.bias_gyro_idx, dtype=jnp.int32)
-        qw, qx, qy, qz = m[quat_idx]
-        quat_gyro_matrix = jnp.array(
-            [
-                [-qx, -qy, -qz],
-                [qw, -qz, qy],
-                [qz, qw, -qx],
-                [-qy, qx, qw],
-            ],
-            dtype=m.dtype,
+        F_x = build_quaternion_transition_jacobian(
+            m,
+            m_pred,
+            dt_imu,
+            config.damping_coeff,
+            layout,
+            enable_experimental_accel_translation=(
+                config.enable_experimental_accel_translation
+            ),
         )
-        F_x = F_x.at[quat_idx[:, None], gyro_bias_idx[None, :]].set(
-            -0.5 * dt_arr * quat_gyro_matrix
-        )
-
-        if use_accel_translation:
-            basis_body = jnp.eye(3, dtype=m.dtype)
-            rotation_world_from_body = rotate_vector_body_to_world(
-                m_pred[quat_idx],
-                basis_body,
-            ).T
-            for dim, (pos_i, vel_i) in enumerate(
-                zip(layout.pos_idx, layout.vel_idx, strict=True)
-            ):
-                for axis, bias_i in enumerate(layout.bias_accel_idx):
-                    coeff = -rotation_world_from_body[dim, axis]
-                    F_x = F_x.at[vel_i, bias_i].set(dt_arr * coeff)
-                    F_x = F_x.at[pos_i, bias_i].set(0.5 * dt_arr**2 * coeff)
     else:
         # Jacobian
         F = jacfwd(f)

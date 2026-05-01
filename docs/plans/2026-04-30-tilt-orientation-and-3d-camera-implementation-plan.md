@@ -31,7 +31,8 @@ Current Milestone 6 cleanup status:
   shape/finite/unit-quaternion, midpoint perturbation recovery, and dropout
   recovery behavior are covered by regression tests. RTS coverage also checks
   hidden-frame covariance shrinkage and quaternion double-cover residual
-  alignment.
+  alignment. EKF and RTS quaternion prediction now share the first-order
+  transition Jacobian helper, with a parity test guarding against future drift.
 - Previous full-suite evidence before the latest RTS smoother changes:
   `647 passed, 1 skipped,
   1 xfailed, 4 known All-NaN slice warnings` in the config immutability tests.

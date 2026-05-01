@@ -8,7 +8,10 @@ from trodestrack.models.ekf import (
     EKFConfig,
     extended_kalman_filter,
     extended_kalman_filter_3d,
+    predict_step,
 )
+from trodestrack.models.filter_common import FilterState, state_yaw, symmetrize
+from trodestrack.models.process_noise import assemble_Q
 from trodestrack.models.quaternion import rotate_vector_body_to_world
 from trodestrack.models.state_layout import get_layout
 from trodestrack.models.ukf import UKFConfig, unscented_kalman_filter
@@ -313,5 +316,67 @@ def test_rts_3d_transition_jacobian_accel_bias_uses_linearization_quaternion():
     np.testing.assert_allclose(
         np.asarray(F_x[np.ix_(vel_idx, bias_accel_idx)]),
         np.asarray(expected_vel_bias_block),
+        atol=1e-6,
+    )
+
+
+def test_rts_3d_transition_matches_ekf_prediction_covariance():
+    layout = get_layout("3d_cam_6dof_imu")
+    quat_idx = np.array(layout.heading_idx)
+    mean = jnp.zeros(layout.n, dtype=jnp.float32)
+    mean = mean.at[jnp.array(layout.pos_idx)].set(jnp.array([0.1, -0.2, 0.3]))
+    mean = mean.at[jnp.array(layout.vel_idx)].set(jnp.array([0.4, -0.1, 0.2]))
+    mean = mean.at[jnp.array(layout.heading_idx)].set(
+        jnp.array([0.9689124, 0.0, 0.0, 0.24740396])
+    )
+    mean = mean.at[jnp.array(layout.bias_gyro_idx)].set(jnp.array([0.01, -0.02, 0.015]))
+    mean = mean.at[jnp.array(layout.bias_accel_idx)].set(jnp.array([0.03, -0.04, 0.02]))
+    cov = jnp.eye(layout.n, dtype=jnp.float32) * 0.05
+    u_imu = jnp.array([0.03, -0.01, 0.2, 0.4, -0.1, 9.9], dtype=jnp.float32)
+    dt = jnp.asarray(0.02, dtype=jnp.float32)
+    config = EKFConfig(
+        state_mode="3d_cam_6dof_imu",
+        enable_experimental_accel_translation=True,
+        adaptive_q_during_dropout=False,
+        use_gravity_orientation_update=False,
+    )
+
+    ekf_pred = predict_step(
+        FilterState(mean=mean, cov=cov),
+        u_imu,
+        dt,
+        config,
+        has_vision=False,
+        layout=layout,
+    )
+    rts_mean_pred, F_x = _transition_mean_and_jacobian(
+        mean,
+        mean,
+        u_imu,
+        dt,
+        ekf_config=config,
+        layout=layout,
+    )
+    Q = assemble_Q(
+        config,
+        theta=state_yaw(rts_mean_pred, layout),
+        dt=dt,
+        n=layout.n,
+        has_vision=False,
+        dtype=mean.dtype,
+        orientation_quaternion=rts_mean_pred[quat_idx],
+    )
+    rts_cov_pred = symmetrize(F_x @ cov @ F_x.T + Q)
+
+    np.testing.assert_allclose(
+        np.asarray(rts_mean_pred),
+        np.asarray(ekf_pred.mean),
+        rtol=1e-6,
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(
+        np.asarray(rts_cov_pred),
+        np.asarray(ekf_pred.cov),
+        rtol=1e-6,
         atol=1e-6,
     )

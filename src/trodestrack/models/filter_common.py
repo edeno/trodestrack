@@ -916,6 +916,86 @@ def dynamics_function(
     return next_state
 
 
+def build_quaternion_transition_jacobian(
+    linearization_mean: jnp.ndarray,
+    linearization_pred: jnp.ndarray,
+    dt_imu: float | Array,
+    damping_coeff: float,
+    layout: StateLayout,
+    *,
+    enable_experimental_accel_translation: bool = False,
+) -> jnp.ndarray:
+    """Build the first-order transition Jacobian for quaternion layouts.
+
+    Parameters
+    ----------
+    linearization_mean : jnp.ndarray
+        State at the start of the IMU step, shape ``(n,)``.
+    linearization_pred : jnp.ndarray
+        Propagated linearization state after the IMU step, shape ``(n,)``.
+    dt_imu : float or Array
+        IMU timestep in seconds.
+    damping_coeff : float
+        Linear velocity damping coefficient.
+    layout : StateLayout
+        Quaternion state layout.
+    enable_experimental_accel_translation : bool, default False
+        Whether accelerometer-driven translation is active.
+
+    Returns
+    -------
+    jnp.ndarray
+        Transition Jacobian ``F_x`` with shape ``(n, n)``.
+    """
+    n = linearization_mean.shape[0]
+    dtype = linearization_mean.dtype
+    F_x = jnp.eye(n, dtype=dtype)
+    dt_arr = jnp.asarray(dt_imu, dtype=dtype)
+
+    if enable_experimental_accel_translation:
+        vel_self = 1.0 - damping_coeff * dt_arr
+        pos_vel = dt_arr - 0.5 * damping_coeff * dt_arr**2
+    else:
+        vel_self = 1.0
+        pos_vel = dt_arr
+
+    for pos_i, vel_i in zip(layout.pos_idx, layout.vel_idx, strict=True):
+        F_x = F_x.at[vel_i, vel_i].set(vel_self)
+        F_x = F_x.at[pos_i, vel_i].set(pos_vel)
+
+    quat_idx = jnp.array(layout.heading_idx, dtype=jnp.int32)
+    gyro_bias_idx = jnp.array(layout.bias_gyro_idx, dtype=jnp.int32)
+    qw, qx, qy, qz = linearization_mean[quat_idx]
+    quat_gyro_matrix = jnp.array(
+        [
+            [-qx, -qy, -qz],
+            [qw, -qz, qy],
+            [qz, qw, -qx],
+            [-qy, qx, qw],
+        ],
+        dtype=dtype,
+    )
+    F_x = F_x.at[quat_idx[:, None], gyro_bias_idx[None, :]].set(
+        -0.5 * dt_arr * quat_gyro_matrix
+    )
+
+    if enable_experimental_accel_translation:
+        basis_body = jnp.eye(3, dtype=dtype)
+        rotation_world_from_body = rotate_vector_body_to_world(
+            linearization_pred[quat_idx],
+            basis_body,
+        ).T
+        for dim, (pos_i, vel_i) in enumerate(
+            zip(layout.pos_idx, layout.vel_idx, strict=True)
+        ):
+            for axis, bias_i in enumerate(layout.bias_accel_idx):
+                coeff = -rotation_world_from_body[dim, axis]
+                F_x = F_x.at[vel_i, bias_i].set(dt_arr * coeff)
+                F_x = F_x.at[pos_i, bias_i].set(0.5 * dt_arr**2 * coeff)
+
+    return F_x
+
+
 def measurement_function(
     state: jnp.ndarray, led_distance: float, layout: StateLayout
 ) -> jnp.ndarray:
