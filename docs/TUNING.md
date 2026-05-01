@@ -164,6 +164,12 @@ Model the IMU sensor's intrinsic noise characteristics.
 - **Decrease** if IMU data is clean (high-quality sensor, rigid mounting)
 - **Use sensor datasheet** values if available (recommended)
 
+**Gravity-frame convention:** `imu_gravity_body` is in world-frame
+coordinates. The calibration helper `estimate_accel_gravity_body` reports a
+sensor-frame stationary accelerometer reading; if the IMU mount is tilted,
+rotate that vector from body/sensor frame into the world frame before using it
+as `imu_gravity_body`.
+
 ### Velocity Damping
 
 Models air drag and friction.
