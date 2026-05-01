@@ -955,6 +955,8 @@ def extended_kalman_filter_3d(
             mask_cam_leds=mask_cam_leds_jax,
         )
 
+    # Uses NumPy interval construction, so keep it outside the traceable core.
+    # The padded result has static shape for the nested IMU ``lax.scan``.
     imu_index_arrays = compute_imu_index_arrays(t_imu, t_cam)
     computation = _extended_kalman_filter_3d_core(
         config_for_filter,
@@ -993,7 +995,13 @@ def _extended_kalman_filter_3d_core(
     *,
     layout: StateLayout,
 ) -> EKF3DComputationResult:
-    """Traceable 3D EKF implementation returning JAX arrays and scalar."""
+    """Traceable 3D EKF implementation returning JAX arrays and scalar.
+
+    The public wrapper calls this eagerly to preserve the current API. Callers
+    that need compiled execution should wrap this core explicitly with
+    ``jax.jit``, treating ``config_for_filter`` and ``layout`` as static or
+    closed-over arguments.
+    """
     camera_model = Camera3DPositionModel(
         led_offsets_body=led_offsets_body_jax,
         measurement_noise_base=config_for_filter.measurement_noise_pos,

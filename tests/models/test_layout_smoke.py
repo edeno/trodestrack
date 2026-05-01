@@ -493,6 +493,8 @@ def test_ekf_3d_cam_6dof_imu_recovers_synthetic_pose() -> None:
 
 
 def test_ekf_3d_core_traces_with_jax_scalar_loglik() -> None:
+    # The public wrapper converts marginal_loglik to a Python float. Exercise
+    # the private core directly to protect the JAX scalar tracing contract.
     layout = get_layout("3d_cam_6dof_imu")
     config = EKFConfig(
         state_mode="3d_cam_6dof_imu",
