@@ -267,6 +267,62 @@ def test_rts_smoother_3d_quaternion_double_cover_residual_alignment():
     )
 
 
+def test_rts_smoother_3d_quaternion_perfect_input_idempotent():
+    layout = get_layout("3d_cam_6dof_imu")
+    t_cam = np.linspace(0.0, 1.0, 21, dtype=np.float32)
+    t_imu = t_cam.copy()
+    U_imu = np.zeros((t_imu.shape[0], 6), dtype=np.float32)
+    U_imu[:, 5] = 9.81
+
+    pos_idx = np.array(layout.pos_idx)
+    vel_idx = np.array(layout.vel_idx)
+    quat_idx = np.array(layout.heading_idx)
+    velocity = np.array([0.2, -0.05, 0.1], dtype=np.float32)
+    filtered_means = np.zeros((t_cam.shape[0], layout.n), dtype=np.float32)
+    filtered_means[:, pos_idx] = (
+        np.array([0.1, -0.2, 0.3], dtype=np.float32)[None, :]
+        + t_cam[:, None] * velocity[None, :]
+    )
+    filtered_means[:, vel_idx] = velocity
+    filtered_means[:, quat_idx] = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+    filtered_covs = np.repeat(
+        (np.eye(layout.n, dtype=np.float32) * 0.02)[None, :, :],
+        t_cam.shape[0],
+        axis=0,
+    )
+    filter_result = EKF3DResult(
+        filtered_means=jnp.asarray(filtered_means),
+        filtered_covariances=jnp.asarray(filtered_covs),
+        # Synthetic shortcut: RTS re-propagates predictions internally.
+        predicted_means=jnp.asarray(filtered_means),
+        predicted_covariances=jnp.asarray(filtered_covs),
+        marginal_loglik=0.0,
+    )
+
+    smoother_result = rts_smoother(
+        filter_result,
+        EKFConfig(
+            state_mode="3d_cam_6dof_imu",
+            enable_experimental_accel_translation=False,
+            enable_zupt=False,
+            use_gravity_orientation_update=False,
+            use_mahalanobis_gating=False,
+        ),
+        t_imu,
+        U_imu,
+        t_cam,
+    )
+
+    smoothed_means = np.asarray(smoother_result.smoothed_means)
+    assert np.isfinite(smoothed_means).all()
+    np.testing.assert_allclose(smoothed_means, filtered_means, atol=2e-5)
+    np.testing.assert_allclose(
+        np.linalg.norm(smoothed_means[:, quat_idx], axis=1),
+        1.0,
+        atol=1e-5,
+    )
+
+
 def test_rts_3d_transition_jacobian_accel_bias_uses_linearization_quaternion():
     layout = get_layout("3d_cam_6dof_imu")
     quat_idx = np.array(layout.heading_idx)
@@ -367,10 +423,17 @@ def test_rts_3d_transition_matches_ekf_prediction_covariance():
         orientation_quaternion=rts_mean_pred[quat_idx],
     )
     rts_cov_pred = symmetrize(F_x @ cov @ F_x.T + Q)
+    ekf_q_contribution = ekf_pred.cov - symmetrize(F_x @ cov @ F_x.T)
 
     np.testing.assert_allclose(
         np.asarray(rts_mean_pred),
         np.asarray(ekf_pred.mean),
+        rtol=1e-6,
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(
+        np.asarray(ekf_q_contribution),
+        np.asarray(Q),
         rtol=1e-6,
         atol=1e-6,
     )
