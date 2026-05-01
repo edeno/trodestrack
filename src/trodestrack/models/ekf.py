@@ -434,16 +434,15 @@ def _gravity_direction_prediction(
     *,
     layout: StateLayout,
 ) -> jnp.ndarray:
-    """Predict stationary accelerometer direction from quaternion orientation."""
+    """Predict stationary accelerometer direction from quaternion orientation.
+
+    ``imu_gravity_body`` is interpreted as the calibrated world-frame gravity
+    vector used by the 3D filter. Preserve non-vertical x/y components so the
+    gravity pseudo-update matches translational gravity compensation.
+    """
 
     quat_idx = jnp.array(layout.heading_idx, dtype=jnp.int32)
-    gravity_magnitude = jnp.linalg.norm(
-        jnp.asarray(config.imu_gravity_body, dtype=state_mean.dtype)
-    )
-    gravity_world = jnp.array(
-        [0.0, 0.0, gravity_magnitude],
-        dtype=state_mean.dtype,
-    )
+    gravity_world = jnp.asarray(config.imu_gravity_body, dtype=state_mean.dtype)
     gravity_body = rotate_vector_world_to_body(state_mean[quat_idx], gravity_world)
     return gravity_body / jnp.maximum(
         jnp.linalg.norm(gravity_body),

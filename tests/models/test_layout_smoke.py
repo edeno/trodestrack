@@ -6,6 +6,7 @@ import numpy as np
 from trodestrack.models.ekf import (
     EKFConfig,
     _chi2_threshold_active,
+    _gravity_direction_prediction,
     extended_kalman_filter,
     extended_kalman_filter_3d,
     predict_step,
@@ -484,6 +485,30 @@ def test_dynamics_3d_quaternion_preserves_calibrated_gravity_direction() -> None
         0.0,
         atol=1e-7,
     )
+
+
+def test_gravity_direction_update_preserves_calibrated_tilt() -> None:
+    layout = get_layout("3d_cam_6dof_imu")
+    state = jnp.zeros(layout.n)
+    state = state.at[jnp.array(layout.heading_idx)].set(jnp.array([1.0, 0.0, 0.0, 0.0]))
+    gravity_world = jnp.array([0.5, 0.0, 9.79])
+
+    prediction = _gravity_direction_prediction(
+        state,
+        EKFConfig(
+            state_mode="3d_cam_6dof_imu",
+            imu_gravity_body=tuple(float(x) for x in np.asarray(gravity_world)),
+        ),
+        layout=layout,
+    )
+
+    expected = gravity_world / jnp.linalg.norm(gravity_world)
+    np.testing.assert_allclose(
+        np.asarray(prediction),
+        np.asarray(expected),
+        atol=1e-7,
+    )
+    assert float(prediction[0]) > 0.04
 
 
 def test_predict_step_3d_quaternion_couples_bias_covariance() -> None:
