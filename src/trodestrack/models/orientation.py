@@ -10,8 +10,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import jax
+import jax.numpy as jnp
 import numpy as np
+from jax import lax
 from numpy.typing import NDArray
+
+from trodestrack.models.quaternion import (
+    integrate_body_gyro,
+    normalize_quaternion,
+    quaternion_from_rotation_vector,
+    quaternion_multiply,
+    quaternion_to_roll_pitch_yaw,
+    quaternion_to_yaw,
+    rotate_vector_world_to_body,
+)
 
 
 @dataclass(frozen=True)
@@ -157,44 +170,33 @@ def estimate_orientation(
     gyro_bias = _initial_gyro_bias(cfg)
     q = _initial_quaternion(accel_arr, gravity_mask, cfg)
 
-    n_time = t_arr.shape[0]
-    quats = np.zeros((n_time, 4), dtype=float)
-    gyro_biases = np.zeros((n_time, 3), dtype=float)
-    camera_yaw_update_mask = np.zeros(n_time, dtype=bool)
+    camera_heading = (
+        np.zeros(t_arr.shape[0], dtype=float)
+        if camera.heading is None
+        else np.asarray(camera.heading, dtype=float)
+    )
+    quats, gyro_biases, camera_yaw_update_mask = _orientation_scan_core_jit(
+        jnp.asarray(t_arr),
+        jnp.asarray(gyro_arr),
+        jnp.asarray(accel_arr),
+        jnp.asarray(gravity_mask),
+        jnp.asarray(camera_heading),
+        jnp.asarray(camera.valid_heading),
+        jnp.asarray(q),
+        jnp.asarray(gyro_bias),
+        jnp.asarray(cfg.accel_correction_gain),
+        jnp.asarray(cfg.accel_bias_correction_gain),
+        jnp.asarray(cfg.camera_yaw_correction_gain),
+        jnp.asarray(cfg.camera_yaw_bias_correction_gain),
+    )
 
-    quats[0] = q
-    gyro_biases[0] = gyro_bias
-    world_down = np.array([0.0, 0.0, -1.0])
-
-    for idx in range(1, n_time):
-        dt = float(t_arr[idx] - t_arr[idx - 1])
-        omega = gyro_arr[idx - 1] - gyro_bias
-        q = _integrate_body_gyro(q, omega, dt)
-
-        if gravity_mask[idx]:
-            measured_down = accel_arr[idx] / np.linalg.norm(accel_arr[idx])
-            predicted_down = _rotate_world_to_body(q, world_down)
-            error_body = np.cross(measured_down, predicted_down)
-            omega_correction = cfg.accel_correction_gain * error_body
-            gyro_bias -= cfg.accel_bias_correction_gain * error_body * dt
-            q = _integrate_body_gyro(q, omega_correction, dt)
-
-        if camera.heading is not None and camera.valid_heading[idx]:
-            yaw = _quaternion_to_yaw(q)
-            yaw_error = _wrap_angle(camera.heading[idx] - yaw)
-            yaw_delta = cfg.camera_yaw_correction_gain * yaw_error
-            q = _quaternion_multiply(
-                _quaternion_from_rotation_vector(np.array([0.0, 0.0, yaw_delta])),
-                q,
-            )
-            q = _normalize_quaternion(q)
-            gyro_bias[2] -= cfg.camera_yaw_bias_correction_gain * yaw_error * dt
-            camera_yaw_update_mask[idx] = True
-
-        quats[idx] = q
-        gyro_biases[idx] = gyro_bias
-
-    roll, pitch, yaw = _quaternion_to_roll_pitch_yaw(quats)
+    quats = np.asarray(quats, dtype=float)
+    gyro_biases = np.asarray(gyro_biases, dtype=float)
+    camera_yaw_update_mask = np.asarray(camera_yaw_update_mask, dtype=bool)
+    roll_jax, pitch_jax, yaw_jax = quaternion_to_roll_pitch_yaw(jnp.asarray(quats))
+    roll = np.asarray(roll_jax, dtype=float)
+    pitch = np.asarray(pitch_jax, dtype=float)
+    yaw = np.asarray(yaw_jax, dtype=float)
     diagnostics = _orientation_diagnostics(
         quats,
         roll,
@@ -216,6 +218,112 @@ def estimate_orientation(
         camera_yaw_update_mask=camera_yaw_update_mask,
         diagnostics=diagnostics,
     )
+
+
+def _canonicalize_quaternion(quat: jnp.ndarray) -> jnp.ndarray:
+    q = normalize_quaternion(quat)
+    return jnp.where(q[0] >= 0.0, q, -q)
+
+
+def _wrap_angle_jax(angle: jnp.ndarray) -> jnp.ndarray:
+    return jnp.arctan2(jnp.sin(angle), jnp.cos(angle))
+
+
+def _orientation_scan_core(
+    t_imu: jnp.ndarray,
+    gyro_xyz: jnp.ndarray,
+    accel_xyz: jnp.ndarray,
+    gravity_update_mask: jnp.ndarray,
+    camera_heading: jnp.ndarray,
+    valid_camera_heading: jnp.ndarray,
+    initial_quaternion: jnp.ndarray,
+    initial_gyro_bias: jnp.ndarray,
+    accel_correction_gain: jnp.ndarray,
+    accel_bias_correction_gain: jnp.ndarray,
+    camera_yaw_correction_gain: jnp.ndarray,
+    camera_yaw_bias_correction_gain: jnp.ndarray,
+) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    """Run the orientation estimator recurrence with ``lax.scan``."""
+
+    world_down = jnp.array([0.0, 0.0, -1.0], dtype=t_imu.dtype)
+    q0 = _canonicalize_quaternion(initial_quaternion.astype(t_imu.dtype))
+    bias0 = initial_gyro_bias.astype(t_imu.dtype)
+
+    def step(carry, inputs):
+        q, gyro_bias = carry
+        dt, gyro_prev, accel_now, use_gravity, heading_now, use_camera = inputs
+
+        omega = gyro_prev - gyro_bias
+        q_pred = _canonicalize_quaternion(integrate_body_gyro(q, omega, dt))
+
+        def apply_gravity(state):
+            q_in, bias_in = state
+            accel_norm = jnp.linalg.norm(accel_now)
+            measured_down = accel_now / jnp.maximum(
+                accel_norm,
+                jnp.asarray(1e-12, dtype=accel_now.dtype),
+            )
+            predicted_down = rotate_vector_world_to_body(q_in, world_down)
+            error_body = jnp.cross(measured_down, predicted_down)
+            omega_correction = accel_correction_gain * error_body
+            bias_out = bias_in - accel_bias_correction_gain * error_body * dt
+            q_out = _canonicalize_quaternion(
+                integrate_body_gyro(q_in, omega_correction, dt)
+            )
+            return q_out, bias_out
+
+        q_gravity, bias_gravity = lax.cond(
+            use_gravity,
+            apply_gravity,
+            lambda state: state,
+            (q_pred, gyro_bias),
+        )
+
+        def apply_camera(state):
+            q_in, bias_in = state
+            yaw = quaternion_to_yaw(q_in)
+            yaw_error = _wrap_angle_jax(heading_now - yaw)
+            yaw_delta = camera_yaw_correction_gain * yaw_error
+            delta_q = quaternion_from_rotation_vector(
+                jnp.array([0.0, 0.0, yaw_delta], dtype=q_in.dtype)
+            )
+            q_out = _canonicalize_quaternion(quaternion_multiply(delta_q, q_in))
+            bias_out = bias_in.at[2].add(
+                -camera_yaw_bias_correction_gain * yaw_error * dt
+            )
+            return q_out, bias_out
+
+        q_next, bias_next = lax.cond(
+            use_camera,
+            apply_camera,
+            lambda state: state,
+            (q_gravity, bias_gravity),
+        )
+        return (q_next, bias_next), (q_next, bias_next, use_camera)
+
+    scan_inputs = (
+        jnp.diff(t_imu),
+        gyro_xyz[:-1],
+        accel_xyz[1:],
+        gravity_update_mask[1:],
+        camera_heading[1:],
+        valid_camera_heading[1:],
+    )
+    (_, _), (quats_tail, biases_tail, camera_tail) = lax.scan(
+        step,
+        (q0, bias0),
+        scan_inputs,
+    )
+    quats = jnp.concatenate([q0[None, :], quats_tail], axis=0)
+    biases = jnp.concatenate([bias0[None, :], biases_tail], axis=0)
+    camera_updates = jnp.concatenate(
+        [jnp.array([False], dtype=bool), camera_tail.astype(bool)],
+        axis=0,
+    )
+    return quats, biases, camera_updates
+
+
+_orientation_scan_core_jit = jax.jit(_orientation_scan_core)
 
 
 @dataclass(frozen=True)
@@ -368,7 +476,7 @@ def _initial_quaternion(
             raise ValueError(
                 f"initial_quaternion must have shape (4,); got {quat.shape}."
             )
-        return _normalize_quaternion(quat)
+        return _canonicalize_quaternion_np(quat)
 
     finite = gravity_mask & np.isfinite(accel_xyz).all(axis=1)
     if not np.any(finite):
@@ -410,51 +518,10 @@ def _orientation_diagnostics(
     )
 
 
-def _integrate_body_gyro(
-    quat_body_to_world: NDArray[np.float64],
-    omega_body: NDArray[np.float64],
-    dt: float,
-) -> NDArray[np.float64]:
-    delta_q = _quaternion_from_rotation_vector(np.asarray(omega_body) * dt)
-    return _normalize_quaternion(_quaternion_multiply(quat_body_to_world, delta_q))
-
-
-def _normalize_quaternion(quat: NDArray[np.float64]) -> NDArray[np.float64]:
-    quat_arr = np.asarray(quat, dtype=float)
-    norm = np.linalg.norm(quat_arr)
-    if norm <= 1e-12:
-        return np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
-    normalized = quat_arr / norm
-    return normalized if normalized[0] >= 0 else -normalized
-
-
-def _quaternion_multiply(
-    left: NDArray[np.float64],
-    right: NDArray[np.float64],
-) -> NDArray[np.float64]:
-    w1, x1, y1, z1 = left
-    w2, x2, y2, z2 = right
-    return np.array(
-        [
-            w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
-            w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
-            w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
-            w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
-        ],
+def _canonicalize_quaternion_np(quat: NDArray[np.float64]) -> NDArray[np.float64]:
+    return np.asarray(
+        _canonicalize_quaternion(jnp.asarray(quat, dtype=jnp.float32)),
         dtype=float,
-    )
-
-
-def _quaternion_from_rotation_vector(
-    rotvec: NDArray[np.float64],
-) -> NDArray[np.float64]:
-    angle = float(np.linalg.norm(rotvec))
-    if angle < 1e-8:
-        return _normalize_quaternion(np.concatenate([[1.0], 0.5 * rotvec]))
-    axis = rotvec / angle
-    half_angle = 0.5 * angle
-    return _normalize_quaternion(
-        np.concatenate([[np.cos(half_angle)], axis * np.sin(half_angle)])
     )
 
 
@@ -475,61 +542,12 @@ def _quaternion_align_vectors(
         if np.linalg.norm(axis) < 1e-8:
             axis = np.cross(source_unit, np.array([0.0, 1.0, 0.0]))
         axis = axis / np.linalg.norm(axis)
-        return _quaternion_from_rotation_vector(np.pi * axis)
+        return _canonicalize_quaternion_np(
+            np.asarray(quaternion_from_rotation_vector(jnp.asarray(np.pi * axis)))
+        )
     axis = np.cross(source_unit, target_unit)
     quat = np.concatenate([[1.0 + dot], axis])
-    return _normalize_quaternion(quat)
-
-
-def _rotate_vector_body_to_world(
-    quat_body_to_world: NDArray[np.float64],
-    vector_body: NDArray[np.float64],
-) -> NDArray[np.float64]:
-    q = _normalize_quaternion(quat_body_to_world)
-    vector_quat = np.concatenate([[0.0], np.asarray(vector_body, dtype=float)])
-    rotated = _quaternion_multiply(
-        _quaternion_multiply(q, vector_quat),
-        np.array([q[0], -q[1], -q[2], -q[3]]),
-    )
-    return rotated[1:]
-
-
-def _rotate_world_to_body(
-    quat_body_to_world: NDArray[np.float64],
-    vector_world: NDArray[np.float64],
-) -> NDArray[np.float64]:
-    q = _normalize_quaternion(quat_body_to_world)
-    q_inv = np.array([q[0], -q[1], -q[2], -q[3]])
-    return _rotate_vector_body_to_world(q_inv, vector_world)
-
-
-def _quaternion_to_yaw(quat_body_to_world: NDArray[np.float64]) -> float:
-    q = _normalize_quaternion(quat_body_to_world)
-    qw, qx, qy, qz = q
-    return float(
-        np.arctan2(
-            2.0 * (qw * qz + qx * qy),
-            1.0 - 2.0 * (qy * qy + qz * qz),
-        )
-    )
-
-
-def _quaternion_to_roll_pitch_yaw(
-    quat_body_to_world: NDArray[np.float64],
-) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
-    q = np.asarray(quat_body_to_world, dtype=float)
-    qw, qx, qy, qz = np.moveaxis(q, -1, 0)
-    roll = np.arctan2(
-        2.0 * (qw * qx + qy * qz),
-        1.0 - 2.0 * (qx * qx + qy * qy),
-    )
-    sin_pitch = 2.0 * (qw * qy - qz * qx)
-    pitch = np.arcsin(np.clip(sin_pitch, -1.0, 1.0))
-    yaw = np.arctan2(
-        2.0 * (qw * qz + qx * qy),
-        1.0 - 2.0 * (qy * qy + qz * qz),
-    )
-    return roll, pitch, yaw
+    return _canonicalize_quaternion_np(quat)
 
 
 def _wrap_angle(angle: NDArray[np.float64] | float) -> NDArray[np.float64] | float:

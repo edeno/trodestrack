@@ -38,6 +38,11 @@ Current Milestone 6 cleanup status:
 - Current full-suite evidence after the RTS smoother and gravity-convention
   cleanup: `656 passed, 1 skipped, 1 xfailed, 4 known All-NaN slice warnings`
   in the config immutability tests.
+- Orientation vectorization is covered by
+  `tests/benchmark/test_orientation_baseline.py`: deterministic 12 s output
+  parity plus a warmed 60 s scan-throughput check. Local evidence improved from
+  the pre-vectorization Python-loop baseline of about `56k IMU samples/s` to
+  about `810k IMU samples/s` after the JAX `lax.scan` refactor.
 
 Real 3D dataset validation remains pending.
 

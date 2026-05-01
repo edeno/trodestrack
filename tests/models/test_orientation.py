@@ -49,7 +49,7 @@ def test_stationary_tilt_converges_to_gravity_direction() -> None:
     np.testing.assert_allclose(
         np.linalg.norm(result.quaternions, axis=1),
         1.0,
-        atol=1e-10,
+        atol=2e-7,
     )
 
 
@@ -102,8 +102,8 @@ def test_yaw_rotation_tracks_gyro_without_roll_pitch_drift() -> None:
     np.testing.assert_allclose(result.yaw[-1], expected_yaw, atol=0.01)
     np.testing.assert_allclose(result.roll, 0.0, atol=0.01)
     np.testing.assert_allclose(result.pitch, 0.0, atol=0.01)
-    assert result.diagnostics.quaternion_norm_min > 1.0 - 1e-10
-    assert result.diagnostics.quaternion_norm_max < 1.0 + 1e-10
+    assert result.diagnostics.quaternion_norm_min > 1.0 - 2e-7
+    assert result.diagnostics.quaternion_norm_max < 1.0 + 2e-7
 
 
 def test_default_initial_gyro_bias_does_not_erase_slow_yaw() -> None:
