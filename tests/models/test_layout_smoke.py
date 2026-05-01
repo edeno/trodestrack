@@ -29,6 +29,7 @@ from trodestrack.models.quaternion import (
 )
 from trodestrack.models.state_layout import get_layout
 from trodestrack.models.ukf import UKFConfig, unscented_kalman_filter
+from trodestrack.runtime.offline import rts_smoother
 
 
 def test_initialize_state_vision_only_layout() -> None:
@@ -929,28 +930,7 @@ def test_ekf_3d_dropout_comparison_camera_gyro_vs_accel_enabled() -> None:
     mean = mean.at[jnp.array(layout.heading_idx)].set(quat_cam[0])
     initial_state = FilterState(mean=mean, cov=jnp.eye(layout.n) * 0.05)
 
-    def run_filter(U_imu: np.ndarray, *, use_accel_translation: bool) -> float:
-        result = extended_kalman_filter_3d(
-            EKFConfig(
-                state_mode="3d_cam_6dof_imu",
-                measurement_noise_pos=1e-5,
-                enable_experimental_accel_translation=use_accel_translation,
-                enable_zupt=False,
-                use_mahalanobis_gating=False,
-                use_gravity_orientation_update=False,
-                adaptive_q_during_dropout=False,
-            ),
-            t_imu,
-            U_imu,
-            t_cam,
-            z_leds,
-            led_offsets,
-            mask_cam_leds=mask_leds,
-            initial_state=initial_state,
-        )
-        estimated_positions = np.asarray(
-            result.filtered_means[:, np.array(layout.pos_idx)]
-        )
+    def dropout_position_rmse(estimated_positions: np.ndarray) -> float:
         return float(
             np.sqrt(
                 np.mean(
@@ -966,11 +946,53 @@ def test_ekf_3d_dropout_comparison_camera_gyro_vs_accel_enabled() -> None:
             )
         )
 
-    rmse_camera_only = run_filter(U_camera, use_accel_translation=False)
-    rmse_gyro_only = run_filter(U_gyro, use_accel_translation=False)
-    rmse_accel_enabled = run_filter(U_accel, use_accel_translation=True)
+    def run_filter(U_imu: np.ndarray, *, use_accel_translation: bool):
+        config = EKFConfig(
+            state_mode="3d_cam_6dof_imu",
+            measurement_noise_pos=1e-5,
+            enable_experimental_accel_translation=use_accel_translation,
+            enable_zupt=False,
+            use_mahalanobis_gating=False,
+            use_gravity_orientation_update=False,
+            adaptive_q_during_dropout=False,
+        )
+        result = extended_kalman_filter_3d(
+            config,
+            t_imu,
+            U_imu,
+            t_cam,
+            z_leds,
+            led_offsets,
+            mask_cam_leds=mask_leds,
+            initial_state=initial_state,
+        )
+        estimated_positions = np.asarray(
+            result.filtered_means[:, np.array(layout.pos_idx)]
+        )
+        return dropout_position_rmse(estimated_positions), result, config
+
+    rmse_camera_only, _, _ = run_filter(U_camera, use_accel_translation=False)
+    rmse_gyro_only, _, _ = run_filter(U_gyro, use_accel_translation=False)
+    rmse_accel_enabled, result_accel_enabled, config_accel_enabled = run_filter(
+        U_accel,
+        use_accel_translation=True,
+    )
+    smoother_result = rts_smoother(
+        result_accel_enabled,
+        config_accel_enabled,
+        t_imu,
+        U_accel,
+        t_cam,
+        mask_cam=mask_leds.any(axis=1),
+    )
+    smoothed_positions = np.asarray(
+        smoother_result.smoothed_means[:, np.array(layout.pos_idx)]
+    )
+    rmse_accel_smoothed = dropout_position_rmse(smoothed_positions)
 
     assert rmse_accel_enabled < 0.25 * rmse_camera_only
     assert rmse_accel_enabled < 0.25 * rmse_gyro_only
+    assert rmse_accel_smoothed <= rmse_accel_enabled + 1e-6
+    assert rmse_accel_smoothed < 0.25 * rmse_accel_enabled
     assert rmse_camera_only > 0.04
     assert rmse_gyro_only > 0.04

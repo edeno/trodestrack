@@ -27,12 +27,14 @@ Current Milestone 6 cleanup status:
 - Gravity update stationarity gating uses bias-corrected gyro norm.
 - `LAYOUT_3D_CAM_6DOF_IMU` is a separate layout instance with the same
   16-dimensional quaternion structure as `LAYOUT_3D_QUAT`.
-- Synthetic bias recovery and 3D dropout comparisons are covered by regression
-  tests.
-- Latest full-suite evidence after the cleanup: `647 passed, 1 skipped,
+- Synthetic bias recovery, 3D dropout comparisons, and initial 3D RTS smoother
+  shape/finite/unit-quaternion, midpoint perturbation recovery, and dropout
+  recovery behavior are covered by regression tests.
+- Previous full-suite evidence before the latest RTS smoother changes:
+  `647 passed, 1 skipped,
   1 xfailed, 4 known All-NaN slice warnings` in the config immutability tests.
 
-RTS smoothing and real 3D dataset validation remain pending.
+Real 3D dataset validation remains pending.
 
 ## Context and Evidence
 
@@ -259,7 +261,8 @@ Tasks:
 - [x] Add 3D camera IEKF iterations, Mahalanobis gating, and ZUPT.
 - [x] Convert the 3D EKF camera and IMU time loops to `jax.lax.scan`.
 - [x] Extract a traceable `_extended_kalman_filter_3d_core` with JAX outputs.
-- [ ] Add RTS smoother support only after the filter path is validated.
+- [x] Add initial RTS smoother support for the 3D quaternion state.
+- [x] Validate 3D RTS smoother accuracy against synthetic recovery metrics.
 - [ ] Validate against the smallest representative real 3D dataset once
   available.
 
@@ -272,6 +275,10 @@ Tests:
 - [x] Gravity gate uses bias-corrected gyro norm.
 - [x] The private 3D core traces with `jax.make_jaxpr` and JITs with scalar
   JAX log-likelihood output.
+- [x] 3D RTS smoother smoke test preserves finite outputs and unit quaternion
+  norms.
+- [x] 3D RTS smoother reduces an injected synthetic midpoint position error.
+- [x] 3D RTS smoother improves or preserves synthetic dropout recovery metrics.
 - [ ] Full real-data 3D tests run on the smallest representative future dataset
   before expanding.
 
@@ -361,8 +368,6 @@ For 3D data:
 
 Extend Milestone 6 validation before promotion:
 
-- Add RTS smoother support only after the filter path passes those synthetic
-  checks.
 - Run the smallest representative real 3D dataset once available.
 
 This keeps the new 3D path experimental until it demonstrates recovery beyond

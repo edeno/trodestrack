@@ -23,15 +23,18 @@ import jax.numpy as jnp
 import numpy as np
 from jax import jacfwd, lax, vmap
 
-from trodestrack.models.ekf import EKFConfig, EKFResult
+from trodestrack.models.ekf import EKF3DResult, EKFConfig, EKFResult
 from trodestrack.models.filter_common import (
     compute_imu_index_arrays,
     dynamics_function,
+    normalize_state_orientation,
     psd_solve,
+    state_yaw,
     symmetrize,
     validate_imu_input_shape,
 )
 from trodestrack.models.process_noise import assemble_Q
+from trodestrack.models.quaternion import rotate_vector_body_to_world
 from trodestrack.models.state_layout import StateLayout, get_heading_index, get_layout
 from trodestrack.models.ukf import UKFConfig, UKFResult, compute_sigma_points
 
@@ -75,6 +78,91 @@ RTS_SMOOTHER_DONATE_ARGNUMS: tuple[int, ...] = (1, 2)
 # =============================================================================
 
 
+def _transition_mean_and_jacobian(
+    state_mean: jnp.ndarray,
+    linearization_mean: jnp.ndarray,
+    u_imu: jnp.ndarray,
+    dt_imu: jnp.ndarray,
+    *,
+    ekf_config: EKFConfig,
+    layout: StateLayout,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Predict one IMU step and return a transition Jacobian.
+
+    Quaternion layouts use the same first-order Jacobian structure as the EKF
+    prediction step to avoid autodiff through the zero-rotation quaternion
+    exponential. Scalar-heading layouts keep the existing autodiff path.
+    """
+
+    def f(x):
+        return dynamics_function(
+            x,
+            u_imu,
+            dt_imu,
+            ekf_config.damping_coeff,
+            layout,
+            gravity_body=ekf_config.imu_gravity_body,
+            enable_experimental_accel_translation=(
+                ekf_config.enable_experimental_accel_translation
+            ),
+        )
+
+    mean_pred = f(state_mean)
+    linearization_pred = f(linearization_mean)
+
+    if not layout.has_quaternion_orientation:
+        return mean_pred, jacfwd(f)(linearization_mean)
+
+    n = state_mean.shape[0]
+    dtype = state_mean.dtype
+    F_x = jnp.eye(n, dtype=dtype)
+    dt_arr = jnp.asarray(dt_imu, dtype=dtype)
+    use_accel_translation = ekf_config.enable_experimental_accel_translation
+
+    if use_accel_translation:
+        vel_self = 1.0 - ekf_config.damping_coeff * dt_arr
+        pos_vel = dt_arr - 0.5 * ekf_config.damping_coeff * dt_arr**2
+    else:
+        vel_self = 1.0
+        pos_vel = dt_arr
+
+    for pos_i, vel_i in zip(layout.pos_idx, layout.vel_idx, strict=True):
+        F_x = F_x.at[vel_i, vel_i].set(vel_self)
+        F_x = F_x.at[pos_i, vel_i].set(pos_vel)
+
+    quat_idx = jnp.array(layout.heading_idx, dtype=jnp.int32)
+    gyro_bias_idx = jnp.array(layout.bias_gyro_idx, dtype=jnp.int32)
+    qw, qx, qy, qz = linearization_mean[quat_idx]
+    quat_gyro_matrix = jnp.array(
+        [
+            [-qx, -qy, -qz],
+            [qw, -qz, qy],
+            [qz, qw, -qx],
+            [-qy, qx, qw],
+        ],
+        dtype=dtype,
+    )
+    F_x = F_x.at[quat_idx[:, None], gyro_bias_idx[None, :]].set(
+        -0.5 * dt_arr * quat_gyro_matrix
+    )
+
+    if use_accel_translation:
+        basis_body = jnp.eye(3, dtype=dtype)
+        rotation_world_from_body = rotate_vector_body_to_world(
+            linearization_pred[quat_idx],
+            basis_body,
+        ).T
+        for dim, (pos_i, vel_i) in enumerate(
+            zip(layout.pos_idx, layout.vel_idx, strict=True)
+        ):
+            for axis, bias_i in enumerate(layout.bias_accel_idx):
+                coeff = -rotation_world_from_body[dim, axis]
+                F_x = F_x.at[vel_i, bias_i].set(dt_arr * coeff)
+                F_x = F_x.at[pos_i, bias_i].set(0.5 * dt_arr**2 * coeff)
+
+    return normalize_state_orientation(mean_pred, layout), F_x
+
+
 def _rts_smoother_impl(
     lin_means_init: jnp.ndarray,
     filtered_means: jnp.ndarray,
@@ -93,21 +181,8 @@ def _rts_smoother_impl(
     """Core RTS smoother staged under ``jax.jit``."""
     n_cam = filtered_means.shape[0]
     n = filtered_means.shape[1]
-
-    def f(x, u, dt):
-        return dynamics_function(
-            x,
-            u,
-            dt,
-            ekf_config.damping_coeff,
-            layout,
-            gravity_body=ekf_config.imu_gravity_body,
-        )
-
-    F_jac = jacfwd(f, argnums=0)
     has_mask = jnp.asarray(mask_is_provided, dtype=bool)
-    h_idx = get_heading_index(layout)
-    has_heading = h_idx < n
+    has_scalar_heading = layout.has_heading_2d
 
     def predict_between_frames(
         t_idx: int,
@@ -131,11 +206,21 @@ def _rts_smoother_impl(
                     lambda: dt_imu_mean,
                 )
 
-                x_pred = f(x_s, u, dt)
-                F_k = F_jac(x_lin_s, u, dt)
+                x_pred, F_k = _transition_mean_and_jacobian(
+                    x_s,
+                    x_lin_s,
+                    u,
+                    dt,
+                    ekf_config=ekf_config,
+                    layout=layout,
+                )
 
                 dtype = x_pred.dtype
-                theta = x_pred[h_idx] if has_heading else jnp.asarray(0.0, dtype=dtype)
+                theta = (
+                    x_pred[get_heading_index(layout)]
+                    if has_scalar_heading
+                    else state_yaw(x_pred, layout)
+                )
                 Q_total = assemble_Q(
                     ekf_config,
                     theta=theta,
@@ -143,12 +228,24 @@ def _rts_smoother_impl(
                     n=n,
                     has_vision=jnp.logical_not(in_blackout),
                     dtype=dtype,
+                    orientation_quaternion=(
+                        x_pred[jnp.array(layout.heading_idx, dtype=jnp.int32)]
+                        if layout.has_quaternion_orientation
+                        else None
+                    ),
                 )
 
                 P_pred = F_k @ P_s @ F_k.T + Q_total
                 P_pred = symmetrize(P_pred)
                 F_new = F_k @ F_prev
-                x_lin_pred = f(x_lin_s, u, dt)
+                x_lin_pred, _ = _transition_mean_and_jacobian(
+                    x_lin_s,
+                    x_lin_s,
+                    u,
+                    dt,
+                    ekf_config=ekf_config,
+                    layout=layout,
+                )
 
                 return (x_pred, P_pred, F_new, x_lin_pred), None
 
@@ -178,14 +275,29 @@ def _rts_smoother_impl(
             t, filtered_mean, filtered_cov, lin_mean
         )
 
-        # Correct for angle wrapping in heading (if present in layout)
-        h_idx = get_heading_index(layout)
-        resid = smoothed_mean_next - m_pred
-        resid = resid.at[h_idx].set(
-            jnp.arctan2(jnp.sin(resid[h_idx]), jnp.cos(resid[h_idx]))
-        )
+        smoothed_mean_next_aligned = smoothed_mean_next
+        if layout.has_heading_2d:
+            h_idx = get_heading_index(layout)
+            resid = smoothed_mean_next_aligned - m_pred
+            resid = resid.at[h_idx].set(
+                jnp.arctan2(jnp.sin(resid[h_idx]), jnp.cos(resid[h_idx]))
+            )
+        elif layout.has_quaternion_orientation:
+            quat_idx = jnp.array(layout.heading_idx, dtype=jnp.int32)
+            sign = jnp.where(
+                jnp.dot(smoothed_mean_next[quat_idx], m_pred[quat_idx]) < 0.0,
+                jnp.asarray(-1.0, dtype=smoothed_mean_next.dtype),
+                jnp.asarray(1.0, dtype=smoothed_mean_next.dtype),
+            )
+            smoothed_mean_next_aligned = smoothed_mean_next.at[quat_idx].set(
+                sign * smoothed_mean_next[quat_idx]
+            )
+            resid = smoothed_mean_next_aligned - m_pred
+        else:
+            resid = smoothed_mean_next_aligned - m_pred
 
         smoothed_mean = filtered_mean + G @ resid
+        smoothed_mean = normalize_state_orientation(smoothed_mean, layout)
         smoothed_cov = filtered_cov + G @ (smoothed_cov_next - P_pred) @ G.T
         smoothed_cov = symmetrize(smoothed_cov)
 
@@ -239,7 +351,7 @@ _rts_smoother_jit = jax.jit(
 
 
 def rts_smoother(
-    filter_result: EKFResult,
+    filter_result: EKFResult | EKF3DResult,
     ekf_config: EKFConfig,
     t_imu: np.ndarray,
     U_imu: np.ndarray,
@@ -251,14 +363,18 @@ def rts_smoother(
 
     Parameters
     ----------
-    filter_result : EKFResult
-        Output from :func:`trodestrack.models.ekf.extended_kalman_filter`.
+    filter_result : EKFResult or EKF3DResult
+        Output from :func:`trodestrack.models.ekf.extended_kalman_filter` or
+        :func:`trodestrack.models.ekf.extended_kalman_filter_3d`.
     ekf_config : EKFConfig
         EKF configuration (for dynamics and Q assembly).
     t_imu : np.ndarray
         IMU timestamps (N_imu,) in seconds.
     U_imu : np.ndarray
-        IMU measurements [ω_z(rad/s), f_x(m/s^2), f_y(m/s^2)] (N_imu, 3).
+        IMU measurements. Shape depends on the layout: 2D layouts use
+        [ω_z(rad/s), f_x(m/s^2), f_y(m/s^2)] with shape (N_imu, 3);
+        3D quaternion layouts use [ω_x, ω_y, ω_z, f_x, f_y, f_z] with
+        shape (N_imu, 6).
     t_cam : np.ndarray
         Camera timestamps (N_cam,) in seconds.
     num_iter : int, default 1

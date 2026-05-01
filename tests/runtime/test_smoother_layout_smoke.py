@@ -1,10 +1,22 @@
 from __future__ import annotations
 
+import jax.numpy as jnp
 import numpy as np
 
-from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
+from trodestrack.models.ekf import (
+    EKF3DResult,
+    EKFConfig,
+    extended_kalman_filter,
+    extended_kalman_filter_3d,
+)
+from trodestrack.models.quaternion import rotate_vector_body_to_world
+from trodestrack.models.state_layout import get_layout
 from trodestrack.models.ukf import UKFConfig, unscented_kalman_filter
-from trodestrack.runtime.offline import rts_smoother, sigma_point_smoother
+from trodestrack.runtime.offline import (
+    _transition_mean_and_jacobian,
+    rts_smoother,
+    sigma_point_smoother,
+)
 
 
 def _tiny_synthetic_sequence():
@@ -62,3 +74,171 @@ def test_ukf_layout_no_hardcoded_8d():
     )
     assert filter_result.filtered_means.shape == (3, 10)
     assert filter_result.predicted_covariances.shape == (3, 10, 10)
+
+
+def test_rts_smoother_smoke_3d_cam_6dof_imu_layout():
+    layout = get_layout("3d_cam_6dof_imu")
+    t_cam = np.array([0.0, 0.05, 0.1], dtype=np.float32)
+    t_imu = np.linspace(0.0, 0.1, 11, dtype=np.float32)
+    U_imu = np.zeros((t_imu.shape[0], 6), dtype=np.float32)
+    U_imu[:, 5] = 9.81
+    led_offsets = np.array(
+        [
+            [-0.03, 0.0, 0.0],
+            [0.03, 0.0, 0.0],
+            [0.0, 0.025, 0.02],
+        ],
+        dtype=np.float32,
+    )
+    position = np.array([0.1, -0.2, 0.3], dtype=np.float32)
+    z_leds_one = position[None, :] + led_offsets
+    z_leds = np.repeat(z_leds_one[None, :, :], t_cam.shape[0], axis=0)
+
+    ekf_config = EKFConfig(
+        state_mode="3d_cam_6dof_imu",
+        measurement_noise_pos=1e-6,
+        enable_experimental_accel_translation=True,
+        enable_zupt=False,
+        use_gravity_orientation_update=False,
+        use_mahalanobis_gating=False,
+    )
+    filter_result = extended_kalman_filter_3d(
+        ekf_config,
+        t_imu,
+        U_imu,
+        t_cam,
+        z_leds,
+        led_offsets,
+    )
+    smoother_result = rts_smoother(
+        filter_result,
+        ekf_config,
+        t_imu,
+        U_imu,
+        t_cam,
+    )
+
+    quat_idx = np.array(layout.heading_idx)
+    assert smoother_result.smoothed_means.shape == (t_cam.shape[0], layout.n)
+    assert smoother_result.smoothed_covariances.shape == (
+        t_cam.shape[0],
+        layout.n,
+        layout.n,
+    )
+    assert np.isfinite(np.asarray(smoother_result.smoothed_means)).all()
+    assert np.isfinite(np.asarray(smoother_result.smoothed_covariances)).all()
+    np.testing.assert_allclose(
+        np.linalg.norm(np.asarray(smoother_result.smoothed_means[:, quat_idx]), axis=1),
+        1.0,
+        atol=1e-5,
+    )
+
+
+def test_rts_smoother_3d_quaternion_reduces_injected_midpoint_position_error():
+    layout = get_layout("3d_cam_6dof_imu")
+    t_cam = np.linspace(0.0, 0.4, 5, dtype=np.float32)
+    t_imu = t_cam.copy()
+    U_imu = np.zeros((t_imu.shape[0], 6), dtype=np.float32)
+    U_imu[:, 5] = 9.81
+
+    true_states = np.zeros((t_cam.shape[0], layout.n), dtype=np.float32)
+    pos_idx = np.array(layout.pos_idx)
+    vel_idx = np.array(layout.vel_idx)
+    quat_idx = np.array(layout.heading_idx)
+    p0 = np.array([0.1, -0.2, 0.3], dtype=np.float32)
+    velocity = np.array([0.2, 0.05, -0.1], dtype=np.float32)
+    true_states[:, pos_idx] = p0 + t_cam[:, None] * velocity
+    true_states[:, vel_idx] = velocity
+    true_states[:, quat_idx] = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+
+    filtered_means = true_states.copy()
+    filtered_means[2, pos_idx] += np.array([0.2, -0.1, 0.05], dtype=np.float32)
+    filtered_covs = np.repeat(
+        (np.eye(layout.n, dtype=np.float32) * 0.05)[None, :, :],
+        t_cam.shape[0],
+        axis=0,
+    )
+    filter_result = EKF3DResult(
+        filtered_means=jnp.asarray(filtered_means),
+        filtered_covariances=jnp.asarray(filtered_covs),
+        # Synthetic shortcut: RTS re-propagates predictions internally.
+        predicted_means=jnp.asarray(filtered_means),
+        predicted_covariances=jnp.asarray(filtered_covs),
+        marginal_loglik=0.0,
+    )
+
+    ekf_config = EKFConfig(
+        state_mode="3d_cam_6dof_imu",
+        enable_experimental_accel_translation=False,
+        enable_zupt=False,
+        use_gravity_orientation_update=False,
+        use_mahalanobis_gating=False,
+    )
+    smoother_result = rts_smoother(
+        filter_result,
+        ekf_config,
+        t_imu,
+        U_imu,
+        t_cam,
+    )
+
+    smoothed_means = np.asarray(smoother_result.smoothed_means)
+    filtered_midpoint_error = np.linalg.norm(
+        filtered_means[2, pos_idx] - true_states[2, pos_idx]
+    )
+    smoothed_midpoint_error = np.linalg.norm(
+        smoothed_means[2, pos_idx] - true_states[2, pos_idx]
+    )
+
+    assert smoothed_midpoint_error < 0.1 * filtered_midpoint_error
+    np.testing.assert_allclose(
+        np.linalg.norm(smoothed_means[:, quat_idx], axis=1),
+        1.0,
+        atol=1e-5,
+    )
+
+
+def test_rts_3d_transition_jacobian_accel_bias_uses_linearization_quaternion():
+    layout = get_layout("3d_cam_6dof_imu")
+    quat_idx = np.array(layout.heading_idx)
+    vel_idx = np.array(layout.vel_idx)
+    bias_accel_idx = np.array(layout.bias_accel_idx)
+    dt = jnp.asarray(0.1, dtype=jnp.float32)
+
+    state_mean = jnp.zeros(layout.n, dtype=jnp.float32)
+    state_mean = state_mean.at[quat_idx].set(jnp.array([1.0, 0.0, 0.0, 0.0]))
+
+    yaw_quarter_turn = jnp.array(
+        [
+            jnp.cos(jnp.pi / 4.0),
+            0.0,
+            0.0,
+            jnp.sin(jnp.pi / 4.0),
+        ],
+        dtype=jnp.float32,
+    )
+    linearization_mean = state_mean.at[quat_idx].set(yaw_quarter_turn)
+    u_imu = jnp.array([0.0, 0.0, 0.0, 0.0, 0.0, 9.81], dtype=jnp.float32)
+
+    _, F_x = _transition_mean_and_jacobian(
+        state_mean,
+        linearization_mean,
+        u_imu,
+        dt,
+        ekf_config=EKFConfig(
+            state_mode="3d_cam_6dof_imu",
+            enable_experimental_accel_translation=True,
+        ),
+        layout=layout,
+    )
+
+    rotation_world_from_body = rotate_vector_body_to_world(
+        yaw_quarter_turn,
+        jnp.eye(3, dtype=jnp.float32),
+    ).T
+    expected_vel_bias_block = -dt * rotation_world_from_body
+    np.testing.assert_allclose(
+        np.asarray(F_x[np.ix_(vel_idx, bias_accel_idx)]),
+        np.asarray(expected_vel_bias_block),
+        atol=1e-6,
+    )
