@@ -238,6 +238,37 @@ def test_ekf_gravity_update_corrects_quaternion_roll_pitch() -> None:
     assert abs(float(next_pitch)) < abs(float(initial_pitch))
 
 
+def test_ekf_gravity_gate_uses_bias_corrected_gyro_norm() -> None:
+    layout = get_layout("2d_cam_6dof_imu_orientation")
+    quat_idx = jnp.array(layout.heading_idx)
+    initial_quat = quaternion_from_rotation_vector(jnp.array([0.35, -0.25, 0.0]))
+    gyro_bias = jnp.array([0.3, 0.0, 0.0])
+    mean = jnp.zeros(layout.n)
+    mean = mean.at[quat_idx].set(initial_quat)
+    mean = mean.at[jnp.array(layout.bias_gyro_idx)].set(gyro_bias)
+    state = FilterState(mean=mean, cov=jnp.eye(layout.n) * 0.5)
+    imu = jnp.concatenate([gyro_bias, jnp.array([0.0, 0.0, 9.81])])
+
+    next_state = predict_step(
+        state,
+        imu,
+        dt_imu=0.01,
+        config=EKFConfig(
+            state_mode="2d_cam_6dof_imu_orientation",
+            use_gravity_orientation_update=True,
+            gravity_orientation_measurement_noise=1e-4,
+            gravity_gyro_norm_threshold_rad_s=0.2,
+            enable_zupt=False,
+        ),
+        layout=layout,
+    )
+
+    initial_roll, initial_pitch, _ = quaternion_to_roll_pitch_yaw(initial_quat)
+    next_roll, next_pitch, _ = quaternion_to_roll_pitch_yaw(next_state.mean[quat_idx])
+    assert abs(float(next_roll)) < abs(float(initial_roll))
+    assert abs(float(next_pitch)) < abs(float(initial_pitch))
+
+
 def test_ekf_smoke_vision_only_shapes() -> None:
     ekf_config = EKFConfig(
         state_mode="vision_only", led_distance=0.04, use_heading_measurement=False

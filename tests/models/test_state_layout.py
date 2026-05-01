@@ -118,9 +118,10 @@ def test_layout_3d_quat_properties():
     assert layout.has_quaternion_orientation is True
 
 
-def test_layout_3d_cam_6dof_imu_is_3d_quaternion_alias():
+def test_layout_3d_cam_6dof_imu_matches_3d_quaternion_structure():
     """The plan-facing 3D mode uses the 16D quaternion layout."""
-    assert LAYOUT_3D_CAM_6DOF_IMU is LAYOUT_3D_QUAT
+    assert LAYOUT_3D_CAM_6DOF_IMU == LAYOUT_3D_QUAT
+    assert LAYOUT_3D_CAM_6DOF_IMU is not LAYOUT_3D_QUAT
     assert get_layout("3d_cam_6dof_imu") is LAYOUT_3D_CAM_6DOF_IMU
 
 

@@ -267,10 +267,18 @@ Note: Requires quaternion normalization constraint |q| = 1
 """
 
 
-LAYOUT_3D_CAM_6DOF_IMU = LAYOUT_3D_QUAT
+LAYOUT_3D_CAM_6DOF_IMU = StateLayout(
+    n=LAYOUT_3D_QUAT.n,
+    pos_idx=LAYOUT_3D_QUAT.pos_idx,
+    vel_idx=LAYOUT_3D_QUAT.vel_idx,
+    heading_idx=LAYOUT_3D_QUAT.heading_idx,
+    bias_gyro_idx=LAYOUT_3D_QUAT.bias_gyro_idx,
+    bias_accel_idx=LAYOUT_3D_QUAT.bias_accel_idx,
+)
 """Full 3D camera with 6-DOF IMU fusion.
 
-Alias for ``LAYOUT_3D_QUAT`` with the explicit state-mode name used by the
+Separate layout instance with the same 16D quaternion state structure as
+``LAYOUT_3D_QUAT`` and the explicit state-mode name used by the
 tilt/orientation implementation plan.
 """
 

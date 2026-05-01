@@ -1,6 +1,6 @@
-"""Extended Kalman Filter (EKF) for sensor-fused rat tracking.
+"""Extended Kalman Filter (EKF) for sensor-fused tracking.
 
-This module implements a 2D EKF with 8-state model:
+This module implements the production 2D EKF with 8-state model:
     x_k = [x, y, vx, vy, θ, b_gz, b_ax, b_ay]^T
 
 Where:
@@ -18,6 +18,7 @@ Key features:
     - IMU pre-integration between camera frames
     - Velocity damping to model drag
     - Dual-LED position and heading measurements
+    - Experimental 3D camera + quaternion 6-DOF IMU filtering
     - Mahalanobis gating for outlier rejection
     - RTS smoother for offline processing (see runtime/offline.py)
 
@@ -462,6 +463,14 @@ def _apply_gravity_orientation_update(
     m = state.mean
     accel = u_imu[3:6]
     gyro = u_imu[:3]
+    gyro_bias = jnp.array(
+        [
+            m[layout.bias_gyro_idx[0]],
+            m[layout.bias_gyro_idx[1]],
+            m[layout.bias_gyro_idx[2]],
+        ],
+        dtype=m.dtype,
+    )
     accel_bias = jnp.array(
         [
             m[layout.bias_accel_idx[0]],
@@ -470,6 +479,7 @@ def _apply_gravity_orientation_update(
         ],
         dtype=m.dtype,
     )
+    gyro_unbiased = gyro - gyro_bias
     accel_unbiased = accel - accel_bias
     accel_norm = jnp.linalg.norm(accel_unbiased)
     gravity_magnitude = jnp.linalg.norm(
@@ -479,11 +489,11 @@ def _apply_gravity_orientation_update(
         accel_norm,
         jnp.asarray(1e-6, dtype=m.dtype),
     )
-    gyro_norm = jnp.linalg.norm(gyro)
+    gyro_norm = jnp.linalg.norm(gyro_unbiased)
     use_update = (
         jnp.asarray(config.use_gravity_orientation_update)
         & jnp.isfinite(accel_unbiased).all()
-        & jnp.isfinite(gyro).all()
+        & jnp.isfinite(gyro_unbiased).all()
         & (accel_norm > 1e-6)
         & (
             jnp.abs(accel_norm - gravity_magnitude)
@@ -945,59 +955,89 @@ def extended_kalman_filter_3d(
         )
 
     dt_imu_mean = jnp.mean(jnp.diff(t_imu_jax))
-    imu_index_arrays = np.asarray(compute_imu_index_arrays(t_imu, t_cam))
+    imu_index_arrays = compute_imu_index_arrays(t_imu, t_cam)
+    chi2_thresholds = _chi2_threshold_table(
+        camera_model.meas_dim,
+        config_for_filter.mahalanobis_threshold_prob,
+        dtype=initial_state.mean.dtype,
+    )
 
-    state = initial_state
-    filtered_means = []
-    filtered_covariances = []
-    predicted_means = []
-    predicted_covariances = []
-    marginal_loglik = jnp.asarray(0.0, dtype=state.mean.dtype)
-
-    for t_idx in range(t_cam_jax.shape[0]):
+    def filter_step(carry, t_idx):
+        state_prev, marginal_loglik_prev = carry
         has_vision = jnp.any(camera_model.valid_coordinates(t_idx))
-        if t_idx > 0:
-            for imu_idx in imu_index_arrays[t_idx]:
-                if imu_idx < 0:
-                    continue
-                dt = (
-                    t_imu_jax[imu_idx] - t_imu_jax[imu_idx - 1]
-                    if imu_idx > 0
-                    else dt_imu_mean
+
+        def propagate_from_prev(state_in: EKFState) -> EKFState:
+            imu_indices = imu_index_arrays[t_idx]
+
+            def propagate_imu(state_imu: EKFState, imu_idx: jnp.ndarray):
+                def do_propagate(state_valid: EKFState) -> EKFState:
+                    dt = lax.cond(
+                        imu_idx > 0,
+                        lambda: t_imu_jax[imu_idx] - t_imu_jax[imu_idx - 1],
+                        lambda: dt_imu_mean,
+                    )
+                    return predict_step(
+                        state_valid,
+                        U_imu_jax[imu_idx],
+                        dt,
+                        config_for_filter,
+                        has_vision=has_vision,
+                        layout=layout,
+                    )
+
+                state_out = lax.cond(
+                    imu_idx >= 0,
+                    do_propagate,
+                    lambda state_invalid: state_invalid,
+                    state_imu,
                 )
-                state = predict_step(
-                    state,
-                    U_imu_jax[imu_idx],
-                    dt,
-                    config_for_filter,
-                    has_vision=has_vision,
-                    layout=layout,
-                )
+                return state_out, None
 
-        predicted_means.append(state.mean)
-        predicted_covariances.append(state.cov)
+            state_out, _ = lax.scan(propagate_imu, state_in, imu_indices)
+            return state_out
 
-        if bool(has_vision):
-            state, log_lik = _update_camera_3d(
-                state,
-                camera_model,
-                t_idx,
-                layout,
-                config_for_filter,
-            )
-            marginal_loglik = marginal_loglik + log_lik
+        state_pred = lax.cond(
+            t_idx == 0,
+            lambda state_in: state_in,
+            propagate_from_prev,
+            state_prev,
+        )
+        predicted_mean = state_pred.mean
+        predicted_covariance = state_pred.cov
 
-        state, log_lik_zupt = update_zupt(state, config_for_filter)
-        marginal_loglik = marginal_loglik + log_lik_zupt
+        state_cam, log_lik_camera = _update_camera_3d_scanned(
+            state_pred,
+            camera_model,
+            t_idx,
+            layout,
+            config_for_filter,
+            chi2_thresholds,
+        )
+        state_filt, log_lik_zupt = update_zupt(state_cam, config_for_filter)
+        marginal_loglik = marginal_loglik_prev + log_lik_camera + log_lik_zupt
+        outputs = (
+            state_filt.mean,
+            state_filt.cov,
+            predicted_mean,
+            predicted_covariance,
+        )
+        return (state_filt, marginal_loglik), outputs
 
-        filtered_means.append(state.mean)
-        filtered_covariances.append(state.cov)
+    (final_state, marginal_loglik), scan_outputs = lax.scan(
+        filter_step,
+        (initial_state, jnp.asarray(0.0, dtype=initial_state.mean.dtype)),
+        jnp.arange(t_cam_jax.shape[0], dtype=jnp.int32),
+    )
+    del final_state
+    filtered_means, filtered_covariances, predicted_means, predicted_covariances = (
+        scan_outputs
+    )
 
     return EKF3DResult(
-        filtered_means=jnp.stack(filtered_means),
-        filtered_covariances=jnp.stack(filtered_covariances),
-        predicted_means=jnp.stack(predicted_means),
-        predicted_covariances=jnp.stack(predicted_covariances),
+        filtered_means=filtered_means,
+        filtered_covariances=filtered_covariances,
+        predicted_means=predicted_means,
+        predicted_covariances=predicted_covariances,
         marginal_loglik=float(marginal_loglik),
     )
 
@@ -1095,6 +1135,50 @@ def _update_camera_3d(
     return state_iter, log_lik
 
 
+def _update_camera_3d_scanned(
+    state: EKFState,
+    camera_model: Camera3DPositionModel,
+    frame_idx: jnp.ndarray,
+    layout: StateLayout,
+    config: EKFConfig,
+    chi2_thresholds: jnp.ndarray,
+) -> tuple[EKFState, jnp.ndarray]:
+    """Apply one JAX-scan-compatible gated 3D LED camera EKF update."""
+    active_mask = camera_model.valid_coordinates(frame_idx)
+    dof = jnp.sum(active_mask.astype(jnp.int32))
+
+    def no_update(_: None) -> tuple[EKFState, jnp.ndarray]:
+        return state, jnp.asarray(0.0, dtype=state.mean.dtype)
+
+    def do_update(_: None) -> tuple[EKFState, jnp.ndarray]:
+        state_iter = state
+        innovation = jnp.zeros(camera_model.meas_dim, dtype=state.mean.dtype)
+        S = jnp.eye(camera_model.meas_dim, dtype=state.mean.dtype)
+        for _ in range(config.num_iter):
+            state_iter, innovation, S = _camera_3d_linear_update(
+                state,
+                state_iter.mean,
+                camera_model,
+                frame_idx,
+                layout,
+            )
+
+        log_lik = _gaussian_log_likelihood_masked(innovation, S, active_mask)
+        if config.use_mahalanobis_gating:
+            nis = _mahalanobis_distance_masked(innovation, S, active_mask)
+            accept_update = nis < chi2_thresholds[dof]
+        else:
+            accept_update = jnp.asarray(True)
+        return lax.cond(
+            accept_update,
+            lambda _: (state_iter, log_lik),
+            lambda _: (state, jnp.asarray(0.0, dtype=state.mean.dtype)),
+            operand=None,
+        )
+
+    return lax.cond(dof > 0, do_update, no_update, operand=None)
+
+
 def _camera_3d_linear_update(
     prior_state: EKFState,
     linearization_mean: jnp.ndarray,
@@ -1117,6 +1201,20 @@ def _camera_3d_linear_update(
     return EKFState(mean=mean_upd, cov=cov_upd), corrected_innovation, S
 
 
+def _masked_measurement_system(
+    innovation: jnp.ndarray,
+    covariance: jnp.ndarray,
+    active_mask: jnp.ndarray,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Return fixed-size innovation/covariance with inactive rows as identity."""
+    active = active_mask.astype(bool)
+    active_outer = active[:, None] & active[None, :]
+    eye = jnp.eye(covariance.shape[0], dtype=covariance.dtype)
+    covariance_masked = jnp.where(active_outer, covariance, eye)
+    innovation_masked = jnp.where(active, innovation, 0.0)
+    return innovation_masked, covariance_masked
+
+
 def _mahalanobis_distance_active(
     innovation: jnp.ndarray,
     covariance: jnp.ndarray,
@@ -1127,6 +1225,21 @@ def _mahalanobis_distance_active(
     cov_active = covariance[active_indices[:, None], active_indices[None, :]]
     solved = psd_solve(cov_active, innov_active)
     return jnp.dot(innov_active, solved)
+
+
+def _mahalanobis_distance_masked(
+    innovation: jnp.ndarray,
+    covariance: jnp.ndarray,
+    active_mask: jnp.ndarray,
+) -> jnp.ndarray:
+    """Mahalanobis distance on active measurement coordinates using masks."""
+    innovation_masked, covariance_masked = _masked_measurement_system(
+        innovation,
+        covariance,
+        active_mask,
+    )
+    solved = psd_solve(covariance_masked, innovation_masked)
+    return jnp.dot(innovation_masked, solved)
 
 
 def _chi2_threshold_active(
@@ -1141,6 +1254,19 @@ def _chi2_threshold_active(
     if dof < 1:
         raise ValueError(f"dof must be >= 1; got {dof}.")
     return jnp.asarray(chi2.ppf(prob, df=dof), dtype=dtype)
+
+
+def _chi2_threshold_table(
+    max_dof: int,
+    prob: float,
+    *,
+    dtype: jnp.dtype,
+) -> jnp.ndarray:
+    """Return chi-square thresholds indexed by dynamic active dimension."""
+    from scipy.stats import chi2
+
+    values = [0.0] + [float(chi2.ppf(prob, df=dof)) for dof in range(1, max_dof + 1)]
+    return jnp.asarray(values, dtype=dtype)
 
 
 def _gaussian_log_likelihood_active(
@@ -1159,4 +1285,26 @@ def _gaussian_log_likelihood_active(
         dim * jnp.log(jnp.asarray(2.0 * np.pi, dtype=innovation.dtype))
         + logdet
         + jnp.dot(innov_active, solved)
+    )
+
+
+def _gaussian_log_likelihood_masked(
+    innovation: jnp.ndarray,
+    covariance: jnp.ndarray,
+    active_mask: jnp.ndarray,
+) -> jnp.ndarray:
+    """Gaussian log likelihood on active measurement coordinates using masks."""
+    innovation_masked, covariance_masked = _masked_measurement_system(
+        innovation,
+        covariance,
+        active_mask,
+    )
+    dim = jnp.sum(active_mask.astype(innovation.dtype))
+    solved = psd_solve(covariance_masked, innovation_masked)
+    sign, logdet = jnp.linalg.slogdet(symmetrize(covariance_masked))
+    logdet = jnp.where(sign > 0, logdet, jnp.asarray(0.0, dtype=innovation.dtype))
+    return -0.5 * (
+        dim * jnp.log(jnp.asarray(2.0 * np.pi, dtype=innovation.dtype))
+        + logdet
+        + jnp.dot(innovation_masked, solved)
     )

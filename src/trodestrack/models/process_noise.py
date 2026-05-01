@@ -306,6 +306,10 @@ def assemble_Q(
                 G = jnp.zeros((n, n_gyro + n_accel), dtype=dtype)
                 quat_indices = cast(tuple[int, int, int, int], layout.heading_idx)
                 half_dt = 0.5 * jnp.asarray(dt, dtype=dtype)
+                # Gyro input noise is applied to the vector quaternion
+                # components. Independent diffusion on qw remains in Q_rate as
+                # a conservative prototype covariance term; normalization keeps
+                # the state on the unit-quaternion manifold after prediction.
                 for row, col in zip(quat_indices[1:], range(3), strict=True):
                     G = G.at[row, col].set(half_dt)
 
