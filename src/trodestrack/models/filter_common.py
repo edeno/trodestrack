@@ -15,6 +15,13 @@ import numpy as np
 from jax import Array, lax, tree_util
 from jax.scipy.linalg import cho_factor, cho_solve
 
+from trodestrack.models.quaternion import (
+    integrate_body_gyro,
+    normalize_quaternion,
+    quaternion_from_rotation_vector,
+    quaternion_to_yaw,
+    rotate_vector_body_to_world,
+)
 from trodestrack.models.state_layout import StateLayout, get_heading_index, get_layout
 
 
@@ -79,6 +86,18 @@ class FilterCoreConfig:
         If True, scale IMU input noise when vision is absent.
     blackout_imu_noise_scale : float
         Scale applied to IMU noise during blackout when enabled.
+    enable_experimental_accel_translation : bool
+        If True, allow the experimental 2D camera + 6-DOF IMU orientation mode
+        to integrate accelerometer samples into x/y velocity. Default is False.
+    use_gravity_orientation_update : bool
+        If True, quaternion-orientation EKF modes use a gated accelerometer
+        gravity-direction pseudo-measurement to constrain roll/pitch.
+    gravity_orientation_measurement_noise : float
+        Variance of the unit-vector gravity-direction pseudo-measurement.
+    gravity_accel_magnitude_tolerance_m_s2 : float
+        Maximum stationary-acceleration magnitude deviation from gravity.
+    gravity_gyro_norm_threshold_rad_s : float
+        Maximum gyro norm for accepting gravity-direction updates.
 
     enable_zupt : bool
         Enable zero-velocity pseudo-measurements when nearly stationary.
@@ -123,13 +142,19 @@ class FilterCoreConfig:
     freeze_bias_during_blackout: bool = True
     reduce_imu_noise_during_blackout: bool = True
     blackout_imu_noise_scale: float = 0.3
+    enable_experimental_accel_translation: bool = False
+    use_gravity_orientation_update: bool = True
+    gravity_orientation_measurement_noise: float = 0.05**2
+    gravity_accel_magnitude_tolerance_m_s2: float = 0.5
+    gravity_gyro_norm_threshold_rad_s: float = 0.2
 
     enable_zupt: bool = True
     zupt_velocity_threshold: float = 0.02  # m/s
     zupt_measurement_noise: float = 0.01**2
 
     # State layout mode (controls state dimension and index mapping)
-    # Supported for 2D paths: "2d_full" (8D), "vision_only" (5D), "2d_cam_3d_imu" (10D)
+    # Supported for 2D paths: "2d_full" (8D), "vision_only" (5D),
+    # "2d_cam_3d_imu" (10D), "2d_cam_6dof_imu_orientation" (14D)
     state_mode: str = "2d_cam_3d_imu"
 
     # PyTree support: treat `state_mode` as static auxiliary data.
@@ -166,6 +191,21 @@ class FilterCoreConfig:
             raise ValueError(
                 "imu_gravity_body must be a length-3 finite sequence "
                 f"[g_x, g_y, g_z] in m/s²; got {self.imu_gravity_body!r}."
+            )
+        if self.gravity_orientation_measurement_noise <= 0:
+            raise ValueError(
+                "gravity_orientation_measurement_noise must be > 0; got "
+                f"{self.gravity_orientation_measurement_noise}."
+            )
+        if self.gravity_accel_magnitude_tolerance_m_s2 < 0:
+            raise ValueError(
+                "gravity_accel_magnitude_tolerance_m_s2 must be >= 0; got "
+                f"{self.gravity_accel_magnitude_tolerance_m_s2}."
+            )
+        if self.gravity_gyro_norm_threshold_rad_s < 0:
+            raise ValueError(
+                "gravity_gyro_norm_threshold_rad_s must be >= 0; got "
+                f"{self.gravity_gyro_norm_threshold_rad_s}."
             )
 
     def tree_flatten(self) -> tuple[tuple, dict]:
@@ -397,9 +437,11 @@ def validate_imu_input_shape(
     module):
 
     - 3 channels ``[ω_z (rad/s), f_x (m/s²), f_y (m/s²)]`` — runs the 2D
-      branch. Valid for any layout.
+      branch. Valid for non-quaternion layouts.
     - 4 channels ``[ω_z, f_x, f_y, f_z]`` — runs the 3D branch. Valid only
       when ``layout`` has 3D velocity (e.g. ``LAYOUT_2D_CAM_3D_IMU``).
+    - 6 channels ``[ω_x, ω_y, ω_z, f_x, f_y, f_z]`` — runs the experimental
+      6-DOF orientation branch. Valid only for quaternion-orientation layouts.
     """
     arr = np.asarray(U_imu)
 
@@ -411,6 +453,16 @@ def validate_imu_input_shape(
 
     got = arr.shape[1]
     has_3d_velocity = len(layout.vel_idx) >= 3
+    has_quaternion_orientation = layout.has_quaternion_orientation
+
+    if has_quaternion_orientation:
+        if got == 6:
+            return
+        raise ValueError(
+            f"{func_name}: state layout uses 6-DOF quaternion orientation and "
+            f"requires 6-channel IMU [ω_x, ω_y, ω_z, f_x, f_y, f_z]; got "
+            f"{got} channels."
+        )
 
     if got in (3, 4):
         if got == 4 and not has_3d_velocity:
@@ -426,7 +478,8 @@ def validate_imu_input_shape(
     # Wrong channel count — build a helpful message.
     msg = (
         f"{func_name}: U_imu has {got} channels; expected 3 "
-        f"[ω_z, f_x, f_y] (2D IMU) or 4 [ω_z, f_x, f_y, f_z] (3D IMU). "
+        f"[ω_z, f_x, f_y] (2D IMU), 4 [ω_z, f_x, f_y, f_z] (3D IMU), "
+        f"or 6 [ω_x, ω_y, ω_z, f_x, f_y, f_z] for quaternion orientation. "
         f"Selected state_mode maps to a "
         f"{'3D-velocity' if has_3d_velocity else '2D-velocity'} layout."
     )
@@ -517,6 +570,32 @@ def rotate_body_accel_to_world(
     )
 
     return R_z @ accel_body
+
+
+def state_yaw(state: jnp.ndarray, layout: StateLayout) -> jnp.ndarray:
+    """Return yaw angle from either scalar-heading or quaternion state layout."""
+
+    if layout.has_heading_2d:
+        return state[get_heading_index(layout)]
+    if layout.has_quaternion_orientation:
+        quat_idx = jnp.array(layout.heading_idx, dtype=jnp.int32)
+        return quaternion_to_yaw(state[quat_idx])
+    raise NotImplementedError(
+        "Yaw extraction is implemented for 2D heading and quaternion layouts only."
+    )
+
+
+def normalize_state_orientation(
+    state: jnp.ndarray,
+    layout: StateLayout,
+) -> jnp.ndarray:
+    """Normalize quaternion state components when the layout has them."""
+
+    if not layout.has_quaternion_orientation:
+        return state
+    quat_idx = jnp.array(layout.heading_idx, dtype=jnp.int32)
+    quat = normalize_quaternion(state[quat_idx])
+    return state.at[quat_idx].set(quat)
 
 
 def gravity_compensate(accel_world: jnp.ndarray, g: float = 9.81) -> jnp.ndarray:
@@ -613,12 +692,14 @@ def dynamics_function(
     damping: float,
     layout: StateLayout,
     gravity_body: tuple[float, float, float] | jnp.ndarray | None = None,
+    enable_experimental_accel_translation: bool = False,
 ) -> jnp.ndarray:
     """Constant-acceleration dynamics with linear damping (layout-aware).
 
-    Supports both 2D and 3D IMU inputs:
+    Supports 2D, yaw+3D-accel, and full 6-axis orientation IMU inputs:
     - 2D IMU: [ω_z(rad/s), f_x(m/s²), f_y(m/s²)] (3,)
     - 3D IMU: [ω_z(rad/s), f_x(m/s²), f_y(m/s²), f_z(m/s²)] (4,)
+    - 6-DOF IMU: [ω_x, ω_y, ω_z, f_x, f_y, f_z] (6,)
 
     For 3D IMU, applies gravity compensation and 3D rotation.
 
@@ -637,6 +718,10 @@ def dynamics_function(
     gravity_body : tuple[float, float, float] or jnp.ndarray, optional
         Expected stationary accelerometer reading in body/sensor axes (m/s²).
         Defaults to ``[0, 0, 9.81]`` for level mounting.
+    enable_experimental_accel_translation : bool, default False
+        For quaternion orientation layouts, whether to integrate accelerometer
+        samples into x/y velocity. Default False keeps position dynamics
+        camera/constant-velocity driven.
 
     Returns
     -------
@@ -661,8 +746,6 @@ def dynamics_function(
     Unused layout components are propagated as identity.
     """
 
-    # Extract indices (2D heading only)
-    h_idx = get_heading_index(layout)
     px_i, py_i = layout.pos_idx[0], layout.pos_idx[1]
     vx_i, vy_i = layout.vel_idx[0], layout.vel_idx[1]
 
@@ -678,7 +761,6 @@ def dynamics_function(
     # Current values
     px, py = state[px_i], state[py_i]
     vx, vy = state[vx_i], state[vy_i]
-    theta = state[h_idx]
 
     # Vision-only layouts do not integrate IMU channels. During dropouts they
     # extrapolate from camera-derived velocity only.
@@ -694,10 +776,56 @@ def dynamics_function(
         else jnp.asarray(gravity_body)
     )
 
+    if layout.has_quaternion_orientation:
+        quat_idx = jnp.array(layout.heading_idx, dtype=jnp.int32)
+        gyro_bias = jnp.array(
+            [
+                state[layout.bias_gyro_idx[0]],
+                state[layout.bias_gyro_idx[1]],
+                state[layout.bias_gyro_idx[2]],
+            ]
+        )
+        accel_bias = jnp.array(
+            [
+                state[layout.bias_accel_idx[0]],
+                state[layout.bias_accel_idx[1]],
+                state[layout.bias_accel_idx[2]],
+            ]
+        )
+
+        omega_body = imu[:3] - gyro_bias
+        quat_next = integrate_body_gyro(state[quat_idx], omega_body, dt)
+
+        vel = jnp.array([vx, vy])
+        if enable_experimental_accel_translation:
+            accel_body_kinematic = imu[3:6] - accel_bias - gravity_body_vec
+            accel_world = rotate_vector_body_to_world(quat_next, accel_body_kinematic)
+            accel_xy = accel_world[:2]
+            vel_next = vel + accel_xy * dt - damping * vel * dt
+            pos_next = (
+                jnp.array([px, py])
+                + vel * dt
+                + 0.5 * accel_xy * dt**2
+                - 0.5 * damping * vel * dt**2
+            )
+        else:
+            vel_next = vel
+            pos_next = jnp.array([px, py]) + vel * dt
+
+        next_state = state
+        next_state = next_state.at[px_i].set(pos_next[0])
+        next_state = next_state.at[py_i].set(pos_next[1])
+        next_state = next_state.at[vx_i].set(vel_next[0])
+        next_state = next_state.at[vy_i].set(vel_next[1])
+        next_state = next_state.at[quat_idx].set(quat_next)
+        return next_state
+
     # Detect IMU dimension: 3-element (2D) or 4-element (3D)
     imu_is_3d = imu.shape[0] >= 4
 
     # Update heading
+    h_idx = get_heading_index(layout)
+    theta = state[h_idx]
     omega_z = imu[0]
     omega_z_unbiased = omega_z - b_gz
     theta_next = theta + omega_z_unbiased * dt
@@ -804,10 +932,9 @@ def measurement_function(
         Measurement vector (4,) ordered as [x1, y1, x2, y2] in meters.
     """
 
-    h_idx = get_heading_index(layout)
     px = state[layout.pos_idx[0]]
     py = state[layout.pos_idx[1]]
-    theta = state[h_idx]
+    theta = state_yaw(state, layout)
     dx = 0.5 * led_distance * jnp.cos(theta)
     dy = 0.5 * led_distance * jnp.sin(theta)
     return jnp.array([px - dx, py - dy, px + dx, py + dy])
@@ -1028,26 +1155,43 @@ def initialize_state(
     mean = jnp.zeros(n)
     cov = jnp.eye(n) * 1.0
 
-    # Map 2D pos/vel/heading
+    # Map 2D pos/vel/orientation
     mean = mean.at[layout.pos_idx[0]].set(mean8[0])
     mean = mean.at[layout.pos_idx[1]].set(mean8[1])
     mean = mean.at[layout.vel_idx[0]].set(mean8[2])
     mean = mean.at[layout.vel_idx[1]].set(mean8[3])
-    mean = mean.at[get_heading_index(layout)].set(mean8[4])
+    if layout.has_heading_2d:
+        mean = mean.at[get_heading_index(layout)].set(mean8[4])
+    elif layout.has_quaternion_orientation:
+        quat_idx = jnp.array(layout.heading_idx, dtype=jnp.int32)
+        quat = quaternion_from_rotation_vector(jnp.array([0.0, 0.0, mean8[4]]))
+        mean = mean.at[quat_idx].set(quat)
+    else:
+        raise NotImplementedError(
+            "initialize_state supports scalar-heading and quaternion layouts only."
+        )
 
     cov = cov.at[layout.pos_idx[0], layout.pos_idx[0]].set(cov8[0, 0])
     cov = cov.at[layout.pos_idx[1], layout.pos_idx[1]].set(cov8[1, 1])
     cov = cov.at[layout.vel_idx[0], layout.vel_idx[0]].set(cov8[2, 2])
     cov = cov.at[layout.vel_idx[1], layout.vel_idx[1]].set(cov8[3, 3])
-    cov = cov.at[get_heading_index(layout), get_heading_index(layout)].set(cov8[4, 4])
+    if layout.has_heading_2d:
+        cov = cov.at[get_heading_index(layout), get_heading_index(layout)].set(
+            cov8[4, 4]
+        )
+    elif layout.has_quaternion_orientation:
+        for idx in layout.heading_idx:
+            cov = cov.at[idx, idx].set(cov8[4, 4])
 
     # Bias variances if present
-    if len(layout.bias_gyro_idx) >= 1:
-        cov = cov.at[layout.bias_gyro_idx[0], layout.bias_gyro_idx[0]].set(cov8[5, 5])
+    for idx in layout.bias_gyro_idx:
+        cov = cov.at[idx, idx].set(cov8[5, 5])
     if len(layout.bias_accel_idx) >= 1:
         cov = cov.at[layout.bias_accel_idx[0], layout.bias_accel_idx[0]].set(cov8[6, 6])
     if len(layout.bias_accel_idx) >= 2:
         cov = cov.at[layout.bias_accel_idx[1], layout.bias_accel_idx[1]].set(cov8[7, 7])
+    if len(layout.bias_accel_idx) >= 3:
+        cov = cov.at[layout.bias_accel_idx[2], layout.bias_accel_idx[2]].set(cov8[7, 7])
 
     return FilterState(mean=mean, cov=cov)
 

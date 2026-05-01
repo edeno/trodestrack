@@ -384,6 +384,9 @@ def predict_step(
             config.damping_coeff,
             layout,
             gravity_body=config.imu_gravity_body,
+            enable_experimental_accel_translation=(
+                config.enable_experimental_accel_translation
+            ),
         )
 
     sigmas_prop = vmap(f)(sigmas)  # (17, 8)
@@ -886,10 +889,19 @@ def unscented_kalman_filter(
     UKFResult
         Filtered and predicted states at camera times, and log-likelihood.
     """
+    layout = get_layout(ukf_config.state_mode)
+    if layout.has_quaternion_orientation:
+        raise NotImplementedError(
+            "unscented_kalman_filter does not yet support quaternion-orientation "
+            "state modes because sigma-point quaternion mean/covariance handling "
+            "is not implemented. Use extended_kalman_filter for "
+            "'2d_cam_6dof_imu_orientation'."
+        )
+
     # Validate IMU input shape early so silent channel mismatches fail loudly.
     validate_imu_input_shape(
         U_imu,
-        get_layout(ukf_config.state_mode),
+        layout,
         func_name="unscented_kalman_filter",
     )
 

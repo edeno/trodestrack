@@ -23,10 +23,12 @@ References
 from __future__ import annotations
 
 import jax.numpy as jnp
+from jax import jacfwd
 
 from trodestrack.models.filter_common import (
     FilterCoreConfig,
     prepare_heading_measurement,
+    state_yaw,
     wrap_angle,
 )
 from trodestrack.models.state_layout import StateLayout, get_heading_index
@@ -163,10 +165,10 @@ class HeadingPseudoModel:
 
         Notes
         -----
-        Measurement function: h(x) = x[heading_idx]
+        Measurement function: h(x) = yaw(x), where yaw is either the scalar
+        heading state or the yaw extracted from a quaternion orientation.
         """
-        h_idx = get_heading_index(self.layout)
-        return state_mean[h_idx : h_idx + 1]  # Keep as 1D array
+        return jnp.array([state_yaw(state_mean, self.layout)])
 
     def jacobian(self, state_mean: jnp.ndarray) -> jnp.ndarray:
         """Return Jacobian selecting heading component.
@@ -183,8 +185,12 @@ class HeadingPseudoModel:
 
         Notes
         -----
-        H = [0, 0, 0, 0, 1, 0, 0, 0] for 8D state (heading at index 4).
+        H selects the scalar heading for 2D layouts. Quaternion layouts use
+        automatic differentiation through the yaw extraction.
         """
+        if self.layout.has_quaternion_orientation:
+            return jacfwd(lambda state: self.predict(state))(state_mean)
+
         n = state_mean.shape[0]
         h_idx = get_heading_index(self.layout)
         H = jnp.zeros((1, n))

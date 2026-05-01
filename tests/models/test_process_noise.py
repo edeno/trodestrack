@@ -151,6 +151,22 @@ def test_build_input_noise_cov_supports_3d_accel():
     assert jnp.allclose(Qu[3, 3], sa, rtol=1e-6)
 
 
+def test_build_input_noise_cov_supports_3axis_gyro_and_3d_accel():
+    """Quaternion orientation modes use full 6-axis IMU input noise."""
+    from trodestrack.models.process_noise import build_input_noise_cov
+
+    cfg = EKFConfig()
+    dt = 0.005
+
+    Qu = build_input_noise_cov(cfg, dt, n_accel=3, n_gyro=3, dtype=jnp.float32)
+
+    assert Qu.shape == (6, 6)
+    sg = (cfg.imu_gyro_noise_density / np.sqrt(dt)) ** 2
+    sa = (cfg.imu_accel_noise_density / np.sqrt(dt)) ** 2
+    assert jnp.allclose(jnp.diag(Qu)[:3], sg, rtol=1e-6)
+    assert jnp.allclose(jnp.diag(Qu)[3:], sa, rtol=1e-6)
+
+
 def test_input_noise_cov_matches_density_to_sample_std():
     """Noise density conversion must match simulator per-sample convention."""
     from trodestrack.models.process_noise import build_input_noise_cov
@@ -167,6 +183,61 @@ def test_input_noise_cov_matches_density_to_sample_std():
     assert jnp.allclose(Qu[0, 0], gyro_var, rtol=1e-6)
     assert jnp.allclose(Qu[1, 1], accel_var, rtol=1e-6)
     assert jnp.allclose(Qu[2, 2], accel_var, rtol=1e-6)
+
+
+def test_assemble_Q_14d_quaternion_mode_uses_gyro_noise_density():
+    """Quaternion Q should not ignore full-gyro input noise."""
+    from trodestrack.models.process_noise import assemble_Q
+
+    cfg_low = EKFConfig(
+        state_mode="2d_cam_6dof_imu_orientation",
+        imu_gyro_noise_density=1e-6,
+        adaptive_q_during_dropout=False,
+        reduce_imu_noise_during_blackout=False,
+        freeze_bias_during_blackout=False,
+    )
+    cfg_high = EKFConfig(
+        state_mode="2d_cam_6dof_imu_orientation",
+        imu_gyro_noise_density=1.0,
+        adaptive_q_during_dropout=False,
+        reduce_imu_noise_during_blackout=False,
+        freeze_bias_during_blackout=False,
+    )
+
+    Q_low = assemble_Q(cfg_low, theta=0.0, dt=0.01, n=14, has_vision=True)
+    Q_high = assemble_Q(cfg_high, theta=0.0, dt=0.01, n=14, has_vision=True)
+
+    assert Q_high[5, 5] > Q_low[5, 5]
+    assert Q_high[6, 6] > Q_low[6, 6]
+    assert Q_high[7, 7] > Q_low[7, 7]
+
+
+def test_assemble_Q_14d_accel_translation_uses_accel_noise_density():
+    """Experimental accel translation should include accel input noise in Q."""
+    from trodestrack.models.process_noise import assemble_Q
+
+    cfg_low = EKFConfig(
+        state_mode="2d_cam_6dof_imu_orientation",
+        enable_experimental_accel_translation=True,
+        imu_accel_noise_density=1e-6,
+        adaptive_q_during_dropout=False,
+        reduce_imu_noise_during_blackout=False,
+        freeze_bias_during_blackout=False,
+    )
+    cfg_high = EKFConfig(
+        state_mode="2d_cam_6dof_imu_orientation",
+        enable_experimental_accel_translation=True,
+        imu_accel_noise_density=1.0,
+        adaptive_q_during_dropout=False,
+        reduce_imu_noise_during_blackout=False,
+        freeze_bias_during_blackout=False,
+    )
+
+    Q_low = assemble_Q(cfg_low, theta=0.0, dt=0.01, n=14, has_vision=True)
+    Q_high = assemble_Q(cfg_high, theta=0.0, dt=0.01, n=14, has_vision=True)
+
+    assert Q_high[2, 2] > Q_low[2, 2]
+    assert Q_high[3, 3] > Q_low[3, 3]
 
 
 def test_assemble_Q_for_10d_state_with_3d_accel():

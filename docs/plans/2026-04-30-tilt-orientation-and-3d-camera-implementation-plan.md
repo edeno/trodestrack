@@ -2,8 +2,10 @@
 
 ## Status
 
-Implementation started. Milestone 1 quaternion utilities and Milestone 2 IMU
-calibration diagnostics have initial implementations.
+Implementation started. Milestones 1-4 have initial implementations:
+quaternion utilities, IMU calibration diagnostics, standalone orientation-only
+estimation, and an experimental 2D camera + 6-DOF IMU orientation EKF mode
+with gated gravity-direction roll/pitch updates.
 
 ## Context and Evidence
 

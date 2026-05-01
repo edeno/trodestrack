@@ -22,7 +22,7 @@ References
 from __future__ import annotations
 
 import jax.numpy as jnp
-from jax import Array
+from jax import Array, jacfwd
 
 from trodestrack.models.filter_common import (
     confidence_to_R_diagonal,
@@ -203,6 +203,13 @@ class CameraPositionModel:
              [1, 0, 0, 0, -d·sin(θ), 0, ...],
              [0, 1, 0, 0,  d·cos(θ), 0, ...]]
         """
+        if self.layout.has_quaternion_orientation:
+            return jacfwd(
+                lambda state: measurement_function(
+                    state, self.led_distance, self.layout
+                )
+            )(state_mean)
+
         h_idx = get_heading_index(self.layout)
         theta = state_mean[h_idx]
         d = self.led_distance / 2.0

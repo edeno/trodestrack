@@ -112,6 +112,30 @@ def test_ekf_rejects_1d_imu(sim_2d):
         _run_ekf(sim_2d, "2d_full", u1d)
 
 
+def test_ekf_accepts_6_channel_imu_for_6dof_orientation_layout(sim_2d):
+    """Quaternion orientation mode consumes full 6-axis IMU samples."""
+    u = sim_2d["U_imu"]
+    u6 = np.column_stack(
+        [
+            np.zeros((u.shape[0], 2)),
+            u[:, 0],
+            u[:, 1],
+            u[:, 2],
+            np.full(u.shape[0], 9.81),
+        ]
+    )
+
+    result = _run_ekf(sim_2d, "2d_cam_6dof_imu_orientation", u6)
+
+    assert result.filtered_means.shape[1] == 14
+    assert np.all(np.isfinite(np.asarray(result.filtered_means)))
+
+
+def test_ekf_rejects_3_channel_imu_for_6dof_orientation_layout(sim_2d):
+    with pytest.raises(ValueError, match="requires 6-channel IMU"):
+        _run_ekf(sim_2d, "2d_cam_6dof_imu_orientation", sim_2d["U_imu"])
+
+
 # -----------------------------------------------------------------------------
 # UKF entrypoint
 # -----------------------------------------------------------------------------
@@ -147,6 +171,22 @@ def test_ukf_rejects_6_channel_imu_for_3d_imu_layout(sim_2d):
     u6 = np.concatenate([u, u], axis=1)
     with pytest.raises(ValueError, match="6 channels"):
         _run_ukf(sim_2d, "2d_cam_3d_imu", u6)
+
+
+def test_ukf_rejects_6dof_orientation_layout_until_quaternion_mean_exists(sim_2d):
+    u = sim_2d["U_imu"]
+    u6 = np.column_stack(
+        [
+            np.zeros((u.shape[0], 2)),
+            u[:, 0],
+            u[:, 1],
+            u[:, 2],
+            np.full(u.shape[0], 9.81),
+        ]
+    )
+
+    with pytest.raises(NotImplementedError, match="quaternion"):
+        _run_ukf(sim_2d, "2d_cam_6dof_imu_orientation", u6)
 
 
 # -----------------------------------------------------------------------------

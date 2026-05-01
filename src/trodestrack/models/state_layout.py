@@ -5,7 +5,8 @@ dimension assumptions ("magic 8s") and enable extensibility to:
 - Vision-only tracking (5D)
 - IMU-only tracking (8D)
 - 2D camera + 3D IMU (10D)
-- Full 3D tracking (16D)
+    - 2D camera + 6-DOF IMU orientation (14D)
+    - Full 3D tracking (16D)
 
 Each layout explicitly specifies which indices correspond to position,
 velocity, orientation, and bias states.
@@ -83,6 +84,11 @@ class StateLayout:
     def has_orientation_3d(self) -> bool:
         """Check if state uses 3D orientation (Euler or quaternion)."""
         return isinstance(self.heading_idx, tuple) and len(self.heading_idx) > 1
+
+    @property
+    def has_quaternion_orientation(self) -> bool:
+        """Check if state uses scalar-first quaternion orientation."""
+        return isinstance(self.heading_idx, tuple) and len(self.heading_idx) == 4
 
 
 def get_heading_index(layout: StateLayout) -> int:
@@ -181,6 +187,32 @@ Note: vz and b_az are weakly observable (no position measurement for z)
 """
 
 
+LAYOUT_2D_CAM_6DOF_IMU_ORIENTATION = StateLayout(
+    n=14,
+    pos_idx=(0, 1),  # x, y
+    vel_idx=(2, 3),  # vx, vy
+    heading_idx=(4, 5, 6, 7),  # qw, qx, qy, qz
+    bias_gyro_idx=(8, 9, 10),  # b_gx, b_gy, b_gz
+    bias_accel_idx=(11, 12, 13),  # b_ax, b_ay, b_az
+)
+"""2D camera with full 6-DOF IMU orientation.
+
+State: [x, y, vx, vy, qw, qx, qy, qz, b_gx, b_gy, b_gz, b_ax, b_ay, b_az]
+
+- Position: (x, y) from overhead camera
+- Velocity: (vx, vy) from camera-derived motion / constant-velocity prediction
+- Orientation: scalar-first body-to-world quaternion
+- Gyro bias: (b_gx, b_gy, b_gz) in rad/s
+- Accel bias: (b_ax, b_ay, b_az) in m/s²
+
+Used for: Experimental 2D camera tracking with full IMU orientation support.
+
+Note: Accelerometer-driven x/y translation is disabled by default in the filter
+configuration for this mode. The accelerometer is retained for orientation and
+future experimental translation work, not as a default position driver.
+"""
+
+
 LAYOUT_3D_EULER = StateLayout(
     n=15,
     pos_idx=(0, 1, 2),  # x, y, z
@@ -244,6 +276,7 @@ LAYOUT_REGISTRY = {
     "vision_only": LAYOUT_VISION_ONLY,
     "imu_only": LAYOUT_2D_FULL,  # Same as 2d_full (8D with biases)
     "2d_cam_3d_imu": LAYOUT_2D_CAM_3D_IMU,
+    "2d_cam_6dof_imu_orientation": LAYOUT_2D_CAM_6DOF_IMU_ORIENTATION,
     "3d_euler": LAYOUT_3D_EULER,
     "3d_quat": LAYOUT_3D_QUAT,
 }

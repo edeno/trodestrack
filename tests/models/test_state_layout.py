@@ -4,6 +4,7 @@ import pytest
 
 from trodestrack.models.state_layout import (
     LAYOUT_2D_CAM_3D_IMU,
+    LAYOUT_2D_CAM_6DOF_IMU_ORIENTATION,
     LAYOUT_2D_FULL,
     LAYOUT_3D_EULER,
     LAYOUT_3D_QUAT,
@@ -64,6 +65,23 @@ def test_layout_2d_cam_3d_imu_properties():
     assert layout.spatial_dim == 2  # Position is still 2D
     assert layout.has_heading_2d is True
     assert layout.has_orientation_3d is False
+
+
+def test_layout_2d_cam_6dof_imu_orientation_properties():
+    """Test properties of 2D camera + 6-DOF IMU orientation layout."""
+    layout = LAYOUT_2D_CAM_6DOF_IMU_ORIENTATION
+
+    assert layout.n == 14
+    assert layout.pos_idx == (0, 1)
+    assert layout.vel_idx == (2, 3)
+    assert layout.heading_idx == (4, 5, 6, 7)
+    assert layout.bias_gyro_idx == (8, 9, 10)
+    assert layout.bias_accel_idx == (11, 12, 13)
+    assert layout.has_biases is True
+    assert layout.spatial_dim == 2
+    assert layout.has_heading_2d is False
+    assert layout.has_orientation_3d is True
+    assert layout.has_quaternion_orientation is True
 
 
 def test_layout_3d_euler_properties():
@@ -161,6 +179,7 @@ def test_all_layouts_have_no_overlapping_indices():
         LAYOUT_2D_FULL,
         LAYOUT_VISION_ONLY,
         LAYOUT_2D_CAM_3D_IMU,
+        LAYOUT_2D_CAM_6DOF_IMU_ORIENTATION,
         LAYOUT_3D_EULER,
         LAYOUT_3D_QUAT,
     ]
@@ -215,6 +234,9 @@ def test_get_heading_index_raises_for_3d_layouts():
     with pytest.raises(NotImplementedError, match="not a single scalar"):
         get_heading_index(LAYOUT_3D_QUAT)
 
+    with pytest.raises(NotImplementedError, match="not a single scalar"):
+        get_heading_index(LAYOUT_2D_CAM_6DOF_IMU_ORIENTATION)
+
 
 def test_get_layout_by_name():
     """Test get_layout() retrieves correct layout by name."""
@@ -222,6 +244,9 @@ def test_get_layout_by_name():
     assert get_layout("vision_only") is LAYOUT_VISION_ONLY
     assert get_layout("imu_only") is LAYOUT_2D_FULL  # Same as 2d_full
     assert get_layout("2d_cam_3d_imu") is LAYOUT_2D_CAM_3D_IMU
+    assert (
+        get_layout("2d_cam_6dof_imu_orientation") is LAYOUT_2D_CAM_6DOF_IMU_ORIENTATION
+    )
     assert get_layout("3d_euler") is LAYOUT_3D_EULER
     assert get_layout("3d_quat") is LAYOUT_3D_QUAT
 
@@ -239,6 +264,7 @@ def test_layout_registry_completeness():
         "vision_only",
         "imu_only",
         "2d_cam_3d_imu",
+        "2d_cam_6dof_imu_orientation",
         "3d_euler",
         "3d_quat",
     ]
@@ -260,6 +286,7 @@ def test_process_noise_can_infer_n_accel_from_layouts():
 
     # 2D cam + 3D IMU should have 3 accel bias terms
     assert len(LAYOUT_2D_CAM_3D_IMU.bias_accel_idx) == 3
+    assert len(LAYOUT_2D_CAM_6DOF_IMU_ORIENTATION.bias_accel_idx) == 3
 
     # 3D layouts should have 3 accel bias terms
     assert len(LAYOUT_3D_EULER.bias_accel_idx) == 3
@@ -275,6 +302,10 @@ def test_velocity_dimension_matches_accel_bias_dimension():
     # 2D cam + 3D IMU: 3D velocity, 3D accel bias
     assert len(LAYOUT_2D_CAM_3D_IMU.vel_idx) == 3
     assert len(LAYOUT_2D_CAM_3D_IMU.bias_accel_idx) == 3
+
+    # 2D cam + 6-DOF IMU orientation: 2D velocity, full 3D accel bias
+    assert len(LAYOUT_2D_CAM_6DOF_IMU_ORIENTATION.vel_idx) == 2
+    assert len(LAYOUT_2D_CAM_6DOF_IMU_ORIENTATION.bias_accel_idx) == 3
 
     # 3D Euler: 3D velocity, 3D accel bias
     assert len(LAYOUT_3D_EULER.vel_idx) == 3

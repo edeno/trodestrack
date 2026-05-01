@@ -46,7 +46,9 @@ from trodestrack.models.filter_common import (
     estimate_led_spacing,
     initialize_state,
     joseph_update,
+    normalize_state_orientation,
     psd_solve,
+    state_yaw,
     symmetrize,
     update_zupt,
     validate_imu_input_shape,
@@ -54,6 +56,7 @@ from trodestrack.models.filter_common import (
 )
 from trodestrack.models.filter_update import ekf_projected_update
 from trodestrack.models.process_noise import assemble_Q
+from trodestrack.models.quaternion import rotate_vector_world_to_body
 from trodestrack.models.sensors.camera_position import CameraPositionModel
 from trodestrack.models.sensors.heading_pseudo import (
     HEADING_GATE_THRESHOLD,
@@ -310,24 +313,42 @@ def predict_step(
             config.damping_coeff,
             layout,
             gravity_body=config.imu_gravity_body,
+            enable_experimental_accel_translation=(
+                config.enable_experimental_accel_translation
+            ),
         )
-
-    # Jacobian
-    F = jacfwd(f)
-    F_x = F(m)
 
     # Predict mean
     m_pred = f(m)
 
-    # Wrap heading angle to (-π, π] to prevent numerical issues
-    h_idx = get_heading_index(layout)
-    m_pred = m_pred.at[h_idx].set(wrap_angle(m_pred[h_idx]))
+    if layout.has_quaternion_orientation:
+        # Autodiff through the quaternion exponential is singular at exactly
+        # zero rotation. Use a conservative transition Jacobian for this
+        # experimental branch: constant-velocity x/y dynamics plus identity
+        # orientation/bias propagation. Quaternion process noise is still
+        # injected through Q below.
+        F_x = jnp.eye(m.shape[0], dtype=m.dtype)
+        F_x = F_x.at[layout.pos_idx[0], layout.vel_idx[0]].set(dt_imu)
+        F_x = F_x.at[layout.pos_idx[1], layout.vel_idx[1]].set(dt_imu)
+    else:
+        # Jacobian
+        F = jacfwd(f)
+        F_x = F(m)
+
+    # Wrap scalar heading or normalize quaternion orientation.
+    if layout.has_heading_2d:
+        h_idx = get_heading_index(layout)
+        m_pred = m_pred.at[h_idx].set(wrap_angle(m_pred[h_idx]))
+        q_heading = m_pred[h_idx]
+    else:
+        m_pred = normalize_state_orientation(m_pred, layout)
+        q_heading = state_yaw(m_pred, layout)
 
     # Assemble process noise using shared helper
     # Use predicted heading θ⁺ for tighter alignment between dynamics and Q
     Q = assemble_Q(
         config,
-        theta=m_pred[h_idx],  # Use predicted heading, not current
+        theta=q_heading,  # Use predicted heading, not current
         dt=dt_imu,
         n=m.shape[0],
         has_vision=has_vision,
@@ -337,8 +358,103 @@ def predict_step(
     # Predict covariance
     P_pred = F_x @ P @ F_x.T + Q
     P_pred = symmetrize(P_pred)
+    predicted_state = EKFState(mean=m_pred, cov=P_pred)
 
-    return EKFState(mean=m_pred, cov=P_pred)
+    if layout.has_quaternion_orientation:
+        predicted_state = _apply_gravity_orientation_update(
+            predicted_state,
+            u_imu,
+            config,
+            layout=layout,
+        )
+
+    return predicted_state
+
+
+def _gravity_direction_prediction(
+    state_mean: jnp.ndarray,
+    config: EKFConfig,
+    *,
+    layout: StateLayout,
+) -> jnp.ndarray:
+    """Predict stationary accelerometer direction from quaternion orientation."""
+
+    quat_idx = jnp.array(layout.heading_idx, dtype=jnp.int32)
+    gravity_magnitude = jnp.linalg.norm(
+        jnp.asarray(config.imu_gravity_body, dtype=state_mean.dtype)
+    )
+    gravity_world = jnp.array(
+        [0.0, 0.0, gravity_magnitude],
+        dtype=state_mean.dtype,
+    )
+    gravity_body = rotate_vector_world_to_body(state_mean[quat_idx], gravity_world)
+    return gravity_body / jnp.maximum(
+        jnp.linalg.norm(gravity_body),
+        jnp.asarray(1e-6, dtype=state_mean.dtype),
+    )
+
+
+def _apply_gravity_orientation_update(
+    state: EKFState,
+    u_imu: jnp.ndarray,
+    config: EKFConfig,
+    *,
+    layout: StateLayout,
+) -> EKFState:
+    """Apply gated accelerometer gravity-direction update for quaternion layouts."""
+
+    m = state.mean
+    accel = u_imu[3:6]
+    gyro = u_imu[:3]
+    accel_bias = jnp.array(
+        [
+            m[layout.bias_accel_idx[0]],
+            m[layout.bias_accel_idx[1]],
+            m[layout.bias_accel_idx[2]],
+        ],
+        dtype=m.dtype,
+    )
+    accel_unbiased = accel - accel_bias
+    accel_norm = jnp.linalg.norm(accel_unbiased)
+    gravity_magnitude = jnp.linalg.norm(
+        jnp.asarray(config.imu_gravity_body, dtype=m.dtype)
+    )
+    accel_direction = accel_unbiased / jnp.maximum(
+        accel_norm,
+        jnp.asarray(1e-6, dtype=m.dtype),
+    )
+    gyro_norm = jnp.linalg.norm(gyro)
+    use_update = (
+        jnp.asarray(config.use_gravity_orientation_update)
+        & jnp.isfinite(accel_unbiased).all()
+        & jnp.isfinite(gyro).all()
+        & (accel_norm > 1e-6)
+        & (
+            jnp.abs(accel_norm - gravity_magnitude)
+            <= config.gravity_accel_magnitude_tolerance_m_s2
+        )
+        & (gyro_norm <= config.gravity_gyro_norm_threshold_rad_s)
+    )
+
+    def do_update(state_in: EKFState) -> EKFState:
+        mean, cov = state_in.mean, state_in.cov
+        z_pred = _gravity_direction_prediction(mean, config, layout=layout)
+        H = jacfwd(lambda x: _gravity_direction_prediction(x, config, layout=layout))(
+            mean
+        )
+        innovation = accel_direction - z_pred
+        R = jnp.eye(3, dtype=mean.dtype) * jnp.asarray(
+            config.gravity_orientation_measurement_noise,
+            dtype=mean.dtype,
+        )
+        S = H @ cov @ H.T + R
+        K = psd_solve(S, H @ cov).T
+        mean_upd = mean + K @ innovation
+        mean_upd = normalize_state_orientation(mean_upd, layout)
+        cov_upd = joseph_update(cov, K, H, R)
+        return EKFState(mean=mean_upd, cov=cov_upd)
+
+    return lax.cond(use_update, do_update, lambda state_in: state_in, state)
 
 
 # =============================================================================
@@ -426,9 +542,14 @@ def update_step(
                     state_iter, innovation, H, R_diag, both_leds, only_led1, only_led2
                 )
 
-                # Wrap heading angle to (-π, π] after update
-                h_idx = get_heading_index(layout)
-                m_upd = state_upd.mean.at[h_idx].set(wrap_angle(state_upd.mean[h_idx]))
+                # Wrap scalar heading or normalize quaternion after update.
+                if layout.has_heading_2d:
+                    h_idx = get_heading_index(layout)
+                    m_upd = state_upd.mean.at[h_idx].set(
+                        wrap_angle(state_upd.mean[h_idx])
+                    )
+                else:
+                    m_upd = normalize_state_orientation(state_upd.mean, layout)
                 state_upd = EKFState(mean=m_upd, cov=state_upd.cov)
 
                 return (state_upd.mean, state_upd.cov), (nis, log_lik, both_leds)
@@ -541,9 +662,12 @@ def update_heading(
         # Mean update
         m_upd = m + (K @ jnp.array([[innov]])).ravel()
 
-        # Wrap heading after update
-        h_idx = get_heading_index(layout)
-        m_upd = m_upd.at[h_idx].set(wrap_angle(m_upd[h_idx]))
+        # Wrap scalar heading or normalize quaternion after update
+        if layout.has_heading_2d:
+            h_idx = get_heading_index(layout)
+            m_upd = m_upd.at[h_idx].set(wrap_angle(m_upd[h_idx]))
+        else:
+            m_upd = normalize_state_orientation(m_upd, layout)
 
         # Covariance update using Joseph form
         P_upd = joseph_update(P, K, H, R_mat)
