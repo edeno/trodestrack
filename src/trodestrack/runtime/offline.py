@@ -67,10 +67,10 @@ class SmootherResult(NamedTuple):
 
 
 RTS_SMOOTHER_STATIC_ARGNAMES = ("layout", "ekf_config", "num_iter")
-# Donate filtered_means (arg 1) and filtered_covs (arg 2) to enable buffer reuse
-# in scan carry iterations. These arrays are large (N_cam, n) and (N_cam, n, n)
-# and are never used after smoother returns.
-RTS_SMOOTHER_DONATE_ARGNUMS: tuple[int, ...] = (1, 2)
+# Donate lin_means_init (arg 0) and filtered_covs (arg 2) to enable buffer
+# reuse in scan carry iterations. These arrays are copied by the wrapper and
+# are never used after smoother returns.
+RTS_SMOOTHER_DONATE_ARGNUMS: tuple[int, ...] = (0, 2)
 
 
 # =============================================================================

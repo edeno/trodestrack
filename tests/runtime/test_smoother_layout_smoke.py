@@ -314,7 +314,18 @@ def test_rts_smoother_3d_quaternion_perfect_input_idempotent():
     )
 
     smoothed_means = np.asarray(smoother_result.smoothed_means)
+    smoothed_cov_traces = np.trace(
+        np.asarray(smoother_result.smoothed_covariances),
+        axis1=1,
+        axis2=2,
+    )
     assert np.isfinite(smoothed_means).all()
+    assert np.isfinite(smoothed_cov_traces).all()
+    np.testing.assert_allclose(
+        np.asarray(smoother_result.smoothed_covariances),
+        np.swapaxes(np.asarray(smoother_result.smoothed_covariances), 1, 2),
+        atol=1e-6,
+    )
     np.testing.assert_allclose(smoothed_means, filtered_means, atol=2e-5)
     np.testing.assert_allclose(
         np.linalg.norm(smoothed_means[:, quat_idx], axis=1),
@@ -423,6 +434,7 @@ def test_rts_3d_transition_matches_ekf_prediction_covariance():
         orientation_quaternion=rts_mean_pred[quat_idx],
     )
     rts_cov_pred = symmetrize(F_x @ cov @ F_x.T + Q)
+    # This isolates Q because EKF and RTS both use the shared F_x helper.
     ekf_q_contribution = ekf_pred.cov - symmetrize(F_x @ cov @ F_x.T)
 
     np.testing.assert_allclose(
