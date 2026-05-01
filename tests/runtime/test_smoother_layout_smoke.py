@@ -198,9 +198,76 @@ def test_rts_smoother_3d_quaternion_reduces_injected_midpoint_position_error():
     )
 
 
+def test_rts_smoother_3d_quaternion_double_cover_residual_alignment():
+    layout = get_layout("3d_cam_6dof_imu")
+    t_cam = np.array([0.0, 0.1, 0.2], dtype=np.float32)
+    t_imu = t_cam.copy()
+    U_imu = np.zeros((t_imu.shape[0], 6), dtype=np.float32)
+    U_imu[:, 5] = 9.81
+
+    pos_idx = np.array(layout.pos_idx)
+    vel_idx = np.array(layout.vel_idx)
+    quat_idx = np.array(layout.heading_idx)
+    quat = np.array([0.9238795, 0.0, 0.0, 0.38268343], dtype=np.float32)
+    filtered_means = np.zeros((t_cam.shape[0], layout.n), dtype=np.float32)
+    filtered_means[:, pos_idx] = np.array(
+        [
+            [0.0, 0.0, 0.2],
+            [0.1, 0.0, 0.2],
+            [0.2, 0.0, 0.2],
+        ],
+        dtype=np.float32,
+    )
+    filtered_means[:, vel_idx] = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    filtered_means[:, quat_idx] = np.stack([quat, -quat, quat])
+    filtered_covs = np.repeat(
+        (np.eye(layout.n, dtype=np.float32) * 0.05)[None, :, :],
+        t_cam.shape[0],
+        axis=0,
+    )
+    filter_result = EKF3DResult(
+        filtered_means=jnp.asarray(filtered_means),
+        filtered_covariances=jnp.asarray(filtered_covs),
+        # Synthetic shortcut: RTS re-propagates predictions internally.
+        predicted_means=jnp.asarray(filtered_means),
+        predicted_covariances=jnp.asarray(filtered_covs),
+        marginal_loglik=0.0,
+    )
+
+    smoother_result = rts_smoother(
+        filter_result,
+        EKFConfig(
+            state_mode="3d_cam_6dof_imu",
+            enable_experimental_accel_translation=False,
+            enable_zupt=False,
+            use_gravity_orientation_update=False,
+            use_mahalanobis_gating=False,
+        ),
+        t_imu,
+        U_imu,
+        t_cam,
+    )
+
+    smoothed_means = np.asarray(smoother_result.smoothed_means)
+    smoothed_quats = smoothed_means[:, quat_idx]
+    assert np.isfinite(smoothed_means).all()
+    np.testing.assert_allclose(
+        np.linalg.norm(smoothed_quats, axis=1),
+        1.0,
+        atol=1e-5,
+    )
+    np.testing.assert_allclose(smoothed_quats, filtered_means[:, quat_idx], atol=1e-5)
+    np.testing.assert_allclose(
+        np.abs(np.sum(smoothed_quats[:-1] * smoothed_quats[1:], axis=1)),
+        1.0,
+        atol=1e-5,
+    )
+
+
 def test_rts_3d_transition_jacobian_accel_bias_uses_linearization_quaternion():
     layout = get_layout("3d_cam_6dof_imu")
     quat_idx = np.array(layout.heading_idx)
+    pos_idx = np.array(layout.pos_idx)
     vel_idx = np.array(layout.vel_idx)
     bias_accel_idx = np.array(layout.bias_accel_idx)
     dt = jnp.asarray(0.1, dtype=jnp.float32)
@@ -237,6 +304,12 @@ def test_rts_3d_transition_jacobian_accel_bias_uses_linearization_quaternion():
         jnp.eye(3, dtype=jnp.float32),
     ).T
     expected_vel_bias_block = -dt * rotation_world_from_body
+    expected_pos_bias_block = -0.5 * dt**2 * rotation_world_from_body
+    np.testing.assert_allclose(
+        np.asarray(F_x[np.ix_(pos_idx, bias_accel_idx)]),
+        np.asarray(expected_pos_bias_block),
+        atol=1e-6,
+    )
     np.testing.assert_allclose(
         np.asarray(F_x[np.ix_(vel_idx, bias_accel_idx)]),
         np.asarray(expected_vel_bias_block),

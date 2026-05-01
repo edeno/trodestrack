@@ -989,10 +989,40 @@ def test_ekf_3d_dropout_comparison_camera_gyro_vs_accel_enabled() -> None:
         smoother_result.smoothed_means[:, np.array(layout.pos_idx)]
     )
     rmse_accel_smoothed = dropout_position_rmse(smoothed_positions)
+    smoother_result_iter2 = rts_smoother(
+        result_accel_enabled,
+        config_accel_enabled,
+        t_imu,
+        U_accel,
+        t_cam,
+        num_iter=2,
+        mask_cam=mask_leds.any(axis=1),
+    )
+    smoothed_positions_iter2 = np.asarray(
+        smoother_result_iter2.smoothed_means[:, np.array(layout.pos_idx)]
+    )
+    rmse_accel_smoothed_iter2 = dropout_position_rmse(smoothed_positions_iter2)
+    filtered_cov_traces = np.trace(
+        np.asarray(result_accel_enabled.filtered_covariances),
+        axis1=1,
+        axis2=2,
+    )
+    smoothed_covariances = np.asarray(smoother_result.smoothed_covariances)
+    smoothed_cov_traces = np.trace(smoothed_covariances, axis1=1, axis2=2)
 
     assert rmse_accel_enabled < 0.25 * rmse_camera_only
     assert rmse_accel_enabled < 0.25 * rmse_gyro_only
     assert rmse_accel_smoothed <= rmse_accel_enabled + 1e-6
     assert rmse_accel_smoothed < 0.25 * rmse_accel_enabled
+    assert rmse_accel_smoothed_iter2 <= rmse_accel_smoothed + 1e-6
+    assert np.isfinite(smoothed_covariances).all()
+    np.testing.assert_allclose(
+        smoothed_covariances,
+        np.swapaxes(smoothed_covariances, 1, 2),
+        atol=1e-6,
+    )
+    assert np.all(
+        smoothed_cov_traces[dropout_frames] <= filtered_cov_traces[dropout_frames]
+    )
     assert rmse_camera_only > 0.04
     assert rmse_gyro_only > 0.04
