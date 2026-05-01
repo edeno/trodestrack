@@ -116,4 +116,4 @@ def test_orientation_estimator_scan_throughput_baseline() -> None:
     print(f"Throughput: {throughput_hz:.0f} IMU samples/s")
 
     assert np.isfinite(result.quaternions).all()
-    assert throughput_hz > 1_000.0
+    assert throughput_hz > 100_000.0
