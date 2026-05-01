@@ -1096,45 +1096,6 @@ def _initialize_3d_state(
     return EKFState(mean=mean, cov=cov)
 
 
-def _update_camera_3d(
-    state: EKFState,
-    camera_model: Camera3DPositionModel,
-    frame_idx: int,
-    layout: StateLayout,
-    config: EKFConfig,
-) -> tuple[EKFState, jnp.ndarray]:
-    """Apply one gated, optionally iterated 3D LED camera EKF update."""
-    valid = np.asarray(camera_model.valid_coordinates(frame_idx))
-    active = np.nonzero(valid)[0]
-    if active.size == 0:
-        return state, jnp.asarray(0.0, dtype=state.mean.dtype)
-
-    state_iter = state
-    innovation = jnp.zeros(camera_model.meas_dim, dtype=state.mean.dtype)
-    S = jnp.eye(camera_model.meas_dim, dtype=state.mean.dtype)
-    for _ in range(config.num_iter):
-        state_iter, innovation, S = _camera_3d_linear_update(
-            state,
-            state_iter.mean,
-            camera_model,
-            frame_idx,
-            layout,
-        )
-
-    log_lik = _gaussian_log_likelihood_active(innovation, S, active)
-    if config.use_mahalanobis_gating:
-        nis = _mahalanobis_distance_active(innovation, S, active)
-        threshold = _chi2_threshold_active(
-            active.size,
-            config.mahalanobis_threshold_prob,
-            dtype=state.mean.dtype,
-        )
-        if not bool(nis < threshold):
-            return state, jnp.asarray(0.0, dtype=state.mean.dtype)
-
-    return state_iter, log_lik
-
-
 def _update_camera_3d_scanned(
     state: EKFState,
     camera_model: Camera3DPositionModel,
@@ -1215,18 +1176,6 @@ def _masked_measurement_system(
     return innovation_masked, covariance_masked
 
 
-def _mahalanobis_distance_active(
-    innovation: jnp.ndarray,
-    covariance: jnp.ndarray,
-    active_indices: np.ndarray,
-) -> jnp.ndarray:
-    """Mahalanobis distance on active measurement coordinates only."""
-    innov_active = innovation[active_indices]
-    cov_active = covariance[active_indices[:, None], active_indices[None, :]]
-    solved = psd_solve(cov_active, innov_active)
-    return jnp.dot(innov_active, solved)
-
-
 def _mahalanobis_distance_masked(
     innovation: jnp.ndarray,
     covariance: jnp.ndarray,
@@ -1267,25 +1216,6 @@ def _chi2_threshold_table(
 
     values = [0.0] + [float(chi2.ppf(prob, df=dof)) for dof in range(1, max_dof + 1)]
     return jnp.asarray(values, dtype=dtype)
-
-
-def _gaussian_log_likelihood_active(
-    innovation: jnp.ndarray,
-    covariance: jnp.ndarray,
-    active_indices: np.ndarray,
-) -> jnp.ndarray:
-    """Gaussian log likelihood on active measurement coordinates only."""
-    innov_active = innovation[active_indices]
-    cov_active = covariance[active_indices[:, None], active_indices[None, :]]
-    dim = innov_active.shape[0]
-    solved = psd_solve(cov_active, innov_active)
-    sign, logdet = jnp.linalg.slogdet(symmetrize(cov_active))
-    logdet = jnp.where(sign > 0, logdet, jnp.asarray(0.0, dtype=innovation.dtype))
-    return -0.5 * (
-        dim * jnp.log(jnp.asarray(2.0 * np.pi, dtype=innovation.dtype))
-        + logdet
-        + jnp.dot(innov_active, solved)
-    )
 
 
 def _gaussian_log_likelihood_masked(

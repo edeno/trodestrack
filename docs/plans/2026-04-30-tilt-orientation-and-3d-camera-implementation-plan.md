@@ -10,9 +10,25 @@ with gated gravity-direction roll/pitch updates. Milestone 5 adds a standalone
 `3d_cam_6dof_imu` EKF entry point with full 3D position/velocity propagation,
 quaternion orientation propagation, 3D LED updates, 3D camera IEKF iterations,
 Mahalanobis gating, ZUPT, and first-order IMU-bias covariance coupling on
-synthetic data. Synthetic bias recovery and 3D dropout comparisons are covered
-by regression tests. RTS smoothing and real 3D dataset validation remain
-pending.
+synthetic data.
+
+Current Milestone 6 cleanup status:
+
+- The 3D EKF camera-frame loop and per-frame IMU propagation now use nested
+  `jax.lax.scan`; the remaining fixed-shape camera gating uses masked
+  likelihood/NIS helpers instead of dynamic active-index slicing.
+- Gravity-direction updates preserve the full calibrated world-frame
+  `imu_gravity_body` vector, including non-vertical x/y components, so the
+  orientation pseudo-measurement matches translational gravity compensation.
+- Gravity update stationarity gating uses bias-corrected gyro norm.
+- `LAYOUT_3D_CAM_6DOF_IMU` is a separate layout instance with the same
+  16-dimensional quaternion structure as `LAYOUT_3D_QUAT`.
+- Synthetic bias recovery and 3D dropout comparisons are covered by regression
+  tests.
+- Latest full-suite evidence after the cleanup: `647 passed, 1 skipped,
+  1 xfailed, 4 known All-NaN slice warnings` in the config immutability tests.
+
+RTS smoothing and real 3D dataset validation remain pending.
 
 ## Context and Evidence
 
@@ -232,18 +248,24 @@ Acceptance criteria:
 
 Tasks:
 
-- Add `3d_cam_6dof_imu` state layout.
-- Add full 3D position/velocity prediction.
-- Enable accelerometer translation only in this mode after validation.
-- Add process noise assembly for quaternion, 3D gyro bias, and 3D accel bias.
-- Add RTS smoother support only after the filter path is validated.
+- [x] Add `3d_cam_6dof_imu` state layout.
+- [x] Add full 3D position/velocity prediction.
+- [x] Keep accelerometer translation explicit and experimental.
+- [x] Add process noise assembly for quaternion, 3D gyro bias, and 3D accel bias.
+- [x] Add 3D camera IEKF iterations, Mahalanobis gating, and ZUPT.
+- [x] Convert the 3D EKF camera and IMU time loops to `jax.lax.scan`.
+- [ ] Add RTS smoother support only after the filter path is validated.
+- [ ] Validate against the smallest representative real 3D dataset once
+  available.
 
 Tests:
 
-- Synthetic 3D trajectory recovers position, velocity, orientation, and biases.
-- 3D dropout tests compare camera-only, gyro-only, and accel-enabled modes.
-- Bias recovery is tested under known injected biases.
-- Full real-data 3D tests run on the smallest representative future dataset
+- [x] Synthetic 3D trajectory recovers position, velocity, and orientation.
+- [x] 3D dropout tests compare camera-only, gyro-only, and accel-enabled modes.
+- [x] Bias recovery is tested under known injected biases.
+- [x] Tilted calibrated gravity vector is preserved by the gravity update.
+- [x] Gravity gate uses bias-corrected gyro norm.
+- [ ] Full real-data 3D tests run on the smallest representative future dataset
   before expanding.
 
 Acceptance criteria:
