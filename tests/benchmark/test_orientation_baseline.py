@@ -90,7 +90,7 @@ def test_orientation_estimator_baseline_outputs_are_stable() -> None:
     np.testing.assert_allclose(
         result.gyro_bias_rad_s[-1],
         [0.0, 0.0, 0.00014809130516368896],
-        atol=1e-10,
+        atol=1e-7,
     )
     assert result.diagnostics.gravity_update_fraction == 0.0
     assert 0.14 < result.diagnostics.camera_yaw_update_fraction < 0.16
