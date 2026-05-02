@@ -51,6 +51,24 @@ Current Milestone 6 cleanup status:
   first JIT call, and `0.005 s` warmed JIT. The nested JAXPR inspection showed
   2 scans and 0 `nonzero` primitives, so the current core remains traceable
   without dynamic-shape masking.
+- 3D RTS smoother optimization evidence is recorded in
+  `tests/benchmark/test_rts_3d_smoother_jaxpr.py`: a deterministic 31-frame /
+  201-IMU-sample case compares eager RTS to the existing module-level jitted
+  smoother. Local timing was about `1.12 s` eager, `0.71 s` first JIT call,
+  `0.003 s` warmed JIT for `num_iter=1`, and `0.006 s` warmed JIT for
+  `num_iter=2`. Nested JAXPR inspection showed 2 scans / 0 `nonzero`
+  primitives for `num_iter=1` and 4 scans / 0 `nonzero` for `num_iter=2`.
+  Because warmed runtime is already small and scales linearly with IEKS
+  iterations, the redundant quaternion dynamics-call refactor is deferred until
+  real-session profiling shows it matters.
+- Camera3DPositionModel trace evidence is recorded in
+  `tests/benchmark/test_camera_3d_model_jaxpr.py`: a deterministic 61-frame,
+  3-LED scan exercises prediction, innovation, masked Jacobian, measurement
+  covariance, and validity masks. Local timing was about `0.22 s` eager,
+  `0.19 s` first JIT call, and `0.0001 s` warmed JIT. Nested JAXPR inspection
+  showed 1 scan, 0 `nonzero` primitives, and only 7 gathers on the smaller
+  7-frame trace, so index/mask refactoring is deferred until real-session
+  profiling shows camera-model overhead is material.
 
 Real 3D dataset validation remains pending.
 
