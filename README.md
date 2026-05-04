@@ -164,18 +164,19 @@ result = extended_kalman_filter(
 )
 
 # Get state layout from filter config (BEST PRACTICE!)
-layout = get_layout(ekf_config.state_mode)  # Usually "2d_full" (8D state)
+# EKFConfig defaults to "2d_cam_3d_imu" (10D: [x, y, vx, vy, vz, theta, biases...]).
+layout = get_layout(ekf_config.state_mode)
 
 # ✅ GOOD: Extract states using layout indices (dimension-agnostic)
 positions = result.filtered_means[:, layout.pos_idx]      # (N, 2) in meters
-velocities = result.filtered_means[:, layout.vel_idx]     # (N, 2) in m/s
+velocities = result.filtered_means[:, layout.vel_idx]     # (N, 3) for 2d_cam_3d_imu, (N, 2) for 2d_full
 headings = result.filtered_means[:, layout.heading_idx]   # (N,) in radians
 
 # ❌ BAD: Hardcoded indices (breaks when switching state modes!)
 # positions = result.filtered_means[:, 0:2]  # Fragile! Don't do this!
 
 # Extract uncertainties (covariances) using layout indices
-P = result.filtered_covariances                           # (N, 8, 8) full covariance
+P = result.filtered_covariances                           # (N, layout.n, layout.n)
 pos_cov = P[:, layout.pos_idx, :][:, :, layout.pos_idx] # (N, 2, 2) position covariance
 pos_std = np.sqrt(np.diagonal(pos_cov, axis1=1, axis2=2)) # (N, 2) position uncertainty
 
@@ -220,7 +221,7 @@ from trodestrack.models.state_layout import get_layout
 from trodestrack.qa.report import generate_qa_report
 from trodestrack.qa.metrics import compute_nees
 
-layout = get_layout(cfg.state_mode)
+layout = get_layout(ekf_config.state_mode)
 
 # Align ground truth (IMU rate, 5D [x, y, vx, vy, theta]) to camera frames.
 X_truth_at_cam = np.array(
