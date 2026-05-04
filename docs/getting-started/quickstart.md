@@ -29,7 +29,7 @@ uv run python examples/04_ukf_basic_scenarios.py
 Compares sigma-point (UKF) vs Jacobian (EKF) approaches.
 
 !!! note "Verdict"
-    EKF wins 5/9 metrics and is 1-5x faster. **Start with EKF!**
+    EKF wins 6/9 metrics (UKF: 3/9) and is 1-5x faster. **Start with EKF!**
 
 ## 3. Test Dropout Robustness
 
@@ -64,8 +64,8 @@ Creates a publication-quality PDF with all PRD metrics, NEES/NIS checks, and tim
 from trodestrack.sim.rat_imu import RatIMUSimConfig, simulate_rat_imu
 
 # Default config matches SpikeGadgets hardware (104 Hz IMU, realistic noise)
-config = RatIMUSimConfig(duration_s=10.0, seed=42)
-sim = simulate_rat_imu(config)
+config = RatIMUSimConfig(duration_s=10.0)
+sim = simulate_rat_imu(config, seed=42)  # seed is an arg of simulate_rat_imu
 ```
 
 ### Run EKF Filter

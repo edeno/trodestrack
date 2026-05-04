@@ -117,8 +117,8 @@ Creates a publication-quality PDF with all PRD metrics, NEES/NIS checks, and tim
 from trodestrack.sim.rat_imu import RatIMUSimConfig, simulate_rat_imu
 
 # Default config matches SpikeGadgets hardware (104 Hz IMU, realistic noise)
-config = RatIMUSimConfig(duration_s=10.0, seed=42)
-sim = simulate_rat_imu(config)
+config = RatIMUSimConfig(duration_s=10.0)
+sim = simulate_rat_imu(config, seed=42)  # seed is an arg of simulate_rat_imu
 ```
 
 #### Run EKF filter
@@ -292,7 +292,7 @@ See [`examples/README.md`](examples/README.md) for the complete learning path. E
 - ✅ **QA & Diagnostics** (M4)
   - Comprehensive metrics (RMSE, NEES, NIS, innovation statistics)
   - Publication-quality plots and multi-page PDF reports
-  - CLI tool: `trodestrack report --run run1/ --pdf report.pdf`
+  - CLI tool: `trodestrack report --run qa_inputs/ --pdf report.pdf` (consumes a separately-prepared QA-input directory; see `--help`)
   - Diagnostic videos with 9-panel filter state visualization
 - ✅ **Testing & Validation**
   - 236+ unit, integration, and property tests (all passing)
@@ -319,8 +319,10 @@ See [`examples/README.md`](examples/README.md) for the complete learning path. E
   - DeepLabCut keypoint format
   - SpikeGadgets raw IMU format
 - 🚧 **CLI Tools**
-  - `trodestrack smooth --config session.yaml`
-  - `trodestrack online --config session.yaml`
+  - YAML config loading for `trodestrack smooth` / `trodestrack online`
+    (today both commands take individual `--imu-timestamps`,
+    `--imu-measurements`, `--camera-timestamps`, `--led1-positions`, … flags;
+    a single `--config session.yaml` shorthand is planned)
 
 ## Documentation
 

@@ -51,7 +51,7 @@ result = extended_kalman_filter(
 # Extract states using layout (dimension-agnostic!)
 layout = get_layout(ekf_config.state_mode)
 positions = result.filtered_means[:, layout.pos_idx]  # (N, 2) in meters
-velocities = result.filtered_means[:, layout.vel_idx]  # (N, 2) in m/s
+velocities = result.filtered_means[:, layout.vel_idx]  # (N, 3) for default 2d_cam_3d_imu (vx, vy, vz)
 headings = result.filtered_means[:, layout.heading_idx]  # (N,) in radians
 ```
 

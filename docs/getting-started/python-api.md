@@ -80,26 +80,17 @@ from trodestrack.sim.rat_imu import RatIMUSimConfig, simulate_rat_imu
 
 config = RatIMUSimConfig(
     duration_s=30.0,                  # 30 second session
-    imu_rate=104.0,                   # SpikeGadgets hardware rate
-    cam_rate=30.0,
-    arena_size=(1.0, 1.0),           # 1m x 1m arena
-
-    # Motion dynamics
-    mean_speed=0.15,                  # m/s
-    velocity_tau=0.5,                 # OU correlation time
-
-    # Sensor noise (SpikeGadgets specs)
-    gyro_noise_density=0.01,          # deg/s/sqrt(Hz)
-    accel_noise_density=0.2,          # mg/sqrt(Hz)
+    fs_imu=104.0,                     # SpikeGadgets hardware IMU rate (Hz)
+    fs_cam=30.0,                      # Camera frame rate (Hz)
+    arena_w=1.0,                      # Arena width  (x-axis, meters)
+    arena_h=1.0,                      # Arena height (y-axis, meters)
 
     # Camera artifacts
-    dropout_prob=0.1,                 # 10% dropout rate
-    swap_prob=0.02,                   # 2% LED swap rate
-
-    seed=42,
+    cam_dropout_prob=0.1,             # 10% frame dropout rate
 )
 
-sim = simulate_rat_imu(config)
+# ``seed`` is an argument of ``simulate_rat_imu``, not the config.
+sim = simulate_rat_imu(config, seed=42)
 ```
 
 ## Filter Configuration
@@ -145,15 +136,18 @@ cfg = EKFConfig(
 ```python
 from trodestrack.models.ukf import UKFConfig
 
-# UKF uses same base parameters plus sigma-point settings
+# UKF uses same base parameters plus sigma-point settings.
+# Defaults: alpha=sqrt(3)≈1.732, beta=2.0, kappa=1.0 (UKFConfig.aggressive()).
+# Note: alpha must be large enough that (n + λ) = α² (n + κ) > 1e-3
+# (UKFConfig validates and rejects degenerate spreads like alpha=1e-3).
 cfg = UKFConfig(
     state_mode="2d_full",
     # ... same parameters as EKFConfig ...
 
-    # UKF-specific
-    alpha=1e-3,    # Sigma point spread
+    # UKF-specific (use the validated aggressive preset)
+    alpha=1.732,   # sqrt(3): wide sigma-point spread
     beta=2.0,      # Prior knowledge (2.0 for Gaussian)
-    kappa=0.0,     # Secondary scaling parameter
+    kappa=1.0,     # Secondary scaling parameter
 )
 ```
 
@@ -317,11 +311,11 @@ print(f"Mean NEES: {nees.mean():.2f} (expected ~ 2 for position-only NEES)")
 from trodestrack.viz.video import create_diagnostic_video
 
 create_diagnostic_video(
-    sim=sim,
-    fwd=result,
-    output_path="diagnostics.mp4",
+    sim,                       # SimOut from simulate_rat_imu
+    "diagnostics.mp4",         # output_path (positional)
+    filter_results=result,     # optional EKFResult overlay
     fps=30,
-    speedup=2.0  # 2x playback speed
+    speedup=2.0,               # 2x playback speed
 )
 ```
 

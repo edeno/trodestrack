@@ -108,7 +108,7 @@ uv run python examples/04_ukf_basic_scenarios.py
 **Output:** 3 comparison PNGs + side-by-side metrics tables
 
 **Key Learning:**
-> **Verdict:** EKF won 5/9 metrics vs UKF's 4/9. UKF is ~1-5× slower. **Recommendation:** Start with EKF; switch to UKF only if EKF fails to meet accuracy requirements.
+> **Verdict:** EKF won 6/9 metrics vs UKF's 3/9. UKF is ~1-5× slower. **Recommendation:** Start with EKF; switch to UKF only if EKF fails to meet accuracy requirements.
 
 ---
 

@@ -788,11 +788,11 @@ from trodestrack.viz.video import create_diagnostic_video
 
 # Generate video with 9-panel diagnostics
 create_diagnostic_video(
-    sim=sim,
-    fwd=fwd,
-    output_path="debug_video.mp4",
+    sim,                            # SimOut
+    "debug_video.mp4",              # output_path
+    filter_results=result,          # optional EKFResult overlay
     fps=30,
-    speedup=1.0  # Real-time playback
+    speedup=1.0,                    # real-time playback
 )
 ```
 
