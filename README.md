@@ -124,14 +124,12 @@ sim = simulate_rat_imu(config)
 #### Run EKF filter
 
 ```python
-from trodestrack.models.ekf import ekf_forward, EKFConfig, ekf_initialize_state
+from trodestrack.models.ekf import extended_kalman_filter, EKFConfig
 
-# Initialize from simulation
 cfg = EKFConfig()
-x0, P0 = ekf_initialize_state(sim, cfg)
-
-# Run filter
-fwd = ekf_forward(x0, P0, cfg, sim)
+result = extended_kalman_filter(cfg, sim)
+# result.filtered_means: (N_cam, n_state)
+# result.filtered_covariances: (N_cam, n_state, n_state)
 ```
 
 #### Working with State Layouts (Recommended Pattern)
@@ -201,16 +199,31 @@ See [`src/trodestrack/models/state_layout.py`](src/trodestrack/models/state_layo
 #### Generate QA report
 
 ```python
-from trodestrack.qa.report import generate_filter_report
+from trodestrack.qa.report import generate_qa_report
+from trodestrack.qa.metrics import compute_nees
 
-generate_filter_report(
-    states_fwd=fwd['x'],
-    states_truth=sim['x_truth'],
-    covariances=fwd['P'],
-    config=cfg,
-    output_path="report.pdf"
+layout = get_layout(cfg.state_mode)
+nees = compute_nees(
+    states_true=sim["x_truth"],
+    states_est=result.filtered_means,
+    covariances=result.filtered_covariances,
+    layout=layout,
+)
+generate_qa_report(
+    pdf_path="report.pdf",
+    t=sim["t_cam_exp"],
+    positions_true=sim["x_truth"][:, layout.pos_idx],
+    positions_est=result.filtered_means[:, layout.pos_idx],
+    velocities_true=sim["x_truth"][:, layout.vel_idx],
+    velocities_est=result.filtered_means[:, layout.vel_idx],
+    headings_true=sim["x_truth"][:, layout.heading_idx],
+    headings_est=result.filtered_means[:, layout.heading_idx],
+    nees=nees,
+    state_dim=layout.n,
 )
 ```
+
+The CLI `trodestrack report` wraps this; see [`src/trodestrack/cli/report.py`](src/trodestrack/cli/report.py) for the full call site.
 
 ### Explore All Examples
 

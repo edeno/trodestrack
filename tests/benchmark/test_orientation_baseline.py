@@ -29,7 +29,7 @@ def make_orientation_benchmark_inputs(
     gyro_bias_z = 0.025
     gyro_xyz = np.zeros((t_imu.shape[0], 3), dtype=float)
     gyro_xyz[:, 2] = yaw_rate + gyro_bias_z
-    accel_xyz = np.tile([0.0, 0.0, -GRAVITY], (t_imu.shape[0], 1))
+    accel_xyz = np.tile([0.0, 0.0, GRAVITY], (t_imu.shape[0], 1))
 
     heading = yaw_rate * t_cam
     half_led_distance = 0.02

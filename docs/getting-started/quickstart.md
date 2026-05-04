@@ -102,14 +102,26 @@ headings = result.filtered_means[:, layout.heading_idx]   # (N,)
 ### Generate QA Report
 
 ```python
-from trodestrack.qa.report import generate_filter_report
+from trodestrack.qa.metrics import compute_nees
+from trodestrack.qa.report import generate_qa_report
 
-generate_filter_report(
-    states_fwd=result.filtered_means,
-    states_truth=sim.get('x_truth'),  # Optional ground truth
+nees = compute_nees(
+    states_true=sim["x_truth"],
+    states_est=result.filtered_means,
     covariances=result.filtered_covariances,
-    config=cfg,
-    output_path="report.pdf"
+    layout=layout,
+)
+generate_qa_report(
+    pdf_path="report.pdf",
+    t=sim["t_cam_exp"],
+    positions_true=sim["x_truth"][:, layout.pos_idx],
+    positions_est=result.filtered_means[:, layout.pos_idx],
+    velocities_true=sim["x_truth"][:, layout.vel_idx],
+    velocities_est=result.filtered_means[:, layout.vel_idx],
+    headings_true=sim["x_truth"][:, layout.heading_idx],
+    headings_est=result.filtered_means[:, layout.heading_idx],
+    nees=nees,
+    state_dim=layout.n,
 )
 ```
 

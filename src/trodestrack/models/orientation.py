@@ -245,7 +245,10 @@ def _orientation_scan_core(
 ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     """Run the orientation estimator recurrence with ``lax.scan``."""
 
-    world_down = jnp.array([0.0, 0.0, -1.0], dtype=t_imu.dtype)
+    # Stationary accelerometer specific force points along +z in the world
+    # frame (sensor reads +g at rest with level mounting), matching
+    # imu_gravity_body=(0, 0, +g) used by the EKF dynamics path.
+    gravity_unit_world = jnp.array([0.0, 0.0, 1.0], dtype=t_imu.dtype)
     q0 = _canonicalize_quaternion(initial_quaternion.astype(t_imu.dtype))
     bias0 = initial_gyro_bias.astype(t_imu.dtype)
 
@@ -259,12 +262,14 @@ def _orientation_scan_core(
         def apply_gravity(state):
             q_in, bias_in = state
             accel_norm = jnp.linalg.norm(accel_now)
-            measured_down = accel_now / jnp.maximum(
+            measured_gravity_body = accel_now / jnp.maximum(
                 accel_norm,
                 jnp.asarray(1e-12, dtype=accel_now.dtype),
             )
-            predicted_down = rotate_vector_world_to_body(q_in, world_down)
-            error_body = jnp.cross(measured_down, predicted_down)
+            predicted_gravity_body = rotate_vector_world_to_body(
+                q_in, gravity_unit_world
+            )
+            error_body = jnp.cross(measured_gravity_body, predicted_gravity_body)
             omega_correction = accel_correction_gain * error_body
             bias_out = bias_in - accel_bias_correction_gain * error_body * dt
             q_out = _canonicalize_quaternion(
@@ -481,11 +486,13 @@ def _initial_quaternion(
     finite = gravity_mask & np.isfinite(accel_xyz).all(axis=1)
     if not np.any(finite):
         return np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
-    measured_down = np.median(accel_xyz[finite], axis=0)
-    measured_down = measured_down / np.linalg.norm(measured_down)
+    measured_gravity_body = np.median(accel_xyz[finite], axis=0)
+    measured_gravity_body = measured_gravity_body / np.linalg.norm(
+        measured_gravity_body
+    )
     return _quaternion_align_vectors(
-        source=measured_down,
-        target=np.array([0.0, 0.0, -1.0]),
+        source=measured_gravity_body,
+        target=np.array([0.0, 0.0, 1.0]),
     )
 
 

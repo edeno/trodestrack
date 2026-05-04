@@ -23,7 +23,7 @@ def test_stationary_tilt_converges_to_gravity_direction() -> None:
         quaternion_from_rotation_vector(jnp.array([0.35, 0.0, 0.0])),
     )
     gravity_body = np.asarray(
-        rotate_vector_world_to_body(true_quat, jnp.array([0.0, 0.0, -GRAVITY]))
+        rotate_vector_world_to_body(true_quat, jnp.array([0.0, 0.0, GRAVITY]))
     )
     gyro = np.zeros((t_imu.size, 3))
     accel = np.tile(gravity_body, (t_imu.size, 1))
@@ -41,7 +41,7 @@ def test_stationary_tilt_converges_to_gravity_direction() -> None:
     estimated_gravity_body = np.asarray(
         rotate_vector_world_to_body(
             jnp.asarray(result.quaternions[-1]),
-            jnp.array([0.0, 0.0, -GRAVITY]),
+            jnp.array([0.0, 0.0, GRAVITY]),
         )
     )
     np.testing.assert_allclose(estimated_gravity_body, gravity_body, atol=0.05)
@@ -60,7 +60,7 @@ def test_default_initial_orientation_matches_stationary_gravity() -> None:
         quaternion_from_rotation_vector(jnp.array([0.35, 0.0, 0.0])),
     )
     gravity_body = np.asarray(
-        rotate_vector_world_to_body(true_quat, jnp.array([0.0, 0.0, -GRAVITY]))
+        rotate_vector_world_to_body(true_quat, jnp.array([0.0, 0.0, GRAVITY]))
     )
     gyro = np.zeros((t_imu.size, 3))
     accel = np.tile(gravity_body, (t_imu.size, 1))
@@ -78,7 +78,7 @@ def test_default_initial_orientation_matches_stationary_gravity() -> None:
     estimated_gravity_body = np.asarray(
         rotate_vector_world_to_body(
             jnp.asarray(result.quaternions[0]),
-            jnp.array([0.0, 0.0, -GRAVITY]),
+            jnp.array([0.0, 0.0, GRAVITY]),
         )
     )
     np.testing.assert_allclose(estimated_gravity_body, gravity_body, atol=1e-6)
@@ -89,7 +89,7 @@ def test_yaw_rotation_tracks_gyro_without_roll_pitch_drift() -> None:
     t_imu = np.linspace(0.0, 10.0, 1_001)
     gyro = np.zeros((t_imu.size, 3))
     gyro[:, 2] = yaw_rate
-    accel = np.tile([0.0, 0.0, -GRAVITY], (t_imu.size, 1))
+    accel = np.tile([0.0, 0.0, GRAVITY], (t_imu.size, 1))
 
     result = estimate_orientation(
         t_imu=t_imu,
@@ -111,7 +111,7 @@ def test_default_initial_gyro_bias_does_not_erase_slow_yaw() -> None:
     t_imu = np.linspace(0.0, 10.0, 1_001)
     gyro = np.zeros((t_imu.size, 3))
     gyro[:, 2] = yaw_rate
-    accel = np.tile([0.0, 0.0, -GRAVITY], (t_imu.size, 1))
+    accel = np.tile([0.0, 0.0, GRAVITY], (t_imu.size, 1))
 
     result = estimate_orientation(
         t_imu=t_imu,
@@ -126,7 +126,7 @@ def test_default_initial_gyro_bias_does_not_erase_slow_yaw() -> None:
 def test_high_linear_acceleration_is_gated_out() -> None:
     t_imu = np.linspace(0.0, 4.0, 401)
     gyro = np.zeros((t_imu.size, 3))
-    accel = np.tile([0.0, 0.0, -GRAVITY], (t_imu.size, 1))
+    accel = np.tile([0.0, 0.0, GRAVITY], (t_imu.size, 1))
     accel[100:180, 0] = 4.0
 
     result = estimate_orientation(
@@ -154,7 +154,7 @@ def test_camera_yaw_correction_reduces_gyro_bias_drift() -> None:
 
     gyro = np.zeros((t_imu.size, 3))
     gyro[:, 2] = true_yaw_rate + gyro_bias_z
-    accel = np.tile([0.0, 0.0, -GRAVITY], (t_imu.size, 1))
+    accel = np.tile([0.0, 0.0, GRAVITY], (t_imu.size, 1))
 
     no_camera = estimate_orientation(
         t_imu=t_imu,
@@ -189,7 +189,7 @@ def test_camera_speed_gate_supports_two_camera_samples() -> None:
     t_imu = np.linspace(0.0, 1.0, 101)
     t_cam = np.array([0.0, 1.0])
     gyro = np.zeros((t_imu.size, 3))
-    accel = np.tile([0.0, 0.0, -GRAVITY], (t_imu.size, 1))
+    accel = np.tile([0.0, 0.0, GRAVITY], (t_imu.size, 1))
     led1 = np.array([[0.0, 0.0], [0.01, 0.0]])
     led2 = led1 + np.array([0.04, 0.0])
 

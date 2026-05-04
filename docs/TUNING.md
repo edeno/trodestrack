@@ -24,31 +24,42 @@ This guide helps you tune Extended Kalman Filter (EKF) and Unscented Kalman Filt
 
 1. **Run with default parameters** on your data
 2. **Check NEES** (Normalized Estimation Error Squared) in the QA report
-3. **If NEES < 6.0** → filter is overconfident → increase process noise
-4. **If NEES > 10.0** → filter is underconfident → decrease process noise or increase measurement noise
+3. **If NEES > 10.0** → filter is overconfident (covariance too small) → increase process noise Q or measurement noise R
+4. **If NEES < 6.0** → filter is underconfident (covariance too large) → decrease process noise or measurement noise
 5. **Iterate** until NEES ≈ 8.0 ± 2.0 (for 8D state)
 
 ### Generate Your First QA Report
 
 ```python
-from trodestrack.models.ekf import ekf_forward, EKFConfig, ekf_initialize_state
-from trodestrack.qa.report import generate_filter_report
+from trodestrack.models.ekf import extended_kalman_filter, EKFConfig
+from trodestrack.models.state_layout import get_layout
+from trodestrack.qa.metrics import compute_nees
+from trodestrack.qa.report import generate_qa_report
 
 # Load your data into simulation format (see I/O guide)
 # sim = load_my_data(...)
 
-# Run filter with default config
 cfg = EKFConfig()
-x0, P0 = ekf_initialize_state(sim, cfg)
-fwd = ekf_forward(x0, P0, cfg, sim)
+result = extended_kalman_filter(cfg, sim)
+layout = get_layout(cfg.state_mode)
 
-# Generate diagnostic report
-generate_filter_report(
-    states_fwd=fwd['x'],
-    states_truth=sim.get('x_truth'),  # Optional: ground truth if available
-    covariances=fwd['P'],
-    config=cfg,
-    output_path="tuning_report.pdf"
+nees = compute_nees(
+    states_true=sim["x_truth"],
+    states_est=result.filtered_means,
+    covariances=result.filtered_covariances,
+    layout=layout,
+)
+generate_qa_report(
+    pdf_path="tuning_report.pdf",
+    t=sim["t_cam_exp"],
+    positions_true=sim["x_truth"][:, layout.pos_idx],
+    positions_est=result.filtered_means[:, layout.pos_idx],
+    velocities_true=sim["x_truth"][:, layout.vel_idx],
+    velocities_est=result.filtered_means[:, layout.vel_idx],
+    headings_true=sim["x_truth"][:, layout.heading_idx],
+    headings_est=result.filtered_means[:, layout.heading_idx],
+    nees=nees,
+    state_dim=layout.n,
 )
 ```
 
@@ -84,18 +95,18 @@ Where:
 
 | NEES Value | Diagnosis | Action |
 |------------|-----------|--------|
-| < 6.0 | **Overconfident** | Increase Q (process noise) |
+| < 6.0 | **Underconfident** (P too large) | Decrease Q or R |
 | 6.0 - 10.0 | **Well-tuned** ✓ | No action needed |
-| > 10.0 | **Underconfident** | Decrease Q or increase R |
+| > 10.0 | **Overconfident** (P too small) | Increase Q (process noise) or R (measurement noise) |
 | Highly variable | **Inconsistent** | Check for outliers, tune gating |
 
 ### Why NEES Matters
 
 - **NEES ≈ 8.0** → filter covariance matches actual error
-- **NEES < 6.0** → covariance too small → smoother won't improve results
-- **NEES > 10.0** → covariance too large → filter underutilizes measurements
+- **NEES < 6.0** → covariance too large → filter underutilizes measurements
+- **NEES > 10.0** → covariance too small → smoother may overshoot and propagate errors
 
-**Pro Tip:** Slightly underconfident (NEES ≈ 9-10) is safer than overconfident for real data.
+**Pro Tip:** Slightly underconfident (NEES ≈ 5-7) is safer than overconfident for real data.
 
 ---
 
