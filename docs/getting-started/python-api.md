@@ -50,25 +50,26 @@ from trodestrack.sim.simple import (
     SimpleSimConfig,
 )
 
-# Configure simulation
+# Configure simulation. ``seed`` is an argument of each simulate_* call,
+# not a SimpleSimConfig field.
 config = SimpleSimConfig(
     duration_s=10.0,
-    cam_rate=30.0,        # Hz
-    imu_rate=200.0,       # Hz
-    seed=42,              # Reproducibility
+    fs_cam=30.0,          # Camera sampling rate (Hz)
+    fs_imu=200.0,         # IMU sampling rate (Hz)
 )
 
 # Stationary rat at (0.5, 0.5) meters
-sim = simulate_stationary(position=[0.5, 0.5], config=config)
+sim = simulate_stationary(position=[0.5, 0.5], config=config, seed=42)
 
 # Moving at constant velocity
 sim = simulate_constant_velocity(
     velocity=[0.2, 0.0],  # m/s
-    config=config
+    config=config,
+    seed=42,
 )
 
 # Circular motion
-sim = simulate_circular(config=config)
+sim = simulate_circular(config=config, seed=42)
 ```
 
 ### Realistic Rat IMU Simulation

@@ -82,7 +82,7 @@ This generates 3 diagnostic PNGs showing filter performance, bias convergence, a
 uv run python examples/04_ukf_basic_scenarios.py
 ```
 
-Compares sigma-point (UKF) vs Jacobian (EKF) approaches. **Verdict:** EKF wins 5/9 metrics and is 1-5× faster—start with EKF!
+Compares sigma-point (UKF) vs Jacobian (EKF) approaches. **Verdict:** EKF wins 6/9 metrics (UKF: 3/9) and is 1-5× faster—start with EKF!
 
 ### 3. Test Dropout Robustness
 
@@ -329,14 +329,14 @@ See [`examples/README.md`](examples/README.md) for the complete learning path. E
 ### User Documentation
 
 - **[Examples README](examples/README.md)** - Start here! Progressive learning path with 8 pedagogical examples
-- **[Tuning Guide](TUNING.md)** - NEES-based diagnostics and parameter selection (coming soon)
-- **[Troubleshooting Guide](TROUBLESHOOTING.md)** - Common filter failures and solutions (coming soon)
+- **[Tuning Guide](docs/TUNING.md)** - NEES-based diagnostics and parameter selection
+- **[Troubleshooting Guide](docs/TROUBLESHOOTING.md)** - Common filter failures and solutions
+- **[State Layouts](docs/user-guide/state-layouts.md)** - Available state modes and dimension-agnostic API
 
 ### Developer Documentation
 
-- [Product Requirements Document (PRD.md)](PRD.md) - Full project specification
 - [Development Guide (CLAUDE.md)](CLAUDE.md) - Commands and architecture
-- [Task Tracking (TASKS.md)](TASKS.md) - Current roadmap and completion status
+- [Implementation plans](docs/plans/) - Active milestone plans (e.g., the tilt-orientation / 3D camera plan)
 
 ## Development
 
