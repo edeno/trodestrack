@@ -112,8 +112,8 @@ Indices:
 - pos_idx: [0, 1]     - Position (x, y) in meters
 - vel_idx: [2, 3]     - Velocity (vx, vy) in m/s
 - heading_idx: 4      - Heading (theta) in radians
-- gyro_bias_idx: 5    - Gyro-Z bias in rad/s
-- accel_bias_idx: [6, 7] - Accel-XY bias in m/s^2
+- bias_gyro_idx: 5    - Gyro-Z bias in rad/s
+- bias_accel_idx: [6, 7] - Accel-XY bias in m/s^2
 ```
 
 **Use when:** You have both camera and IMU data.
@@ -129,8 +129,8 @@ Indices:
 - pos_idx: [0, 1]
 - vel_idx: [2, 3]
 - heading_idx: 4
-- gyro_bias_idx: None
-- accel_bias_idx: None
+- bias_gyro_idx: None
+- bias_accel_idx: None
 ```
 
 **Use when:** You only have camera data, or want faster processing.
@@ -146,8 +146,8 @@ Indices:
 - pos_idx: [0, 1]
 - vel_idx: [2, 3, 4]  # Note: includes vz!
 - heading_idx: 5
-- gyro_bias_idx: 6
-- accel_bias_idx: [7, 8, 9]
+- bias_gyro_idx: 6
+- bias_accel_idx: [7, 8, 9]
 ```
 
 **Use when:** You want to detect vertical motion (rearing, jumping).
@@ -164,8 +164,8 @@ Indices:
 - vel_idx: [3, 4, 5]
 - heading_idx: 8  # yaw only
 - orientation_idx: [6, 7, 8]  # roll, pitch, yaw
-- gyro_bias_idx: [9, 10, 11]
-- accel_bias_idx: [12, 13, 14]
+- bias_gyro_idx: [9, 10, 11]
+- bias_accel_idx: [12, 13, 14]
 ```
 
 **Use when:** You need full 3D pose estimation.
@@ -181,8 +181,8 @@ Indices:
 - pos_idx: [0, 1, 2]
 - vel_idx: [3, 4, 5]
 - quaternion_idx: [6, 7, 8, 9]  # [w, x, y, z]
-- gyro_bias_idx: [10, 11, 12]
-- accel_bias_idx: [13, 14, 15]
+- bias_gyro_idx: [10, 11, 12]
+- bias_accel_idx: [13, 14, 15]
 ```
 
 **Use when:** You need 3D tracking without gimbal lock issues.
@@ -200,8 +200,8 @@ Indices:
 - pos_idx: [0, 1, 2]
 - vel_idx: [3, 4, 5]
 - quaternion_idx: [6, 7, 8, 9]  # [w, x, y, z]
-- gyro_bias_idx: [10, 11, 12]
-- accel_bias_idx: [13, 14, 15]
+- bias_gyro_idx: [10, 11, 12]
+- bias_accel_idx: [13, 14, 15]
 ```
 
 **Use when:** You have 3D LED observations and want to call
@@ -290,10 +290,10 @@ def extract_biases(result, cfg):
         return None
 
     biases = {}
-    if layout.gyro_bias_idx is not None:
-        biases['gyro'] = result.filtered_means[:, layout.gyro_bias_idx]
-    if layout.accel_bias_idx is not None:
-        biases['accel'] = result.filtered_means[:, layout.accel_bias_idx]
+    if layout.bias_gyro_idx:  # tuple is non-empty
+        biases['gyro'] = result.filtered_means[:, list(layout.bias_gyro_idx)]
+    if layout.bias_accel_idx:
+        biases['accel'] = result.filtered_means[:, list(layout.bias_accel_idx)]
 
     return biases
 ```
@@ -359,10 +359,10 @@ velocities = result[:, layout.vel_idx]  # (N, 2) or (N, 3)
 # WRONG: Crashes if biases not present
 gyro_bias = result[:, 5]
 
-# CORRECT: Check first
+# CORRECT: Check first (bias_gyro_idx is an empty tuple when no biases exist)
 layout = get_layout(cfg.state_mode)
-if layout.gyro_bias_idx is not None:
-    gyro_bias = result[:, layout.gyro_bias_idx]
+if layout.bias_gyro_idx:
+    gyro_bias = result[:, list(layout.bias_gyro_idx)]
 else:
     gyro_bias = None
 ```

@@ -140,11 +140,14 @@ def print_metrics_table(
             "(requires rotation)"
         )
 
-    # Educational note on NEES interpretation
-    if mean_nees < 6.0:
-        print("  ⚠ Filter may be OVERCONFIDENT (NEES too low)")
-    elif mean_nees > 10.0:
-        print("  ⚠ Filter may be UNDERCONFIDENT (NEES too high)")
+    # Educational note on NEES interpretation (canonical convention).
+    # High NEES means actual error² exceeds what P reports → P too small →
+    # overconfident. Low NEES means P is larger than actual error² needs →
+    # underconfident.
+    if mean_nees > 10.0:
+        print("  ⚠ Filter may be OVERCONFIDENT (NEES too high; covariance too small)")
+    elif mean_nees < 6.0:
+        print("  ⚠ Filter may be UNDERCONFIDENT (NEES too low; covariance too large)")
     else:
         print("  ✓ Filter consistency is GOOD (NEES near ideal)")
 
@@ -852,7 +855,7 @@ def main() -> None:
        • Velocity RMSE near zero → rat is stationary, filter knows it
        • Heading RMSE high → ⚠️  Only LED1 visible (no heading measurement!)
        • Gyro bias does NOT converge → bias is unobservable without rotation
-       • NEES > 8.0 → filter slightly underconfident (high process noise)
+       • NEES > 8.0 → filter slightly overconfident (covariance too small)
 
     ⚠️  Limitation: This scenario only simulates LED1 (single position measurement).
     Without dual-LED heading observations, heading must be estimated from IMU gyro
@@ -952,7 +955,7 @@ def main() -> None:
        • Velocity RMSE < 10 cm/s → velocity estimate is reliable
        • Heading RMSE good → ⚠️  Only LED1 visible, but motion constrains heading!
        • Accel bias observable → forward motion constrains bias estimate
-       • NEES > 8.0 → filter slightly underconfident (high process noise)
+       • NEES > 8.0 → filter slightly overconfident (covariance too small)
 
     Key insight: Even with only LED1 (position), heading becomes observable during
     motion because velocity direction constrains heading. However, this is less
@@ -1100,15 +1103,16 @@ def main() -> None:
 
     3. FILTER CONSISTENCY:
        • NEES ≈ 8.0 means filter is "honest" about uncertainty
-       • NEES < 6.0 → overconfident (covariance too small)
-       • NEES > 10.0 → underconfident (covariance too large)
+       • NEES > 10.0 → overconfident (covariance too small)
+       • NEES < 6.0 → underconfident (covariance too large)
 
-    4. PERFORMANCE vs PRD TARGETS:
-       • Stationary:       {metrics_stat["pos_rmse_cm"]:.2f} cm (target ≤ 2 cm)
+    4. PERFORMANCE vs PRD TARGETS (≤ 2 cm position, ≤ 7° heading):
+       • Stationary:       {metrics_stat["pos_rmse_cm"]:.2f} cm
+         {"✅ meets" if metrics_stat["pos_rmse_cm"] <= 2.0 else "⚠️  exceeds"} the 2 cm position target.
        • Const Velocity:   {metrics_const_vel["pos_rmse_cm"]:.2f} cm, {metrics_const_vel["vel_rmse_cm_s"]:.2f} cm/s
+         {"✅ meets" if metrics_const_vel["pos_rmse_cm"] <= 2.0 else "⚠️  exceeds"} the 2 cm position target.
        • Circular:         {metrics_circular["pos_rmse_cm"]:.2f} cm, {metrics_circular["heading_rmse_deg"]:.2f}°
-
-    ✅ All scenarios meet PRD targets under ideal conditions (no dropouts).
+         {"✅ meets" if metrics_circular["pos_rmse_cm"] <= 2.0 and metrics_circular["heading_rmse_deg"] <= 7.0 else "⚠️  exceeds"} the position+heading targets.
 
     NEXT STEPS:
     • Run examples/04_ukf_basic_scenarios.py to compare UKF vs EKF
