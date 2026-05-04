@@ -101,11 +101,6 @@ plt.show()
 
 ## Available State Modes
 
-### `"2d_cam_3d_imu"` (10D) - Default
-
-`EKFConfig` and `UKFConfig` default to this mode (see `FilterCoreConfig.state_mode`).
-See the dedicated section below for its index layout.
-
 ### `"2d_full"` (8D)
 
 Standard sensor fusion with camera and IMU.
@@ -140,9 +135,11 @@ Indices:
 
 **Use when:** You only have camera data, or want faster processing.
 
-### `"2d_cam_3d_imu"` (10D)
+### `"2d_cam_3d_imu"` (10D) — Default
 
-2D camera with 3D accelerometer for detecting rearing behavior.
+The default `state_mode` for `EKFConfig`/`UKFConfig` (see
+`FilterCoreConfig.state_mode`). 2D camera with 3D accelerometer for detecting
+rearing behavior.
 
 ```
 State vector: [x, y, vx, vy, vz, theta, b_gz, b_ax, b_ay, b_az]
