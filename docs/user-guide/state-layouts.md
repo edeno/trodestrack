@@ -101,7 +101,12 @@ plt.show()
 
 ## Available State Modes
 
-### `"2d_full"` (8D) - Default
+### `"2d_cam_3d_imu"` (10D) - Default
+
+`EKFConfig` and `UKFConfig` default to this mode (see `FilterCoreConfig.state_mode`).
+See the dedicated section below for its index layout.
+
+### `"2d_full"` (8D)
 
 Standard sensor fusion with camera and IMU.
 
@@ -126,11 +131,11 @@ Camera-only tracking without bias estimation.
 State vector: [x, y, vx, vy, theta]
 
 Indices:
-- pos_idx: [0, 1]
-- vel_idx: [2, 3]
+- pos_idx: (0, 1)
+- vel_idx: (2, 3)
 - heading_idx: 4
-- bias_gyro_idx: None
-- bias_accel_idx: None
+- bias_gyro_idx: ()       # empty tuple — no biases
+- bias_accel_idx: ()      # empty tuple — no biases
 ```
 
 **Use when:** You only have camera data, or want faster processing.
@@ -160,12 +165,11 @@ Full 3D tracking with Euler angles.
 State vector: [x, y, z, vx, vy, vz, roll, pitch, yaw, b_gx, b_gy, b_gz, b_ax, b_ay, b_az]
 
 Indices:
-- pos_idx: [0, 1, 2]
-- vel_idx: [3, 4, 5]
-- heading_idx: 8  # yaw only
-- orientation_idx: [6, 7, 8]  # roll, pitch, yaw
-- bias_gyro_idx: [9, 10, 11]
-- bias_accel_idx: [12, 13, 14]
+- pos_idx: (0, 1, 2)
+- vel_idx: (3, 4, 5)
+- heading_idx: (6, 7, 8)   # tuple covers (roll, pitch, yaw)
+- bias_gyro_idx: (9, 10, 11)
+- bias_accel_idx: (12, 13, 14)
 ```
 
 **Use when:** You need full 3D pose estimation.
@@ -178,11 +182,11 @@ Full 3D tracking with quaternions (avoids gimbal lock).
 State vector: [x, y, z, vx, vy, vz, qw, qx, qy, qz, b_gx, b_gy, b_gz, b_ax, b_ay, b_az]
 
 Indices:
-- pos_idx: [0, 1, 2]
-- vel_idx: [3, 4, 5]
-- quaternion_idx: [6, 7, 8, 9]  # [w, x, y, z]
-- bias_gyro_idx: [10, 11, 12]
-- bias_accel_idx: [13, 14, 15]
+- pos_idx: (0, 1, 2)
+- vel_idx: (3, 4, 5)
+- heading_idx: (6, 7, 8, 9)   # 4-tuple = quaternion (qw, qx, qy, qz)
+- bias_gyro_idx: (10, 11, 12)
+- bias_accel_idx: (13, 14, 15)
 ```
 
 **Use when:** You need 3D tracking without gimbal lock issues.
@@ -197,11 +201,11 @@ opt into the 3D camera filter path explicitly.
 State vector: [x, y, z, vx, vy, vz, qw, qx, qy, qz, b_gx, b_gy, b_gz, b_ax, b_ay, b_az]
 
 Indices:
-- pos_idx: [0, 1, 2]
-- vel_idx: [3, 4, 5]
-- quaternion_idx: [6, 7, 8, 9]  # [w, x, y, z]
-- bias_gyro_idx: [10, 11, 12]
-- bias_accel_idx: [13, 14, 15]
+- pos_idx: (0, 1, 2)
+- vel_idx: (3, 4, 5)
+- heading_idx: (6, 7, 8, 9)   # 4-tuple = quaternion (qw, qx, qy, qz)
+- bias_gyro_idx: (10, 11, 12)
+- bias_accel_idx: (13, 14, 15)
 ```
 
 **Use when:** You have 3D LED observations and want to call
