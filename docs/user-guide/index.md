@@ -98,10 +98,9 @@ Units must be SI (not raw sensor counts).
 
 ### Online Tracking
 
-For incremental, frame-by-frame use, see the
-[`trodestrack online`](../cli.md) CLI command and
-[`src/trodestrack/cli/online.py`](../../src/trodestrack/cli/online.py) for the
-streaming entry point that wraps the EKF predict/update primitives.
+For incremental, frame-by-frame use, run the `trodestrack online` CLI
+command (`uv run trodestrack online --help` for usage). It wraps the EKF
+predict/update primitives for streaming inputs.
 
 ### Offline Analysis
 
