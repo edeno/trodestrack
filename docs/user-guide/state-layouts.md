@@ -109,11 +109,11 @@ Standard sensor fusion with camera and IMU.
 State vector: [x, y, vx, vy, theta, b_gz, b_ax, b_ay]
 
 Indices:
-- pos_idx: [0, 1]     - Position (x, y) in meters
-- vel_idx: [2, 3]     - Velocity (vx, vy) in m/s
-- heading_idx: 4      - Heading (theta) in radians
-- bias_gyro_idx: 5    - Gyro-Z bias in rad/s
-- bias_accel_idx: [6, 7] - Accel-XY bias in m/s^2
+- pos_idx: (0, 1)         - Position (x, y) in meters
+- vel_idx: (2, 3)         - Velocity (vx, vy) in m/s
+- heading_idx: 4          - Heading (theta) in radians
+- bias_gyro_idx: (5,)     - Gyro-Z bias in rad/s
+- bias_accel_idx: (6, 7)  - Accel-XY bias in m/s^2
 ```
 
 **Use when:** You have both camera and IMU data.
@@ -145,11 +145,11 @@ rearing behavior.
 State vector: [x, y, vx, vy, vz, theta, b_gz, b_ax, b_ay, b_az]
 
 Indices:
-- pos_idx: [0, 1]
-- vel_idx: [2, 3, 4]  # Note: includes vz!
+- pos_idx: (0, 1)
+- vel_idx: (2, 3, 4)         # Note: includes vz!
 - heading_idx: 5
-- bias_gyro_idx: 6
-- bias_accel_idx: [7, 8, 9]
+- bias_gyro_idx: (6,)
+- bias_accel_idx: (7, 8, 9)
 ```
 
 **Use when:** You want to detect vertical motion (rearing, jumping).
