@@ -144,8 +144,11 @@ def main() -> None:
         seed=42,
     )
 
-    # EKF configuration using REALISTIC SpikeGadgets IMU specifications
+    # EKF configuration using REALISTIC SpikeGadgets IMU specifications.
+    # Pin to the 8D ``2d_full`` layout so layout.heading_idx (4) is in range
+    # for the simulator's 5D X_truth array.
     ekf_config = EKFConfig(
+        state_mode="2d_full",
         # Process noise spectral densities (tuned for good performance)
         process_noise_pos=2e-3,  # m^2/s^3
         process_noise_vel=1e-1,  # (m/s)^2/s

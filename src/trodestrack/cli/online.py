@@ -212,10 +212,14 @@ def run_online(args: argparse.Namespace) -> None:
     n_imu = len(t_imu)
     n_cam = len(t_cam)
 
-    # Validate IMU data shape
-    if U_imu.shape != (n_imu, 3):
+    # Validate IMU data shape. Channel count depends on layout:
+    # 3 for 2D layouts, 4 for 3D-velocity layouts, 6 for quaternion layouts.
+    # Defer to the filter's validate_imu_input_shape, which knows the rules.
+    if U_imu.ndim != 2 or U_imu.shape[0] != n_imu or U_imu.shape[1] not in (3, 4, 6):
         print(
-            f"Error: IMU measurements shape {U_imu.shape} doesn't match (n_imu={n_imu}, 3)",
+            f"Error: IMU measurements shape {U_imu.shape} must be "
+            f"(n_imu={n_imu}, 3 | 4 | 6) — column count depends on the "
+            f"configured state layout.",
             file=sys.stderr,
         )
         sys.exit(1)

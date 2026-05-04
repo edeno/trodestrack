@@ -722,8 +722,10 @@ def main() -> None:
         cam_dropout_prob=0.0,  # NO DROPOUTS (ideal conditions)
     )
 
-    # EKF config using REALISTIC SpikeGadgets IMU specifications (same as example 03)
+    # EKF config using REALISTIC SpikeGadgets IMU specifications (same as example 03).
+    # Pin to the 8D ``2d_full`` layout so the truth array matches the filter state dim.
     ekf_config = EKFConfig(
+        state_mode="2d_full",
         # Process noise spectral densities (tuned for good performance)
         process_noise_pos=2e-3,  # m^2/s^3
         process_noise_vel=1e-1,  # (m/s)^2/s
@@ -745,6 +747,7 @@ def main() -> None:
 
     # UKF config (matched parameters to EKF, default sigma-point settings)
     ukf_config = UKFConfig(
+        state_mode="2d_full",
         # Process noise spectral densities (same as EKF)
         process_noise_pos=2e-3,  # m^2/s^3
         process_noise_vel=1e-1,  # (m/s)^2/s

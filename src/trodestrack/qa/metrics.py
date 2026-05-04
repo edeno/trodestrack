@@ -734,8 +734,10 @@ def within_envelope(
         For a well-calibrated filter, approximately `confidence*100`% of NEES
         or NIS values should fall within the chi-squared confidence envelope.
         Significant deviations indicate filter miscalibration:
-        - Too many outside upper bound → underconfident filter (P too large)
-        - Too many outside lower bound → overconfident filter (P too small)
+        - Too many outside upper bound → overconfident filter (P too small);
+          actual error² is larger than the covariance reports
+        - Too many outside lower bound → underconfident filter (P too large);
+          actual error² is smaller than the covariance reports
     """
     lower, upper = chi2_bounds(df=df, confidence=confidence)
     within_bounds = (values >= lower) & (values <= upper)

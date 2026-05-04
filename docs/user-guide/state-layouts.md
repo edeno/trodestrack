@@ -249,21 +249,22 @@ The `StateLayout` object provides:
 ```python
 layout = get_layout("2d_full")
 
-# Dimensions
-layout.state_dim          # 8 (total state dimension)
-layout.pos_dim            # 2 (position dimension)
-layout.vel_dim            # 2 (velocity dimension)
+# Dimensions (derived from index tuples)
+layout.n                  # 8 (total state dimension)
+len(layout.pos_idx)       # 2 (position dimension)
+len(layout.vel_idx)       # 2 (velocity dimension)
 
-# Indices for slicing
-layout.pos_idx            # array([0, 1])
-layout.vel_idx            # array([2, 3])
-layout.heading_idx        # 4 (scalar for 2D)
-layout.gyro_bias_idx      # 5 (scalar for 2D)
-layout.accel_bias_idx     # array([6, 7])
+# Indices for slicing (all are tuples; cast to list/jnp.array as needed)
+layout.pos_idx            # (0, 1)
+layout.vel_idx            # (2, 3)
+layout.heading_idx        # 4 (int for 2D scalar heading)
+layout.bias_gyro_idx      # (5,) — single-element tuple for 2D
+layout.bias_accel_idx     # (6, 7)
 
-# Utility methods
-layout.has_biases         # True
-layout.is_3d              # False
+# Boolean queries
+layout.has_biases                   # True
+layout.has_quaternion_orientation   # False (4-element heading_idx tuple = quat layout)
+layout.has_heading_2d               # True (scalar int heading_idx = 2D layout)
 ```
 
 ## Writing Dimension-Agnostic Code

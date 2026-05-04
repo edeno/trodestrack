@@ -721,8 +721,11 @@ def main() -> None:
     """
     )
 
-    # EKF configuration using REALISTIC SpikeGadgets IMU specifications
+    # EKF configuration using REALISTIC SpikeGadgets IMU specifications.
+    # Pin to the 8D ``2d_full`` layout so the truth array (5D X_truth + biases
+    # constructed below) matches the filter state dim.
     ekf_config = EKFConfig(
+        state_mode="2d_full",
         # Process noise spectral densities (Q matrix continuous-time variances)
         # Tuned to balance accuracy and well-calibrated uncertainty (NEES ≈ 8)
         process_noise_pos=2e-3,  # m^2/s^3 - accounts for unmodeled dynamics
