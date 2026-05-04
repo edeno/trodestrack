@@ -28,9 +28,13 @@ This guide helps you tune Extended Kalman Filter (EKF) and Unscented Kalman Filt
 4. **If NEES < 1.0** → filter is underconfident (covariance too large) → decrease process noise or measurement noise
 5. **Iterate** until NEES ≈ 2.0 (position-only NEES, ``state_dim=2``)
 
-> *NEES thresholds in this guide are for the position-only NEES the QA snippets
-> compute (chi-square with 2 dof, mean = 2). For full-state NEES with
-> ``state_dim=D``, scale the targets by D/2.*
+> *NEES thresholds in this guide are for the position-only NEES the QA
+> snippets compute (chi-square with 2 dof, mean = 2). For full-state NEES
+> with ``state_dim=D``, the expected mean is D and the well-tuned interval
+> is the chi-square 95% CI for D dof. Compute it with
+> ``scipy.stats.chi2.ppf([0.025, 0.975], df=D)`` (e.g. D=8 → [2.18, 17.54]);
+> do not scale the 2-dof interval linearly — chi-square quantiles do not
+> scale with D.*
 
 ### Generate Your First QA Report
 
@@ -44,6 +48,7 @@ from trodestrack.qa.report import generate_qa_report
 # sim = load_my_data(...)
 
 cfg = EKFConfig()
+layout = get_layout(cfg.state_mode)
 result = extended_kalman_filter(
     cfg,
     sim["t_imu"],
@@ -115,8 +120,11 @@ Where:
 - **Ideal range**: [1.0, 4.0] (informal guideline for "well-tuned")
 
 For NEES on a higher-dimensional aligned subset (e.g., the 5D `[x, y, vx, vy, θ]`
-slice that matches `X_truth`), the expected mean and CI scale with the state
-dimension D used in `compute_nees`.
+slice that matches `X_truth`), the expected mean is **D** (the state dimension)
+but the 95% CI must be looked up from the chi-square distribution — quantiles
+do not scale linearly with D. Compute the bounds as
+``scipy.stats.chi2.ppf([0.025, 0.975], df=D)`` (e.g. D=5 → [0.83, 12.83],
+D=8 → [2.18, 17.54]).
 
 ### Interpreting NEES
 

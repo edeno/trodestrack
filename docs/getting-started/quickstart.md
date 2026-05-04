@@ -111,8 +111,11 @@ headings = result.filtered_means[:, layout.heading_idx]   # (N,)
 
 ```python
 import numpy as np
+from trodestrack.models.state_layout import get_layout
 from trodestrack.qa.metrics import compute_nees
 from trodestrack.qa.report import generate_qa_report
+
+layout = get_layout(cfg.state_mode)
 
 # Align ground truth (IMU rate, 5D [x, y, vx, vy, theta]) to camera frames.
 X_truth_at_cam = np.array(
