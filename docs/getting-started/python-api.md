@@ -164,9 +164,18 @@ cfg = UKFConfig(
 from trodestrack.models.ekf import extended_kalman_filter, EKFConfig
 
 cfg = EKFConfig()
-result = extended_kalman_filter(cfg, sim)
+filter_args = (
+    cfg,
+    sim["t_imu"],
+    sim["U_imu"],
+    sim["t_cam_exp"],
+    sim["Z_cam_led1"],
+    sim["Z_cam_led2"],
+    sim["mask_cam"],
+)
+result = extended_kalman_filter(*filter_args)
 
-# Result is a FilterResult namedtuple
+# Result is an EKFResult NamedTuple
 print(f"Filtered means shape: {result.filtered_means.shape}")       # (N, 8)
 print(f"Filtered covariances shape: {result.filtered_covariances.shape}")  # (N, 8, 8)
 ```
@@ -177,7 +186,15 @@ print(f"Filtered covariances shape: {result.filtered_covariances.shape}")  # (N,
 from trodestrack.models.ukf import unscented_kalman_filter, UKFConfig
 
 cfg = UKFConfig()
-result = unscented_kalman_filter(cfg, sim)
+result = unscented_kalman_filter(
+    cfg,
+    sim["t_imu"],
+    sim["U_imu"],
+    sim["t_cam_exp"],
+    sim["Z_cam_led1"],
+    sim["Z_cam_led2"],
+    sim["mask_cam"],
+)
 ```
 
 ### RTS Smoother (Offline)
@@ -187,17 +204,9 @@ For offline analysis, the smoother uses future observations:
 ```python
 from trodestrack.runtime.offline import rts_smoother
 
-# Run forward filter first
-forward_result = extended_kalman_filter(cfg, sim)
-
-# Then run backward smoother
+forward_result = extended_kalman_filter(*filter_args)
 smoothed_result = rts_smoother(
-    forward_result.filtered_means,
-    forward_result.filtered_covariances,
-    forward_result.transition_matrices,
-    forward_result.process_covariances,
-    cfg,
-    sim
+    forward_result, cfg, sim["t_imu"], sim["U_imu"], sim["t_cam_exp"]
 )
 ```
 
@@ -238,14 +247,28 @@ See [State Layouts](../user-guide/state-layouts.md) for complete documentation.
 ### Generate QA Report
 
 ```python
-from trodestrack.qa.report import generate_filter_report
+from trodestrack.qa.metrics import compute_nees
+from trodestrack.qa.report import generate_qa_report
+from trodestrack.models.state_layout import get_layout
 
-generate_filter_report(
-    states_fwd=result.filtered_means,
-    states_truth=sim.get('x_truth'),
+layout = get_layout(cfg.state_mode)
+nees = compute_nees(
+    states_true=sim["x_truth"],
+    states_est=result.filtered_means,
     covariances=result.filtered_covariances,
-    config=cfg,
-    output_path="qa_report.pdf"
+    layout=layout,
+)
+generate_qa_report(
+    pdf_path="qa_report.pdf",
+    t=sim["t_cam_exp"],
+    positions_true=sim["x_truth"][:, layout.pos_idx],
+    positions_est=result.filtered_means[:, layout.pos_idx],
+    velocities_true=sim["x_truth"][:, layout.vel_idx],
+    velocities_est=result.filtered_means[:, layout.vel_idx],
+    headings_true=sim["x_truth"][:, layout.heading_idx],
+    headings_est=result.filtered_means[:, layout.heading_idx],
+    nees=nees,
+    state_dim=layout.n,
 )
 ```
 

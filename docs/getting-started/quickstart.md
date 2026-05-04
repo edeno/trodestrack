@@ -75,7 +75,15 @@ from trodestrack.models.ekf import extended_kalman_filter, EKFConfig
 
 # Run filter with default configuration
 cfg = EKFConfig()
-result = extended_kalman_filter(cfg, sim)
+result = extended_kalman_filter(
+    cfg,
+    sim["t_imu"],
+    sim["U_imu"],
+    sim["t_cam_exp"],
+    sim["Z_cam_led1"],
+    sim["Z_cam_led2"],
+    sim["mask_cam"],
+)
 
 # Access results
 positions = result.filtered_means[:, :2]  # (N, 2) positions

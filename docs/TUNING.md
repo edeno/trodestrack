@@ -40,7 +40,15 @@ from trodestrack.qa.report import generate_qa_report
 # sim = load_my_data(...)
 
 cfg = EKFConfig()
-result = extended_kalman_filter(cfg, sim)
+result = extended_kalman_filter(
+    cfg,
+    sim["t_imu"],
+    sim["U_imu"],
+    sim["t_cam_exp"],
+    sim["Z_cam_led1"],
+    sim["Z_cam_led2"],
+    sim["mask_cam"],
+)
 layout = get_layout(cfg.state_mode)
 
 nees = compute_nees(
@@ -136,8 +144,8 @@ class FilterCoreConfig:
 ```
 
 **When to adjust:**
-- **Increase Q** if NEES < 6.0 (filter too confident)
-- **Decrease Q** if NEES > 10.0 (filter too uncertain)
+- **Increase Q** if NEES > 10.0 (filter too confident; covariance too small)
+- **Decrease Q** if NEES < 6.0 (filter too uncertain; covariance too large)
 - **Increase `process_noise_vel`** if velocity estimates lag true motion
 - **Increase `process_noise_gyro_bias`** if heading drifts during rotation
 
@@ -216,10 +224,10 @@ uv run python examples/08_qa_report_generation.py
 Open `tuning_report.pdf` and check the **NEES histogram** panel:
 
 - **Most samples in [6.0, 10.0]?** → Well-tuned ✓
-- **Peak < 6.0?** → Overconfident → Go to Step 3
-- **Peak > 10.0?** → Underconfident → Go to Step 4
+- **Peak > 10.0?** → Overconfident → Go to Step 3
+- **Peak < 6.0?** → Underconfident → Go to Step 4
 
-### Step 3: Fix Overconfidence (NEES < 6.0)
+### Step 3: Fix Overconfidence (NEES > 10.0)
 
 **Problem:** Filter covariance is too small.
 
@@ -245,7 +253,7 @@ Open `tuning_report.pdf` and check the **NEES histogram** panel:
 
 **Re-run and check NEES.** Repeat until NEES ≈ 8.0.
 
-### Step 4: Fix Underconfidence (NEES > 10.0)
+### Step 4: Fix Underconfidence (NEES < 6.0)
 
 **Problem:** Filter covariance is too large.
 
@@ -360,7 +368,7 @@ cfg = EKFConfig(
 
 ### Scenario 5: Fast, Erratic Motion
 
-**Symptom:** Filter lags behind true motion, velocity RMSE high, NEES < 6.0.
+**Symptom:** Filter lags behind true motion, velocity RMSE high, NEES > 10.0.
 
 **Solution:** Increase velocity process noise.
 
@@ -495,8 +503,8 @@ cfg = EKFConfig(
 
 | Issue | Parameter | Typical Change |
 |-------|-----------|----------------|
-| NEES < 6.0 | `process_noise_pos` | Increase 2-5× |
-| NEES > 10.0 | `process_noise_pos` | Decrease 2× |
+| NEES > 10.0 | `process_noise_pos` | Increase 2-5× |
+| NEES < 6.0 | `process_noise_pos` | Decrease 2× |
 | Velocity lag | `process_noise_vel` | Increase 2× |
 | Heading drift | `use_heading_measurement` | Set to `True` |
 | Stationary drift | `enable_zupt` | Set to `True` |

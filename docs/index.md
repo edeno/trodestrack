@@ -38,7 +38,15 @@ sim = simulate_circular(sim_config)
 
 # Run EKF
 ekf_config = EKFConfig()
-result = extended_kalman_filter(ekf_config, sim)
+result = extended_kalman_filter(
+    ekf_config,
+    sim["t_imu"],
+    sim["U_imu"],
+    sim["t_cam_exp"],
+    sim["Z_cam_led1"],
+    sim["Z_cam_led2"],
+    sim["mask_cam"],
+)
 
 # Extract states using layout (dimension-agnostic!)
 layout = get_layout(ekf_config.state_mode)

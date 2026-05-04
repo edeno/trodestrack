@@ -127,7 +127,15 @@ sim = simulate_rat_imu(config)
 from trodestrack.models.ekf import extended_kalman_filter, EKFConfig
 
 cfg = EKFConfig()
-result = extended_kalman_filter(cfg, sim)
+result = extended_kalman_filter(
+    cfg,
+    sim["t_imu"],
+    sim["U_imu"],
+    sim["t_cam_exp"],
+    sim["Z_cam_led1"],
+    sim["Z_cam_led2"],
+    sim["mask_cam"],
+)
 # result.filtered_means: (N_cam, n_state)
 # result.filtered_covariances: (N_cam, n_state, n_state)
 ```
@@ -145,7 +153,15 @@ from trodestrack.sim.simple import simulate_circular, SimpleSimConfig
 sim_config = SimpleSimConfig(duration_s=10.0)
 sim = simulate_circular(sim_config)
 ekf_config = EKFConfig()
-result = extended_kalman_filter(ekf_config, sim)
+result = extended_kalman_filter(
+    ekf_config,
+    sim["t_imu"],
+    sim["U_imu"],
+    sim["t_cam_exp"],
+    sim["Z_cam_led1"],
+    sim["Z_cam_led2"],
+    sim["mask_cam"],
+)
 
 # Get state layout from filter config (BEST PRACTICE!)
 layout = get_layout(ekf_config.state_mode)  # Usually "2d_full" (8D state)

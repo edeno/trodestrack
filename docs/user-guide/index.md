@@ -96,43 +96,61 @@ Units must be SI (not raw sensor counts).
 
 ## Common Workflows
 
-### Real-Time Tracking
+### Online Tracking
 
-```python
-# Initialize filter
-cfg = EKFConfig()
-x, P = ekf_initialize_state(sim, cfg)
-
-# Process each frame
-for frame in data_stream:
-    x, P = ekf_update_step(x, P, frame, cfg)
-    yield x[:2]  # Position estimate
-```
+For incremental, frame-by-frame use, see the
+[`trodestrack online`](../cli.md) CLI command and
+[`src/trodestrack/cli/online.py`](../../src/trodestrack/cli/online.py) for the
+streaming entry point that wraps the EKF predict/update primitives.
 
 ### Offline Analysis
 
 ```python
-# Run forward filter
-fwd = extended_kalman_filter(cfg, sim)
+from trodestrack.models.ekf import extended_kalman_filter, EKFConfig
+from trodestrack.runtime.offline import rts_smoother
 
-# Run backward smoother
-smoothed = rts_smoother(fwd, cfg, sim)
-
-# Generate report
-generate_filter_report(smoothed, output_path="report.pdf")
+cfg = EKFConfig()
+result = extended_kalman_filter(
+    cfg,
+    sim["t_imu"],
+    sim["U_imu"],
+    sim["t_cam_exp"],
+    sim["Z_cam_led1"],
+    sim["Z_cam_led2"],
+    sim["mask_cam"],
+)
+smoothed = rts_smoother(
+    result, cfg, sim["t_imu"], sim["U_imu"], sim["t_cam_exp"]
+)
+# See README.md for the full QA-report invocation via generate_qa_report.
 ```
 
 ### Parameter Search
 
 ```python
-# Grid search over process noise
+from trodestrack.qa.metrics import compute_nees
+from trodestrack.models.state_layout import get_layout
+
 results = []
 for q_pos in [0.01, 0.02, 0.05, 0.1]:
     cfg = EKFConfig(process_noise_pos=q_pos)
-    result = extended_kalman_filter(cfg, sim)
-    nees = compute_nees(result, sim['x_truth']).mean()
-    results.append((q_pos, nees))
+    result = extended_kalman_filter(
+        cfg,
+        sim["t_imu"],
+        sim["U_imu"],
+        sim["t_cam_exp"],
+        sim["Z_cam_led1"],
+        sim["Z_cam_led2"],
+        sim["mask_cam"],
+    )
+    layout = get_layout(cfg.state_mode)
+    nees = compute_nees(
+        states_true=sim["x_truth"],
+        states_est=result.filtered_means,
+        covariances=result.filtered_covariances,
+        layout=layout,
+    )
+    results.append((q_pos, float(nees.mean())))
 
-# Find best parameter
-best_q = min(results, key=lambda x: abs(x[1] - 8.0))
+best_q = min(results, key=lambda r: abs(r[1] - 8.0))
 ```

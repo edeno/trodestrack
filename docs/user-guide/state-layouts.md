@@ -42,7 +42,15 @@ from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
 
 # Run filter
 cfg = EKFConfig(state_mode="2d_full")
-result = extended_kalman_filter(cfg, sim)
+result = extended_kalman_filter(
+    cfg,
+    sim["t_imu"],
+    sim["U_imu"],
+    sim["t_cam_exp"],
+    sim["Z_cam_led1"],
+    sim["Z_cam_led2"],
+    sim["mask_cam"],
+)
 
 # Get layout from config
 layout = get_layout(cfg.state_mode)

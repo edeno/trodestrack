@@ -110,9 +110,14 @@ Click on your symptom to jump to the solution:
 
 3. **Check initial state:**
    ```python
-   x0, P0 = ekf_initialize_state(sim, cfg)
-   print(f"Initial position: {x0[:2]}")  # Should be in arena
-   print(f"Initial velocity: {x0[2:4]}")  # Should be < 2 m/s
+   from trodestrack.models.filter_common import initialize_state
+
+   layout = get_layout(cfg.state_mode)
+   state = initialize_state(
+       sim["Z_cam_led1"][0], sim["Z_cam_led2"][0], cfg, layout=layout
+   )
+   print(f"Initial position: {state.mean[layout.pos_idx]}")  # Should be in arena
+   print(f"Initial velocity: {state.mean[layout.vel_idx]}")  # Should be < 2 m/s
    ```
 
 #### Solutions
@@ -134,10 +139,25 @@ sim['Z_cam_led2'] = sim['Z_cam_led2'] * scale_m_per_pixel
 
 **If covariance initialization is too small:**
 ```python
-# Increase initial uncertainty
-x0, P0 = ekf_initialize_state(sim, cfg)
-P0 = P0 * 10.0  # Scale up initial covariance
-fwd = ekf_forward(x0, P0, cfg, sim)
+from trodestrack.models.ekf import EKFState
+from trodestrack.models.filter_common import initialize_state
+from trodestrack.models.state_layout import get_layout
+
+layout = get_layout(cfg.state_mode)
+state = initialize_state(
+    sim["Z_cam_led1"][0], sim["Z_cam_led2"][0], cfg, layout=layout
+)
+inflated = EKFState(mean=state.mean, cov=state.cov * 10.0)
+result = extended_kalman_filter(
+    cfg,
+    sim["t_imu"],
+    sim["U_imu"],
+    sim["t_cam_exp"],
+    sim["Z_cam_led1"],
+    sim["Z_cam_led2"],
+    sim["mask_cam"],
+    initial_state=inflated,
+)
 ```
 
 ---
@@ -528,12 +548,24 @@ assert np.isfinite(fwd['P']).all(), "Covariance contains NaN/Inf"
    ```python
    # First call is slow (compilation), second call is fast
    import time
+
+   def _run():
+       return extended_kalman_filter(
+           cfg,
+           sim["t_imu"],
+           sim["U_imu"],
+           sim["t_cam_exp"],
+           sim["Z_cam_led1"],
+           sim["Z_cam_led2"],
+           sim["mask_cam"],
+       )
+
    start = time.time()
-   fwd = ekf_forward(x0, P0, cfg, sim)  # First call: ~5 seconds
+   _run()  # First call: ~5 seconds (compilation)
    print(f"First call: {time.time() - start:.2f}s")
 
    start = time.time()
-   fwd = ekf_forward(x0, P0, cfg, sim)  # Second call: ~0.01 seconds
+   _run()  # Second call: ~0.01 seconds (cached trace)
    print(f"Second call: {time.time() - start:.2f}s")
    ```
 
@@ -552,9 +584,9 @@ assert np.isfinite(fwd['P']).all(), "Covariance contains NaN/Inf"
 **Option 1: Use EKF instead of UKF**
 ```python
 # UKF is 1-5× slower due to sigma-point transforms
-from trodestrack.models.ekf import ekf_forward
+from trodestrack.models.ekf import extended_kalman_filter
 # Instead of:
-# from trodestrack.models.ukf import ukf_forward
+# from trodestrack.models.ukf import unscented_kalman_filter
 ```
 
 **Option 2: Reduce IEKF iterations**
@@ -767,15 +799,29 @@ uv run pytest tests/integration/test_prd_session.py -v
 
 ```python
 # Run both filters on same data
-from trodestrack.models.ekf import ekf_forward
-from trodestrack.models.ukf import ukf_forward
+from trodestrack.models.ekf import extended_kalman_filter
+from trodestrack.models.ukf import unscented_kalman_filter
 
-fwd_ekf = ekf_forward(x0, P0, cfg, sim)
-fwd_ukf = ukf_forward(x0, P0, cfg, sim)
+filter_args = (
+    cfg,
+    sim["t_imu"],
+    sim["U_imu"],
+    sim["t_cam_exp"],
+    sim["Z_cam_led1"],
+    sim["Z_cam_led2"],
+    sim["mask_cam"],
+)
+result_ekf = extended_kalman_filter(*filter_args)
+result_ukf = unscented_kalman_filter(*filter_args)
 
-# Compare RMSE
-rmse_ekf = compute_position_rmse(fwd_ekf['x'][:, :2], sim['x_truth'][:, :2])
-rmse_ukf = compute_position_rmse(fwd_ukf['x'][:, :2], sim['x_truth'][:, :2])
+layout = get_layout(cfg.state_mode)
+truth_pos = sim["x_truth"][:, layout.pos_idx]
+rmse_ekf = compute_position_rmse(
+    result_ekf.filtered_means[:, layout.pos_idx], truth_pos
+)
+rmse_ukf = compute_position_rmse(
+    result_ukf.filtered_means[:, layout.pos_idx], truth_pos
+)
 print(f"EKF RMSE: {rmse_ekf*100:.2f} cm")
 print(f"UKF RMSE: {rmse_ukf*100:.2f} cm")
 ```
@@ -798,14 +844,21 @@ print(f"UKF RMSE: {rmse_ukf*100:.2f} cm")
 ```python
 # Minimal failing example
 from trodestrack.sim.simple import simulate_stationary, SimpleSimConfig
-from trodestrack.models.ekf import ekf_forward, EKFConfig, ekf_initialize_state
+from trodestrack.models.ekf import extended_kalman_filter, EKFConfig
 
 config_sim = SimpleSimConfig(duration_s=5.0)
 sim = simulate_stationary(position=[0.5, 0.5], config=config_sim, seed=42)
 
 cfg = EKFConfig()  # Add your custom settings here
-x0, P0 = ekf_initialize_state(sim, cfg)
-fwd = ekf_forward(x0, P0, cfg, sim)
+result = extended_kalman_filter(
+    cfg,
+    sim["t_imu"],
+    sim["U_imu"],
+    sim["t_cam_exp"],
+    sim["Z_cam_led1"],
+    sim["Z_cam_led2"],
+    sim["mask_cam"],
+)
 
 # Describe the problem here
 print(f"Problem: Position RMSE is {compute_position_rmse(...):.4f} m (expected < 0.02)")
