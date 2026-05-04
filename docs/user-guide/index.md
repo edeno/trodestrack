@@ -127,8 +127,13 @@ smoothed = rts_smoother(
 ### Parameter Search
 
 ```python
+import numpy as np
 from trodestrack.qa.metrics import compute_nees
-from trodestrack.models.state_layout import get_layout
+
+X_truth_at_cam = np.array(
+    [sim["X_truth"][np.argmin(np.abs(sim["t_imu"] - t_c))] for t_c in sim["t_cam_exp"]]
+)
+truth_pos = X_truth_at_cam[:, :2]
 
 results = []
 for q_pos in [0.01, 0.02, 0.05, 0.1]:
@@ -142,12 +147,10 @@ for q_pos in [0.01, 0.02, 0.05, 0.1]:
         sim["Z_cam_led2"],
         sim["mask_cam"],
     )
-    layout = get_layout(cfg.state_mode)
     nees = compute_nees(
-        states_true=sim["x_truth"],
-        states_est=result.filtered_means,
-        covariances=result.filtered_covariances,
-        layout=layout,
+        states_true=truth_pos,
+        states_est=np.asarray(result.filtered_means[:, :2]),
+        covariances_est=np.asarray(result.filtered_covariances[:, :2, :2]),
     )
     results.append((q_pos, float(nees.mean())))
 

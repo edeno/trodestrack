@@ -215,27 +215,36 @@ See [`src/trodestrack/models/state_layout.py`](src/trodestrack/models/state_layo
 #### Generate QA report
 
 ```python
+import numpy as np
 from trodestrack.qa.report import generate_qa_report
 from trodestrack.qa.metrics import compute_nees
 
-layout = get_layout(cfg.state_mode)
+# Align ground truth (IMU rate, 5D [x, y, vx, vy, theta]) to camera frames.
+X_truth_at_cam = np.array(
+    [sim["X_truth"][np.argmin(np.abs(sim["t_imu"] - t_c))] for t_c in sim["t_cam_exp"]]
+)
+filtered = np.asarray(result.filtered_means)
+filtered_cov = np.asarray(result.filtered_covariances)
+
+# This example assumes the default ``2d_full`` layout where the first 5
+# state columns align with ``X_truth``. For other layouts, index via
+# ``layout.pos_idx``/``layout.vel_idx``/``layout.heading_idx`` instead.
 nees = compute_nees(
-    states_true=sim["x_truth"],
-    states_est=result.filtered_means,
-    covariances=result.filtered_covariances,
-    layout=layout,
+    states_true=X_truth_at_cam[:, :2],
+    states_est=filtered[:, :2],
+    covariances_est=filtered_cov[:, :2, :2],
 )
 generate_qa_report(
     pdf_path="report.pdf",
     t=sim["t_cam_exp"],
-    positions_true=sim["x_truth"][:, layout.pos_idx],
-    positions_est=result.filtered_means[:, layout.pos_idx],
-    velocities_true=sim["x_truth"][:, layout.vel_idx],
-    velocities_est=result.filtered_means[:, layout.vel_idx],
-    headings_true=sim["x_truth"][:, layout.heading_idx],
-    headings_est=result.filtered_means[:, layout.heading_idx],
+    positions_true=X_truth_at_cam[:, :2],
+    positions_est=filtered[:, :2],
+    velocities_true=X_truth_at_cam[:, 2:4],
+    velocities_est=filtered[:, 2:4],
+    headings_true=X_truth_at_cam[:, 4],
+    headings_est=filtered[:, 4],
     nees=nees,
-    state_dim=layout.n,
+    state_dim=2,
 )
 ```
 

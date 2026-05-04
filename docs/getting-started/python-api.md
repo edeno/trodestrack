@@ -27,11 +27,12 @@ sim = {
     'Z_cam_led2': np.array(...),     # (N, 2) LED2 positions [x, y] in meters
     'mask_cam': np.array(...),       # (N,) boolean mask for valid frames
 
-    # IMU measurements
-    'u_imu': np.array(...),          # (M, 3) IMU data [gyro_z, accel_x, accel_y]
+    'U_imu': np.array(...),          # (M, 3) IMU data [gyro_z, accel_x, accel_y]
+    't_imu': np.array(...),          # (M,) IMU timestamps in seconds
+    't_cam_exp': np.array(...),      # (N,) camera timestamps in seconds
 
-    # Optional: ground truth for validation
-    'x_truth': np.array(...),        # (N, 8) true state vectors
+    # Optional: ground truth for validation (at IMU rate)
+    'X_truth': np.array(...),        # (M, 5) true state [x, y, vx, vy, theta]
 }
 ```
 
@@ -247,28 +248,34 @@ See [State Layouts](../user-guide/state-layouts.md) for complete documentation.
 ### Generate QA Report
 
 ```python
+import numpy as np
 from trodestrack.qa.metrics import compute_nees
 from trodestrack.qa.report import generate_qa_report
-from trodestrack.models.state_layout import get_layout
 
-layout = get_layout(cfg.state_mode)
+# Align ground truth (IMU rate, 5D) to camera frames.
+X_truth_at_cam = np.array(
+    [sim["X_truth"][np.argmin(np.abs(sim["t_imu"] - t_c))] for t_c in sim["t_cam_exp"]]
+)
+filtered = np.asarray(result.filtered_means)
+filtered_cov = np.asarray(result.filtered_covariances)
+
+# Assumes default 2d_full layout (first 5 columns align with X_truth).
 nees = compute_nees(
-    states_true=sim["x_truth"],
-    states_est=result.filtered_means,
-    covariances=result.filtered_covariances,
-    layout=layout,
+    states_true=X_truth_at_cam[:, :2],
+    states_est=filtered[:, :2],
+    covariances_est=filtered_cov[:, :2, :2],
 )
 generate_qa_report(
     pdf_path="qa_report.pdf",
     t=sim["t_cam_exp"],
-    positions_true=sim["x_truth"][:, layout.pos_idx],
-    positions_est=result.filtered_means[:, layout.pos_idx],
-    velocities_true=sim["x_truth"][:, layout.vel_idx],
-    velocities_est=result.filtered_means[:, layout.vel_idx],
-    headings_true=sim["x_truth"][:, layout.heading_idx],
-    headings_est=result.filtered_means[:, layout.heading_idx],
+    positions_true=X_truth_at_cam[:, :2],
+    positions_est=filtered[:, :2],
+    velocities_true=X_truth_at_cam[:, 2:4],
+    velocities_est=filtered[:, 2:4],
+    headings_true=X_truth_at_cam[:, 4],
+    headings_est=filtered[:, 4],
     nees=nees,
-    state_dim=layout.n,
+    state_dim=2,
 )
 ```
 
@@ -276,25 +283,24 @@ generate_qa_report(
 
 ```python
 from trodestrack.qa.metrics import (
-    compute_rmse,
+    compute_position_rmse,
     compute_nees,
-    compute_nis,
 )
 
-# Position RMSE
-pos_rmse = compute_rmse(
-    result.filtered_means[:, layout.pos_idx],
-    sim['x_truth'][:, layout.pos_idx]
+# Position RMSE (uses the aligned X_truth_at_cam from above)
+pos_rmse = compute_position_rmse(
+    np.asarray(result.filtered_means[:, :2]),
+    X_truth_at_cam[:, :2],
 )
 print(f"Position RMSE: {pos_rmse * 100:.2f} cm")
 
-# NEES (filter consistency)
+# NEES (filter consistency, position only)
 nees = compute_nees(
-    result.filtered_means,
-    result.filtered_covariances,
-    sim['x_truth']
+    states_true=X_truth_at_cam[:, :2],
+    states_est=np.asarray(result.filtered_means[:, :2]),
+    covariances_est=np.asarray(result.filtered_covariances[:, :2, :2]),
 )
-print(f"Mean NEES: {nees.mean():.2f} (expected: {layout.state_dim})")
+print(f"Mean NEES: {nees.mean():.2f} (expected ~ 2 for position-only NEES)")
 ```
 
 ### Create Diagnostic Video

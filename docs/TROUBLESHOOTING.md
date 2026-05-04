@@ -28,7 +28,7 @@ Run through these checks first before diving into specific problems:
 # Check for NaN/Inf in inputs
 assert np.isfinite(sim['Z_cam_led1']).all(), "LED1 contains NaN/Inf"
 assert np.isfinite(sim['Z_cam_led2']).all(), "LED2 contains NaN/Inf"
-assert np.isfinite(sim['u_imu']).all(), "IMU contains NaN/Inf"
+assert np.isfinite(sim['U_imu']).all(), "IMU contains NaN/Inf"
 
 # Check units (common mistake: pixels instead of meters)
 led_positions = sim['Z_cam_led1'][sim['mask_cam']]
@@ -105,7 +105,7 @@ Click on your symptom to jump to the solution:
 
 2. **Check for NaN/Inf in inputs:**
    ```python
-   assert np.isfinite(sim['u_imu']).all(), "IMU contains invalid values"
+   assert np.isfinite(sim['U_imu']).all(), "IMU contains invalid values"
    ```
 
 3. **Check initial state:**
@@ -245,9 +245,10 @@ cfg = EKFConfig(
 
 1. **Check motion type:**
    ```python
-   # Plot velocity angle vs heading
-   vel_angle = np.arctan2(sim['vy_truth'], sim['vx_truth'])
-   plt.plot(sim['theta_truth'], label='True heading')
+   # X_truth columns: [x, y, vx, vy, theta] at IMU rate.
+   X_truth = sim['X_truth']
+   vel_angle = np.arctan2(X_truth[:, 3], X_truth[:, 2])  # vy, vx
+   plt.plot(X_truth[:, 4], label='True heading')
    plt.plot(vel_angle, label='Velocity heading')
    # If these match → straight-line motion → bias unobservable
    ```
@@ -255,7 +256,7 @@ cfg = EKFConfig(
 2. **Check bias convergence:**
    ```python
    # Plot gyro bias estimate
-   plt.plot(fwd['x'][:, 5])  # Index 5 = b_gz
+   plt.plot(result.filtered_means[:, 5])  # Index 5 = b_gz
    # Should converge to truth during rotation, drift during straight line
    ```
 
@@ -364,7 +365,7 @@ LED swap detection failed → filter treats swapped LEDs as true observation →
 2. **Check for swap events:**
    ```python
    # Plot heading discontinuities
-   heading_diff = np.diff(fwd['x'][:, 4])  # Index 4 = θ
+   heading_diff = np.diff(result.filtered_means[:, 4])  # Index 4 = θ
    swap_frames = np.where(np.abs(heading_diff) > 2.0)[0]  # > 114° jump
    print(f"Detected {len(swap_frames)} swap events")
    ```
@@ -424,7 +425,7 @@ sim['Z_cam_led1'][swap_mask], sim['Z_cam_led2'][swap_mask] = \
    ```python
    # During dropout, filter relies on IMU only
    # Check if IMU bias estimates are converged before dropout
-   bias_at_dropout = fwd['x'][dropout_start, 5:8]  # Gyro + accel biases
+   bias_at_dropout = result.filtered_means[dropout_start, 5:8]  # Gyro + accel biases
    ```
 
 #### Solutions
@@ -479,9 +480,9 @@ IMU noise accumulates during stationary periods → small velocity estimates →
 
 1. **Check velocity magnitude during stationary period:**
    ```python
-   velocity_mag = np.linalg.norm(fwd['x'][:, 2:4], axis=1)
+   velocity_mag = np.linalg.norm(result.filtered_means[:, 2:4], axis=1)
    stationary_mask = velocity_mag < 0.05  # < 5 cm/s
-   drift = np.linalg.norm(np.diff(fwd['x'][stationary_mask, :2], axis=0), axis=1)
+   drift = np.linalg.norm(np.diff(result.filtered_means[stationary_mask, :2], axis=0), axis=1)
    print(f"Mean drift during stationary: {drift.mean():.4f} m/frame")
    ```
 
@@ -554,7 +555,7 @@ cfg = EKFConfig(
 **Option 3: Check for filter divergence**
 ```python
 # If covariance explodes AND position diverges → see "Filter Divergence"
-assert np.isfinite(fwd['P']).all(), "Covariance contains NaN/Inf"
+assert np.isfinite(result.filtered_covariances).all(), "Covariance contains NaN/Inf"
 ```
 
 ---
@@ -597,7 +598,7 @@ assert np.isfinite(fwd['P']).all(), "Covariance contains NaN/Inf"
 
 3. **Check IMU sample count:**
    ```python
-   print(f"IMU samples: {len(sim['u_imu'])}")  # Should be < 100k for 30-min session
+   print(f"IMU samples: {len(sim['U_imu'])}")  # Should be < 100k for 30-min session
    ```
 
 #### Solutions
@@ -657,13 +658,13 @@ See **[TUNING.md](TUNING.md)** for detailed parameter tuning guidance.
    ```python
    assert np.isfinite(sim['Z_cam_led1']).all()
    assert np.isfinite(sim['Z_cam_led2']).all()
-   assert np.isfinite(sim['u_imu']).all()
+   assert np.isfinite(sim['U_imu']).all()
    ```
 
 2. **Check for extreme values:**
    ```python
    print(f"Max LED position: {np.nanmax(sim['Z_cam_led1'])}")  # Should be < 10 m
-   print(f"Max IMU gyro: {np.nanmax(sim['u_imu'][:, 0])}")     # Should be < 100 rad/s
+   print(f"Max IMU gyro: {np.nanmax(sim['U_imu'][:, 0])}")     # Should be < 100 rad/s
    ```
 
 3. **Check covariance:**
@@ -729,8 +730,8 @@ if cfg.led_distance is not None:
 
 ```python
 # Check for saturation (depends on sensor range)
-gyro_max = np.abs(sim['u_imu'][:, 0]).max()
-accel_max = np.abs(sim['u_imu'][:, 1:3]).max()
+gyro_max = np.abs(sim['U_imu'][:, 0]).max()
+accel_max = np.abs(sim['U_imu'][:, 1:3]).max()
 print(f"Max gyro: {gyro_max:.2f} rad/s")   # Typical limit: 2000°/s = 35 rad/s
 print(f"Max accel: {accel_max:.2f} m/s²")  # Typical limit: 16g = 157 m/s²
 ```
@@ -835,13 +836,15 @@ filter_args = (
 result_ekf = extended_kalman_filter(*filter_args)
 result_ukf = unscented_kalman_filter(*filter_args)
 
-layout = get_layout(cfg.state_mode)
-truth_pos = sim["x_truth"][:, layout.pos_idx]
+X_truth_at_cam = np.array(
+    [sim["X_truth"][np.argmin(np.abs(sim["t_imu"] - t_c))] for t_c in sim["t_cam_exp"]]
+)
+truth_pos = X_truth_at_cam[:, :2]
 rmse_ekf = compute_position_rmse(
-    result_ekf.filtered_means[:, layout.pos_idx], truth_pos
+    np.asarray(result_ekf.filtered_means[:, :2]), truth_pos
 )
 rmse_ukf = compute_position_rmse(
-    result_ukf.filtered_means[:, layout.pos_idx], truth_pos
+    np.asarray(result_ukf.filtered_means[:, :2]), truth_pos
 )
 print(f"EKF RMSE: {rmse_ekf*100:.2f} cm")
 print(f"UKF RMSE: {rmse_ukf*100:.2f} cm")
