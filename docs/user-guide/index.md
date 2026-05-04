@@ -63,9 +63,9 @@ The Kalman filter optimally weights these sensors based on their uncertainties.
 
 A well-tuned filter is "consistent" when its uncertainty estimates match actual errors:
 
-- **NEES < 6**: Underconfident (covariance too large)
-- **NEES ~ 8**: Well-tuned (for 8D state)
-- **NEES > 10**: Overconfident (covariance too small)
+- **NEES < 1**: Underconfident (covariance too large)
+- **NEES ~ 2**: Well-tuned (position-only NEES, ``state_dim=2``)
+- **NEES > 4**: Overconfident (covariance too small)
 
 See the [Tuning Guide](tuning.md) for how to achieve consistency.
 
@@ -154,5 +154,5 @@ for q_pos in [0.01, 0.02, 0.05, 0.1]:
     )
     results.append((q_pos, float(nees.mean())))
 
-best_q = min(results, key=lambda r: abs(r[1] - 8.0))
+best_q = min(results, key=lambda r: abs(r[1] - 2.0))  # Target = state_dim
 ```

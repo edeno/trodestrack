@@ -226,23 +226,26 @@ X_truth_at_cam = np.array(
 filtered = np.asarray(result.filtered_means)
 filtered_cov = np.asarray(result.filtered_covariances)
 
-# This example assumes the default ``2d_full`` layout where the first 5
-# state columns align with ``X_truth``. For other layouts, index via
-# ``layout.pos_idx``/``layout.vel_idx``/``layout.heading_idx`` instead.
+# Layout-aware indexing handles every scalar-heading state mode.
+pos_idx = list(layout.pos_idx)
+vel_idx_2d = list(layout.vel_idx)[:2]  # X_truth has only vx, vy
+heading_col = int(layout.heading_idx)
+
+# Position-only NEES (state_dim=2): expected mean ~ 2 for a consistent filter.
 nees = compute_nees(
     states_true=X_truth_at_cam[:, :2],
-    states_est=filtered[:, :2],
-    covariances_est=filtered_cov[:, :2, :2],
+    states_est=filtered[:, pos_idx],
+    covariances_est=filtered_cov[np.ix_(np.arange(filtered.shape[0]), pos_idx, pos_idx)],
 )
 generate_qa_report(
     pdf_path="report.pdf",
     t=sim["t_cam_exp"],
     positions_true=X_truth_at_cam[:, :2],
-    positions_est=filtered[:, :2],
+    positions_est=filtered[:, pos_idx],
     velocities_true=X_truth_at_cam[:, 2:4],
-    velocities_est=filtered[:, 2:4],
+    velocities_est=filtered[:, vel_idx_2d],
     headings_true=X_truth_at_cam[:, 4],
-    headings_est=filtered[:, 4],
+    headings_est=filtered[:, heading_col],
     nees=nees,
     state_dim=2,
 )

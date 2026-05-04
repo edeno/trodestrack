@@ -24,9 +24,13 @@ This guide helps you tune Extended Kalman Filter (EKF) and Unscented Kalman Filt
 
 1. **Run with default parameters** on your data
 2. **Check NEES** (Normalized Estimation Error Squared) in the QA report
-3. **If NEES > 10.0** → filter is overconfident (covariance too small) → increase process noise Q or measurement noise R
-4. **If NEES < 6.0** → filter is underconfident (covariance too large) → decrease process noise or measurement noise
-5. **Iterate** until NEES ≈ 8.0 ± 2.0 (for 8D state)
+3. **If NEES > 4.0** → filter is overconfident (covariance too small) → increase process noise Q or measurement noise R
+4. **If NEES < 1.0** → filter is underconfident (covariance too large) → decrease process noise or measurement noise
+5. **Iterate** until NEES ≈ 2.0 (position-only NEES, ``state_dim=2``)
+
+> *NEES thresholds in this guide are for the position-only NEES the QA snippets
+> compute (chi-square with 2 dof, mean = 2). For full-state NEES with
+> ``state_dim=D``, scale the targets by D/2.*
 
 ### Generate Your First QA Report
 
@@ -58,28 +62,32 @@ X_truth_at_cam = np.array(
 filtered = np.asarray(result.filtered_means)
 filtered_cov = np.asarray(result.filtered_covariances)
 
-# Assumes default 2d_full layout (first 5 state columns align with X_truth).
+pos_idx = list(layout.pos_idx)
+vel_idx_2d = list(layout.vel_idx)[:2]  # X_truth has only vx, vy
+heading_col = int(layout.heading_idx)
+
+# Position-only NEES (state_dim=2): expected mean ~ 2 for a consistent filter.
 nees = compute_nees(
     states_true=X_truth_at_cam[:, :2],
-    states_est=filtered[:, :2],
-    covariances_est=filtered_cov[:, :2, :2],
+    states_est=filtered[:, pos_idx],
+    covariances_est=filtered_cov[np.ix_(np.arange(filtered.shape[0]), pos_idx, pos_idx)],
 )
 generate_qa_report(
     pdf_path="tuning_report.pdf",
     t=sim["t_cam_exp"],
     positions_true=X_truth_at_cam[:, :2],
-    positions_est=filtered[:, :2],
+    positions_est=filtered[:, pos_idx],
     velocities_true=X_truth_at_cam[:, 2:4],
-    velocities_est=filtered[:, 2:4],
+    velocities_est=filtered[:, vel_idx_2d],
     headings_true=X_truth_at_cam[:, 4],
-    headings_est=filtered[:, 4],
+    headings_est=filtered[:, heading_col],
     nees=nees,
     state_dim=2,
 )
 ```
 
 **Key metrics to check:**
-- **NEES panel**: Should be centered around 8.0 with most samples in [6.0, 10.0]
+- **NEES panel**: Should be centered around 2.0 with most samples in [1.0, 4.0] for position-only NEES
 - **Position RMSE**: Target ≤ 2 cm (PRD requirement)
 - **Velocity RMSE**: Target ≤ 10 cm/s
 - **Heading RMSE**: Target ≤ 7°
@@ -101,27 +109,31 @@ Where:
 - `eₖ = x̂ₖ - xₖ` is the estimation error
 - `Pₖ` is the filter's covariance estimate
 
-**For a consistent 8D filter:**
-- **Expected NEES**: 8.0 (equal to state dimension)
-- **95% CI**: [3.3, 13.4] (from χ²(8, 0.025) to χ²(8, 0.975))
-- **Ideal range**: [6.0, 10.0] (informal guideline for "well-tuned")
+**For position-only NEES (state_dim=2, what the QA snippets compute):**
+- **Expected NEES**: 2.0 (equal to state dimension)
+- **95% CI**: [0.05, 7.38] (from χ²(2, 0.025) to χ²(2, 0.975))
+- **Ideal range**: [1.0, 4.0] (informal guideline for "well-tuned")
+
+For NEES on a higher-dimensional aligned subset (e.g., the 5D `[x, y, vx, vy, θ]`
+slice that matches `X_truth`), the expected mean and CI scale with the state
+dimension D used in `compute_nees`.
 
 ### Interpreting NEES
 
-| NEES Value | Diagnosis | Action |
-|------------|-----------|--------|
-| < 6.0 | **Underconfident** (P too large) | Decrease Q or R |
-| 6.0 - 10.0 | **Well-tuned** ✓ | No action needed |
-| > 10.0 | **Overconfident** (P too small) | Increase Q (process noise) or R (measurement noise) |
+| NEES Value (state_dim=2) | Diagnosis | Action |
+|--------------------------|-----------|--------|
+| < 1.0 | **Underconfident** (P too large) | Decrease Q or R |
+| 1.0 - 4.0 | **Well-tuned** ✓ | No action needed |
+| > 4.0 | **Overconfident** (P too small) | Increase Q (process noise) or R (measurement noise) |
 | Highly variable | **Inconsistent** | Check for outliers, tune gating |
 
 ### Why NEES Matters
 
-- **NEES ≈ 8.0** → filter covariance matches actual error
-- **NEES < 6.0** → covariance too large → filter underutilizes measurements
-- **NEES > 10.0** → covariance too small → smoother may overshoot and propagate errors
+- **NEES ≈ 2.0** → filter covariance matches actual error (position-only NEES)
+- **NEES < 1.0** → covariance too large → filter underutilizes measurements
+- **NEES > 4.0** → covariance too small → smoother may overshoot and propagate errors
 
-**Pro Tip:** Slightly underconfident (NEES ≈ 5-7) is safer than overconfident for real data.
+**Pro Tip:** Slightly underconfident (NEES ≈ 1.5-2.0) is safer than overconfident for real data.
 
 ---
 
@@ -151,8 +163,8 @@ class FilterCoreConfig:
 ```
 
 **When to adjust:**
-- **Increase Q** if NEES > 10.0 (filter too confident; covariance too small)
-- **Decrease Q** if NEES < 6.0 (filter too uncertain; covariance too large)
+- **Increase Q** if NEES > 4.0 (filter too confident; covariance too small)
+- **Decrease Q** if NEES < 1.0 (filter too uncertain; covariance too large)
 - **Increase `process_noise_vel`** if velocity estimates lag true motion
 - **Increase `process_noise_gyro_bias`** if heading drifts during rotation
 
@@ -230,11 +242,11 @@ uv run python examples/08_qa_report_generation.py
 
 Open `tuning_report.pdf` and check the **NEES histogram** panel:
 
-- **Most samples in [6.0, 10.0]?** → Well-tuned ✓
-- **Peak > 10.0?** → Overconfident → Go to Step 3
-- **Peak < 6.0?** → Underconfident → Go to Step 4
+- **Most samples in [1.0, 4.0]?** → Well-tuned ✓
+- **Peak > 4.0?** → Overconfident → Go to Step 3
+- **Peak < 1.0?** → Underconfident → Go to Step 4
 
-### Step 3: Fix Overconfidence (NEES > 10.0)
+### Step 3: Fix Overconfidence (NEES > 4.0)
 
 **Problem:** Filter covariance is too small.
 
@@ -258,9 +270,9 @@ Open `tuning_report.pdf` and check the **NEES histogram** panel:
    )
    ```
 
-**Re-run and check NEES.** Repeat until NEES ≈ 8.0.
+**Re-run and check NEES.** Repeat until NEES ≈ 2.0.
 
-### Step 4: Fix Underconfidence (NEES < 6.0)
+### Step 4: Fix Underconfidence (NEES < 1.0)
 
 **Problem:** Filter covariance is too large.
 
@@ -284,7 +296,7 @@ Open `tuning_report.pdf` and check the **NEES histogram** panel:
    )
    ```
 
-**Re-run and check NEES.** Repeat until NEES ≈ 8.0.
+**Re-run and check NEES.** Repeat until NEES ≈ 2.0.
 
 ### Step 5: Check RMSE vs PRD Targets
 
@@ -375,7 +387,7 @@ cfg = EKFConfig(
 
 ### Scenario 5: Fast, Erratic Motion
 
-**Symptom:** Filter lags behind true motion, velocity RMSE high, NEES > 10.0.
+**Symptom:** Filter lags behind true motion, velocity RMSE high, NEES > 4.0.
 
 **Solution:** Increase velocity process noise.
 
@@ -510,8 +522,8 @@ cfg = EKFConfig(
 
 | Issue | Parameter | Typical Change |
 |-------|-----------|----------------|
-| NEES > 10.0 | `process_noise_pos` | Increase 2-5× |
-| NEES < 6.0 | `process_noise_pos` | Decrease 2× |
+| NEES > 4.0 | `process_noise_pos` | Increase 2-5× |
+| NEES < 1.0 | `process_noise_pos` | Decrease 2× |
 | Velocity lag | `process_noise_vel` | Increase 2× |
 | Heading drift | `use_heading_measurement` | Set to `True` |
 | Stationary drift | `enable_zupt` | Set to `True` |

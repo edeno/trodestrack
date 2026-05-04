@@ -192,7 +192,7 @@ result = extended_kalman_filter(
    ```
 
 2. **Check NEES:**
-   - If NEES << 6: Filter is underconfident (covariance too large) → Kalman gain too high → trusts noisy measurements too much
+   - If NEES < 1.0: Filter is underconfident (covariance too large) → Kalman gain too high → trusts noisy measurements too much
 
 #### Solutions
 
@@ -309,7 +309,7 @@ smoothed = rts_smoother(
    - If velocity RMSE is high → filter can't track acceleration changes
 
 2. **Check NEES:**
-   - If NEES > 10 → filter is overconfident (covariance too small) → Kalman gain too low → trusts model too much
+   - If NEES > 4.0 → filter is overconfident (covariance too small) → Kalman gain too low → trusts model too much
 
 #### Solutions
 
@@ -643,8 +643,8 @@ See **[TUNING.md](TUNING.md)** for detailed parameter tuning guidance.
 
 **Quick fixes:**
 
-- **NEES > 10.0** (overconfident, P too small) → Increase `process_noise_pos` by 2-5× OR increase `measurement_noise_pos` by 2×
-- **NEES < 6.0** (underconfident, P too large) → Decrease `process_noise_pos` by 2× OR decrease `measurement_noise_pos` by 2×
+- **NEES > 4.0** (overconfident, P too small) → Increase `process_noise_pos` by 2-5× OR increase `measurement_noise_pos` by 2×
+- **NEES < 1.0** (underconfident, P too large) → Decrease `process_noise_pos` by 2× OR decrease `measurement_noise_pos` by 2×
 
 ---
 

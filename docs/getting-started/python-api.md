@@ -249,31 +249,38 @@ See [State Layouts](../user-guide/state-layouts.md) for complete documentation.
 
 ```python
 import numpy as np
+from trodestrack.models.state_layout import get_layout
 from trodestrack.qa.metrics import compute_nees
 from trodestrack.qa.report import generate_qa_report
 
-# Align ground truth (IMU rate, 5D) to camera frames.
+layout = get_layout(cfg.state_mode)
+
+# Align ground truth (IMU rate, 5D [x, y, vx, vy, theta]) to camera frames.
 X_truth_at_cam = np.array(
     [sim["X_truth"][np.argmin(np.abs(sim["t_imu"] - t_c))] for t_c in sim["t_cam_exp"]]
 )
 filtered = np.asarray(result.filtered_means)
 filtered_cov = np.asarray(result.filtered_covariances)
 
-# Assumes default 2d_full layout (first 5 columns align with X_truth).
+pos_idx = list(layout.pos_idx)
+vel_idx_2d = list(layout.vel_idx)[:2]  # X_truth has only vx, vy
+heading_col = int(layout.heading_idx)
+
+# Position-only NEES (state_dim=2): expected mean ~ 2 for a consistent filter.
 nees = compute_nees(
     states_true=X_truth_at_cam[:, :2],
-    states_est=filtered[:, :2],
-    covariances_est=filtered_cov[:, :2, :2],
+    states_est=filtered[:, pos_idx],
+    covariances_est=filtered_cov[np.ix_(np.arange(filtered.shape[0]), pos_idx, pos_idx)],
 )
 generate_qa_report(
     pdf_path="qa_report.pdf",
     t=sim["t_cam_exp"],
     positions_true=X_truth_at_cam[:, :2],
-    positions_est=filtered[:, :2],
+    positions_est=filtered[:, pos_idx],
     velocities_true=X_truth_at_cam[:, 2:4],
-    velocities_est=filtered[:, 2:4],
+    velocities_est=filtered[:, vel_idx_2d],
     headings_true=X_truth_at_cam[:, 4],
-    headings_est=filtered[:, 4],
+    headings_est=filtered[:, heading_col],
     nees=nees,
     state_dim=2,
 )
