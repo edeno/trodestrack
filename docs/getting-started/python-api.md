@@ -176,9 +176,10 @@ filter_args = (
 )
 result = extended_kalman_filter(*filter_args)
 
-# Result is an EKFResult NamedTuple
-print(f"Filtered means shape: {result.filtered_means.shape}")       # (N, 8)
-print(f"Filtered covariances shape: {result.filtered_covariances.shape}")  # (N, 8, 8)
+# Result is an EKFResult NamedTuple. The state dimension follows the
+# layout for cfg.state_mode (default "2d_cam_3d_imu" -> 10D state).
+print(f"Filtered means shape: {result.filtered_means.shape}")       # (N, layout.n)
+print(f"Filtered covariances shape: {result.filtered_covariances.shape}")  # (N, layout.n, layout.n)
 ```
 
 ### Unscented Kalman Filter

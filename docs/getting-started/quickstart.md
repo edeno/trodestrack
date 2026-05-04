@@ -87,7 +87,7 @@ result = extended_kalman_filter(
 
 # Access results
 positions = result.filtered_means[:, :2]  # (N, 2) positions
-covariances = result.filtered_covariances  # (N, 8, 8) covariances
+covariances = result.filtered_covariances  # (N, layout.n, layout.n)
 ```
 
 ### Use State Layouts (Recommended!)
@@ -98,10 +98,11 @@ from trodestrack.models.state_layout import get_layout
 # Get layout from config (dimension-agnostic!)
 layout = get_layout(cfg.state_mode)
 
-# Extract states using layout indices
+# Extract states using layout indices.
+# Defaults: state_mode="2d_cam_3d_imu" -> layout.n=10, layout.vel_idx=(2,3,4) (vx, vy, vz).
 positions = result.filtered_means[:, layout.pos_idx]      # (N, 2)
-velocities = result.filtered_means[:, layout.vel_idx]     # (N, 2)
-headings = result.filtered_means[:, layout.heading_idx]   # (N,)
+velocities = result.filtered_means[:, layout.vel_idx]     # (N, len(layout.vel_idx))
+headings = result.filtered_means[:, layout.heading_idx]   # (N,) for scalar-heading layouts
 ```
 
 !!! warning "Avoid Hardcoded Indices"

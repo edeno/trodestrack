@@ -63,7 +63,7 @@ uv run python examples/08_qa_report_generation.py
 ```
 
 **Check these metrics first:**
-1. **NEES histogram**: Should be centered around 8.0
+1. **NEES histogram**: Should be centered around 2.0 (position-only NEES; expected mean equals state_dim)
 2. **Position RMSE**: Should be < 10 cm (ideally < 2 cm)
 3. **Innovation statistics**: Should be zero-mean
 4. **Trajectory plot**: Check for discontinuities or divergence
@@ -637,7 +637,7 @@ jax.config.update('jax_platform_name', 'gpu')
 
 ### NEES Inconsistency
 
-**Symptom:** NEES histogram is not centered around 8.0.
+**Symptom:** NEES histogram is not centered around 2.0 (position-only NEES; expected mean equals state_dim).
 
 See **[TUNING.md](TUNING.md)** for detailed parameter tuning guidance.
 
