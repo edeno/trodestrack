@@ -110,14 +110,23 @@ Click on your symptom to jump to the solution:
 
 3. **Check initial state:**
    ```python
+   import jax.numpy as jnp
    from trodestrack.models.filter_common import initialize_state
 
    layout = get_layout(cfg.state_mode)
+   dt_cam = float(np.mean(np.diff(sim["t_cam_exp"])))
    state = initialize_state(
-       sim["Z_cam_led1"][0], sim["Z_cam_led2"][0], cfg, layout=layout
+       sim["Z_cam_led1"],
+       sim["Z_cam_led2"],
+       sim["mask_cam"],
+       dt_cam,
+       cfg.led_distance,
+       layout=layout,
    )
-   print(f"Initial position: {state.mean[layout.pos_idx]}")  # Should be in arena
-   print(f"Initial velocity: {state.mean[layout.vel_idx]}")  # Should be < 2 m/s
+   pos = state.mean[jnp.array(layout.pos_idx)]
+   vel = state.mean[jnp.array(layout.vel_idx)]
+   print(f"Initial position: {pos}")  # Should be in arena
+   print(f"Initial velocity: {vel}")  # Should be < 2 m/s
    ```
 
 #### Solutions
@@ -144,8 +153,14 @@ from trodestrack.models.filter_common import initialize_state
 from trodestrack.models.state_layout import get_layout
 
 layout = get_layout(cfg.state_mode)
+dt_cam = float(np.mean(np.diff(sim["t_cam_exp"])))
 state = initialize_state(
-    sim["Z_cam_led1"][0], sim["Z_cam_led2"][0], cfg, layout=layout
+    sim["Z_cam_led1"],
+    sim["Z_cam_led2"],
+    sim["mask_cam"],
+    dt_cam,
+    cfg.led_distance,
+    layout=layout,
 )
 inflated = EKFState(mean=state.mean, cov=state.cov * 10.0)
 result = extended_kalman_filter(
@@ -177,7 +192,7 @@ result = extended_kalman_filter(
    ```
 
 2. **Check NEES:**
-   - If NEES >> 10: Filter is underconfident → trusts noisy measurements too much
+   - If NEES << 6: Filter is underconfident (covariance too large) → Kalman gain too high → trusts noisy measurements too much
 
 #### Solutions
 
@@ -201,7 +216,9 @@ cfg = EKFConfig(
 from trodestrack.runtime.offline import rts_smoother
 
 # Smoother eliminates jitter by using future observations
-smoothed = rts_smoother(fwd['x'], fwd['P'], fwd['F'], fwd['Q'], cfg, sim)
+smoothed = rts_smoother(
+    result, cfg, sim["t_imu"], sim["U_imu"], sim["t_cam_exp"]
+)
 ```
 
 **Option 4: Enable Mahalanobis gating (reject outliers)**
@@ -274,7 +291,9 @@ cfg = EKFConfig(
 **Option 4: Use smoother (offline only)**
 ```python
 # Smoother can correct past heading using future observations
-smoothed = rts_smoother(fwd['x'], fwd['P'], fwd['F'], fwd['Q'], cfg, sim)
+smoothed = rts_smoother(
+    result, cfg, sim["t_imu"], sim["U_imu"], sim["t_cam_exp"]
+)
 ```
 
 ---
@@ -289,7 +308,7 @@ smoothed = rts_smoother(fwd['x'], fwd['P'], fwd['F'], fwd['Q'], cfg, sim)
    - If velocity RMSE is high → filter can't track acceleration changes
 
 2. **Check NEES:**
-   - If NEES < 6 → filter is overconfident → trusts model too much
+   - If NEES > 10 → filter is overconfident (covariance too small) → Kalman gain too low → trusts model too much
 
 #### Solutions
 
@@ -425,7 +444,9 @@ cfg = EKFConfig(
 **Option 2: Use smoother (offline only)**
 ```python
 # Smoother corrects dropout drift using future observations
-smoothed = rts_smoother(fwd['x'], fwd['P'], fwd['F'], fwd['Q'], cfg, sim)
+smoothed = rts_smoother(
+    result, cfg, sim["t_imu"], sim["U_imu"], sim["t_cam_exp"]
+)
 ```
 
 **Example:** 5s dropout drift reduces from ~2 m (filter) to ~0.5 m (smoother).
@@ -621,8 +642,8 @@ See **[TUNING.md](TUNING.md)** for detailed parameter tuning guidance.
 
 **Quick fixes:**
 
-- **NEES < 6.0** → Increase `process_noise_pos` by 2-5×
-- **NEES > 10.0** → Decrease `process_noise_pos` by 2× OR increase `measurement_noise_pos` by 2×
+- **NEES > 10.0** (overconfident, P too small) → Increase `process_noise_pos` by 2-5× OR increase `measurement_noise_pos` by 2×
+- **NEES < 6.0** (underconfident, P too large) → Decrease `process_noise_pos` by 2× OR decrease `measurement_noise_pos` by 2×
 
 ---
 

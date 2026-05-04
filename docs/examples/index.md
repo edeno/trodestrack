@@ -213,8 +213,8 @@ uv run python examples/08_qa_report_generation.py
 **Examples 03-04** use NEES (Normalized Estimation Error Squared) to check if the filter's uncertainty estimates are honest:
 
 - NEES ~ 8.0 (for 8D state) = filter is consistent
-- NEES < 6.0 = overconfident (covariance too small)
-- NEES > 10.0 = underconfident (covariance too large)
+- NEES < 6.0 = underconfident (covariance too large)
+- NEES > 10.0 = overconfident (covariance too small)
 
 ### Computational Tradeoffs
 

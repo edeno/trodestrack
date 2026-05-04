@@ -63,9 +63,9 @@ The Kalman filter optimally weights these sensors based on their uncertainties.
 
 A well-tuned filter is "consistent" when its uncertainty estimates match actual errors:
 
-- **NEES < 6**: Overconfident (covariance too small)
+- **NEES < 6**: Underconfident (covariance too large)
 - **NEES ~ 8**: Well-tuned (for 8D state)
-- **NEES > 10**: Underconfident (covariance too large)
+- **NEES > 10**: Overconfident (covariance too small)
 
 See the [Tuning Guide](tuning.md) for how to achieve consistency.
 
