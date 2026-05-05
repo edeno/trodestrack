@@ -108,11 +108,20 @@ enforces the layout-specific channel rules at filter entry.
 
 ## Common Workflows
 
-### Online Tracking
+### Online (Forward-Only) Tracking
 
-For incremental, frame-by-frame use, run the `trodestrack online` CLI
-command (`uv run trodestrack online --help` for usage). It wraps the EKF
-predict/update primitives for streaming inputs.
+The `trodestrack online` CLI command is **forward-filter-only** (no
+backward smoothing): it loads the full IMU / camera / LED arrays from
+disk, runs the EKF in a single forward pass via `extended_kalman_filter`,
+and writes filtered means + covariances to `--output-dir`. It is *not*
+streaming — there is no per-frame ingest loop. "Online" here means
+"forward-only / suitable for online use offline" rather than "incremental
+real-time".
+
+True frame-by-frame ingest would require driving `predict_step` /
+`update_step` from `trodestrack.models.filter_common` directly; that is
+not exposed as a CLI today. See `uv run trodestrack online --help` for
+the batch CLI.
 
 ### Offline Analysis
 

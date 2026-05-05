@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
+from trodestrack.models.state_layout import get_layout
 from trodestrack.sim.rat_imu import RatIMUSimConfig, simulate_rat_imu
 
 
@@ -62,6 +63,15 @@ def main():
         Z_cam_led2=sim_data["Z_cam_led2"],
         mask_cam=mask_with_dropout,
     )
+
+    # Resolve bias indices via the actual filter layout — under the default
+    # 10D 2d_cam_3d_imu layout, b_gz is at column 6 and accel-bias columns
+    # are 7..9; hardcoding 5 / 6:8 silently plotted heading and gyro bias.
+    layout = get_layout(ekf_config.state_mode)
+    gyro_bias_idx = layout.bias_gyro_idx[0]
+    accel_bias_x_idx = layout.bias_accel_idx[0]
+    accel_bias_y_idx = layout.bias_accel_idx[1]
+    accel_bias_slice = list(layout.bias_accel_idx)[:2]
 
     # Interpolate truth
     t_truth = sim_data["t_imu"]
@@ -144,13 +154,19 @@ def main():
     # Bias estimates
     ax = axes[1, 0]
     ax.plot(
-        sim_data["t_cam_exp"], result.filtered_means[:, 5], label="Gyro Bias (rad/s)"
+        sim_data["t_cam_exp"],
+        result.filtered_means[:, gyro_bias_idx],
+        label="Gyro Bias (rad/s)",
     )
     ax.plot(
-        sim_data["t_cam_exp"], result.filtered_means[:, 6], label="Accel X Bias (m/s²)"
+        sim_data["t_cam_exp"],
+        result.filtered_means[:, accel_bias_x_idx],
+        label="Accel X Bias (m/s²)",
     )
     ax.plot(
-        sim_data["t_cam_exp"], result.filtered_means[:, 7], label="Accel Y Bias (m/s²)"
+        sim_data["t_cam_exp"],
+        result.filtered_means[:, accel_bias_y_idx],
+        label="Accel Y Bias (m/s²)",
     )
     ax.axvspan(5.0, 10.0, color="red", alpha=0.2, label="Dropout")
     ax.set_xlabel("Time (s)")
@@ -197,13 +213,20 @@ def main():
     print(f"EKF estimated motion during dropout: {drift_ekf:.3f} cm")
     print(f"Drift ERROR (EKF vs truth at end):   {drift_error:.3f} cm")
 
-    # Check bias drift
-    bias_accel_start = result.filtered_means[dropout_start_idx, 6:8]
-    bias_accel_end = result.filtered_means[dropout_end_idx, 6:8]
+    # Check bias drift via layout indices, not the hardcoded 6:8 / 5 that
+    # mixed accel-bias and gyro-bias columns under the default 10D layout.
+    bias_accel_start = result.filtered_means[dropout_start_idx, accel_bias_slice]
+    bias_accel_end = result.filtered_means[dropout_end_idx, accel_bias_slice]
     bias_drift = np.linalg.norm(bias_accel_end - bias_accel_start)
     print(f"\nAccelerometer bias drift during dropout: {bias_drift:.6f} m/s²")
-    print(f"Gyro bias start: {result.filtered_means[dropout_start_idx, 5]:.6f} rad/s")
-    print(f"Gyro bias end:   {result.filtered_means[dropout_end_idx, 5]:.6f} rad/s")
+    print(
+        f"Gyro bias start: "
+        f"{result.filtered_means[dropout_start_idx, gyro_bias_idx]:.6f} rad/s"
+    )
+    print(
+        f"Gyro bias end:   "
+        f"{result.filtered_means[dropout_end_idx, gyro_bias_idx]:.6f} rad/s"
+    )
 
 
 if __name__ == "__main__":

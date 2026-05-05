@@ -54,6 +54,14 @@ jobs:
     name: Publish to PyPI
     needs: [build]
     runs-on: ubuntu-latest
+    # Only publish to real PyPI for full (non-prerelease) GitHub releases
+    # or for an explicit workflow_dispatch with a release_tag. The release
+    # event sets github.event.release.prerelease to true for prereleases;
+    # gating here keeps prereleases off pypi.org.
+    if: |
+      (github.event_name == 'release' && github.event.release.prerelease == false) ||
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push'
     environment:
       name: pypi
       url: https://pypi.org/p/trodestrack
@@ -74,7 +82,8 @@ jobs:
     name: Publish to TestPyPI (for testing)
     needs: [build]
     runs-on: ubuntu-latest
-    if: github.event.release.prerelease
+    # TestPyPI is the destination for prerelease GitHub releases.
+    if: github.event_name == 'release' && github.event.release.prerelease == true
     environment:
       name: testpypi
       url: https://test.pypi.org/p/trodestrack
