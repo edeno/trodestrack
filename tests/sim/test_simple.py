@@ -513,7 +513,10 @@ def test_seed_reproducibility(config, sim_func, kwargs):
 
     assert np.allclose(sim1["X_truth"], sim2["X_truth"])
     assert np.allclose(sim1["U_imu"], sim2["U_imu"])
-    assert np.allclose(sim1["Z_cam_led1"], sim2["Z_cam_led1"])
+    # equal_nan=True since simple sims now NaN-out dropped frames in
+    # Z_cam_led1 to match the rat_imu convention; the NaN positions are
+    # deterministic from the seed and should match between runs.
+    assert np.allclose(sim1["Z_cam_led1"], sim2["Z_cam_led1"], equal_nan=True)
     assert np.array_equal(sim1["mask_cam"], sim2["mask_cam"])
 
 
@@ -533,6 +536,13 @@ def test_different_seeds_produce_different_results(config, sim_func, kwargs):
     # Ground truth should be the same
     assert np.allclose(sim1["X_truth"], sim2["X_truth"])
 
-    # But measurements should differ (due to noise)
+    # But measurements should differ (due to noise). Compare only finite
+    # samples — np.allclose returns False on NaN even when both arrays
+    # have identical NaN positions, so the raw `not np.allclose` would
+    # spuriously pass once the simple sims NaN-out dropped frames.
     assert not np.allclose(sim1["U_imu"], sim2["U_imu"])
-    assert not np.allclose(sim1["Z_cam_led1"], sim2["Z_cam_led1"])
+    finite_both = np.isfinite(sim1["Z_cam_led1"]) & np.isfinite(sim2["Z_cam_led1"])
+    assert finite_both.any(), "expected at least one finite-vs-finite LED1 sample"
+    assert not np.allclose(
+        sim1["Z_cam_led1"][finite_both], sim2["Z_cam_led1"][finite_both]
+    )

@@ -258,7 +258,7 @@ def confidence_to_noise_scale(
         >>> conf = np.array([1.0, 0.5, 0.1])
         >>> scales = confidence_to_noise_scale(conf, base_std=0.01, epsilon=0.01)
         >>> scales  # Lower confidence → higher noise
-        array([0.00990099, 0.01414214, 0.03015113])
+        array([0.00995037, 0.0140028 , 0.03015113])
     """
     return base_std / np.sqrt(epsilon + confidence)
 

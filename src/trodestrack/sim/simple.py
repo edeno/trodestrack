@@ -212,6 +212,10 @@ def simulate_stationary(
             position[1] + cam_noise_y,
         ]
     )
+    # Match rat_imu's convention: dropped frames carry NaN LED coordinates
+    # so diagnostics that infer validity from finite values agree with
+    # mask_cam. Filters that honor mask_cam are unaffected.
+    Z_cam_led1[~mask_cam] = np.nan
 
     # Single LED mask (for consistency, LED1 only)
     mask_led1 = mask_cam.copy()
@@ -362,6 +366,9 @@ def simulate_constant_velocity(
             y_cam + cam_noise_y,
         ]
     )
+    # Match rat_imu's convention: dropped frames carry NaN LED coordinates
+    # so diagnostics inferring validity from finite values agree with mask_cam.
+    Z_cam_led1[~mask_cam] = np.nan
 
     # Single LED mask (for consistency, LED1 only)
     mask_led1 = mask_cam.copy()
@@ -550,6 +557,12 @@ def simulate_circular(
             y_cam + dy + cam_noise_y2,
         ]
     )
+
+    # Match rat_imu's convention: dropped frames carry NaN LED coordinates
+    # so diagnostics inferring validity from finite values agree with
+    # mask_cam. Filters that honor mask_cam are unaffected.
+    Z_cam_led1[~mask_cam] = np.nan
+    Z_cam_led2[~mask_cam] = np.nan
 
     # Both LEDs available for heading observability
     mask_led1 = mask_cam.copy()

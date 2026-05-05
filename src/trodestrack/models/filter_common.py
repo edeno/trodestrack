@@ -273,6 +273,27 @@ class FilterCoreConfig:
                 f"fraction; got {self.led_distance_tolerance!r}."
             )
 
+        # Dropout / blackout multipliers scale the per-step Q diagonal in
+        # process_noise.assemble_Q during camera blackouts. A negative
+        # multiplier flips the sign of the corresponding Q diagonal entry
+        # (verified: dropout_q_vel_multiplier=-1.0 → min eig ≈ -5e-5),
+        # NaN propagates through Q and breaks every downstream solve, and
+        # the IMU-noise scale appears multiplicatively in G Q_u Gᵀ. All
+        # four are unitless scaling factors; require finite-non-negative.
+        scale_fields = (
+            "dropout_q_pos_multiplier",
+            "dropout_q_vel_multiplier",
+            "dropout_q_bias_multiplier",
+            "blackout_imu_noise_scale",
+        )
+        for fname in scale_fields:
+            value = getattr(self, fname)
+            if not np.isfinite(value) or value < 0:
+                raise ValueError(
+                    f"{fname} must be a finite non-negative unitless "
+                    f"multiplier; got {value!r}."
+                )
+
     def tree_flatten(self) -> tuple[tuple, dict]:
         """Flatten config for JAX PyTree registration.
 
