@@ -129,9 +129,23 @@ def load_run_data(run_dir: Path) -> dict[str, NDArray | int]:
         "nees": np.load(run_dir / "nees.npy"),
     }
 
-    # Load state dimension
+    # Load state dimension. Must be a positive integer — chi2_bounds /
+    # compute_nees_stats use it as the chi-squared df, and df <= 0 makes
+    # scipy.stats.chi2.ppf return NaN bounds that would silently embed in
+    # the QA report.
     state_dim_text = (run_dir / "state_dim.txt").read_text().strip()
-    data["state_dim"] = int(state_dim_text)
+    try:
+        state_dim = int(state_dim_text)
+    except ValueError as e:
+        raise ValueError(
+            f"state_dim.txt must contain an integer; got {state_dim_text!r}."
+        ) from e
+    if state_dim < 1:
+        raise ValueError(
+            "state_dim must be a positive integer (degrees of freedom for "
+            f"NEES chi-squared bounds); got {state_dim} from state_dim.txt."
+        )
+    data["state_dim"] = state_dim
 
     # Validate data shapes for consistency
     N = len(data["t"])
@@ -175,11 +189,25 @@ def load_run_data(run_dir: Path) -> dict[str, NDArray | int]:
                 "trajectory time base."
             )
         data["nis"] = nis
-        # Load measurement dimension if NIS exists
+        # Load measurement dimension if NIS exists. Same positive-integer
+        # contract as state_dim — used as df for the NIS chi-squared bounds.
         meas_dim_path = run_dir / "measurement_dim.txt"
         if meas_dim_path.exists():
             meas_dim_text = meas_dim_path.read_text().strip()
-            data["measurement_dim"] = int(meas_dim_text)
+            try:
+                meas_dim = int(meas_dim_text)
+            except ValueError as e:
+                raise ValueError(
+                    "measurement_dim.txt must contain an integer; got "
+                    f"{meas_dim_text!r}."
+                ) from e
+            if meas_dim < 1:
+                raise ValueError(
+                    "measurement_dim must be a positive integer (degrees of "
+                    "freedom for NIS chi-squared bounds); got "
+                    f"{meas_dim} from measurement_dim.txt."
+                )
+            data["measurement_dim"] = meas_dim
 
     return data
 

@@ -728,6 +728,18 @@ def chi2_bounds(df: int, confidence: float = 0.95) -> tuple[float, float]:
         For NEES/NIS consistency checks, approximately `confidence*100`% of
         values should fall within this interval if the filter is well-calibrated.
     """
+    # scipy.stats.chi2.ppf returns NaN for df <= 0, which the QA report
+    # would otherwise embed as nan chi2_lower / chi2_upper / 0% in_bounds
+    # entries. Reject up front with a precise message.
+    if not isinstance(df, (int, np.integer)) or df < 1:
+        raise ValueError(
+            f"df must be a positive integer (degrees of freedom); got {df!r}."
+        )
+    if not np.isfinite(confidence) or not (0.0 < confidence < 1.0):
+        raise ValueError(
+            f"confidence must be a finite value in (0, 1); got {confidence!r}."
+        )
+
     from scipy.stats import chi2
 
     alpha = 1.0 - confidence

@@ -311,6 +311,18 @@ class FilterCoreConfig:
                 f"fraction; got {self.led_distance_tolerance!r}."
             )
 
+        # damping_coeff (1/s) appears multiplicatively in the velocity
+        # propagation step (`vel_next = vel + accel * dt - damping *
+        # vel * dt`). NaN here propagates into every state and covariance
+        # entry from the first prediction onward; a negative value would
+        # invert damping into a destabilizing feedback. Require finite
+        # non-negative.
+        if not np.isfinite(self.damping_coeff) or self.damping_coeff < 0:
+            raise ValueError(
+                "damping_coeff must be a finite non-negative value (1/s); "
+                f"got {self.damping_coeff!r}."
+            )
+
         # Dropout / blackout multipliers scale the per-step Q diagonal in
         # process_noise.assemble_Q during camera blackouts. A negative
         # multiplier flips the sign of the corresponding Q diagonal entry
