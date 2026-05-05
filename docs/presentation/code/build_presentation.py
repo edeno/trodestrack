@@ -487,13 +487,13 @@ def build_section_1_problem(builder):
         title="What is TrodesTrack?",
         bullets=[
             "Python package for sensor-fusion rat tracking",
-            "Inputs: Trodes/DLC camera + SpikeGadgets IMU",
+            "Inputs: NumPy arrays (LED positions + IMU samples); Trodes/DLC/SpikeGadgets loaders planned",
             "Algorithms: Extended Kalman Filter (EKF), Unscented Kalman Filter (UKF), RTS Smoother",
             "Outputs: Position, velocity, heading + uncertainty",
             "Key features: Bias estimation, outlier rejection, dropout tolerance",
             "Built with JAX: Fast (300× realtime), GPU-ready",
         ],
-        notes="TrodesTrack is an open-source Python package. It ingests camera tracking (Trodes LEDs or DeepLabCut) and SpikeGadgets IMU data. Implements EKF, UKF, and RTS smoothing with JAX (300× realtime on CPU). Outputs full state [x, y, vx, vy, θ, biases] with uncertainty estimates (covariance matrices).",
+        notes="TrodesTrack is an open-source Python package. Today it consumes generic NumPy arrays (camera LED positions + IMU samples) — typical sources are Trodes LED CSV, DeepLabCut CSV, and SpikeGadgets IMU exports, but format-specific loaders are still on the roadmap. Implements EKF, UKF, and RTS smoothing with JAX (300× realtime on CPU). Outputs full state [x, y, vx, vy, θ, biases] with uncertainty estimates (covariance matrices).",
     )
 
     # Slide 8: Quick Preview - Before & After
@@ -694,16 +694,16 @@ def build_section_3_features(builder):
 
     # Slide 25: Real Data Support
     builder.add_content_slide(
-        title="Real Data Support",
+        title="Real Data Support (Status)",
         bullets=[
-            "Input formats: Trodes LEDs, DeepLabCut CSV, SpikeGadgets IMU (.mda, .rec)",
-            "Homography calibration: Interactive tool (click arena corners)",
-            "Time synchronization: Hardware-synced (SpikeGadgets clock)",
-            "Preprocessing: Remove IMU sample-and-hold repeats, convert units",
-            "Output formats: Parquet (states), HDF5 (diagnostics), MP4 (videos)",
-            "Example datasets: fetch_example() downloads demo session",
+            "Today: generic NumPy array inputs (timestamps + LED positions + IMU)",
+            "CLI: ``trodestrack online`` / ``smooth`` / ``report`` (text + .npy I/O)",
+            "Diagnostic videos: MP4 via ``trodestrack.viz.video``",
+            "Planned: native loaders for Trodes LED CSV, DeepLabCut CSV, SpikeGadgets MDA/REC",
+            "Planned: homography calibration tool, Parquet/HDF5 outputs, fetch_example() demo data",
+            "User pipeline today: convert to NumPy arrays, then call the filters / CLIs",
         ],
-        notes="TrodesTrack ingests real data from Trodes (LED CSV), DeepLabCut (DLC CSV), and SpikeGadgets (MDA/REC files). Homography calibration tool (calib-homography command) maps pixels to meters via arena corners. Time sync assumes hardware-synced clocks. Preprocessing handles unit conversions and removes sample-and-hold repeats. Outputs: Parquet (time series), HDF5 (full diagnostics), MP4 (videos). Demo datasets available via fetch_example().",
+        notes="TrodesTrack today consumes generic NumPy arrays for IMU + camera inputs and ships a CLI ('trodestrack online / smooth / report') that reads text files (.txt for filter outputs and .npy for QA inputs). Diagnostic videos render via the trodestrack.viz.video module. Format-specific loaders for Trodes LED CSV, DeepLabCut CSV, and SpikeGadgets MDA/REC, a homography calibration tool, Parquet/HDF5 outputs, and a fetch_example() demo helper are planned (see README.md 'In Progress'). Until they ship, users convert their own data to NumPy arrays and call the filter or CLI directly.",
     )
 
 
@@ -741,7 +741,7 @@ def build_section_4_getting_started(builder):
             "📚 Estimated time: 2-3 hours to complete all examples",
             "🚀 Each example runs in <1 minute",
         ],
-        notes="TrodesTrack includes 10 progressive examples in the examples/ folder. Start with simple circular motion (5 lines), then EKF on synthetic data (30 lines). Examples 3-5 cover dropout, UKF, smoothing. Examples 6-8 show real data ingestion. Example 9 demonstrates homography calibration. Example 10 is the full pipeline. Each example is self-contained and runnable in <1 minute. Total learning time: 2-3 hours.",
+        notes="TrodesTrack includes 9 progressive examples in the examples/ folder (01, 02, 03, 03b, 04, 05, 06, 07, 08). Start with simple simulations and a realistic IMU walkthrough (01-02), then EKF basics on synthetic data (03) and dimension-agnostic plot utilities (03b). Example 04 compares EKF vs UKF. Examples 05 and 06 stress-test EKF and UKF under camera dropout. Example 07 demonstrates RTS / IEKS smoothing. Example 08 generates a full QA PDF. Real-data ingestion loaders, homography calibration, and end-to-end pipeline examples are planned but not yet shipped. Each example is self-contained and runnable in <1 minute. Total learning time: 2-3 hours.",
     )
 
     # Slide 29: Decision Tree: Which Filter?
@@ -800,7 +800,7 @@ def build_section_4_getting_started(builder):
             "PRD: Full technical specification (.claude/docs/PRD.md)",
             "Contact: eric.denovellis@ucsf.edu",
         ],
-        notes="All resources available on GitHub. README has quickstart guide. Examples folder has 10 progressive tutorials. TUNING.md explains NEES-based parameter selection. TROUBLESHOOTING.md covers common failure modes. PRD (.claude/docs/PRD.md) has full mathematical specification. Report bugs via GitHub Issues. Contact Eric Denovellis for questions or collaboration.",
+        notes="All resources available on GitHub. README has quickstart guide. Examples folder has 9 progressive tutorials (01-08 plus 03b). TUNING.md explains NEES-based parameter selection. TROUBLESHOOTING.md covers common failure modes. The mathematical specification lives in the implementation plans under docs/plans/. Report bugs via GitHub Issues. Contact Eric Denovellis for questions or collaboration.",
     )
 
 
@@ -870,7 +870,7 @@ def build_section_6_conclusion(builder):
             "⚡ Performance: 300× realtime on CPU (JAX)",
             "",
             "🚀 Start with Example 01 → real data in ~3 hours",
-            "📖 Full documentation + 10 progressive examples",
+            "📖 Full documentation + 9 progressive examples",
         ],
         notes="Key takeaways for neuroscientists. Sensor fusion dramatically outperforms vision-only. Kalman filtering is the optimal framework for combining noisy sensors. IMU bias estimation is critical (not optional). Accelerometers measure specific force (gravity included), gyros drift unbounded. TrodesTrack meets strict accuracy targets: <2 cm RMSE, <3.5 m dropout drift. JAX provides extreme speed. Learning path: 9 examples, ~3 hours to competence.",
     )
