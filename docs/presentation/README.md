@@ -5,12 +5,13 @@ A comprehensive 30-minute presentation explaining TrodesTrack sensor-fusion trac
 ## 📁 Contents
 
 ### Main Deliverable
-- **[trodestrack_presentation.pptx](trodestrack_presentation.pptx)** (2.5 MB)
+- **`trodestrack_presentation.pptx`** (built locally, ~2.5 MB)
   - 46 slides (43 content + 3 section dividers)
   - 16:9 aspect ratio, professional formatting
   - All visuals integrated
   - Speaker notes on every slide
-  - **Ready for presentation!**
+  - **Not tracked in git** (`.pptx` is gitignored). Generate it with the
+    "Rebuild Presentation from Scratch" command below before presenting.
 
 ### Supporting Materials
 - **[PRESENTATION_OUTLINE.md](PRESENTATION_OUTLINE.md)** - Full 43-slide structure with learning objectives
@@ -32,8 +33,10 @@ A comprehensive 30-minute presentation explaining TrodesTrack sensor-fusion trac
   Slides 2 (failure modes) and 18 (9-panel diagnostic) are content slides
   in the current builder; their figure generators have not been landed yet.
 
-- **`videos/`** - 1 demonstration video:
-  - `slide08_beforeafter.mp4` (672 KB, 10 seconds)
+- **`videos/`** - demonstration videos generated locally; **not tracked in
+  git** (`*.mp4` is gitignored). Regenerate with the script below.
+  - `slide08_beforeafter.mp4` (~672 KB, 10 seconds — produced by
+    `generate_slide08_beforeafter_video.py`)
 
 - **`code/`** - Python scripts to regenerate all shipped assets:
   - `build_presentation.py` - PowerPoint builder
@@ -52,19 +55,29 @@ A comprehensive 30-minute presentation explaining TrodesTrack sensor-fusion trac
 ## 🚀 Quick Start
 
 ### View the Presentation
+
+`trodestrack_presentation.pptx` is **not tracked in git**. Build it locally
+first (see "Rebuild Presentation from Scratch" below), then:
+
 ```bash
 open docs/presentation/trodestrack_presentation.pptx
 ```
 
 ### Complete the Presentation (Manual Step)
-The presentation is 99% complete. One manual step required:
 
-1. Open `trodestrack_presentation.pptx`
-2. Navigate to Slide 8 ("Quick Preview: Before & After")
-3. Click Insert → Video → Browse
-4. Select `videos/slide08_beforeafter.mp4`
-5. Resize video to fit content area
-6. Save
+The build is 99% complete after the rebuild step. One manual edit is
+required for the embedded video:
+
+1. Generate the video first:
+   `uv run python docs/presentation/code/generate_slide08_beforeafter_video.py`
+   (writes `docs/presentation/videos/slide08_beforeafter.mp4`; also
+   gitignored).
+2. Open `trodestrack_presentation.pptx`.
+3. Navigate to Slide 8 ("Quick Preview: Before & After").
+4. Click Insert → Video → Browse.
+5. Select `videos/slide08_beforeafter.mp4`.
+6. Resize video to fit content area.
+7. Save.
 
 **Why manual?** python-pptx doesn't support video embedding programmatically.
 

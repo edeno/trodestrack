@@ -613,8 +613,11 @@ covariance grows to match observed error.
 
 ## Further Reading
 
-- **[Examples](../examples/index.md)** - See Examples 03-04 for NEES interpretation
-- **[Troubleshooting](troubleshooting.md)** - Detailed failure mode analysis
+- **Examples** - See Examples 03-04 for NEES interpretation
+  ([source](https://github.com/edeno/trodestrack/tree/master/examples) /
+  [docs page](https://edeno.github.io/trodestrack/examples/))
+- **Troubleshooting** - Detailed failure mode analysis
+  ([docs page](https://edeno.github.io/trodestrack/user-guide/troubleshooting/))
 - **Särkkä (2013)** - "Bayesian Filtering and Smoothing" (textbook reference)
 
 ---

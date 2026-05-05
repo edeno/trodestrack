@@ -951,8 +951,11 @@ print(f"Problem: Position RMSE is {compute_position_rmse(...):.4f} m (expected <
 
 ### Useful Resources
 
-- **[Filter Tuning](tuning.md)** - Parameter selection guide
-- **[Examples](../examples/index.md)** - Educational examples with expected outputs
+- **Filter Tuning** - Parameter selection guide
+  ([docs page](https://edeno.github.io/trodestrack/user-guide/tuning/))
+- **Examples** - Educational examples with expected outputs
+  ([source](https://github.com/edeno/trodestrack/tree/master/examples) /
+  [docs page](https://edeno.github.io/trodestrack/examples/))
 - **[GitHub Issues](https://github.com/edeno/trodestrack/issues)** - Report bugs
 
 ---

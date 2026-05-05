@@ -251,8 +251,9 @@ docs/presentation/
 │   (slide02_failure_modes.png and slide18_diagnostic_panel.png deferred;
 │    those slides render as bullet content in build_presentation.py.)
 │
-├── videos/                                  1 MP4 shipped
-│   └── slide08_beforeafter.mp4              ✅
+├── videos/                                  generated locally (gitignored)
+│   └── slide08_beforeafter.mp4              ✳ regenerate via
+│                                              generate_slide08_beforeafter_video.py
 │
 └── code/                                    7 generator scripts shipped
     ├── generate_slide03_trajectory_comparison.py ✅
