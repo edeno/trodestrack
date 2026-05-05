@@ -14,6 +14,7 @@ from matplotlib.artist import Artist
 from matplotlib.gridspec import GridSpec
 
 from trodestrack.models.ekf import EKFResult
+from trodestrack.models.state_layout import StateLayout, get_heading_index, get_layout
 from trodestrack.sim.utils import SimOut
 from trodestrack.viz.components import (
     BiasEstimatePanelArtist,
@@ -48,6 +49,8 @@ def create_diagnostic_video(
     codec: str = "h264",
     bitrate: int = 2000,
     return_animation: bool = False,
+    state_mode: str | None = None,
+    layout: StateLayout | None = None,
 ) -> Path | tuple[Path, Any, Any]:
     """Generate diagnostic video from simulation data with optional filter overlay.
 
@@ -80,6 +83,16 @@ def create_diagnostic_video(
         Video bitrate (kbps).
     return_animation : bool, default False
         If True, return tuple (path, anim, fig) for testing.
+    state_mode : str or None, optional
+        Filter state-mode name (e.g. ``"2d_full"``, ``"2d_cam_3d_imu"``).
+        Required when ``filter_results`` is provided unless ``layout`` is
+        given directly. Used to resolve heading and bias indices for the
+        diagnostic overlay so they line up with the actual filter layout.
+    layout : StateLayout or None, optional
+        Pre-resolved state layout. Takes precedence over ``state_mode``.
+        Must be a scalar-2D-heading layout (``layout.has_heading_2d``);
+        the diagnostic overlay does not currently support 3D-orientation
+        layouts.
 
     Returns
     -------
@@ -93,15 +106,53 @@ def create_diagnostic_video(
         >>> create_diagnostic_video(sim, "debug.mp4", fps=30)
         PosixPath('debug.mp4')
 
-        # With filter results
+        # With filter results — pass the same state_mode used for the filter so
+        # the overlay reads heading and biases from the right indices.
         >>> from trodestrack.models.ekf import extended_kalman_filter, EKFConfig
-        >>> result = extended_kalman_filter(EKFConfig(), ...)
+        >>> cfg = EKFConfig()
+        >>> result = extended_kalman_filter(cfg, ...)
         >>> create_diagnostic_video(
-        ...     sim, "debug_filter.mp4", filter_results=result, fps=30
+        ...     sim,
+        ...     "debug_filter.mp4",
+        ...     filter_results=result,
+        ...     state_mode=cfg.state_mode,
+        ...     fps=30,
         ... )
         PosixPath('debug_filter.mp4')
     """
     output_path = Path(output_path)
+
+    # Resolve a state layout for the filter overlay. We need the heading and
+    # bias indices for that layout; reading them as fixed columns silently
+    # mislabels heading as vz and shifts the bias panels for non-8D modes.
+    overlay_layout: StateLayout | None = None
+    if filter_results is not None:
+        if layout is not None:
+            overlay_layout = layout
+        elif state_mode is not None:
+            overlay_layout = get_layout(state_mode)
+        else:
+            raise ValueError(
+                "create_diagnostic_video requires `state_mode` (or `layout`) "
+                "when `filter_results` is provided so the overlay can resolve "
+                "heading and bias indices for the actual filter layout. "
+                "Pass state_mode=cfg.state_mode (e.g. '2d_full' or "
+                "'2d_cam_3d_imu')."
+            )
+
+        n_state = int(np.asarray(filter_results.filtered_means).shape[1])
+        if n_state != overlay_layout.n:
+            raise ValueError(
+                f"filter_results state dim ({n_state}) does not match "
+                f"layout '{state_mode or layout}' (n={overlay_layout.n})."
+            )
+        if not overlay_layout.has_heading_2d:
+            raise NotImplementedError(
+                "create_diagnostic_video only supports scalar-2D-heading "
+                "layouts today (e.g. 'vision_only', '2d_full', "
+                f"'2d_cam_3d_imu'). Got layout with heading_idx="
+                f"{overlay_layout.heading_idx!r}."
+            )
 
     # Apply Tufte style
     apply_tufte_style()
@@ -614,11 +665,21 @@ def create_diagnostic_video(
             # ================================================================
             x_est = np.asarray(
                 filter_results.filtered_means[cam_idx]
-            )  # [x, y, vx, vy, θ, b_gz, b_ax, b_ay]
+            )  # state vector laid out per overlay_layout
             P_est = np.asarray(
                 filter_results.filtered_covariances[cam_idx]
-            )  # 8x8 covariance
+            )  # (n, n) covariance, n = overlay_layout.n
             x_pred = np.asarray(filter_results.predicted_means[cam_idx])
+
+            # Layout-resolved indices: assert overlay_layout was set above.
+            assert overlay_layout is not None
+            pos_x_idx, pos_y_idx = overlay_layout.pos_idx[0], overlay_layout.pos_idx[1]
+            vel_x_idx, vel_y_idx = overlay_layout.vel_idx[0], overlay_layout.vel_idx[1]
+            heading_idx_int = get_heading_index(overlay_layout)
+            gyro_bias_idx = overlay_layout.bias_gyro_idx[0]
+            accel_bias_idx = overlay_layout.bias_accel_idx
+            accel_bias_x_idx = accel_bias_idx[0]
+            accel_bias_y_idx = accel_bias_idx[1]
 
             # Ground truth at camera time
             x_truth, y_truth, vx_truth, vy_truth, theta_truth = state
@@ -626,12 +687,18 @@ def create_diagnostic_video(
             # ================================================================
             # 1. Update filter position artist with uncertainty ellipse
             # ================================================================
-            filter_artist.update(float(x_est[0]), float(x_est[1]), P_est)
+            filter_artist.update(
+                float(x_est[pos_x_idx]),
+                float(x_est[pos_y_idx]),
+                P_est[np.ix_([pos_x_idx, pos_y_idx], [pos_x_idx, pos_y_idx])],
+            )
 
             # ================================================================
             # 2. Compute and update measurement residuals (innovations)
             # ================================================================
-            px_pred, py_pred, theta_pred = x_pred[0], x_pred[1], x_pred[4]
+            px_pred = x_pred[pos_x_idx]
+            py_pred = x_pred[pos_y_idx]
+            theta_pred = x_pred[heading_idx_int]
 
             # Apply measurement function to compute predicted LED positions
             dx = 0.5 * led_distance * np.cos(theta_pred)
@@ -654,14 +721,14 @@ def create_diagnostic_video(
             # 3. Compute and update state estimation errors
             # ================================================================
             # Velocity errors (cm/s)
-            error_vx = (x_est[2] - vx_truth) * 100
-            error_vy = (x_est[3] - vy_truth) * 100
+            error_vx = (x_est[vel_x_idx] - vx_truth) * 100
+            error_vy = (x_est[vel_y_idx] - vy_truth) * 100
 
             # Heading error (degrees, properly wrapped)
             def wrap_angle(theta):
                 return np.arctan2(np.sin(theta), np.cos(theta))
 
-            error_heading_rad = wrap_angle(x_est[4] - theta_truth)
+            error_heading_rad = wrap_angle(x_est[heading_idx_int] - theta_truth)
             error_heading_deg = np.degrees(error_heading_rad)
 
             state_error_panel.update(
@@ -674,9 +741,9 @@ def create_diagnostic_video(
             # ================================================================
             # 4. Update bias estimates (show filter learning IMU biases)
             # ================================================================
-            gyro_bias = x_est[5]  # rad/s
-            accel_bias_x = x_est[6]  # m/s²
-            accel_bias_y = x_est[7]  # m/s²
+            gyro_bias = x_est[gyro_bias_idx]  # rad/s
+            accel_bias_x = x_est[accel_bias_x_idx]  # m/s²
+            accel_bias_y = x_est[accel_bias_y_idx]  # m/s²
 
             bias_panel.update(
                 t,
@@ -689,8 +756,10 @@ def create_diagnostic_video(
             # 5. Compute and update NEES (filter consistency metric)
             # ================================================================
             # NEES for 2D position only (to match chi-squared bounds)
-            error_pos = np.array([x_est[0] - x_truth, x_est[1] - y_truth])
-            P_pos = P_est[:2, :2]
+            error_pos = np.array(
+                [x_est[pos_x_idx] - x_truth, x_est[pos_y_idx] - y_truth]
+            )
+            P_pos = P_est[np.ix_([pos_x_idx, pos_y_idx], [pos_x_idx, pos_y_idx])]
 
             try:
                 # NEES = e^T * P^{-1} * e

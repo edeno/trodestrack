@@ -33,7 +33,11 @@ class FilterCoreConfig:
     Parameters
     ----------
     process_noise_pos : float
-        Position random-walk spectral density (m^2/s^3) used in Q.
+        Position random-walk spectral density (m^2/s) used in Q. The
+        process-noise rate diagonal places this directly on the position
+        entries (see ``build_Q_rate`` in ``process_noise.py``) and the
+        per-step assembled Q multiplies it by ``dt``, so the per-step
+        position variance contribution has units m^2.
     process_noise_vel : float
         Velocity random-walk spectral density ((m/s)^2/s).
     process_noise_heading : float

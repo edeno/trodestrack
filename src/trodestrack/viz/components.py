@@ -1032,24 +1032,26 @@ class FilterArtist:
         Args:
             x_pred: Predicted x position in meters
             y_pred: Predicted y position in meters
-            P: Full state covariance matrix (8×8), position covariance at [:2, :2]
+            P: 2×2 position covariance matrix. The caller is responsible
+                for selecting the position rows/cols from the full state
+                covariance via the filter layout.
 
         Returns:
             List of modified artists
 
         Raises:
-            ValueError: If P is not shape (8, 8)
+            ValueError: If P is not shape (2, 2).
         """
         # Validate input shape
         P_np = np.asarray(P)
-        if P_np.shape != (8, 8):
-            raise ValueError(f"Expected P shape (8, 8), got {P_np.shape}")
+        if P_np.shape != (2, 2):
+            raise ValueError(f"Expected P shape (2, 2), got {P_np.shape}")
 
         # Update marker position
         self.pred_marker.set_data([x_pred], [y_pred])
 
         # Compute covariance ellipse (95% confidence for 2D: χ²(2, 0.05) = 5.991)
-        P_pos = P_np[:2, :2]
+        P_pos = P_np
         eigenvalues, eigenvectors = np.linalg.eigh(P_pos)
 
         # Ensure eigenvalues are positive (numerical stability)

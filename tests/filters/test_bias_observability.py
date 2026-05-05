@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 
 from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
+from trodestrack.models.state_layout import get_layout
 from trodestrack.sim.simple import (
     SimpleSimConfig,
     simulate_circular,
@@ -72,10 +73,14 @@ def test_stationary_bias_unobservable() -> None:
         mask_cam=sim["mask_cam"],
     )
 
-    # Extract bias covariance at start and end
-    P_est = result.filtered_covariances  # (N_cam, 8, 8)
-    P_bias_start = P_est[0, 5:8, 5:8]  # [b_gz, b_ax, b_ay]
-    P_bias_end = P_est[-1, 5:8, 5:8]
+    # Extract bias covariance at start and end. Resolve indices through
+    # the actual filter layout — hardcoded 5:8 silently picked up heading
+    # / vz columns under the default 10D 2d_cam_3d_imu layout.
+    layout = get_layout(ekf_config.state_mode)
+    bias_idx = list(layout.bias_gyro_idx) + list(layout.bias_accel_idx)
+    P_est = result.filtered_covariances
+    P_bias_start = P_est[0][np.ix_(bias_idx, bias_idx)]
+    P_bias_end = P_est[-1][np.ix_(bias_idx, bias_idx)]
 
     # Ensure initial covariance is valid (defensive check)
     trace_start = np.trace(P_bias_start)
@@ -151,10 +156,16 @@ def test_circular_bias_converges() -> None:
         mask_cam=sim["mask_cam"],
     )
 
-    # Extract gyro bias covariance (index 5 in state: b_gz)
+    # Resolve gyro-bias index from the layout the filter actually used.
+    # In the default 2d_cam_3d_imu layout (10D), b_gz is at index 6, not 5;
+    # index 5 is the heading. Hardcoding index 5 in this test silently
+    # validated the wrong state component.
+    layout = get_layout(ekf_config.state_mode)
+    b_gz_idx = layout.bias_gyro_idx[0]
+
     P_est = result.filtered_covariances
-    gyro_bias_var_start = P_est[0, 5, 5]
-    gyro_bias_var_end = P_est[-1, 5, 5]
+    gyro_bias_var_start = P_est[0, b_gz_idx, b_gz_idx]
+    gyro_bias_var_end = P_est[-1, b_gz_idx, b_gz_idx]
 
     # Defensive check
     assert gyro_bias_var_start > 0, "Initial gyro bias variance must be positive"
@@ -172,7 +183,7 @@ def test_circular_bias_converges() -> None:
 
     # Also verify that the bias estimate is reasonable (not diverging)
     X_est = result.filtered_means
-    gyro_bias_estimate = X_est[-1, 5]
+    gyro_bias_estimate = X_est[-1, b_gz_idx]
     assert np.abs(gyro_bias_estimate) < 1.0, (
         f"Gyro bias estimate {gyro_bias_estimate:.3f} rad/s seems unreasonably large"
     )
@@ -233,17 +244,20 @@ def test_straight_line_lateral_bias_unobservable() -> None:
         mask_cam=sim["mask_cam"],
     )
 
-    # Extract acceleration bias covariances
-    # State indices: [x, y, vx, vy, θ, b_gz, b_ax, b_ay]
-    # b_ax = index 6 (forward in body frame when θ=0)
-    # b_ay = index 7 (lateral in body frame when θ=0)
+    # Extract acceleration bias covariances via layout indices.
+    # Body-frame at θ=0: bias_accel_idx[0] is forward (b_ax),
+    # bias_accel_idx[1] is lateral (b_ay).
+    layout = get_layout(ekf_config.state_mode)
+    forward_idx = layout.bias_accel_idx[0]
+    lateral_idx = layout.bias_accel_idx[1]
+
     P_est = result.filtered_covariances
 
-    forward_bias_var_start = P_est[0, 6, 6]
-    forward_bias_var_end = P_est[-1, 6, 6]
+    forward_bias_var_start = P_est[0, forward_idx, forward_idx]
+    forward_bias_var_end = P_est[-1, forward_idx, forward_idx]
 
-    lateral_bias_var_start = P_est[0, 7, 7]
-    lateral_bias_var_end = P_est[-1, 7, 7]
+    lateral_bias_var_start = P_est[0, lateral_idx, lateral_idx]
+    lateral_bias_var_end = P_est[-1, lateral_idx, lateral_idx]
 
     # Defensive checks
     assert forward_bias_var_start > 0, "Initial forward bias variance must be positive"

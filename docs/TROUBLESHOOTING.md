@@ -849,6 +849,8 @@ create_diagnostic_video(
     sim,                            # SimOut
     "debug_video.mp4",              # output_path
     filter_results=result,          # optional EKFResult overlay
+    state_mode=cfg.state_mode,      # required when filter_results is set; aligns
+                                    # heading/bias panels with the actual layout
     fps=30,
     speedup=1.0,                    # real-time playback
 )

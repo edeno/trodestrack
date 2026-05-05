@@ -355,6 +355,8 @@ create_diagnostic_video(
     sim,                       # SimOut from simulate_rat_imu
     "diagnostics.mp4",         # output_path (positional)
     filter_results=result,     # optional EKFResult overlay
+    state_mode=cfg.state_mode, # required when filter_results is set; resolves
+                               # heading and bias indices for the overlay
     fps=30,
     speedup=2.0,               # 2x playback speed
 )

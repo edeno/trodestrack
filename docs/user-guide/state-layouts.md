@@ -25,11 +25,20 @@ This code breaks when switching state modes:
 **State layouts solve this:**
 
 ```python
-# GOOD: Dimension-agnostic (robust!)
+# GOOD: layout-aware indexing for position and velocity (works for every layout).
 layout = get_layout(cfg.state_mode)
-positions = result.filtered_means[:, layout.pos_idx]
-velocities = result.filtered_means[:, layout.vel_idx]
-heading = result.filtered_means[:, layout.heading_idx]
+positions = result.filtered_means[:, layout.pos_idx]      # (N, 2) for 2D, (N, 3) for 3D
+velocities = result.filtered_means[:, layout.vel_idx]     # (N, k_vel) per layout
+
+# Heading is layout-shape-dependent: scalar yaw for 2D modes, but a 3-tuple
+# Euler or 4-tuple quaternion for 14D / 15D / 16D modes. Guard before treating
+# as a 1-D angle.
+heading_block = result.filtered_means[:, layout.heading_idx]
+if layout.has_heading_2d:
+    heading = heading_block.squeeze(-1) if heading_block.ndim == 2 else heading_block
+    # heading: (N,) yaw in radians
+else:
+    heading = heading_block  # (N, 3) Euler or (N, 4) quaternion — handle separately
 ```
 
 ## Using State Layouts
@@ -276,17 +285,21 @@ layout.n                  # 8 (total state dimension)
 len(layout.pos_idx)       # 2 (position dimension)
 len(layout.vel_idx)       # 2 (velocity dimension)
 
-# Indices for slicing (all are tuples; cast to list/jnp.array as needed)
+# Indices for slicing. `pos_idx`, `vel_idx`, `bias_gyro_idx`, and
+# `bias_accel_idx` are tuples. `heading_idx` is layout-shape-dependent:
+# `int` for 2D scalar-yaw layouts, `tuple` for 3D Euler / quaternion
+# layouts. Always branch on `layout.has_heading_2d` before treating
+# `heading_idx` as a scalar column.
 layout.pos_idx            # (0, 1)
 layout.vel_idx            # (2, 3)
-layout.heading_idx        # 4 (int for 2D scalar heading)
+layout.heading_idx        # 4  (int — scalar yaw for the 2D 2d_full layout)
 layout.bias_gyro_idx      # (5,) — single-element tuple for 2D
 layout.bias_accel_idx     # (6, 7)
 
 # Boolean queries
 layout.has_biases                   # True
-layout.has_quaternion_orientation   # False (4-element heading_idx tuple = quat layout)
-layout.has_heading_2d               # True (scalar int heading_idx = 2D layout)
+layout.has_quaternion_orientation   # False (4-tuple heading_idx ⇒ quat layout)
+layout.has_heading_2d               # True (int heading_idx ⇒ scalar yaw layout)
 ```
 
 ## Writing Dimension-Agnostic Code
