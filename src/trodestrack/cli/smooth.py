@@ -282,13 +282,34 @@ def run_smooth(args: argparse.Namespace) -> None:
 
     # Load optional camera mask
     if args.camera_mask is not None:
-        mask_cam = load_data_file(args.camera_mask, "Camera mask").astype(bool)
-        if mask_cam.shape != (n_cam,):
+        mask_raw = load_data_file(args.camera_mask, "Camera mask")
+        if mask_raw.shape != (n_cam,):
             print(
-                f"Error: Camera mask shape {mask_cam.shape} doesn't match (n_cam={n_cam},)",
+                f"Error: Camera mask shape {mask_raw.shape} doesn't match (n_cam={n_cam},)",
                 file=sys.stderr,
             )
             sys.exit(1)
+        # The CLI advertises --camera-mask as [0/1]. np.asarray(...).astype(bool)
+        # would silently coerce 2, -1, NaN, etc. into True and treat malformed
+        # rows as valid frames. Reject anything that isn't an exact 0 / 1 so a
+        # corrupted mask file fails loudly rather than inflating the
+        # valid-frame count.
+        if not np.all(np.isfinite(mask_raw)):
+            print(
+                "Error: --camera-mask contains non-finite values (NaN/inf); "
+                "expected only 0 or 1.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if not np.all(np.isin(mask_raw, (0, 1))):
+            bad = mask_raw[~np.isin(mask_raw, (0, 1))]
+            print(
+                f"Error: --camera-mask must contain only 0 or 1; found "
+                f"{len(bad)} other value(s) (e.g. {bad[:5].tolist()}).",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        mask_cam = mask_raw.astype(bool)
     else:
         mask_cam = np.ones(n_cam, dtype=bool)
 

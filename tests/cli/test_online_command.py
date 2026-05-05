@@ -1,14 +1,17 @@
-"""Tests for trodestrack online CLI command.
+"""Tests for the ``trodestrack online`` CLI command.
 
-This module tests the online subcommand functionality which runs real-time
-filtering (EKF forward pass only, no smoothing).
+The ``online`` subcommand runs the EKF in **forward filter only** mode (no
+backward smoothing) as a batch over complete IMU/camera/LED arrays loaded
+from disk. There is no streaming or per-frame ingest loop; "online" here
+means "no future-frame dependence", not "real-time per-frame". These
+tests cover the batch end-to-end behaviour.
 
 Test cases:
-1. Test help message displays correctly
-2. Test online command with minimal config (stationary scenario)
-3. Test output directory creation and file structure
-4. Test error handling for missing/invalid files
-5. Test streaming mode (process frame-by-frame)
+1. Help message displays correctly.
+2. Online command with minimal config (stationary scenario), end-to-end batch run.
+3. Output directory creation and file structure.
+4. Error handling for missing/invalid input files.
+5. Argument parsing fall-through to ``EKFConfig`` defaults.
 """
 
 from __future__ import annotations

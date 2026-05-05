@@ -821,21 +821,44 @@ def compute_dropout_drift(
     # Find contiguous dropout blocks
     dropout = ~valid_mask
     diff = np.diff(dropout.astype(int), prepend=0, append=0)
-    starts = np.where(diff == 1)[0]  # Dropout begins
-    ends = np.where(diff == -1)[0]  # Dropout ends
+    starts = np.where(diff == 1)[0]  # Dropout begins (first invalid sample)
+    ends = np.where(diff == -1)[0]  # Dropout ends (first valid sample after, exclusive)
 
-    # Find first block with duration >= min_duration_s
+    # Each contiguous dropout block covers samples [start_idx, end_idx).
+    # The duration of the *interval covered by those samples* is
+    # ``t[end_idx] - t[start_idx]`` when end_idx < N (the block ends when
+    # the next valid sample arrives). For example, a 150-frame dropout at
+    # 30 Hz spanning samples [s, s+150) has duration t[s+150] - t[s] = 5.0 s,
+    # whereas ``t[end_idx - 1] - t[start_idx]`` only covers 149 sample
+    # intervals (≈4.967 s) and would silently fail a min_duration_s=5.0
+    # threshold for an exactly-5 s block.
+    #
+    # If the dropout extends to the end of the trace (end_idx == N) there
+    # is no "next valid sample"; extrapolate by adding the local sample
+    # period (median dt over the block, or the global median if the block
+    # is too short for a local estimate).
+    n = len(t)
     for start_idx, end_idx in zip(starts, ends, strict=False):
-        duration = t[end_idx - 1] - t[start_idx]
+        if end_idx < n:
+            duration = float(t[end_idx] - t[start_idx])
+        elif end_idx - start_idx >= 2:
+            local_dt = float(np.median(np.diff(t[start_idx:end_idx])))
+            duration = float(t[end_idx - 1] - t[start_idx] + local_dt)
+        elif n >= 2:
+            global_dt = float(np.median(np.diff(t)))
+            duration = global_dt
+        else:
+            duration = 0.0
+
         if duration >= min_duration_s:
-            # Measure drift from start to end
+            # Measure drift from start to end (last in-block sample).
             pos_start = positions[start_idx]
             pos_end = positions[end_idx - 1]
             drift = np.linalg.norm(pos_end - pos_start)
 
             return {
                 "drift_m": float(drift),
-                "duration_s": float(duration),
+                "duration_s": duration,
                 "start_idx": int(start_idx),
                 "end_idx": int(end_idx),
             }
