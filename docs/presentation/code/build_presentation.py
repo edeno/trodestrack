@@ -592,10 +592,10 @@ def build_section_2_how_it_works(builder):
             "UKF (Unscented Kalman Filter): Samples sigma points, no linearization",
             "EKF: Faster, good for mild nonlinearities",
             "UKF: Slower, better for strong nonlinearities",
-            "TrodesTrack default: EKF (meets <33 ms latency)",
+            "TrodesTrack default: EKF (mean per-frame ≤33 ms over a 30-min session, batch lax.scan)",
             "UKF available for offline smoothing",
         ],
-        notes="EKF linearizes the dynamics (Jacobians). UKF uses sigma points (deterministic sampling). For 2D tracking, nonlinearities are mild (heading rotation), so EKF works well. UKF is more accurate but 3× slower. TrodesTrack uses EKF by default for online filtering (<33 ms per frame). UKF is available for offline smoothing where speed is less critical.",
+        notes="EKF linearizes the dynamics (Jacobians). UKF uses sigma points (deterministic sampling). For 2D tracking, nonlinearities are mild (heading rotation), so EKF works well. UKF is more accurate but 3× slower. TrodesTrack uses EKF by default for forward-only filtering. The PRD's ≤33 ms per-frame latency target is verified by tests/benchmark/test_throughput.py as an amortized mean over a 30-min batch lax.scan (necessary but not sufficient for true per-frame tail latency); the filter is not driven from a streaming per-frame ingest loop. UKF is available for offline smoothing where speed is less critical.",
     )
 
     # Slide 16: Offline Smoothing
@@ -617,7 +617,7 @@ def build_section_2_how_it_works(builder):
             "Arena bounds: Soft constraint to stay within known region",
             "Damping: Exponential decay prevents velocity explosion during dropout",
         ],
-        notes="TrodesTrack includes multiple robustness mechanisms. Mahalanobis gating rejects outliers (e.g., reflections) beyond χ² threshold. Transient LED swaps are absorbed by gating on the dual-LED residual; persistent (sustained) front/back swaps are NOT auto-detected (see test_persistent_led_swap xfail) and require pre-filter LED-identity correction. DLC confidence scales measurement noise (low confidence → high noise). Bias estimation adapts to IMU drift. Arena bounds provide soft constraints. Velocity damping (λ term) prevents unbounded growth during long dropouts.",
+        notes="TrodesTrack includes multiple robustness mechanisms. Mahalanobis gating rejects outliers (e.g., reflections) beyond χ² threshold. Transient LED swaps are absorbed by gating on the dual-LED residual; persistent (sustained) front/back swaps are NOT auto-detected (tracked by the test_filter_stable_under_frequent_swaps xfail in tests/filters/test_robustness.py) and require pre-filter LED-identity correction. DLC confidence scales measurement noise (low confidence → high noise). Bias estimation adapts to IMU drift. Arena bounds provide soft constraints. Velocity damping (λ term) prevents unbounded growth during long dropouts.",
     )
 
     # Slide 18: The 9-Panel Diagnostic Video
@@ -700,10 +700,10 @@ def build_section_3_features(builder):
             "GPU (single card): 1000×+ realtime (30-min session in 2 seconds)",
             "Memory efficient: O(n) scaling, ~100 MB for 30-min session",
             "Batch processing: Parallelize across sessions",
-            "Online latency: <33 ms per frame (EKF)",
+            "Forward-only EKF mean per-frame ≤33 ms over a 30-min session (amortized batch lax.scan; NOT per-frame streaming)",
             "JAX JIT compilation: First run slow, subsequent runs fast",
         ],
-        notes="TrodesTrack is highly optimized using JAX. CPU performance: 300× realtime on single core (M1 Mac / Intel Xeon). GPU acceleration: 1000×+ realtime on NVIDIA A100. Memory scales linearly O(n). Batch processing across sessions is embarrassingly parallel. Online filtering meets <33 ms latency requirement (30 Hz). JAX JIT compilation adds ~10s overhead on first run, then subsequent runs are instant.",
+        notes="TrodesTrack is highly optimized using JAX. CPU performance: 300× realtime on single core (M1 Mac / Intel Xeon). GPU acceleration: 1000×+ realtime on NVIDIA A100. Memory scales linearly O(n). Batch processing across sessions is embarrassingly parallel. The PRD's ≤33 ms-per-frame target is verified by tests/benchmark/test_throughput.py as the amortized mean (total / num_frames over a single 30-min batch lax.scan), which is necessary but not sufficient for tail / p99 per-frame latency — there is no streaming per-frame ingest harness today, so this is a throughput-style proxy for the forward-only 'online' CLI rather than a real-time guarantee. JAX JIT compilation adds ~10s overhead on first run, then subsequent runs are instant.",
     )
 
     # Slide 25: Real Data Support
@@ -762,14 +762,14 @@ def build_section_4_getting_started(builder):
     builder.add_content_slide(
         title="Decision Tree: Which Filter to Use?",
         bullets=[
-            "Need real-time (<33 ms)? → Use EKF",
+            "Forward-only (no future-frame dependence)? → Use EKF",
             "Strong nonlinearities? → Use UKF (offline only)",
             "Offline analysis + max accuracy? → Use RTS smoother",
             "Iterative refinement? → Use IEKS (iterated EKF smoother)",
             "Unsure? → Start with EKF (default)",
             "All filters have identical API: just swap config",
         ],
-        notes="Decision tree for choosing filter. Real-time requirement → EKF (fastest). Strong nonlinearities (e.g., 3D rotations) → UKF. Offline analysis + max accuracy → RTS smoother. Iterative refinement → IEKS, exposed today as ``rts_smoother(..., num_iter=N)`` and as the ``--num-iter`` flag on ``trodestrack smooth``; example 07 demonstrates ``num_iter=2``. When unsure, start with EKF (default, works for 95% of cases). All filters share identical API (filter config object + same input arrays), so switching is trivial.",
+        notes="Decision tree for choosing filter. Forward-only / no-lookahead use → EKF (fastest; this is what the trodestrack online CLI runs as a batch over complete files — not a streaming per-frame ingest). Strong nonlinearities (e.g., 3D rotations) → UKF. Offline analysis + max accuracy → RTS smoother. Iterative refinement → IEKS, exposed today as ``rts_smoother(..., num_iter=N)`` and as the ``--num-iter`` flag on ``trodestrack smooth``; example 07 demonstrates ``num_iter=2``. When unsure, start with EKF (default, works for 95% of cases). All filters share identical API (filter config object + same input arrays), so switching is trivial.",
     )
 
     # Slide 30: When to Use TrodesTrack

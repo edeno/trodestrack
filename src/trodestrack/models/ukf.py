@@ -385,7 +385,8 @@ def predict_step(
     lamb = config.alpha**2 * (n + config.kappa) - n
     w_mean, w_cov = compute_weights(n, config.alpha, config.beta, lamb)
 
-    # Generate sigma points (2n+1 = 17 points)
+    # Generate sigma points (2n+1 — 17 for 8D 2d_full, 21 for the default
+    # 10D 2d_cam_3d_imu, etc.; n is resolved from the active StateLayout).
     sigmas = compute_sigma_points(m, P, n, lamb)
 
     # Propagate sigma points through dynamics

@@ -8,8 +8,8 @@ trodestrack combines video tracking (Trodes LEDs and/or DeepLabCut keypoints) wi
 
 - **Sensor Fusion**: Extended Kalman Filter (EKF) and Unscented Kalman Filter (UKF) for combining video (~30 Hz) and IMU (100 Hz) measurements
 - **3D IMU Support**: Full 6-axis IMU processing (3-axis gyro + 3-axis accel) with gravity compensation
-- **Online & Offline Processing**: Real-time filtering and RTS smoothing for offline analysis
-- **Robust Handling**: Occlusions, reflections, and camera/sensor dropout. Transient LED swaps are mitigated by Mahalanobis gating on dual-LED measurements; persistent LED swaps are *not* automatically detected (see [tests/filters/test_robustness.py](tests/filters/test_robustness.py) `test_persistent_led_swap` xfail) and require pre-filter LED-identity correction.
+- **Online & Offline Processing**: Forward-only EKF and RTS smoothing — both run as batch operations over complete input arrays. The `trodestrack online` CLI is forward-only ("no future-frame dependence"), not a streaming / real-time ingest loop.
+- **Robust Handling**: Occlusions, reflections, and camera/sensor dropout. Transient LED swaps are mitigated by Mahalanobis gating on dual-LED measurements; persistent LED swaps are *not* automatically detected (tracked by the `test_filter_stable_under_frequent_swaps` xfail in [tests/filters/test_robustness.py](tests/filters/test_robustness.py)) and require pre-filter LED-identity correction.
 - **JAX-Accelerated**: High-performance implementation using JAX - **316× realtime** on CPU, GPU-ready
 - **Rich Simulation**: Comprehensive synthetic data generation for testing and validation
 - **Diagnostic Visualization**: Publication-quality video output for quality control

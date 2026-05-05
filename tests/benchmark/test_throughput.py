@@ -2,10 +2,14 @@
 
 This module validates system performance against PRD requirements:
 - Offline smoothing ≥10× realtime (CPU) on 30 min session (PRD §4.3)
-- Online EKF latency ≤33 ms per frame (CPU) (PRD §4.4)
-
-These benchmarks ensure the filter implementation meets production throughput
-and latency requirements for both offline post-processing and real-time tracking.
+- Online EKF latency ≤33 ms per frame (CPU) (PRD §4.4) — measured here
+  as amortized mean per-frame time (total / num_frames) over a single
+  JIT'd ``lax.scan`` batch, which is a *necessary* but not sufficient
+  condition for the per-frame requirement. Per-frame tail / p99 latency
+  is not measured by this suite (the filter is not driven from a
+  streaming ingest loop), so this is a throughput-style proxy for the
+  forward-only "online" CLI rather than a streaming / real-time
+  guarantee.
 
 References:
     - PRD.md Section 4: Core Outcomes (Acceptance Criteria)
