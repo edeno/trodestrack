@@ -85,11 +85,16 @@ TrodesTrack consumes IMU data from 6-axis hardware (3-axis gyro +
 3-axis accelerometer). The number of channels passed to the filter
 depends on the configured ``state_mode``:
 
-- **3 channels** ``[ω_z, f_x, f_y]`` — 2D layouts (``"2d_full"``, ``"vision_only"``).
-- **4 channels** ``[ω_z, f_x, f_y, f_z]`` — default ``"2d_cam_3d_imu"`` layout
-  (3D velocity, 1-axis gyro). Select these columns from your raw 6-axis stream.
-- **6 channels** ``[ω_x, ω_y, ω_z, f_x, f_y, f_z]`` — quaternion-orientation
-  layouts (``"2d_cam_6dof_imu_orientation"``, ``"3d_cam_6dof_imu"``).
+- **3 channels** ``[ω_z, f_x, f_y]`` — works with any non-quaternion layout
+  (``"2d_full"``, ``"vision_only"``, and the default ``"2d_cam_3d_imu"``).
+  In ``"2d_cam_3d_imu"`` this is a degenerate path: ``f_z`` is unobserved
+  and ``vz`` stays idle (see `tests/filters/test_imu_shape_validation.py`).
+- **4 channels** ``[ω_z, f_x, f_y, f_z]`` — recommended for the default
+  ``"2d_cam_3d_imu"`` layout when you want 3D velocity. Select these
+  columns from your raw 6-axis stream.
+- **6 channels** ``[ω_x, ω_y, ω_z, f_x, f_y, f_z]`` — required for
+  quaternion-orientation layouts (``"2d_cam_6dof_imu_orientation"``,
+  ``"3d_cam_6dof_imu"``).
 
 Units must be SI (rad/s for gyro, m/s² for accelerometer), not raw
 sensor counts. ``trodestrack.models.filter_common.validate_imu_input_shape``

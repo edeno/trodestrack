@@ -328,7 +328,7 @@ See [`examples/README.md`](examples/README.md) for the complete learning path. E
 
 ### User Documentation
 
-- **[Examples README](examples/README.md)** - Start here! Progressive learning path with 8 pedagogical examples
+- **[Examples README](examples/README.md)** - Start here! Progressive learning path with 9 pedagogical examples (01–08 plus 03b)
 - **[Tuning Guide](docs/TUNING.md)** - NEES-based diagnostics and parameter selection
 - **[Troubleshooting Guide](docs/TROUBLESHOOTING.md)** - Common filter failures and solutions
 - **[State Layouts](docs/user-guide/state-layouts.md)** - Available state modes and dimension-agnostic API

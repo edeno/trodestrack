@@ -729,13 +729,14 @@ def build_section_4_getting_started(builder):
 
     # Slide 28: Learning Path
     builder.add_content_slide(
-        title="Learning Path: 10 Examples",
+        title="Learning Path: 9 Examples",
         bullets=[
-            "01-02: Simple motion + EKF basics (35 lines total)",
-            "03-05: Dropout handling, UKF, RTS smoothing",
-            "06-08: Real data ingestion (Trodes, DLC, SpikeGadgets)",
-            "09: Homography calibration (interactive tool)",
-            "10: Full pipeline (end-to-end workflow)",
+            "01-02: Simple simulations + realistic IMU (analytic + SpikeGadgets)",
+            "03 / 03b: EKF basics + plot-utility patterns",
+            "04: UKF vs EKF comparison (verdict: start with EKF)",
+            "05-06: Dropout robustness for EKF and UKF",
+            "07: RTS / IEKS smoothing for offline analysis",
+            "08: QA report generation (PDF with NEES diagnostics)",
             "",
             "📚 Estimated time: 2-3 hours to complete all examples",
             "🚀 Each example runs in <1 minute",
@@ -871,7 +872,7 @@ def build_section_6_conclusion(builder):
             "🚀 Start with Example 01 → real data in ~3 hours",
             "📖 Full documentation + 10 progressive examples",
         ],
-        notes="Key takeaways for neuroscientists. Sensor fusion dramatically outperforms vision-only. Kalman filtering is the optimal framework for combining noisy sensors. IMU bias estimation is critical (not optional). Accelerometers measure specific force (gravity included), gyros drift unbounded. TrodesTrack meets strict accuracy targets: <2 cm RMSE, <3.5 m dropout drift. JAX provides extreme speed. Learning path: 10 examples, ~3 hours to competence.",
+        notes="Key takeaways for neuroscientists. Sensor fusion dramatically outperforms vision-only. Kalman filtering is the optimal framework for combining noisy sensors. IMU bias estimation is critical (not optional). Accelerometers measure specific force (gravity included), gyros drift unbounded. TrodesTrack meets strict accuracy targets: <2 cm RMSE, <3.5 m dropout drift. JAX provides extreme speed. Learning path: 9 examples, ~3 hours to competence.",
     )
 
     # Slide 39: Comparison to Alternatives

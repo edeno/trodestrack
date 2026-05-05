@@ -83,7 +83,7 @@ Click on your symptom to jump to the solution:
 - [Stationary rat drifts](#stationary-drift)
 - [Covariance grows unbounded](#covariance-explosion)
 - [Filter runs extremely slowly](#slow-performance)
-- [NEES inconsistent (< 6 or > 10)](#nees-inconsistency)
+- [NEES inconsistent (< 1 or > 4 for position-only NEES)](#nees-inconsistency)
 - [NaN/Inf in filter output](#naninf-output)
 
 ---

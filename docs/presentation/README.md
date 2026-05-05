@@ -113,7 +113,7 @@ uv run python docs/presentation/code/build_presentation.py
 
 ### Section 4: GETTING STARTED (Slides 26-32)
 - Installation (Python + uv)
-- Learning path (10 progressive examples)
+- Learning path (9 progressive examples)
 - Decision tree (which filter to use)
 - When to use TrodesTrack
 - Troubleshooting common issues

@@ -102,33 +102,33 @@ sim = simulate_rat_imu(config, seed=42)
 from trodestrack.models.ekf import EKFConfig
 
 cfg = EKFConfig(
-    # State mode (determines state dimension)
-    state_mode="2d_full",             # 8D: [x, y, vx, vy, theta, b_gz, b_ax, b_ay]
+    # State mode (determines state dimension; default is 2d_cam_3d_imu)
+    state_mode="2d_cam_3d_imu",          # 10D: [x,y,vx,vy,vz,θ,b_gz,b_ax,b_ay,b_az]
 
     # Process noise
-    process_noise_pos=0.02,           # m^2/s
-    process_noise_vel=2.0,            # m^2/s^3
-    process_noise_heading=0.02,       # rad^2/s
-    process_noise_gyro_bias=2e-6,     # rad^2/s^3
-    process_noise_accel_bias=2e-4,    # m^2/s^5
+    process_noise_pos=1e-4,              # m^2/s
+    process_noise_vel=5e-3,              # m^2/s^3
+    process_noise_heading=5e-4,          # rad^2/s
+    process_noise_gyro_bias=5e-8,        # rad^2/s^3
+    process_noise_accel_bias=2e-5,       # m^2/s^5
 
     # Measurement noise
-    measurement_noise_pos=0.005**2,   # m^2 (5mm)
-    measurement_noise_heading=0.05**2, # rad^2 (~3 deg)
+    measurement_noise_pos=0.01**2,       # m^2 (1 cm)
+    measurement_noise_heading=0.05**2,   # rad^2 (~3 deg)
 
     # Dynamics
-    damping_coeff=0.5,                # 1/s (velocity decay)
+    damping_coeff=0.2,                   # 1/s (velocity decay)
 
     # Robustness features
-    use_mahalanobis_gating=True,      # Reject outliers
-    mahalanobis_threshold_prob=0.997, # 3-sigma gate
+    use_mahalanobis_gating=True,         # Reject outliers (3σ)
+    mahalanobis_threshold_prob=0.997,    # 3-sigma gate
 
-    enable_zupt=False,                # Zero-velocity updates
-    zupt_velocity_threshold=0.05,     # m/s
+    enable_zupt=True,                    # Zero-velocity updates
+    zupt_velocity_threshold=0.02,        # m/s
 
     # Adaptive noise during dropout
     adaptive_q_during_dropout=True,
-    dropout_q_pos_multiplier=10.0,
+    dropout_q_pos_multiplier=2.0,        # see docs/TUNING.md for the full set
 )
 ```
 

@@ -74,7 +74,7 @@ producing lower-variance trajectories than forward filtering alone.
         "--imu-measurements",
         type=Path,
         required=True,
-        help="Path to IMU measurements file (N_imu, 3) [ω_z, f_x, f_y] in rad/s and m/s²",
+        help="Path to IMU measurements file. Channel count depends on state_mode: (N_imu, 3) [ω_z, f_x, f_y] for 2D layouts (and degenerate 2d_cam_3d_imu); (N_imu, 4) [ω_z, f_x, f_y, f_z] for 2d_cam_3d_imu with 3D velocity; (N_imu, 6) [ω_x, ω_y, ω_z, f_x, f_y, f_z] for quaternion-orientation layouts. Units: rad/s and m/s².",
         metavar="FILE",
     )
     input_group.add_argument(
