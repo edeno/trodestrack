@@ -74,7 +74,7 @@ uv run python examples/03_ekf_basic_scenarios.py
 **Learn:** Using built-in plotting utilities and state layouts
 **Duration:** ~5 seconds
 **Topics:**
-- **State Layout System:** Dimension-agnostic state extraction (works with 5D, 8D, 10D, 15D states)
+- **State Layout System:** Dimension-agnostic state extraction (works with 5D, 8D, 10D, 14D, 15D, 16D states)
 - Using `qa.plot_*` functions instead of manual matplotlib code
 - Covariance extraction and uncertainty visualization
 - DRY principle for plotting (Don't Repeat Yourself)
@@ -109,17 +109,6 @@ uv run python examples/04_ukf_basic_scenarios.py
 
 **Key Learning:**
 > **Verdict:** EKF won 6/9 metrics vs UKF's 3/9. UKF is ~1-5× slower. **Recommendation:** Start with EKF; switch to UKF only if EKF fails to meet accuracy requirements.
-
----
-
-#### [03b_using_plot_utilities.py](03b_using_plot_utilities.py)
-**Learn:** Build dimension-agnostic analysis code with `qa.plots` helpers
-**Topics:** `get_layout(cfg.state_mode)`, layout-driven slicing, covariance
-ellipses, error time series.
-
-```bash
-uv run python examples/03b_using_plot_utilities.py
-```
 
 ---
 
