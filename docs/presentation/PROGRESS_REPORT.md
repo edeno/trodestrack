@@ -145,7 +145,7 @@ documented failure modes (occlusion, reflection, motion blur, dim lighting).
   - Slides 33-36: Section 5 (ADVANCED TOPICS)
   - Slides 37-43: Section 6 (CONCLUSION)
   - 3 extra slides: Section dividers
-- ✅ Integrated all 11 generated visuals
+- ✅ Integrated all 8 generated visuals; slide 2 and slide 18 render as bullet content (generators deferred)
 - ✅ Applied color scheme (Blue, Orange, Green, Red, Gray)
 - ✅ Added speaker notes to all slides
 - ✅ 16:9 aspect ratio, professional formatting

@@ -42,8 +42,11 @@ def generate_slide21():
     )
     sim = simulate_rat_imu(config)
 
-    # Run EKF
-    ekf_config = EKFConfig()
+    # Run EKF. Pin to the 8D ``2d_full`` layout so the NEES extraction below
+    # (which treats X_truth's [x, y, vx, vy, θ] as columns 0-4 of the filter
+    # state) is correct. Under the current EKFConfig() default (``2d_cam_3d_imu``,
+    # 10D) heading lives at index 5, not 4.
+    ekf_config = EKFConfig(state_mode="2d_full")
     result = extended_kalman_filter(
         ekf_config,
         sim["t_imu"],
@@ -54,8 +57,8 @@ def generate_slide21():
         sim["mask_cam"],
     )
 
-    # Get layout
-    layout = get_layout("2d_full")
+    # Get layout (matches ekf_config.state_mode above).
+    layout = get_layout(ekf_config.state_mode)
 
     # Downsample truth to camera rate
     t_cam = sim["t_cam_exp"]

@@ -255,8 +255,10 @@ cfg = EKFConfig(
 
 2. **Check bias convergence:**
    ```python
-   # Plot gyro bias estimate
-   plt.plot(result.filtered_means[:, 5])  # Index 5 = b_gz
+   # Plot gyro bias estimate (use layout indexing — index varies by state_mode)
+   layout = get_layout(cfg.state_mode)
+   gyro_bias = result.filtered_means[:, list(layout.bias_gyro_idx)]
+   plt.plot(gyro_bias)
    # Should converge to truth during rotation, drift during straight line
    ```
 
@@ -364,8 +366,9 @@ LED swap detection failed → filter treats swapped LEDs as true observation →
 
 2. **Check for swap events:**
    ```python
-   # Plot heading discontinuities
-   heading_diff = np.diff(result.filtered_means[:, 4])  # Index 4 = θ
+   # Plot heading discontinuities (use layout — index varies by state_mode)
+   layout = get_layout(cfg.state_mode)
+   heading_diff = np.diff(result.filtered_means[:, layout.heading_idx])
    swap_frames = np.where(np.abs(heading_diff) > 2.0)[0]  # > 114° jump
    print(f"Detected {len(swap_frames)} swap events")
    ```
@@ -425,7 +428,9 @@ sim['Z_cam_led1'][swap_mask], sim['Z_cam_led2'][swap_mask] = \
    ```python
    # During dropout, filter relies on IMU only
    # Check if IMU bias estimates are converged before dropout
-   bias_at_dropout = result.filtered_means[dropout_start, 5:8]  # Gyro + accel biases
+   layout = get_layout(cfg.state_mode)
+   bias_idx = list(layout.bias_gyro_idx) + list(layout.bias_accel_idx)
+   bias_at_dropout = result.filtered_means[dropout_start, bias_idx]
    ```
 
 #### Solutions
