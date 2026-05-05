@@ -1,7 +1,12 @@
 """Unscented Kalman Filter (UKF) for sensor-fused rat tracking.
 
-The UKF uses sigma-point transforms to handle nonlinearity without Jacobians.
-It propagates (2n+1) = 17 sigma points through nonlinear dynamics and measurements.
+The UKF uses sigma-point transforms to handle nonlinearity without
+Jacobians. It propagates (2n+1) sigma points through nonlinear dynamics
+and measurements, where ``n`` is the state dimension selected by
+``UKFConfig.state_mode`` (resolved via ``StateLayout``). For example,
+the legacy 8D ``2d_full`` layout uses 17 sigma points; the default 10D
+``2d_cam_3d_imu`` layout uses 21. Quaternion-orientation layouts are
+rejected by the UKF.
 
 Key advantages over EKF:
     - No Jacobian computation required
@@ -372,7 +377,9 @@ def predict_step(
         Predicted state with mean and covariance.
     """
     m, P = state.mean, state.cov
-    n = len(m)  # State dimension (8)
+    n = len(
+        m
+    )  # State dimension, resolved from `layout` (8 for 2d_full, 10 for 2d_cam_3d_imu, etc.)
 
     # Compute UKF parameters
     lamb = config.alpha**2 * (n + config.kappa) - n

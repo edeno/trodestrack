@@ -364,7 +364,15 @@ cfg = EKFConfig(
 
 #### Root Cause
 
-LED swap detection failed → filter treats swapped LEDs as true observation → heading flips 180°.
+The filter does **not** detect persistent LED swaps. Mahalanobis gating
+on the dual-LED residual absorbs single-frame swaps, but if the front/back
+identities stay swapped across frames the swapped pair becomes a
+self-consistent measurement and the filter accepts it as truth — heading
+flips 180°. This is tracked by the `test_persistent_led_swap` xfail in
+`tests/filters/test_robustness.py`. Until LED-swap detection lands,
+correct identities upstream of the filter (e.g. choose the LED whose
+position is closer to the previous-frame estimate, or use color/shape
+features in the detector).
 
 #### Diagnostic Steps
 

@@ -1,7 +1,14 @@
-"""CLI command for online filtering of sensor-fused tracking data.
+"""CLI command for forward-only filtering of sensor-fused tracking data.
 
-This module implements the `trodestrack online` command which runs real-time
-EKF filtering (forward pass only, no smoothing) on IMU + camera data.
+This module implements the ``trodestrack online`` command, which runs the
+EKF in **forward filter only** mode (no backward smoothing) on IMU +
+camera data. "Online" here means "forward-pass / no future-frame
+dependence" — the command is *not* a streaming ingest loop. It loads the
+full IMU / camera / LED arrays from disk and calls
+``extended_kalman_filter`` once over the batch. Per-frame ingest would
+require driving ``predict_step`` / ``update_step`` from
+``trodestrack.models.filter_common`` directly; that is not exposed as a
+CLI today.
 
 Usage:
     trodestrack online \\
@@ -48,20 +55,35 @@ def add_online_parser(subparsers: argparse._SubParsersAction) -> None:
     """
     parser = subparsers.add_parser(
         "online",
-        help="Run online filtering (EKF forward pass only, no smoothing)",
+        help="Run forward-only EKF filtering (no smoothing) over complete input files",
         description="""
-Run Extended Kalman Filter on sensor-fused tracking data (online mode).
+Run Extended Kalman Filter on sensor-fused tracking data in forward-only
+("online") mode.
 
-This command performs forward filtering only (no backward smoothing):
-1. Extended Kalman Filter (EKF) forward pass
-2. Saves filter outputs to disk
+Despite the name, this is a BATCH command: it loads complete IMU,
+camera, LED, and mask arrays from disk and runs the EKF once over the
+full session. There is no per-frame streaming ingest. "Online" here
+means "no backward smoother" / "no future-frame dependence", not
+"real-time per-frame".
 
-Online mode is suitable for:
-- Real-time applications (low latency)
-- Situations where you don't have access to future observations
-- Quick processing without smoothing overhead
+What it does:
+1. Reads input arrays from --imu-timestamps, --imu-measurements,
+   --camera-timestamps, --led1-positions, --led2-positions.
+2. Runs Extended Kalman Filter (EKF) forward pass over the full arrays
+   via `extended_kalman_filter`.
+3. Writes filter outputs to --output-dir.
 
-For best accuracy with access to all data, use 'trodestrack smooth' instead.
+Use this command for:
+- Producing forward-only estimates without smoother latency / lookahead.
+- Filtering datasets where future observations should not influence past
+  estimates (online-style analyses on archived data).
+
+For best accuracy when you do have access to all data, use
+`trodestrack smooth` instead.
+
+True per-frame / real-time streaming is not provided by this CLI; for
+that, drive `predict_step` / `update_step` from
+`trodestrack.models.filter_common` directly via the Python API.
         """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -223,7 +245,7 @@ def run_online(args: argparse.Namespace) -> None:
         Parsed command-line arguments.
     """
     print("=" * 80)
-    print("trodestrack online — Real-time Filtering")
+    print("trodestrack online — Forward-only EKF (batch over full input arrays)")
     print("=" * 80)
 
     # Load input data
@@ -350,7 +372,9 @@ def run_online(args: argparse.Namespace) -> None:
 
     # Save metadata for reproducibility
     with open(output_dir / "metadata.txt", "w") as f:
-        f.write("trodestrack online — Real-time Filtering Results\n")
+        f.write(
+            "trodestrack online — Forward-only EKF Results (batch over full inputs)\n"
+        )
         f.write("=" * 80 + "\n\n")
         f.write("Input Files:\n")
         f.write(f"  IMU timestamps: {args.imu_timestamps}\n")

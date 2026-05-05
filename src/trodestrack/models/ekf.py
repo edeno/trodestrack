@@ -1,14 +1,26 @@
 """Extended Kalman Filter (EKF) for sensor-fused tracking.
 
-This module implements the production 2D EKF with 8-state model:
-    x_k = [x, y, vx, vy, θ, b_gz, b_ax, b_ay]^T
+The production 2D EKF state vector is selected by ``EKFConfig.state_mode``;
+the default is the 10D ``2d_cam_3d_imu`` layout (see
+``trodestrack.models.state_layout``):
 
-Where:
+    x_k = [x, y, vx, vy, vz, θ, b_gz, b_ax, b_ay, b_az]^T   (default, 10D)
+
+The legacy 8D ``2d_full`` layout is also registered:
+
+    x_k = [x, y, vx, vy, θ, b_gz, b_ax, b_ay]^T              (8D)
+
+Where, common to both:
     - (x, y): Position in meters
     - (vx, vy): Velocity in m/s
     - θ: Heading angle in radians
     - b_gz: Gyroscope z-axis bias in rad/s
     - b_ax, b_ay: Accelerometer x, y biases in m/s²
+    - 10D adds vz (vertical velocity) and b_az (vertical accel bias) for
+      3D-accel IMU support.
+
+State dimension is dimension-agnostic throughout the filter; per-component
+indices are resolved via ``StateLayout`` rather than hardcoded.
 
 The filter fuses:
     - High-rate IMU measurements (gyro, accel) at ~200 Hz

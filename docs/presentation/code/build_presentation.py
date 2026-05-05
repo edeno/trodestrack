@@ -611,13 +611,13 @@ def build_section_2_how_it_works(builder):
         title="Robustness Features",
         bullets=[
             "Mahalanobis gating: Reject outliers beyond 3σ threshold",
-            "LED swap resolution: Handle front/back confusion via residuals",
+            "Transient LED-swap mitigation: gating + dual-LED residuals reject one-frame swaps",
             "Confidence scaling: Weight camera by DLC confidence",
             "Bias estimation: Adapt to slowly changing IMU characteristics",
             "Arena bounds: Soft constraint to stay within known region",
             "Damping: Exponential decay prevents velocity explosion during dropout",
         ],
-        notes="TrodesTrack includes multiple robustness mechanisms. Mahalanobis gating rejects outliers (e.g., reflections) beyond χ² threshold. LED swaps are resolved by comparing wrapped residuals. DLC confidence scales measurement noise (low confidence → high noise). Bias estimation adapts to IMU drift. Arena bounds provide soft constraints. Velocity damping (λ term) prevents unbounded growth during long dropouts.",
+        notes="TrodesTrack includes multiple robustness mechanisms. Mahalanobis gating rejects outliers (e.g., reflections) beyond χ² threshold. Transient LED swaps are absorbed by gating on the dual-LED residual; persistent (sustained) front/back swaps are NOT auto-detected (see test_persistent_led_swap xfail) and require pre-filter LED-identity correction. DLC confidence scales measurement noise (low confidence → high noise). Bias estimation adapts to IMU drift. Arena bounds provide soft constraints. Velocity damping (λ term) prevents unbounded growth during long dropouts.",
     )
 
     # Slide 18: The 9-Panel Diagnostic Video
