@@ -682,14 +682,14 @@ def build_section_3_features(builder):
     builder.add_content_slide(
         title="Flexible State Tracking Modes",
         bullets=[
-            "2d_pos: Position only (x, y) - 2D state",
-            "2d_vel: Position + velocity (x, y, vₓ, vᵧ) - 4D state",
-            "2d_full: Position + velocity + heading + biases - 8D state (default)",
-            "heading_only: Heading only (θ, b_gz) - 2D state",
-            "Future 3d_pose: Full 6-DOF (x, y, z, roll, pitch, yaw) - 16D state",
-            "Tradeoff: Complexity vs accuracy vs computation",
+            "vision_only: [x, y, vx, vy, θ] — 5D, camera only, no IMU biases",
+            "2d_full: [x, y, vx, vy, θ, b_gz, b_ax, b_ay] — 8D, 2D camera + 2D IMU",
+            "2d_cam_3d_imu: 10D, 2D camera + 3D IMU (default; adds vz, b_az for rearing)",
+            "2d_cam_6dof_imu_orientation: 14D, quaternion orientation + 2D camera (experimental)",
+            "3d_euler / 3d_quat / 3d_cam_6dof_imu: 15-16D, full 3D pose",
+            "Switch by setting EKFConfig(state_mode=...); see docs/user-guide/state-layouts.md",
         ],
-        notes="TrodesTrack supports multiple state layouts via get_layout() API. 2d_pos is simplest (no velocity). 2d_vel adds velocity but no heading. 2d_full (default) includes heading and biases (8D). heading_only tracks orientation alone (useful for virtual reality). Future 3D extension will support full 6-DOF pose. Choose layout based on experiment needs and computational budget.",
+        notes="TrodesTrack supports multiple state layouts via the registry in trodestrack.models.state_layout (see get_layout()). The shipped layouts are vision_only (5D, camera-only), 2d_full (8D), 2d_cam_3d_imu (10D, the default — includes vz / b_az for rearing detection), 2d_cam_6dof_imu_orientation (14D, experimental quaternion orientation with a 2D camera), and the 3D modes 3d_euler / 3d_quat / 3d_cam_6dof_imu (15-16D, used by extended_kalman_filter_3d). Choose a layout by passing state_mode to EKFConfig / UKFConfig; the user-guide page docs/user-guide/state-layouts.md has the per-mode index tables.",
     )
 
     # Slide 24: Performance & Scalability

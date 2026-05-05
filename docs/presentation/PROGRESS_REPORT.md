@@ -122,8 +122,7 @@ documented failure modes (occlusion, reflection, motion blur, dim lighting).
 **Time spent**: 1 hour
 **Description**: Three-panel view showing timeline, IMU measurements, and spatial trajectory between camera frames
 
-**Total Priority 1 Completed**: 11/11 visuals ✅ (all Priority 1 work complete!)
-**Total Priority 1 Time**: 10.5 hours total
+**Total Priority 1 Status**: 8 of 10 PNGs shipped + 1 MP4. Slide 2 (failure modes) and slide 18 (9-panel diagnostic) are deferred — those slides currently render as bullet content in `build_presentation.py`; their generator scripts have not landed.
 
 ---
 
@@ -203,9 +202,9 @@ documented failure modes (occlusion, reflection, motion blur, dim lighting).
 ## 🎯 Recommended Next Steps
 
 ### For Minimal Viable Presentation (MVP):
-1. ✅ ~~**Generate Priority 1 visuals**~~ → COMPLETE! (11/11 done in 10.5 hours)
+1. ⏳ **Generate Priority 1 visuals**: 8 of 10 shipped + 1 MP4. Slide 2 (failure modes) and slide 18 (9-panel diagnostic) still deferred — currently rendered as bullet content in `build_presentation.py`.
 2. ✅ ~~**Create PowerPoint presentation**~~ → COMPLETE! (46 slides in 2 hours)
-3. **Add video to Slide 8** (5 minutes) ← **NEXT STEP**
+3. **Add video to Slide 8** (5 minutes)
    - Open `trodestrack_presentation.pptx`
    - Navigate to Slide 8
    - Insert → Video → `videos/slide08_beforeafter.mp4`
@@ -328,24 +327,24 @@ result = extended_kalman_filter(
 
 ## 📧 Deliverables Summary
 
-### What's Ready Now (MVP Complete! 🎉):
+### What's Ready Now:
 1. ✅ Complete 43-slide outline with detailed pedagogical structure
-2. ✅ **ALL 11 Priority 1 visuals** (publication-quality):
-   - 3 IMU physics slides (5A, 5B, 5C)
-   - Failure modes grid (slide 2)
-   - Trajectory comparison (slide 3)
-   - Before/after video (slide 8) - 10s split-screen MP4
-   - IMU integration (slide 12)
-   - Uncertainty evolution (slide 14)
-   - Smoother comparison (slide 16)
-   - 9-panel diagnostic (slide 18)
-   - NEES histogram (slide 21)
-3. ✅ **PowerPoint presentation** (trodestrack_presentation.pptx, 2.5 MB):
+2. ⏳ **8 of 10 Priority 1 PNGs shipped + 1 MP4** (publication-quality):
+   - 3 IMU physics slides (5A, 5B, 5C) ✅
+   - Trajectory comparison (slide 3) ✅
+   - Before/after video (slide 8) ✅ — 10s split-screen MP4
+   - IMU integration (slide 12) ✅
+   - Uncertainty evolution (slide 14) ✅
+   - Smoother comparison (slide 16) ✅
+   - NEES histogram (slide 21) ✅
+   - Failure modes grid (slide 2) ⏳ — bullet content; generator deferred
+   - 9-panel diagnostic (slide 18) ⏳ — bullet content; generator deferred
+3. ✅ **PowerPoint presentation** (trodestrack_presentation.pptx):
    - 46 slides total (43 content + 3 section dividers)
-   - All visuals integrated
+   - 7 generator scripts ship + the builder; slides 2 and 18 render as bullets
    - Professional formatting (16:9, color scheme applied)
    - Speaker notes on every slide
-4. ✅ 10 working code generation scripts (fully tested)
+4. ✅ 7 working code generation scripts (fully tested)
 5. ✅ Organized folder structure with all assets
 6. ✅ Updated documentation (TASKS.md, PROGRESS_REPORT.md)
 
