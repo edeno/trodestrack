@@ -154,6 +154,54 @@ def create_diagnostic_video(
                 f"{overlay_layout.heading_idx!r}."
             )
 
+        # Camera-frame alignment: the animation indexes filtered_means,
+        # filtered_covariances, and predicted_means by cam_idx (resolved
+        # from sim_data["t_cam_exp"]). A filter result with fewer frames
+        # than the simulation would silently produce an out-of-range
+        # index when prepare_video_data emits the last cam_idx.
+        n_cam_sim = int(np.asarray(sim_data["t_cam_exp"]).shape[0])
+        for fname in ("filtered_means", "filtered_covariances", "predicted_means"):
+            arr = np.asarray(getattr(filter_results, fname))
+            if arr.shape[0] != n_cam_sim:
+                raise ValueError(
+                    f"filter_results.{fname}.shape[0]={arr.shape[0]} does not "
+                    f"match sim_data['t_cam_exp'] length {n_cam_sim}; the "
+                    "diagnostic video indexes both by camera frame and "
+                    "would otherwise read past the filter result."
+                )
+
+    # Validate fps / speedup at the public boundary so prepare_video_data
+    # below doesn't divide by zero, build a NaN-length np.arange, or
+    # silently emit a 0-frame video. Keep these strictly positive and
+    # finite — empty animations would render but contain nothing.
+    if not np.isfinite(fps) or fps <= 0:
+        raise ValueError(
+            f"fps must be a finite strictly-positive frame rate; got {fps!r}."
+        )
+    if not np.isfinite(speedup) or speedup <= 0:
+        raise ValueError(
+            f"speedup must be a finite strictly-positive playback multiplier; "
+            f"got {speedup!r}."
+        )
+
+    # Validate the rolling-window parameters too. The diagnostic-panel
+    # artists size their deque buffers as ``int(window_s * fps)`` and a
+    # zero or negative window collapses the visible history to 0
+    # samples (deque maxlen=0 stores nothing) or raises ValueError on
+    # construction.
+    if not np.isfinite(time_window_s) or time_window_s * fps < 1:
+        raise ValueError(
+            f"time_window_s must be finite and yield int(time_window_s * fps) "
+            f">= 1 (got time_window_s={time_window_s!r}, fps={fps!r}); "
+            "smaller windows would collapse the diagnostic plots' history "
+            "buffers to zero samples."
+        )
+    if not np.isfinite(trail_length_s) or trail_length_s * fps < 1:
+        raise ValueError(
+            f"trail_length_s must be finite and yield int(trail_length_s * "
+            f"fps) >= 1 (got trail_length_s={trail_length_s!r}, fps={fps!r})."
+        )
+
     # Apply Tufte style
     apply_tufte_style()
 
