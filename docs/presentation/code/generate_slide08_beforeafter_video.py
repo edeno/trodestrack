@@ -5,7 +5,7 @@ Creates a 10-second split-screen video comparing:
 - Left panel: Vision-only extrapolation (jumps, huge uncertainty during dropout)
 - Right panel: Sensor fusion (smooth, bounded uncertainty)
 
-Shows 5-second dropout in the middle of the session.
+Shows a 1-second camera dropout (t = 2.5–3.5 s) in the middle of the session.
 """
 
 from pathlib import Path

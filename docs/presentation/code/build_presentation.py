@@ -507,15 +507,15 @@ def build_section_1_problem(builder):
     builder.add_content_slide(
         title="Quick Preview: Before & After",
         bullets=[
-            "Scenario: 5-second camera dropout",
-            "Vision-only: Huge drift (3+ meters)",
-            "Sensor fusion: Bounded error (<10 cm)",
+            "Scenario: 1-second camera dropout (t = 2.5–3.5 s)",
+            "Vision-only: Drift grows freely",
+            "Sensor fusion: Bounded error",
             "Video shows: Split-screen comparison",
             "Left: Vision-only extrapolation",
             "Right: TrodesTrack sensor fusion",
         ],
         image_path=None,  # Video will be added manually
-        notes="This video shows a 10-second session with a 5-second camera dropout. Left: vision-only tracking extrapolates position, drifts 3+ meters. Right: TrodesTrack uses IMU pre-integration to maintain accuracy within 10 cm. Notice uncertainty grows during dropout (ellipses expand) and shrinks when camera returns. This is the core value proposition!",
+        notes="This video shows a 10-second session with a 1-second camera dropout (t = 2.5–3.5 s). Left: vision-only tracking extrapolates position and drifts. Right: TrodesTrack uses IMU pre-integration to maintain accuracy. Notice uncertainty grows during dropout (ellipses expand) and shrinks when camera returns. This is the core value proposition!",
     )
     # Note: Videos need to be added manually to PowerPoint after generation
 

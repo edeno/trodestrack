@@ -292,17 +292,33 @@ def compute_nees(
         >>> nees = compute_nees(X_truth, X_est, P_est, heading_idx=4)
 
     Notes:
-        For a D-dimensional state, NEES ~ chi^2(D) if filter is consistent.
-        - 95% confidence interval for D=5: [1.145, 11.07]
-        - 95% confidence interval for D=8: [2.733, 15.51]
+        For a D-dimensional state, NEES ~ chi^2(D) if the filter is consistent.
+        Central 95% intervals (chi2.ppf at 0.025 / 0.975), matching the
+        helper in :func:`get_chi2_confidence_interval`:
+
+        - D=5:  [0.8312, 12.8325]
+        - D=8:  [2.1797, 17.5345]
+        - D=10: [3.2470, 20.4832]
+        - D=14: [5.6287, 26.1189]
+        - D=15: [6.2621, 27.4884]
+        - D=16: [6.9077, 28.8454]
 
         If NEES is consistently outside this range, the filter is either:
         - Over-confident (NEES too high): covariance underestimated
         - Under-confident (NEES too low): covariance overestimated
 
-        **Important**: For states containing heading/orientation angles, always
-        pass the ``layout`` parameter to ensure proper angle wrapping. Without this,
-        NEES values will be incorrectly large when angles wrap through 0°/360°.
+        **Heading / orientation handling.** When ``layout`` describes a
+        scalar 2D heading (``layout.has_heading_2d``), this function
+        wraps the heading-component residual to ``[-π, π]`` so the NEES
+        is not inflated by 0°/360° wraparound. For 3D-orientation
+        layouts (Euler tuples or quaternions, i.e. ``layout.heading_idx``
+        is a 3- or 4-tuple), no orientation residual handling is
+        applied — the orientation components enter the residual
+        unwrapped, which is generally only meaningful when truth and
+        estimate are referenced to the same parameterization without
+        sign flips. Treat 3D NEES from this helper as an approximate
+        diagnostic, not a calibrated chi-square test, and prefer
+        per-component diagnostics for 3D orientation.
     """
     if states_true.shape != states_est.shape:
         raise ValueError(

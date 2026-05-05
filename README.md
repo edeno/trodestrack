@@ -170,9 +170,17 @@ result = extended_kalman_filter(
 layout = get_layout(ekf_config.state_mode)
 
 # ✅ GOOD: Extract states using layout indices (dimension-agnostic)
-positions = result.filtered_means[:, layout.pos_idx]      # (N, 2) in meters
+positions = result.filtered_means[:, layout.pos_idx]      # (N, 2) for 2D layouts, (N, 3) for 3D
 velocities = result.filtered_means[:, layout.vel_idx]     # (N, 3) for 2d_cam_3d_imu, (N, 2) for 2d_full
-headings = result.filtered_means[:, layout.heading_idx]   # (N,) in radians
+# Heading shape depends on layout: scalar yaw for 2D layouts, 3-tuple Euler
+# for 3d_euler, 4-tuple quaternion for 3d_quat / 3d_cam_6dof_imu /
+# 2d_cam_6dof_imu_orientation. Guard before treating as a 1D angle.
+heading_block = result.filtered_means[:, layout.heading_idx]
+if layout.has_heading_2d:
+    headings = heading_block.squeeze(-1) if heading_block.ndim == 2 else heading_block
+    # headings: (N,) yaw in radians
+else:
+    headings = heading_block  # (N, 3) Euler or (N, 4) quaternion components
 
 # ❌ BAD: Hardcoded indices (breaks when switching state modes!)
 # positions = result.filtered_means[:, 0:2]  # Fragile! Don't do this!

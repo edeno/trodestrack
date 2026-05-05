@@ -195,19 +195,25 @@ def test_offline_smoother_throughput():
 @pytest.mark.slow
 @pytest.mark.benchmark
 def test_online_ekf_latency():
-    """PRD §4.4: Online EKF should achieve ≤33 ms per-frame latency on CPU.
+    """PRD §4 Online: end-to-end latency ≤33 ms per frame (EKF on CPU).
 
-    Validates that the EKF prediction + update cycle can process a single
-    camera frame (with inter-frame IMU pre-integration) in ≤33 ms on CPU.
+    Validates that the EKF can keep up with a 30 Hz camera over a long
+    session: total wall-clock processing time divided by frame count
+    must stay below the 33 ms frame period.
 
-    This simulates online tracking where the filter must process each camera
-    frame as it arrives at 30 Hz (~33 ms frame period).
+    Caveat: this is an amortized / mean per-frame check, not a per-frame
+    tail-latency check. The filter runs as a single JIT-compiled
+    ``lax.scan`` over the full session, so individual scan steps are not
+    timed and slow tail frames cannot be detected here. Per-frame
+    distribution and p99 measurement require an unrolled / online-loop
+    harness; this test verifies only that the average frame budget is
+    met. For the cited PRD ≤33 ms requirement, the mean is a
+    *necessary*, not sufficient, condition.
 
     Strategy:
-        - Generate a realistic session with 30 Hz camera
-        - Run the full EKF filter (pre-integration + measurement update per frame)
-        - Measure total processing time and compute average per-frame latency
-        - PRD requires p99 latency ≤33 ms, we test mean latency ≤33 ms (stricter)
+        - Generate a realistic 30-min session with 30 Hz camera.
+        - Run the full EKF filter (pre-integration + measurement update per frame).
+        - Measure total processing time and assert mean per-frame ≤33 ms.
 
     Expected runtime: ~45-60 seconds (on modern CPU, measured on M-series Mac)
     """
@@ -265,17 +271,22 @@ def test_online_ekf_latency():
     )
     print(f"Number of frames: {num_frames}")
     print(f"Total processing time: {total_processing_time_s:.2f} s")
-    print(f"Mean latency per frame: {mean_latency_per_frame_ms:.2f} ms")
+    print(f"Mean latency per frame (amortized): {mean_latency_per_frame_ms:.2f} ms")
     print(f"Camera frame period (30 Hz): {frame_period_ms:.2f} ms")
-    print(f"PRD requirement: ≤{PRD_ONLINE_EKF_LATENCY_MS_MAX:.1f} ms per frame")
+    print(
+        f"PRD requirement: ≤{PRD_ONLINE_EKF_LATENCY_MS_MAX:.1f} ms per frame "
+        "(this test checks MEAN only — necessary, not sufficient)"
+    )
     print(
         f"Status: {'PASS ✓' if mean_latency_per_frame_ms <= PRD_ONLINE_EKF_LATENCY_MS_MAX else 'FAIL ✗'}"
     )
 
-    # Validate PRD requirement
+    # Validate PRD ≤33 ms requirement at the mean (necessary condition).
+    # Tail / p99 verification requires an unrolled per-frame harness and is
+    # not covered by this test.
     assert mean_latency_per_frame_ms <= PRD_ONLINE_EKF_LATENCY_MS_MAX, (
         f"Mean EKF latency {mean_latency_per_frame_ms:.2f} ms exceeds "
-        f"PRD requirement {PRD_ONLINE_EKF_LATENCY_MS_MAX:.1f} ms"
+        f"PRD requirement {PRD_ONLINE_EKF_LATENCY_MS_MAX:.1f} ms (mean check)"
     )
 
     # Sanity check: verify filter produced valid results

@@ -224,10 +224,21 @@ from trodestrack.models.state_layout import get_layout
 # Get layout from config
 layout = get_layout(cfg.state_mode)
 
-# Extract states (works with any state dimension!)
-positions = result.filtered_means[:, layout.pos_idx]
-velocities = result.filtered_means[:, layout.vel_idx]
-headings = result.filtered_means[:, layout.heading_idx]
+# Extract states using layout indices.
+# layout.pos_idx / layout.vel_idx are always tuples, so these slices stack
+# the named components into (N, k) arrays for any registered mode.
+positions = result.filtered_means[:, layout.pos_idx]      # (N, 2) for 2D, (N, 3) for 3D
+velocities = result.filtered_means[:, layout.vel_idx]     # (N, k_vel)
+
+# Heading layout-aware: scalar yaw for 2D modes; 3-tuple Euler or 4-tuple
+# quaternion for 14D / 15D / 16D modes. Cast to a scalar yaw only when the
+# layout actually exposes one.
+heading_block = result.filtered_means[:, layout.heading_idx]
+if layout.has_heading_2d:
+    headings = heading_block.squeeze(-1) if heading_block.ndim == 2 else heading_block
+    # headings: (N,) yaw in radians
+else:
+    headings = heading_block  # (N, 3) Euler or (N, 4) quaternion — handle separately
 
 # Extract covariances
 P = result.filtered_covariances
@@ -270,7 +281,17 @@ filtered_cov = np.asarray(result.filtered_covariances)
 
 pos_idx = list(layout.pos_idx)
 vel_idx_2d = list(layout.vel_idx)[:2]  # X_truth has only vx, vy
-heading_col = int(layout.heading_idx)
+# This QA snippet assumes a scalar 2D-yaw layout. Cast guarded; for
+# 3-tuple Euler / 4-tuple quaternion layouts you would build per-component
+# diagnostics instead.
+if not layout.has_heading_2d:
+    raise ValueError(
+        f"This QA example expects a scalar-heading layout; got "
+        f"layout.heading_idx={layout.heading_idx!r}. Build per-component "
+        "orientation diagnostics for 14D/15D/16D layouts."
+    )
+heading_idx_raw = layout.heading_idx
+heading_col = int(heading_idx_raw[0] if isinstance(heading_idx_raw, tuple) else heading_idx_raw)
 
 # Position-only NEES (state_dim=2): expected mean ~ 2 for a consistent filter.
 nees = compute_nees(
@@ -300,20 +321,27 @@ from trodestrack.qa.metrics import (
     compute_nees,
 )
 
-# Position RMSE (uses the aligned X_truth_at_cam from above).
-# Signature is compute_position_rmse(positions_true, positions_est, ...) —
-# the truth array goes first.
-pos_rmse = compute_position_rmse(
-    X_truth_at_cam[:, :2],
-    np.asarray(result.filtered_means[:, :2]),
-)
+# X_truth from the simulator is laid out as [x, y, vx, vy, theta], so its
+# position columns are the first two regardless of filter layout.
+truth_xy = X_truth_at_cam[:, :2]
+
+# Estimated position columns come from the filter layout, not hardcoded indices.
+filtered = np.asarray(result.filtered_means)
+filtered_cov = np.asarray(result.filtered_covariances)
+est_xy = filtered[:, list(layout.pos_idx)[:2]]
+est_xy_cov = filtered_cov[
+    np.ix_(np.arange(filtered.shape[0]), list(layout.pos_idx)[:2], list(layout.pos_idx)[:2])
+]
+
+# Position RMSE — signature is compute_position_rmse(positions_true, positions_est, ...)
+pos_rmse = compute_position_rmse(truth_xy, est_xy)
 print(f"Position RMSE: {pos_rmse * 100:.2f} cm")
 
 # NEES (filter consistency, position only)
 nees = compute_nees(
-    states_true=X_truth_at_cam[:, :2],
-    states_est=np.asarray(result.filtered_means[:, :2]),
-    covariances_est=np.asarray(result.filtered_covariances[:, :2, :2]),
+    states_true=truth_xy,
+    states_est=est_xy,
+    covariances_est=est_xy_cov,
 )
 print(f"Mean NEES: {nees.mean():.2f} (expected ~ 2 for position-only NEES)")
 ```
