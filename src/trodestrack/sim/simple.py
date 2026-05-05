@@ -57,6 +57,27 @@ class SimpleSimConfig:
 
     def __post_init__(self):
         """Validate configuration parameters."""
+        # Reject non-finite scalar parameters first. Bare ``<= 0`` / ``< 0``
+        # comparisons silently accept NaN (NaN compares False to both),
+        # and the simulator then emits non-finite IMU / truth arrays —
+        # e.g. gyro_noise_density=NaN produced non-finite U_imu.
+        finite_scalar_fields = (
+            "duration_s",
+            "fs_imu",
+            "fs_cam",
+            "gyro_noise_density",
+            "accel_noise_density",
+            "gyro_bias_std",
+            "accel_bias_std",
+            "cam_noise_std",
+            "cam_dropout_prob",
+            "gravity",
+        )
+        for fname in finite_scalar_fields:
+            value = getattr(self, fname)
+            if not np.isfinite(value):
+                raise ValueError(f"{fname} must be a finite value; got {value!r}.")
+
         # Duration validation
         if self.duration_s <= 0:
             raise ValueError(

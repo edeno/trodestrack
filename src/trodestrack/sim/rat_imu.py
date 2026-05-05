@@ -277,6 +277,49 @@ class RatIMUSimConfig:
         """Validate configuration parameters."""
         import warnings
 
+        # Reject non-finite scalar parameters up front. The downstream
+        # checks use bare comparisons like ``<= 0`` / ``< 0`` which NaN
+        # silently passes (NaN compares False to both), and the simulator
+        # then emits non-finite IMU and/or truth arrays. Listing the
+        # numeric fields explicitly so a future field addition trips
+        # AttributeError rather than silently dropping out of the gate.
+        finite_scalar_fields = (
+            "duration_s",
+            "fs_imu",
+            "fs_cam",
+            "arena_w",
+            "arena_h",
+            "cam_dropout_prob",
+            "cam_dropout_correlation",
+            "cam_jitter_s",
+            "cam_latency_s",
+            "led_swap_prob",
+            "led_swap_rate",
+            "led_swap_duration_mean",
+            "led_swap_duration_std",
+            "led_wall_reflection_prob",
+            "led_wall_reflection_distance",
+            "confidence_base",
+            "confidence_dropout_decay",
+            "speed_clip",
+            "gravity",
+            "imu_tilt_roll_deg",
+            "imu_tilt_pitch_deg",
+            "cam_sigma_m",
+            "gyro_noise_density",
+            "accel_noise_density",
+            "gyro_bias_rw_density",
+            "accel_bias_rw_density",
+            "tau_yaw_rate",
+            "tau_a_fwd",
+            "tau_a_lat",
+            "vel_drag",
+        )
+        for fname in finite_scalar_fields:
+            value = getattr(self, fname)
+            if not np.isfinite(value):
+                raise ValueError(f"{fname} must be a finite value; got {value!r}.")
+
         # Duration validation
         if self.duration_s <= 0:
             raise ValueError(
@@ -433,7 +476,13 @@ class RatIMUSimConfig:
                 f"Got drag_fwd={self.drag_fwd}, drag_lat={self.drag_lat}"
             )
 
-        # Validate drag coefficients are non-negative
+        # Validate drag coefficients are non-negative and finite (NaN
+        # passes the bare <0 comparison and propagates through dynamics).
+        if not np.isfinite(self.drag_fwd) or not np.isfinite(self.drag_lat):
+            raise ValueError(
+                "drag_fwd and drag_lat must be finite values; got "
+                f"drag_fwd={self.drag_fwd!r}, drag_lat={self.drag_lat!r}."
+            )
         if self.drag_fwd < 0:
             raise ValueError(
                 f"Forward drag coefficient must be non-negative, got {self.drag_fwd} 1/s.\n"

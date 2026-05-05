@@ -425,10 +425,30 @@ def _validate_imu_inputs(
         )
     if t_arr.shape[0] < 2:
         raise ValueError("At least two IMU samples are required.")
-    if not np.all(np.diff(t_arr) > 0):
-        raise ValueError("t_imu must be strictly increasing.")
     if not np.isfinite(t_arr).all():
         raise ValueError("t_imu contains non-finite values.")
+    if not np.all(np.diff(t_arr) > 0):
+        raise ValueError("t_imu must be strictly increasing.")
+
+    # Reject non-finite IMU samples at the public boundary. The scan
+    # propagates each gyro_prev through integrate_body_gyro, where a
+    # NaN/inf gyro vector produces a non-finite quaternion that
+    # normalize_quaternion silently maps back to identity (norm > eps is
+    # False for NaN), hiding a corrupted sample as a plausible no-rotation
+    # step. The troubleshooting docs already require finite IMU samples,
+    # so enforce it here.
+    if not np.isfinite(gyro_arr).all():
+        n_bad = int(np.sum(~np.isfinite(gyro_arr).all(axis=1)))
+        raise ValueError(
+            f"gyro_xyz contains non-finite value(s) (NaN/inf) in {n_bad} "
+            "row(s); IMU samples must be finite (rad/s)."
+        )
+    if not np.isfinite(accel_arr).all():
+        n_bad = int(np.sum(~np.isfinite(accel_arr).all(axis=1)))
+        raise ValueError(
+            f"accel_xyz contains non-finite value(s) (NaN/inf) in {n_bad} "
+            "row(s); IMU samples must be finite (m/s²)."
+        )
     return t_arr, gyro_arr, accel_arr
 
 
