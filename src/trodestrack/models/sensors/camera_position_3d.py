@@ -18,12 +18,20 @@ quaternion from a 3D quaternion state layout.
 
 from __future__ import annotations
 
+import jax
 import jax.numpy as jnp
+import numpy as np
 from jax import jacfwd
 
 from trodestrack.models.filter_common import confidence_to_R_diagonal
 from trodestrack.models.quaternion import rotate_vector_body_to_world
 from trodestrack.models.state_layout import StateLayout
+
+
+def _is_traced(arr) -> bool:
+    """True when ``arr`` is a JAX tracer (cannot run host-side numeric checks)."""
+
+    return isinstance(arr, jax.core.Tracer)
 
 
 class Camera3DPositionModel:
@@ -70,14 +78,25 @@ class Camera3DPositionModel:
             raise ValueError(
                 "Camera3DPositionModel requires a 3D quaternion state layout."
             )
-        if measurement_noise_base <= 0:
+        # Use np.isfinite explicitly: NaN compares False to ``<= 0`` and
+        # would otherwise propagate through every covariance / prediction
+        # entry. confidence_clip_min appears in the denominator of
+        # confidence_to_R_diagonal (R = base / clip(conf, clip_min, 1.0)),
+        # so it must also be strictly positive.
+        if not np.isfinite(measurement_noise_base) or measurement_noise_base <= 0:
             raise ValueError(
-                f"measurement_noise_base must be > 0, got {measurement_noise_base}."
+                "measurement_noise_base must be a finite strictly-positive "
+                f"variance; got {measurement_noise_base!r}."
             )
-        if invalid_measurement_noise <= 0:
+        if not np.isfinite(invalid_measurement_noise) or invalid_measurement_noise <= 0:
             raise ValueError(
-                "invalid_measurement_noise must be > 0, got "
-                f"{invalid_measurement_noise}."
+                "invalid_measurement_noise must be a finite strictly-positive "
+                f"variance; got {invalid_measurement_noise!r}."
+            )
+        if not np.isfinite(confidence_clip_min) or confidence_clip_min <= 0:
+            raise ValueError(
+                "confidence_clip_min must be a finite strictly-positive "
+                f"floor; got {confidence_clip_min!r}."
             )
 
         led_offsets = jnp.asarray(led_offsets_body)
@@ -89,6 +108,19 @@ class Camera3DPositionModel:
             )
         if led_offsets.shape[0] < 2:
             raise ValueError("Camera3DPositionModel requires at least two LED offsets.")
+        # Reject non-finite LED offsets — predict() rotates them into
+        # world frame and adds them to the predicted body position, so a
+        # single NaN/inf poisons every predicted LED. Only run this on
+        # concrete (host) arrays; the model is also reconstructed inside
+        # the JIT-traced filter where the array is a tracer and has
+        # already been validated at the public entry point.
+        if not _is_traced(led_offsets_body) and not np.all(
+            np.isfinite(np.asarray(led_offsets_body))
+        ):
+            raise ValueError(
+                "led_offsets_body must contain only finite values; got "
+                "non-finite entries (NaN/inf)."
+            )
         if z_leds.ndim != 3 or z_leds.shape[1:] != led_offsets.shape:
             raise ValueError(
                 "z_leds_all must have shape (n_time, n_leds, 3) matching "
@@ -111,6 +143,18 @@ class Camera3DPositionModel:
                 raise ValueError(
                     "conf_all must have shape (n_time, n_leds) or "
                     f"(n_time, n_leds, 3); got {conf.shape}."
+                )
+            # Reject non-finite confidences — confidence_to_R_diagonal
+            # uses ``base / clip(conf, clip_min, 1.0)``; np.clip of NaN
+            # is NaN, which propagates into every R entry. The 2D EKF /
+            # UKF entry points already validate conf_cam at ingress, but
+            # this model is also constructed directly elsewhere.
+            if not _is_traced(conf_all) and not np.all(
+                np.isfinite(np.asarray(conf_all))
+            ):
+                raise ValueError(
+                    "conf_all must contain only finite values; got "
+                    "non-finite entries (NaN/inf)."
                 )
         else:
             conf = None

@@ -13,6 +13,7 @@ References
 from __future__ import annotations
 
 import jax.numpy as jnp
+import numpy as np
 from jax import lax
 
 from trodestrack.models.state_layout import StateLayout
@@ -84,12 +85,20 @@ class ZUPTModel:
         layout: StateLayout,
         dtype=jnp.float32,
     ):
-        # Validate parameters
-        if measurement_noise <= 0:
-            raise ValueError(f"measurement_noise must be > 0, got {measurement_noise}")
-        if velocity_threshold < 0:
+        # Use np.isfinite explicitly: NaN compares False to both ``<= 0``
+        # and ``< 0``, so the bare comparisons accepted NaN previously.
+        # NaN measurement_noise produced an all-NaN ZUPT covariance; NaN
+        # velocity_threshold drove the stationarity gate to ``False``
+        # everywhere and silently disabled ZUPT updates.
+        if not np.isfinite(measurement_noise) or measurement_noise <= 0:
             raise ValueError(
-                f"velocity_threshold must be >= 0, got {velocity_threshold}"
+                "measurement_noise must be a finite strictly-positive "
+                f"variance (m²/s²); got {measurement_noise!r}."
+            )
+        if not np.isfinite(velocity_threshold) or velocity_threshold < 0:
+            raise ValueError(
+                "velocity_threshold must be a finite non-negative speed "
+                f"(m/s); got {velocity_threshold!r}."
             )
 
         self.enable_zupt = enable_zupt
