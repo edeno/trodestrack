@@ -25,13 +25,24 @@ Run through these checks first before diving into specific problems:
 ### ✅ Data Sanity Checks
 
 ```python
-# Check for NaN/Inf in inputs
-assert np.isfinite(sim['Z_cam_led1']).all(), "LED1 contains NaN/Inf"
-assert np.isfinite(sim['Z_cam_led2']).all(), "LED2 contains NaN/Inf"
+# Check for NaN/Inf in inputs.
+# IMU samples must always be finite (the filter does not mask IMU rows).
 assert np.isfinite(sim['U_imu']).all(), "IMU contains NaN/Inf"
 
+# LED arrays may contain NaNs by design — that's how the simulator and
+# the filter mark dropped or partially-occluded LEDs. Only require
+# finite values where the camera mask says the frame is valid AND that
+# specific LED row is finite (the filter's measurement model handles
+# single-LED frames; see tests/filters/test_ekf_partial_observations.py).
+mask = sim['mask_cam']
+led1_valid = mask & np.isfinite(sim['Z_cam_led1']).all(axis=1)
+led2_valid = mask & np.isfinite(sim['Z_cam_led2']).all(axis=1)
+assert np.isfinite(sim['Z_cam_led1'][led1_valid]).all()
+assert np.isfinite(sim['Z_cam_led2'][led2_valid]).all()
+assert led1_valid.any() or led2_valid.any(), "no valid LED frames"
+
 # Check units (common mistake: pixels instead of meters)
-led_positions = sim['Z_cam_led1'][sim['mask_cam']]
+led_positions = sim['Z_cam_led1'][led1_valid]
 assert led_positions.max() < 10.0, "LED positions likely in pixels, not meters"
 
 # Check time alignment
@@ -661,9 +672,15 @@ See **[TUNING.md](TUNING.md)** for detailed parameter tuning guidance.
 
 1. **Check inputs:**
    ```python
-   assert np.isfinite(sim['Z_cam_led1']).all()
-   assert np.isfinite(sim['Z_cam_led2']).all()
+   # IMU must always be finite. LEDs may contain NaNs by design (dropouts /
+   # single-LED frames are valid inputs); only require finiteness on rows
+   # the camera mask marks valid AND that have finite coordinates.
    assert np.isfinite(sim['U_imu']).all()
+   mask = sim['mask_cam']
+   led1_valid = mask & np.isfinite(sim['Z_cam_led1']).all(axis=1)
+   led2_valid = mask & np.isfinite(sim['Z_cam_led2']).all(axis=1)
+   assert np.isfinite(sim['Z_cam_led1'][led1_valid]).all()
+   assert np.isfinite(sim['Z_cam_led2'][led2_valid]).all()
    ```
 
 2. **Check for extreme values:**
@@ -681,12 +698,19 @@ See **[TUNING.md](TUNING.md)** for detailed parameter tuning guidance.
 
 #### Solutions
 
-**Option 1: Replace NaN with masked observations**
+**Option 1: Pass NaNs through; the filter handles them.**
 ```python
-# Replace NaN in LED positions with dummy values + mask=False
-nan_mask = ~np.isfinite(sim['Z_cam_led1'])
-sim['Z_cam_led1'][nan_mask] = 0.0
-sim['mask_cam'][nan_mask[:, 0]] = False
+# The camera measurement model treats NaN-containing LED rows as
+# missing observations and falls back to single-LED or prediction-only
+# updates as appropriate. You don't need to overwrite NaNs with dummy
+# values — see tests/filters/test_ekf_partial_observations.py.
+# If a frame is *entirely* unusable (both LEDs NaN), set mask_cam=False
+# for that frame so the filter skips the camera update altogether:
+both_invalid = (
+    ~np.isfinite(sim['Z_cam_led1']).all(axis=1)
+    & ~np.isfinite(sim['Z_cam_led2']).all(axis=1)
+)
+sim['mask_cam'][both_invalid] = False
 ```
 
 **Option 2: Increase numerical stability**

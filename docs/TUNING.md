@@ -196,7 +196,7 @@ Controls how much the filter trusts the camera observations.
 **When to adjust:**
 - **Increase R** if camera tracking is noisy (jittery LED detections)
 - **Decrease R** if camera tracking is very precise (controlled lab setup)
-- **Scale with DLC confidence**: Set `R = base_R / confidence²` (built-in)
+- **Scale with DLC confidence**: built-in scaling is `R = base_R / clip(confidence, clip_min, 1.0)` (linear, not squared) — see `confidence_to_R_diagonal` in `filter_common.py`
 
 ### IMU Noise Densities
 
@@ -447,9 +447,11 @@ cfg = EKFConfig(
 
 **Purpose:** Scale measurement trust based on DLC confidence or LED geometry quality.
 
-**Built-in scaling:**
+**Built-in scaling:** linear (not squared) reciprocal of clipped DLC
+confidence, implemented by `confidence_to_R_diagonal` in
+`trodestrack.models.filter_common`:
 ```python
-R_scaled = R_base / confidence²
+R_scaled = R_base / clip(confidence, clip_min, 1.0)
 ```
 
 **Additional heading noise scaling:**

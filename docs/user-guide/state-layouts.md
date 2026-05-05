@@ -310,32 +310,63 @@ def extract_biases(result, cfg):
 ### Pattern 3: Generic Plotting Function
 
 ```python
-def plot_position_with_uncertainty(result, cfg, ax=None):
-    """Plot position with uncertainty bands (any state mode)."""
-    import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.patches import Ellipse
 
+
+def plot_position_with_uncertainty(result, cfg, ax=None, n_std=2.0):
+    """Plot position trajectory with periodic n-sigma uncertainty ellipses
+    (any state mode)."""
     layout = get_layout(cfg.state_mode)
-    pos = result.filtered_means[:, layout.pos_idx]
-    P = result.filtered_covariances
-    pos_cov = P[:, layout.pos_idx, :][:, :, layout.pos_idx]
-    pos_std = np.sqrt(np.diagonal(pos_cov, axis1=1, axis2=2))
+    pos = np.asarray(result.filtered_means[:, list(layout.pos_idx)])
+    P = np.asarray(result.filtered_covariances)
+    pos_cov = P[:, list(layout.pos_idx)][:, :, list(layout.pos_idx)]
 
     if ax is None:
-        fig, ax = plt.subplots()
+        _fig, ax = plt.subplots()
 
-    ax.plot(pos[:, 0], pos[:, 1], 'b-', label='Position')
+    ax.plot(pos[:, 0], pos[:, 1], "b-", label="Position")
 
-    # Add uncertainty ellipses at intervals
-    for i in range(0, len(pos), len(pos)//10):
-        ellipse = create_confidence_ellipse(pos[i], pos_cov[i])
-        ax.add_patch(ellipse)
+    # Inline 2x2 covariance -> ellipse axes/angle (no helper exists for
+    # adding a single ellipse patch to an existing axes; ``trodestrack.qa.
+    # plots.plot_covariance_ellipse`` builds its own figure).
+    step = max(1, len(pos) // 10)
+    for i in range(0, len(pos), step):
+        cov2 = pos_cov[i]
+        eigvals, eigvecs = np.linalg.eigh(cov2)
+        # eigh returns ascending; reverse so eigvals[0] is the major axis
+        order = np.argsort(eigvals)[::-1]
+        eigvals = eigvals[order]
+        eigvecs = eigvecs[:, order]
+        width, height = 2.0 * n_std * np.sqrt(np.maximum(eigvals, 0.0))
+        angle = np.degrees(np.arctan2(eigvecs[1, 0], eigvecs[0, 0]))
+        ax.add_patch(
+            Ellipse(
+                xy=(pos[i, 0], pos[i, 1]),
+                width=width,
+                height=height,
+                angle=angle,
+                fill=False,
+                edgecolor="b",
+                alpha=0.4,
+            )
+        )
 
-    ax.set_xlabel('X (m)')
-    ax.set_ylabel('Y (m)')
+    ax.set_xlabel("X (m)")
+    ax.set_ylabel("Y (m)")
     ax.legend()
-    ax.axis('equal')
-
+    ax.axis("equal")
     return ax
+
+
+# For a standalone uncertainty figure (not overlaid onto an existing axes),
+# use the QA helper:
+#
+#     from trodestrack.qa.plots import plot_covariance_ellipse
+#     fig, ax = plot_covariance_ellipse(
+#         mean=pos[-1], cov=pos_cov[-1], trajectory=pos
+#     )
 ```
 
 ## Common Mistakes

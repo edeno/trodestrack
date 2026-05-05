@@ -332,19 +332,33 @@ create_diagnostic_video(
 TrodesTrack raises informative errors:
 
 ```python
-from trodestrack.models.ekf import EKFConfig
+from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
+from trodestrack.models.state_layout import get_layout
 
-# Invalid state mode
+# EKFConfig itself does not validate state_mode at construction time;
+# the lookup happens inside get_layout(...) (and inside the filter call
+# path), which raises KeyError for unknown modes.
+cfg = EKFConfig(state_mode="invalid")  # no error here
 try:
-    cfg = EKFConfig(state_mode="invalid")
-except ValueError as e:
-    print(f"Error: {e}")  # "Unknown state_mode: invalid"
+    layout = get_layout(cfg.state_mode)
+except KeyError as e:
+    print(f"Error: {e}")  # "'invalid' is not a registered state_mode"
 
-# Data shape mismatch
+# Data shape mismatch. extended_kalman_filter takes positional arrays
+# (ekf_config, t_imu, U_imu, t_cam, Z_cam_led1, Z_cam_led2, mask_cam, ...)
+# and validates IMU shape via validate_imu_input_shape — passing a
+# wrong-shaped IMU array raises ValueError; passing the wrong number of
+# positional args raises TypeError before the shape check runs.
 try:
-    result = extended_kalman_filter(cfg, bad_data)
+    cfg = EKFConfig(state_mode="2d_full")
+    bad_U_imu = np.zeros((100, 7))  # 7 channels is not a valid layout
+    result = extended_kalman_filter(
+        cfg,
+        sim["t_imu"], bad_U_imu, sim["t_cam_exp"],
+        sim["Z_cam_led1"], sim["Z_cam_led2"], sim["mask_cam"],
+    )
 except ValueError as e:
-    print(f"Error: {e}")  # Informative message about shape mismatch
+    print(f"Error: {e}")  # validate_imu_input_shape message
 ```
 
 ## Performance Tips
