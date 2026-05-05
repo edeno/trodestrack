@@ -239,10 +239,13 @@ pos_std = np.sqrt(np.diagonal(pos_cov, axis1=1, axis2=2))  # (N, 2)
 
 | Mode | Dim | State Vector | Use Case |
 |------|-----|--------------|----------|
-| `"2d_full"` | 8D | [x, y, vx, vy, theta, b_gz, b_ax, b_ay] | Standard sensor fusion |
-| `"vision_only"` | 5D | [x, y, vx, vy, theta] | Camera-only tracking |
-| `"2d_cam_3d_imu"` | 10D | [x, y, vx, vy, vz, theta, b_gz, b_ax, b_ay, b_az] | 2D camera + 3D accel |
-| `"3d_euler"` | 15D | [x, y, z, vx, vy, vz, roll, pitch, yaw, ...] | Full 3D tracking |
+| `"2d_cam_3d_imu"` | 10D | [x, y, vx, vy, vz, theta, b_gz, b_ax, b_ay, b_az] | **Default**: 2D camera + 3D accel |
+| `"2d_full"` | 8D | [x, y, vx, vy, theta, b_gz, b_ax, b_ay] | Standard 2D sensor fusion |
+| `"vision_only"` | 5D | [x, y, vx, vy, theta] | Camera-driven tracking; APIs still require placeholder IMU arrays |
+| `"2d_cam_6dof_imu_orientation"` | 14D | [x, y, vx, vy, qw, qx, qy, qz, b_gx, b_gy, b_gz, b_ax, b_ay, b_az] | Experimental: 2D camera + 6-DOF IMU with quaternion orientation |
+| `"3d_euler"` | 15D | [x, y, z, vx, vy, vz, roll, pitch, yaw, b_gx, b_gy, b_gz, b_ax, b_ay, b_az] | Full 3D tracking with Euler-angle orientation |
+| `"3d_quat"` | 16D | [x, y, z, vx, vy, vz, qw, qx, qy, qz, b_gx, b_gy, b_gz, b_ax, b_ay, b_az] | Full 3D tracking with quaternion orientation |
+| `"3d_cam_6dof_imu"` | 16D | same as `"3d_quat"` | **Required** by the experimental `extended_kalman_filter_3d` entry point (3D LED observations + 6-channel IMU) |
 
 See [State Layouts](../user-guide/state-layouts.md) for complete documentation.
 
@@ -297,10 +300,12 @@ from trodestrack.qa.metrics import (
     compute_nees,
 )
 
-# Position RMSE (uses the aligned X_truth_at_cam from above)
+# Position RMSE (uses the aligned X_truth_at_cam from above).
+# Signature is compute_position_rmse(positions_true, positions_est, ...) —
+# the truth array goes first.
 pos_rmse = compute_position_rmse(
-    np.asarray(result.filtered_means[:, :2]),
     X_truth_at_cam[:, :2],
+    np.asarray(result.filtered_means[:, :2]),
 )
 print(f"Position RMSE: {pos_rmse * 100:.2f} cm")
 

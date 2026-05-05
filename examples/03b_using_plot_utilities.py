@@ -27,7 +27,7 @@ KEY PRINCIPLE: Use State Layouts, Not Magic Indices
 ✅ GOOD: positions = result.filtered_means[:, layout.pos_idx]  # Robust!
 
 State layouts make your code:
-- Dimension-agnostic (works with 5D, 8D, 10D, 15D states)
+- Dimension-agnostic (works with 5D, 8D, 10D, 14D, 15D, 16D states)
 - Self-documenting (layout.pos_idx is clearer than [:, 0:2])
 - Robust to changes (switching state modes doesn't break your code)
 

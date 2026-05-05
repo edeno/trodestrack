@@ -10,7 +10,7 @@ This section provides detailed guidance for using TrodesTrack effectively in you
 
     ---
 
-    Write dimension-agnostic code that works with any state mode (5D, 8D, 10D, 15D)
+    Write dimension-agnostic code that works with any state mode (5D, 8D, 10D, 14D, 15D, 16D)
 
     [:octicons-arrow-right-24: State Layouts](state-layouts.md)
 

@@ -106,7 +106,7 @@ headings = result.filtered_means[:, layout.heading_idx]   # (N,) for scalar-head
 ```
 
 !!! warning "Avoid Hardcoded Indices"
-    Always use `layout.pos_idx` instead of `[:, 0:2]`. Hardcoded indices break when switching state modes (5D, 8D, 10D, 15D).
+    Always use `layout.pos_idx` instead of `[:, 0:2]`. Hardcoded indices break when switching state modes (5D, 8D, 10D, 14D, 15D, 16D).
 
 ### Generate QA Report
 

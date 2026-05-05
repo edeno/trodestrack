@@ -429,10 +429,28 @@ sim['Z_cam_led1'][swap_mask], sim['Z_cam_led2'][swap_mask] = \
 
 #### Diagnostic Steps
 
-1. **Check dropout duration:**
+1. **Check dropout duration:** (no dedicated helper ships; compute inline.)
    ```python
-   dropout_lengths = get_dropout_lengths(sim['mask_cam'])
-   print(f"Max dropout: {dropout_lengths.max():.1f} frames (~{dropout_lengths.max()/30:.1f}s)")
+   import numpy as np
+
+   mask = np.asarray(sim["mask_cam"], dtype=bool)
+   # Run-length encode the False (dropped) runs.
+   gaps = []
+   length = 0
+   for valid in mask:
+       if not valid:
+           length += 1
+       elif length:
+           gaps.append(length)
+           length = 0
+   if length:
+       gaps.append(length)
+   if gaps:
+       max_gap = max(gaps)
+       fs_cam = 1.0 / np.mean(np.diff(sim["t_cam_exp"]))
+       print(f"Max dropout: {max_gap} frames (~{max_gap / fs_cam:.1f}s)")
+   else:
+       print("No dropouts in this session.")
    ```
 
 2. **Check IMU-only drift:**
@@ -689,10 +707,21 @@ See **[TUNING.md](TUNING.md)** for detailed parameter tuning guidance.
    print(f"Max IMU gyro: {np.nanmax(sim['U_imu'][:, 0])}")     # Should be < 100 rad/s
    ```
 
-3. **Check covariance:**
+3. **Check covariance:** (use the filter's own initialization output for `P0`.)
    ```python
+   from trodestrack.models.filter_common import initialize_state
+   from trodestrack.models.state_layout import get_layout
+
+   layout = get_layout(cfg.state_mode)
+   dt_cam = float(np.mean(np.diff(sim["t_cam_exp"])))
+   state0 = initialize_state(
+       sim["Z_cam_led1"], sim["Z_cam_led2"], sim["mask_cam"],
+       dt_cam, cfg.led_distance, layout=layout,
+   )
+   P0 = np.asarray(state0.cov)
    # NaN in covariance indicates numerical instability
-   print(f"Initial covariance condition number: {np.linalg.cond(P0)}")
+   assert np.isfinite(P0).all(), "P0 contains NaN/Inf"
+   print(f"Initial covariance condition number: {np.linalg.cond(P0):.2e}")
    # Should be < 1e10
    ```
 
@@ -869,11 +898,12 @@ X_truth_at_cam = np.array(
     [sim["X_truth"][np.argmin(np.abs(sim["t_imu"] - t_c))] for t_c in sim["t_cam_exp"]]
 )
 truth_pos = X_truth_at_cam[:, :2]
+# Signature is compute_position_rmse(positions_true, positions_est, ...).
 rmse_ekf = compute_position_rmse(
-    np.asarray(result_ekf.filtered_means[:, :2]), truth_pos
+    truth_pos, np.asarray(result_ekf.filtered_means[:, :2])
 )
 rmse_ukf = compute_position_rmse(
-    np.asarray(result_ukf.filtered_means[:, :2]), truth_pos
+    truth_pos, np.asarray(result_ukf.filtered_means[:, :2])
 )
 print(f"EKF RMSE: {rmse_ekf*100:.2f} cm")
 print(f"UKF RMSE: {rmse_ukf*100:.2f} cm")

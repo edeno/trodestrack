@@ -689,7 +689,7 @@ def build_section_3_features(builder):
             "3d_euler / 3d_quat / 3d_cam_6dof_imu: 15-16D, full 3D pose",
             "Switch by setting EKFConfig(state_mode=...); see docs/user-guide/state-layouts.md",
         ],
-        notes="TrodesTrack supports multiple state layouts via the registry in trodestrack.models.state_layout (see get_layout()). The shipped layouts are vision_only (5D, camera-only), 2d_full (8D), 2d_cam_3d_imu (10D, the default — includes vz / b_az for rearing detection), 2d_cam_6dof_imu_orientation (14D, experimental quaternion orientation with a 2D camera), and the 3D modes 3d_euler / 3d_quat / 3d_cam_6dof_imu (15-16D, used by extended_kalman_filter_3d). Choose a layout by passing state_mode to EKFConfig / UKFConfig; the user-guide page docs/user-guide/state-layouts.md has the per-mode index tables.",
+        notes='TrodesTrack supports multiple state layouts via the registry in trodestrack.models.state_layout (see get_layout()). The shipped layouts are vision_only (5D, camera-only), 2d_full (8D), 2d_cam_3d_imu (10D, the default — includes vz / b_az for rearing detection), 2d_cam_6dof_imu_orientation (14D, experimental quaternion orientation with a 2D camera), 3d_euler (15D), and 3d_quat (16D). The experimental ``extended_kalman_filter_3d`` entry point requires state_mode="3d_cam_6dof_imu" (16D, same vector layout as 3d_quat) — 3d_euler / 3d_quat are EKF-compatible state vectors but do not flow through the 3D-camera filter directly. Choose a layout by passing state_mode to EKFConfig / UKFConfig; the user-guide page docs/user-guide/state-layouts.md has the per-mode index tables.',
     )
 
     # Slide 24: Performance & Scalability

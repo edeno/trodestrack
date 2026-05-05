@@ -529,7 +529,7 @@ def plot_ekf_results(
     # Compute full NEES using actual state dimension from layout
     from scipy.stats import chi2
 
-    state_dim = layout.n  # Use layout dimension (supports 5D, 8D, 10D, 15D)
+    state_dim = layout.n  # Use layout dimension (supports 5D, 8D, 10D, 14D, 15D, 16D)
     nees_values = []
     for i in range(len(t_cam)):
         err = X_est[i] - X_truth_cam[i]
