@@ -134,6 +134,23 @@ class UKFConfig(FilterCoreConfig):
         n = layout.n
         n_plus_lambda = self.alpha**2 * (n + self.kappa)
         if n_plus_lambda < self._MIN_N_PLUS_LAMBDA:
+            # The diagnostic message references (n + κ) and (n + λ) in
+            # denominators. Guard those: kappa <= -n hits the degenerate-
+            # weight gate too, but a literal division would raise
+            # ZeroDivisionError before reaching the actual ValueError. In
+            # that case ``w_mean[0]`` blows up to ±∞ rather than a finite
+            # number, and the only fix is to pick kappa > -n.
+            if (n + self.kappa) <= 0:
+                raise ValueError(
+                    "UKFConfig would produce degenerate sigma-point weights "
+                    f"for state_mode='{self.state_mode}' (n={n}): "
+                    f"(n + κ) = {n + self.kappa!r} ≤ 0, so "
+                    f"(n + λ) = α²(n + κ) = {n_plus_lambda!r} is also "
+                    "non-positive and the central weight w_mean[0] = "
+                    "λ/(n+λ) is unbounded. Use kappa > "
+                    f"{-n} (or raise it past -n) to keep the unscented "
+                    "weights well defined."
+                )
             min_alpha = (self._MIN_N_PLUS_LAMBDA / (n + self.kappa)) ** 0.5
             raise ValueError(
                 f"UKFConfig would produce degenerate sigma-point weights for "
