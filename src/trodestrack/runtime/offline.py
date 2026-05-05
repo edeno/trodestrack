@@ -35,6 +35,10 @@ from trodestrack.models.filter_common import (
     validate_imu_input_shape,
     wrap_angle,
 )
+
+# Note: full camera-shape validator (validate_camera_input_shapes) is used
+# only by the EKF/UKF entrypoints, which take LED + mask + conf arrays. The
+# smoothers only get t_cam + mask_cam, validated inline below.
 from trodestrack.models.process_noise import assemble_Q
 from trodestrack.models.state_layout import StateLayout, get_heading_index, get_layout
 from trodestrack.models.ukf import UKFConfig, UKFResult, compute_sigma_points
@@ -364,6 +368,25 @@ def rts_smoother(
         func_name="rts_smoother",
     )
 
+    # Validate t_cam / mask_cam alignment with the filter result. JAX
+    # indexing silently clamps a too-short mask_cam to its last in-range
+    # value, marking every later frame with that stale flag. Catch the
+    # length mismatch at the entry point.
+    n_cam = int(filter_result.filtered_means.shape[0])
+    t_cam_arr = np.asarray(t_cam)
+    if t_cam_arr.ndim != 1 or t_cam_arr.shape[0] != n_cam:
+        raise ValueError(
+            f"rts_smoother: t_cam must have shape ({n_cam},) to match "
+            f"filter_result.filtered_means, got {t_cam_arr.shape}."
+        )
+    if mask_cam is not None:
+        mask_arr = np.asarray(mask_cam)
+        if mask_arr.shape != (n_cam,):
+            raise ValueError(
+                f"rts_smoother: mask_cam must have shape ({n_cam},) to match "
+                f"t_cam / filter_result, got {mask_arr.shape}."
+            )
+
     # Convert to JAX arrays
     t_imu_jax = jnp.array(t_imu)
     U_imu_jax = jnp.array(U_imu)
@@ -671,6 +694,24 @@ def sigma_point_smoother(
         get_layout(ukf_config.state_mode),
         func_name="sigma_point_smoother",
     )
+
+    # Validate t_cam / mask_cam alignment with the filter result so a
+    # too-short mask_cam doesn't silently reuse its last in-range value
+    # for every later frame (JAX out-of-bounds indexing clamps).
+    n_cam = int(filter_result.filtered_means.shape[0])
+    t_cam_arr_check = np.asarray(t_cam)
+    if t_cam_arr_check.ndim != 1 or t_cam_arr_check.shape[0] != n_cam:
+        raise ValueError(
+            f"sigma_point_smoother: t_cam must have shape ({n_cam},) to "
+            f"match filter_result, got {t_cam_arr_check.shape}."
+        )
+    if mask_cam is not None:
+        mask_arr_check = np.asarray(mask_cam)
+        if mask_arr_check.shape != (n_cam,):
+            raise ValueError(
+                f"sigma_point_smoother: mask_cam must have shape ({n_cam},) "
+                f"to match t_cam / filter_result, got {mask_arr_check.shape}."
+            )
 
     # Convert to JAX arrays
     t_imu_jax = jnp.array(t_imu)

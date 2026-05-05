@@ -547,6 +547,81 @@ def validate_imu_input_shape(
     raise ValueError(msg)
 
 
+def validate_camera_input_shapes(
+    t_cam,
+    Z_cam_led1,
+    Z_cam_led2,
+    mask_cam,
+    *,
+    conf_cam=None,
+    func_name: str = "Kalman filter",
+) -> None:
+    """Validate that all camera-aligned arrays match ``len(t_cam)``.
+
+    Why this exists: the camera measurement models (``CameraPositionModel``
+    and friends) index ``Z_cam_led*[frame_idx]``, ``mask_cam[frame_idx]``,
+    and ``conf_cam[frame_idx]`` with a JAX scalar. Out-of-bounds JAX
+    indexing silently clamps to the last in-range element, so a
+    too-short camera-aligned array reuses its last row for every later
+    frame and the filter returns finite but wrong outputs. Catch the
+    mismatch at the Python entrypoint instead.
+
+    Parameters
+    ----------
+    t_cam : array-like
+        Camera timestamps; defines the expected frame count ``N_cam``.
+    Z_cam_led1, Z_cam_led2 : array-like
+        LED position arrays. Must have shape ``(N_cam, 2)``.
+    mask_cam : array-like
+        Per-frame validity mask. Must have shape ``(N_cam,)``.
+    conf_cam : array-like or None, optional
+        Per-frame confidence array. If provided, must have shape
+        ``(N_cam, 4)`` (``[x1, y1, x2, y2]`` weights).
+    func_name : str, optional
+        Caller name for error-message prefixing.
+
+    Raises
+    ------
+    ValueError
+        If ``t_cam`` is not 1-D or any camera-aligned array has a shape
+        that does not match ``(N_cam, ...)``.
+    """
+    t_cam_arr = np.asarray(t_cam)
+    if t_cam_arr.ndim != 1:
+        raise ValueError(f"{func_name}: t_cam must be 1D, got shape {t_cam_arr.shape}.")
+    n_cam = int(t_cam_arr.shape[0])
+
+    led1_arr = np.asarray(Z_cam_led1)
+    if led1_arr.shape != (n_cam, 2):
+        raise ValueError(
+            f"{func_name}: Z_cam_led1 must have shape ({n_cam}, 2) to match "
+            f"t_cam, got {led1_arr.shape}."
+        )
+
+    led2_arr = np.asarray(Z_cam_led2)
+    if led2_arr.shape != (n_cam, 2):
+        raise ValueError(
+            f"{func_name}: Z_cam_led2 must have shape ({n_cam}, 2) to match "
+            f"t_cam, got {led2_arr.shape}."
+        )
+
+    mask_arr = np.asarray(mask_cam)
+    if mask_arr.shape != (n_cam,):
+        raise ValueError(
+            f"{func_name}: mask_cam must have shape ({n_cam},) to match "
+            f"t_cam, got {mask_arr.shape}."
+        )
+
+    if conf_cam is not None:
+        conf_arr = np.asarray(conf_cam)
+        if conf_arr.shape != (n_cam, 4):
+            raise ValueError(
+                f"{func_name}: conf_cam must have shape ({n_cam}, 4) "
+                "([x1, y1, x2, y2] per frame) to match t_cam, got "
+                f"{conf_arr.shape}."
+            )
+
+
 def wrap_angle(theta: jnp.ndarray) -> jnp.ndarray:
     """Wrap angles to (-π, π] using numerically stable trigonometric method.
 

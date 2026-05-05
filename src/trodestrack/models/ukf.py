@@ -44,6 +44,7 @@ from trodestrack.models.filter_common import (
     initialize_state,
     symmetrize,
     update_zupt,
+    validate_camera_input_shapes,
     validate_imu_input_shape,
     wrap_angle,
 )
@@ -929,6 +930,19 @@ def unscented_kalman_filter(
     validate_imu_input_shape(
         U_imu,
         layout,
+        func_name="unscented_kalman_filter",
+    )
+
+    # Validate camera-aligned arrays match len(t_cam). JAX out-of-bounds
+    # indexing silently clamps, so a too-short Z_cam_led* / mask_cam /
+    # conf_cam would otherwise reuse the last in-range row for every
+    # later frame and the filter would return finite-but-wrong outputs.
+    validate_camera_input_shapes(
+        t_cam,
+        Z_cam_led1,
+        Z_cam_led2,
+        mask_cam,
+        conf_cam=conf_cam,
         func_name="unscented_kalman_filter",
     )
 

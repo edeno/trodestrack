@@ -65,6 +65,7 @@ from trodestrack.models.filter_common import (
     state_yaw,
     symmetrize,
     update_zupt,
+    validate_camera_input_shapes,
     validate_imu_input_shape,
     wrap_angle,
 )
@@ -825,6 +826,19 @@ def extended_kalman_filter(
     validate_imu_input_shape(
         U_imu,
         get_layout(ekf_config.state_mode),
+        func_name="extended_kalman_filter",
+    )
+
+    # Validate camera-aligned arrays match len(t_cam). Without this, JAX
+    # indexing silently clamps a too-short Z_cam_led* / mask_cam / conf_cam
+    # to its last in-range row, reusing a stale frame for every later step
+    # and returning finite-but-wrong outputs.
+    validate_camera_input_shapes(
+        t_cam,
+        Z_cam_led1,
+        Z_cam_led2,
+        mask_cam,
+        conf_cam=conf_cam,
         func_name="extended_kalman_filter",
     )
 
