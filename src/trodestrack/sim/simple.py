@@ -132,6 +132,30 @@ class SimpleSimConfig:
             )
 
 
+def _validate_xy_array(value: np.ndarray, name: str) -> np.ndarray:
+    """Coerce ``value`` into a finite ``(2,)`` float array.
+
+    Used by the simple-scenario sims for ``position``, ``initial_position``,
+    ``velocity``, and ``center``. Without this guard, a malformed
+    ``(1,)`` argument raises a raw IndexError mid-simulation, and a
+    NaN argument silently produces non-finite truth/IMU/camera arrays.
+    """
+    arr = np.asarray(value, dtype=float)
+    if arr.shape != (2,):
+        raise ValueError(f"{name} must have shape (2,); got {arr.shape}.")
+    if not np.all(np.isfinite(arr)):
+        raise ValueError(f"{name} must contain finite values; got {arr!r}.")
+    return arr
+
+
+def _validate_finite_scalar(value: float, name: str) -> float:
+    """Reject non-finite scalar arguments to the simple-sim functions."""
+
+    if not np.isfinite(value):
+        raise ValueError(f"{name} must be a finite value; got {value!r}.")
+    return float(value)
+
+
 def simulate_stationary(
     config: SimpleSimConfig | None = None,
     position: np.ndarray | None = None,
@@ -172,6 +196,8 @@ def simulate_stationary(
         config = SimpleSimConfig()
     if position is None:
         position = np.array([0.5, 0.5])
+    position = _validate_xy_array(position, "position")
+    heading = _validate_finite_scalar(heading, "heading")
 
     rng = np.random.default_rng(seed)
 
@@ -321,6 +347,8 @@ def simulate_constant_velocity(
         initial_position = np.array([0.1, 0.1])
     if velocity is None:
         velocity = np.array([0.2, 0.1])  # 0.224 m/s = 22.4 cm/s
+    initial_position = _validate_xy_array(initial_position, "initial_position")
+    velocity = _validate_xy_array(velocity, "velocity")
 
     rng = np.random.default_rng(seed)
 
@@ -473,6 +501,9 @@ def simulate_circular(
         config = SimpleSimConfig()
     if center is None:
         center = np.array([0.5, 0.5])
+    center = _validate_xy_array(center, "center")
+    radius = _validate_finite_scalar(radius, "radius")
+    angular_velocity = _validate_finite_scalar(angular_velocity, "angular_velocity")
 
     rng = np.random.default_rng(seed)
 

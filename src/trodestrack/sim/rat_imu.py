@@ -23,6 +23,7 @@ Coordinate Frames:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from dataclasses import fields as dataclass_fields
 
 import numpy as np
 
@@ -313,6 +314,9 @@ class RatIMUSimConfig:
             "tau_yaw_rate",
             "tau_a_fwd",
             "tau_a_lat",
+            "sigma_yaw_rate",
+            "sigma_a_fwd",
+            "sigma_a_lat",
             "vel_drag",
         )
         for fname in finite_scalar_fields:
@@ -515,6 +519,31 @@ class RatIMUSimConfig:
             raise ValueError(
                 f"Initial covariance P0 must have shape (5, 5), got {self.P0.shape}"
             )
+
+        # Initial-state content validation. The simulator samples the
+        # truth trajectory from m0 and P0 — non-finite m0 produces NaN
+        # truth, and a non-PSD P0 raises a raw LinAlgError from
+        # np.random.multivariate_normal mid-simulation. Catch the actual
+        # contract violation here.
+        if not np.all(np.isfinite(self.m0)):
+            raise ValueError(f"m0 must contain finite values; got {self.m0!r}.")
+        if not np.all(np.isfinite(self.P0)):
+            raise ValueError(
+                f"P0 must contain finite values; got non-finite entries in {self.P0!r}."
+            )
+        # Symmetric-PSD check via Cholesky. ``np.linalg.cholesky`` raises
+        # LinAlgError on non-PSD matrices; surface that as ValueError.
+        if not np.allclose(self.P0, self.P0.T, atol=1e-10):
+            raise ValueError(
+                "P0 must be symmetric (P0 == P0.T); got an asymmetric matrix."
+            )
+        try:
+            np.linalg.cholesky(self.P0)
+        except np.linalg.LinAlgError as exc:
+            raise ValueError(
+                "P0 must be a positive semi-definite covariance matrix; "
+                f"Cholesky factorization failed: {exc}."
+            ) from exc
 
 
 # -----------------------------------------------------------------------------
@@ -1085,10 +1114,16 @@ def make_default_config(**kwargs) -> RatIMUSimConfig:
     Example:
         >>> config = make_default_config(duration_s=120.0, use_second_led=True)
     """
-    config = RatIMUSimConfig()
-    for key, value in kwargs.items():
-        if hasattr(config, key):
-            setattr(config, key, value)
-        else:
-            raise ValueError(f"Unknown config parameter: {key}")
-    return config
+    # Construct directly with the overrides so RatIMUSimConfig.__post_init__
+    # runs against the final field values. Using post-construction setattr
+    # would silently bypass every validation block (verified: the previous
+    # implementation accepted duration_s=-1.0, fs_imu=0.0, and
+    # sigma_yaw_rate=NaN, all of which now raise at construction).
+    defaults = RatIMUSimConfig()
+    valid_field_names = {f.name for f in dataclass_fields(defaults)}
+    unknown = sorted(set(kwargs) - valid_field_names)
+    if unknown:
+        raise ValueError(f"Unknown config parameter(s): {unknown!r}")
+    base = {f.name: getattr(defaults, f.name) for f in dataclass_fields(defaults)}
+    base.update(kwargs)
+    return RatIMUSimConfig(**base)
