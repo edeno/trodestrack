@@ -129,6 +129,32 @@ def load_run_data(run_dir: Path) -> dict[str, NDArray | int]:
         "nees": np.load(run_dir / "nees.npy"),
     }
 
+    # Validate the time axis. generate_qa_report enforces this too, but
+    # surfacing the failure at the loader names the offending file
+    # (timestamps.npy) directly rather than the in-memory array.
+    t_arr = data["t"]
+    if t_arr.ndim != 1:
+        raise ValueError(
+            f"timestamps.npy must contain a 1D array; got shape {t_arr.shape}."
+        )
+    if t_arr.size < 2:
+        raise ValueError(
+            f"timestamps.npy must have at least two samples; got shape {t_arr.shape}."
+        )
+    if not np.all(np.isfinite(t_arr)):
+        n_bad = int(np.sum(~np.isfinite(t_arr)))
+        raise ValueError(
+            f"timestamps.npy contains {n_bad} non-finite value(s) (NaN/inf); "
+            "QA-report timestamps must be finite seconds."
+        )
+    if not np.all(np.diff(t_arr) > 0):
+        first_bad = int(np.argmax(np.diff(t_arr) <= 0))
+        raise ValueError(
+            "timestamps.npy must be strictly increasing; first non-increasing "
+            f"step at index {first_bad + 1} (t[{first_bad}]={t_arr[first_bad]!r}, "
+            f"t[{first_bad + 1}]={t_arr[first_bad + 1]!r})."
+        )
+
     # Load state dimension. Must be a positive integer — chi2_bounds /
     # compute_nees_stats use it as the chi-squared df, and df <= 0 makes
     # scipy.stats.chi2.ppf return NaN bounds that would silently embed in
