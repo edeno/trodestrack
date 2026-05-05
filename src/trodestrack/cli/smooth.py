@@ -33,7 +33,10 @@ import numpy as np
 
 from trodestrack.cli.utils import load_data_file
 from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
+from trodestrack.models.filter_common import FilterCoreConfig
 from trodestrack.runtime.offline import rts_smoother
+
+_FILTER_DEFAULTS = FilterCoreConfig()
 
 
 def add_smooth_parser(subparsers: argparse._SubParsersAction) -> None:
@@ -118,67 +121,70 @@ producing lower-variance trajectories than forward filtering alone.
         metavar="DIR",
     )
 
-    # Filter configuration
+    # Filter configuration. Defaults are None sentinels so omitted flags fall
+    # through to EKFConfig() / FilterCoreConfig defaults rather than being
+    # overridden by stale CLI-side numbers. Help strings pull live values from
+    # _FILTER_DEFAULTS so they stay in sync with the dataclass.
     filter_group = parser.add_argument_group("filter parameters (optional)")
     filter_group.add_argument(
         "--process-noise-pos",
         type=float,
-        default=0.02,
-        help="Position process noise (default: 0.02 m²/s)",
+        default=None,
+        help=f"Position process noise (default: {_FILTER_DEFAULTS.process_noise_pos:.2e} m²/s)",
     )
     filter_group.add_argument(
         "--process-noise-vel",
         type=float,
-        default=2.0,
-        help="Velocity process noise (default: 2.0 m²/s³)",
+        default=None,
+        help=f"Velocity process noise (default: {_FILTER_DEFAULTS.process_noise_vel:.2e} m²/s³)",
     )
     filter_group.add_argument(
         "--process-noise-heading",
         type=float,
-        default=0.02,
-        help="Heading process noise (default: 0.02 rad²/s)",
+        default=None,
+        help=f"Heading process noise (default: {_FILTER_DEFAULTS.process_noise_heading:.2e} rad²/s)",
     )
     filter_group.add_argument(
         "--process-noise-gyro-bias",
         type=float,
-        default=2e-6,
-        help="Gyro bias random walk density (default: 2e-6 rad²/s³)",
+        default=None,
+        help=f"Gyro bias random walk density (default: {_FILTER_DEFAULTS.process_noise_gyro_bias:.2e} rad²/s³)",
     )
     filter_group.add_argument(
         "--process-noise-accel-bias",
         type=float,
-        default=2e-4,
-        help="Accel bias random walk density (default: 2e-4 m²/s⁵)",
+        default=None,
+        help=f"Accel bias random walk density (default: {_FILTER_DEFAULTS.process_noise_accel_bias:.2e} m²/s⁵)",
     )
     filter_group.add_argument(
         "--measurement-noise-pos",
         type=float,
-        default=0.005**2,
-        help="Position measurement noise variance (default: 2.5e-5 m²)",
+        default=None,
+        help=f"Position measurement noise variance (default: {_FILTER_DEFAULTS.measurement_noise_pos:.2e} m²)",
     )
     filter_group.add_argument(
         "--imu-gyro-noise-density",
         type=float,
-        default=0.001,
-        help="IMU gyro noise density (default: 0.001 rad/s/√Hz)",
+        default=None,
+        help=f"IMU gyro noise density (default: {_FILTER_DEFAULTS.imu_gyro_noise_density:.2e} rad/s/√Hz)",
     )
     filter_group.add_argument(
         "--imu-accel-noise-density",
         type=float,
-        default=0.05,
-        help="IMU accel noise density (default: 0.05 m/s²/√Hz)",
+        default=None,
+        help=f"IMU accel noise density (default: {_FILTER_DEFAULTS.imu_accel_noise_density:.2e} m/s²/√Hz)",
     )
     filter_group.add_argument(
         "--damping-coeff",
         type=float,
-        default=0.5,
-        help="Velocity damping coefficient (default: 0.5 s⁻¹)",
+        default=None,
+        help=f"Velocity damping coefficient (default: {_FILTER_DEFAULTS.damping_coeff} s⁻¹)",
     )
     filter_group.add_argument(
         "--led-distance",
         type=float,
         default=None,
-        help="Expected LED spacing in meters (default: auto-detect from first valid frame)",
+        help="Expected LED spacing in meters (default: auto-detect from first valid frame, falling back to FilterCoreConfig.led_distance)",
     )
 
     # Smoother configuration
@@ -192,7 +198,7 @@ producing lower-variance trajectories than forward filtering alone.
     smoother_group.add_argument(
         "--use-heading-measurement",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=None,
         help="Use heading pseudo-measurement from dual LEDs (default: True)",
     )
 
@@ -271,26 +277,30 @@ def run_smooth(args: argparse.Namespace) -> None:
     print(f"  Valid camera frames: {mask_cam.sum()} ({100 * mask_cam.mean():.1f}%)")
     print(f"  Duration: {t_cam[-1] - t_cam[0]:.2f} s")
 
-    # Configure filter
+    # Configure filter. Filter only the kwargs the user explicitly set so
+    # EKFConfig falls back to its own defaults for anything not on the CLI.
     print("\nConfiguring Extended Kalman Filter...")
+    config_overrides = {
+        "process_noise_pos": args.process_noise_pos,
+        "process_noise_vel": args.process_noise_vel,
+        "process_noise_heading": args.process_noise_heading,
+        "process_noise_gyro_bias": args.process_noise_gyro_bias,
+        "process_noise_accel_bias": args.process_noise_accel_bias,
+        "measurement_noise_pos": args.measurement_noise_pos,
+        "imu_gyro_noise_density": args.imu_gyro_noise_density,
+        "imu_accel_noise_density": args.imu_accel_noise_density,
+        "damping_coeff": args.damping_coeff,
+        "led_distance": args.led_distance,
+        "use_heading_measurement": args.use_heading_measurement,
+    }
     ekf_config = EKFConfig(
-        process_noise_pos=args.process_noise_pos,
-        process_noise_vel=args.process_noise_vel,
-        process_noise_heading=args.process_noise_heading,
-        process_noise_gyro_bias=args.process_noise_gyro_bias,
-        process_noise_accel_bias=args.process_noise_accel_bias,
-        measurement_noise_pos=args.measurement_noise_pos,
-        imu_gyro_noise_density=args.imu_gyro_noise_density,
-        imu_accel_noise_density=args.imu_accel_noise_density,
-        damping_coeff=args.damping_coeff,
-        led_distance=args.led_distance,
-        use_heading_measurement=args.use_heading_measurement,
+        **{k: v for k, v in config_overrides.items() if v is not None}
     )
 
-    print(f"  Process noise (pos): {args.process_noise_pos:.4f} m²/s")
-    print(f"  Process noise (vel): {args.process_noise_vel:.4f} m²/s³")
-    print(f"  Damping coefficient: {args.damping_coeff:.2f} s⁻¹")
-    print(f"  LED heading measurement: {args.use_heading_measurement}")
+    print(f"  Process noise (pos): {ekf_config.process_noise_pos:.2e} m²/s")
+    print(f"  Process noise (vel): {ekf_config.process_noise_vel:.2e} m²/s³")
+    print(f"  Damping coefficient: {ekf_config.damping_coeff:.2f} s⁻¹")
+    print(f"  LED heading measurement: {ekf_config.use_heading_measurement}")
 
     # Run forward filter
     print("\nRunning Extended Kalman Filter (forward pass)...")

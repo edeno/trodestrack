@@ -19,17 +19,24 @@ TrodesTrack expects data in a dictionary format with specific keys:
 ```python
 sim = {
     # Timestamps
-    't_cam_exp': np.array(...),      # (N,) camera exposure times in seconds
     't_imu': np.array(...),          # (M,) IMU timestamps in seconds
+    't_cam_exp': np.array(...),      # (N,) camera exposure times in seconds
 
     # Camera measurements
     'Z_cam_led1': np.array(...),     # (N, 2) LED1 positions [x, y] in meters
     'Z_cam_led2': np.array(...),     # (N, 2) LED2 positions [x, y] in meters
     'mask_cam': np.array(...),       # (N,) boolean mask for valid frames
 
-    'U_imu': np.array(...),          # (M, 3) IMU data [gyro_z, accel_x, accel_y]
-    't_imu': np.array(...),          # (M,) IMU timestamps in seconds
-    't_cam_exp': np.array(...),      # (N,) camera timestamps in seconds
+    # IMU measurements. Channel count depends on the configured state mode:
+    #   (M, 3) [omega_z, f_x, f_y]                    — non-quaternion layouts;
+    #                                                    works with the default
+    #                                                    "2d_cam_3d_imu" as a
+    #                                                    degenerate path (vz idle).
+    #   (M, 4) [omega_z, f_x, f_y, f_z]               — "2d_cam_3d_imu" with 3D velocity.
+    #   (M, 6) [omega_x, omega_y, omega_z, f_x, f_y, f_z] — quaternion-orientation
+    #                                                       layouts (e.g.
+    #                                                       "3d_cam_6dof_imu").
+    'U_imu': np.array(...),
 
     # Optional: ground truth for validation (at IMU rate)
     'X_truth': np.array(...),        # (M, 5) true state [x, y, vx, vy, theta]

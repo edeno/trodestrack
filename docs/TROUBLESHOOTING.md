@@ -199,15 +199,15 @@ result = extended_kalman_filter(
 **Option 1: Increase measurement noise (trust camera less)**
 ```python
 cfg = EKFConfig(
-    measurement_noise_pos=0.01**2  # Increase from 0.005² (1 cm vs 5 mm)
+    measurement_noise_pos=0.02**2  # Increase from 0.01² (2 cm vs 1 cm)
 )
 ```
 
 **Option 2: Decrease process noise (smoother motion model)**
 ```python
 cfg = EKFConfig(
-    process_noise_pos=0.005,  # Decrease from 0.02
-    process_noise_vel=0.5     # Decrease from 2.0
+    process_noise_pos=5e-5,   # Decrease from 1e-4 (current default)
+    process_noise_vel=2.5e-3  # Decrease from 5e-3 (current default)
 )
 ```
 

@@ -160,19 +160,19 @@ Controls how much the filter trusts the dynamics model vs measurements.
 @dataclass
 class FilterCoreConfig:
     # Position random walk (m²/s)
-    process_noise_pos: float = 0.02  # DEFAULT
+    process_noise_pos: float = 1e-4  # DEFAULT
 
     # Velocity random walk (m²/s³)
-    process_noise_vel: float = 2.0   # DEFAULT
+    process_noise_vel: float = 5e-3  # DEFAULT
 
     # Heading random walk (rad²/s)
-    process_noise_heading: float = 0.02  # DEFAULT
+    process_noise_heading: float = 5e-4  # DEFAULT
 
     # Gyro bias random walk (rad²/s³)
-    process_noise_gyro_bias: float = 2e-6  # DEFAULT
+    process_noise_gyro_bias: float = 5e-8  # DEFAULT
 
     # Accel bias random walk (m²/s⁵)
-    process_noise_accel_bias: float = 2e-4  # DEFAULT
+    process_noise_accel_bias: float = 2e-5  # DEFAULT
 ```
 
 **When to adjust:**
@@ -187,7 +187,7 @@ Controls how much the filter trusts the camera observations.
 
 ```python
     # Position measurement variance (m²)
-    measurement_noise_pos: float = 0.005**2  # (5 mm)² = 2.5e-5
+    measurement_noise_pos: float = 0.01**2  # (1 cm)² = 1e-4
 
     # Heading measurement variance (rad²)
     measurement_noise_heading: float = 0.05**2  # (~3°)² = 2.5e-3
@@ -203,11 +203,11 @@ Controls how much the filter trusts the camera observations.
 Model the IMU sensor's intrinsic noise characteristics.
 
 ```python
-    # Gyro noise density (rad/s/√Hz)
-    imu_gyro_noise_density: float = 0.0001  # DEFAULT
+    # Gyro noise density (rad/s/√Hz) — SpikeGadgets product manual (0.01°/s/√Hz)
+    imu_gyro_noise_density: float = 0.00017453  # DEFAULT
 
-    # Accel noise density (m/s²/√Hz)
-    imu_accel_noise_density: float = 0.005  # DEFAULT
+    # Accel noise density (m/s²/√Hz) — SpikeGadgets product manual (0.2 mg/√Hz)
+    imu_accel_noise_density: float = 0.00196133  # DEFAULT
 ```
 
 **When to adjust:**
@@ -227,11 +227,12 @@ Models air drag and friction.
 
 ```python
     # Damping coefficient λ (1/s)
-    damping_coeff: float = 0.5  # DEFAULT
+    damping_coeff: float = 0.2  # DEFAULT
 ```
 
 **Interpretation:**
-- `λ = 0.5` → velocity decays to 60% in 1 second without acceleration
+- `λ = 0.2` → velocity decays to ~82% in 1 second without acceleration (current default; light drag for low-friction floors)
+- `λ = 0.5` → velocity decays to 60% in 1 second
 - `λ = 1.0` → velocity decays to 37% in 1 second (high drag)
 - `λ = 0.0` → no drag (unrealistic for animals)
 
@@ -267,19 +268,19 @@ Open `tuning_report.pdf` and check the **NEES histogram** panel:
 
 1. **Increase position process noise** by 2-5×
    ```python
-   cfg = EKFConfig(process_noise_pos=0.1)  # Was 0.02
+   cfg = EKFConfig(process_noise_pos=5e-4)  # Was 1e-4
    ```
 
 2. **Increase velocity process noise** by 2×
    ```python
-   cfg = EKFConfig(process_noise_vel=4.0)  # Was 2.0
+   cfg = EKFConfig(process_noise_vel=1e-2)  # Was 5e-3
    ```
 
 3. **Increase IMU noise densities** by 2×
    ```python
    cfg = EKFConfig(
-       imu_gyro_noise_density=0.0002,  # Was 0.0001
-       imu_accel_noise_density=0.01    # Was 0.005
+       imu_gyro_noise_density=3.5e-4,   # Was 0.00017453
+       imu_accel_noise_density=3.9e-3,  # Was 0.00196133
    )
    ```
 
@@ -293,19 +294,19 @@ Open `tuning_report.pdf` and check the **NEES histogram** panel:
 
 1. **Decrease position process noise** by 2×
    ```python
-   cfg = EKFConfig(process_noise_pos=0.01)  # Was 0.02
+   cfg = EKFConfig(process_noise_pos=5e-5)  # Was 1e-4
    ```
 
 2. **Increase measurement trust** (decrease R) by 2×
    ```python
-   cfg = EKFConfig(measurement_noise_pos=0.0025**2)  # Was 0.005**2
+   cfg = EKFConfig(measurement_noise_pos=0.005**2)  # Was 0.01**2
    ```
 
 3. **Decrease IMU noise densities** by 2×
    ```python
    cfg = EKFConfig(
-       imu_gyro_noise_density=0.00005,  # Was 0.0001
-       imu_accel_noise_density=0.0025   # Was 0.005
+       imu_gyro_noise_density=8.7e-5,    # Was 0.00017453
+       imu_accel_noise_density=9.8e-4,   # Was 0.00196133
    )
    ```
 
