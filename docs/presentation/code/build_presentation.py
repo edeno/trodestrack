@@ -927,11 +927,11 @@ def build_section_6_conclusion(builder):
             "GitHub: github.com/edeno/trodestrack",
             "Email: eric.denovellis@ucsf.edu",
             "",
-            "Try it: uv sync && uv run python examples/01_simple.py",
+            "Try it: uv sync && uv run python examples/01_simple_simulations.py",
             "",
             "Slides + code: github.com/edeno/trodestrack/docs/presentation/",
         ],
-        notes="Thank you for your attention! Questions welcome. Try TrodesTrack yourself: clone the repo, run 'uv sync', then 'uv run python examples/01_simple.py'. Full slides and generation code available in docs/presentation/ folder. Contributions and feedback welcome via GitHub Issues or email.",
+        notes="Thank you for your attention! Questions welcome. Try TrodesTrack yourself: clone the repo, run 'uv sync', then 'uv run python examples/01_simple_simulations.py'. Full slides and generation code available in docs/presentation/ folder. Contributions and feedback welcome via GitHub Issues or email.",
     )
 
     # Slide 42: Acknowledgments (optional)

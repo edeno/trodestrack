@@ -3,16 +3,17 @@
 ## Phase 1: Core Visual Generation (Priority 1)
 
 ### Slide 2: Failure Modes
-- [x] Create `code/generate_slide02_failure_modes.py`
-- [x] Generate 2×2 grid showing:
-  - [x] Top-left: LED occlusion (rat near wall)
-  - [x] Top-right: LED reflection (shiny surface)
-  - [x] Bottom-left: Motion blur (fast movement)
-  - [x] Bottom-right: Dim lighting (low confidence)
-- [x] Use `simulate_rat_imu()` with high dropout rate
-- [x] Extract 4 representative frames from video
-- [x] Save as `visuals/slide02_failure_modes.png`
-- [x] **Completed**: 1 hour
+- [ ] Create `code/generate_slide02_failure_modes.py`
+- [ ] Generate 2×2 grid showing:
+  - [ ] Top-left: LED occlusion (rat near wall)
+  - [ ] Top-right: LED reflection (shiny surface)
+  - [ ] Bottom-left: Motion blur (fast movement)
+  - [ ] Bottom-right: Dim lighting (low confidence)
+- [ ] Use `simulate_rat_imu()` with high dropout rate
+- [ ] Extract 4 representative frames from video
+- [ ] Save as `visuals/slide02_failure_modes.png`
+- [ ] **Status**: deferred — slide currently renders as bullet content
+  in `build_presentation.py` (slide 2)
 
 ### Slide 3: Trajectory Comparison
 - [x] Create `code/generate_slide03_trajectory_comparison.py`
@@ -74,10 +75,10 @@
 - [x] **Completed**: 1 hour
 
 ### Slide 18: 9-Panel Diagnostic Screenshot
-- [x] Create `code/generate_slide18_diagnostic.py`
-- [x] Generate 10s simulation
-- [x] Run EKF with `create_diagnostic_video()`
-- [x] Extract single frame showing all 9 panels:
+- [ ] Create `code/generate_slide18_diagnostic.py`
+- [ ] Generate 10s simulation
+- [ ] Run EKF with `create_diagnostic_video()`
+- [ ] Extract single frame showing all 9 panels:
   1. Arena view with trajectory
   2. Gyro Z time series
   3. Accel X/Y time series
@@ -87,9 +88,10 @@
   7. Heading error
   8. NEES diagnostic
   9. Bias estimates
-- [x] Ensure frame shows interesting moment (middle of simulation)
-- [x] Save as `visuals/slide18_diagnostic_panel.png`
-- [x] **Completed**: 30 minutes
+- [ ] Ensure frame shows interesting moment (middle of simulation)
+- [ ] Save as `visuals/slide18_diagnostic_panel.png`
+- [ ] **Status**: deferred — slide currently renders as bullet content
+  in `build_presentation.py` (slide 18)
 
 ### Slide 21: NEES Histogram
 - [x] Create `code/generate_slide21_nees.py`
