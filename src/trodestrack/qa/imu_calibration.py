@@ -111,6 +111,16 @@ def finite_difference(
         )
     if t_arr.shape[0] < 3:
         raise ValueError("At least three samples are required for finite differences.")
+    # Reject non-finite timestamps before the strict-increase check —
+    # ``np.diff`` of [..., +inf] is NaN, which fails ``> 0`` and would
+    # mask the real problem; an array like [0, 1, +inf] also passes the
+    # diff-positive check but produces NaN derivatives downstream.
+    if not np.all(np.isfinite(t_arr)):
+        n_bad = int(np.sum(~np.isfinite(t_arr)))
+        raise ValueError(
+            f"t contains {n_bad} non-finite value(s) (NaN/inf); "
+            "timestamps must be finite seconds."
+        )
     if not np.all(np.diff(t_arr) > 0):
         raise ValueError("t must be strictly increasing.")
     return np.gradient(values_arr, t_arr, axis=0, edge_order=2)
@@ -120,9 +130,21 @@ def camera_midpoint(
     led1: NDArray[np.floating],
     led2: NDArray[np.floating],
 ) -> NDArray[np.float64]:
-    """Return dual-LED midpoint positions, shape ``(n_time, 2)``."""
+    """Return dual-LED midpoint positions, shape ``(n_time, 2)``.
 
-    return 0.5 * (np.asarray(led1, dtype=float) + np.asarray(led2, dtype=float))
+    Raises
+    ------
+    ValueError
+        If ``led1`` and ``led2`` are not both shape ``(n_time, 2)``.
+
+    Without this guard, numpy broadcasts a malformed ``(2,)`` ``led2``
+    across every time step in ``led1`` and produces a finite-but-wrong
+    midpoint, which then poisons downstream camera-speed and
+    stationary-mask computations.
+    """
+
+    led1_arr, led2_arr = _validate_led_pair(led1, led2)
+    return 0.5 * (led1_arr + led2_arr)
 
 
 def smooth_time_series(
@@ -153,6 +175,15 @@ def smooth_time_series(
         Smoothed values with the same shape as ``values``.
     """
 
+    # sigma_s flows into `_gaussian_kernel` and then into `int(...)` for
+    # the kernel half-width — a NaN/inf would otherwise raise the opaque
+    # "cannot convert float NaN to integer" from Python's int(). Reject
+    # at the public boundary instead.
+    if not np.isfinite(sigma_s) or sigma_s < 0:
+        raise ValueError(
+            f"sigma_s must be a finite non-negative value in seconds; got {sigma_s!r}."
+        )
+
     t_arr = np.asarray(t, dtype=float)
     values_arr = np.asarray(values, dtype=float)
     if t_arr.ndim != 1:
@@ -161,6 +192,12 @@ def smooth_time_series(
         raise ValueError(
             f"values first dimension {values_arr.shape[0]} does not match "
             f"len(t)={t_arr.shape[0]}."
+        )
+    if not np.all(np.isfinite(t_arr)):
+        n_bad = int(np.sum(~np.isfinite(t_arr)))
+        raise ValueError(
+            f"t contains {n_bad} non-finite value(s) (NaN/inf); "
+            "timestamps must be finite seconds."
         )
     if not np.all(np.diff(t_arr) > 0):
         raise ValueError("t must be strictly increasing.")
@@ -319,7 +356,17 @@ def estimate_gyro_bias(
     """Estimate yaw gyro bias from low-motion samples using a median."""
 
     gyro_arr = np.asarray(gyro_z, dtype=float)
-    mask = np.asarray(stationary_mask, dtype=bool) & np.isfinite(gyro_arr)
+    mask_arr = np.asarray(stationary_mask, dtype=bool)
+    # Reject shape mismatch up front. NumPy would otherwise raise a raw
+    # broadcasting error from the `mask & isfinite(gyro)` line below.
+    if gyro_arr.ndim != 1:
+        raise ValueError(f"gyro_z must be 1D; got shape {gyro_arr.shape}.")
+    if mask_arr.shape != gyro_arr.shape:
+        raise ValueError(
+            "stationary_mask must have the same length as gyro_z; got "
+            f"stationary_mask {mask_arr.shape} vs gyro_z {gyro_arr.shape}."
+        )
+    mask = mask_arr & np.isfinite(gyro_arr)
     if not np.any(mask):
         raise ValueError("No finite stationary samples available for gyro bias.")
     return float(np.median(gyro_arr[mask]))
@@ -341,7 +388,15 @@ def estimate_accel_gravity_body(
         raise ValueError(
             f"accel_xyz must have shape (n_time, 3); got {accel_arr.shape}."
         )
-    mask = np.asarray(stationary_mask, dtype=bool) & np.isfinite(accel_arr).all(axis=1)
+    mask_arr = np.asarray(stationary_mask, dtype=bool)
+    # Reject mask-vs-signal length mismatch up front. NumPy would
+    # otherwise raise a raw broadcasting error from the AND below.
+    if mask_arr.shape != (accel_arr.shape[0],):
+        raise ValueError(
+            "stationary_mask must have shape (n_time,) matching accel_xyz; "
+            f"got stationary_mask {mask_arr.shape} vs accel_xyz {accel_arr.shape}."
+        )
+    mask = mask_arr & np.isfinite(accel_arr).all(axis=1)
     if not np.any(mask):
         raise ValueError("No finite stationary samples available for accel gravity.")
     return np.median(accel_arr[mask], axis=0)
@@ -707,6 +762,15 @@ def _gaussian_kernel(
 ) -> NDArray[np.float64]:
     """Construct a normalized 1D Gaussian kernel."""
 
+    # Reject non-finite sigma at this private boundary too — public
+    # callers (smooth_time_series) already validate, but guarding here
+    # turns any future caller's NaN into a clear ValueError instead of
+    # the opaque ``int(NaN)`` failure inside ``np.ceil``/``int``.
+    if not np.isfinite(sigma_samples) or not np.isfinite(truncate):
+        raise ValueError(
+            "sigma_samples and truncate must be finite; got "
+            f"sigma_samples={sigma_samples!r}, truncate={truncate!r}."
+        )
     if sigma_samples <= 0:
         return np.array([1.0])
     radius = max(1, int(np.ceil(truncate * sigma_samples)))
