@@ -350,5 +350,5 @@ except ValueError as e:
 ## Next Steps
 
 - **[State Layouts](../user-guide/state-layouts.md)**: Deep dive into dimension-agnostic coding
-- **[Tuning Guide](../user-guide/tuning.md)**: Optimize filter parameters
-- **[API Reference](../reference/)**: Complete API documentation
+- **[Tuning Guide](../TUNING.md)**: Optimize filter parameters
+- **[Troubleshooting Guide](../TROUBLESHOOTING.md)**: Common filter failures and solutions

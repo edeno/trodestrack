@@ -372,7 +372,7 @@ trodestrack/
   runtime/      # Online filter API + offline smoother workflows
   qa/           # Metrics (RMSE, NEES, NIS), plots, PDF reports
   viz/          # Diagnostic videos with multi-panel state visualization
-  cli/          # CLI: trodestrack report (more commands coming)
+  cli/          # CLI: trodestrack online / smooth / report
   io/           # Data loaders: Trodes, DLC, SpikeGadgets (coming soon)
   config/       # Configuration schemas (coming soon)
 ```
@@ -387,7 +387,7 @@ This project follows strict test-driven development (TDD) practices:
 4. Run tests until they pass
 5. Refactor for clarity
 
-See [PRD.md](PRD.md) for development guidelines and code style requirements.
+See [CLAUDE.md](CLAUDE.md) for development guidelines and code style requirements.
 
 ## Citation
 

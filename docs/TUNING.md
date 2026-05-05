@@ -592,7 +592,7 @@ cfg = EKFConfig(
 
 ## Further Reading
 
-- **[Examples](../examples/)** - See Examples 03-04 for NEES interpretation
+- **[Examples](examples/index.md)** - See Examples 03-04 for NEES interpretation
 - **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** - Detailed failure mode analysis
 - **Särkkä (2013)** - "Bayesian Filtering and Smoothing" (textbook reference)
 

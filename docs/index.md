@@ -83,13 +83,13 @@ headings = result.filtered_means[:, layout.heading_idx]  # (N,) in radians
 
     [:octicons-arrow-right-24: User Guide](user-guide/index.md)
 
--   :material-api:{ .lg .middle } **API Reference**
+-   :material-api:{ .lg .middle } **Python API**
 
     ---
 
-    Complete API documentation for all modules
+    Importable functions, configs, and result types
 
-    [:octicons-arrow-right-24: API Reference](reference/)
+    [:octicons-arrow-right-24: Python API](getting-started/python-api.md)
 
 </div>
 
