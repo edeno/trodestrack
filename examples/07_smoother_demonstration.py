@@ -20,7 +20,7 @@ Key phenomena illustrated:
 - IEKS relinearization around smoothed trajectory improves accuracy
 
 Usage:
-    uv run python examples/06_dropout_smoother_comparison.py
+    uv run python examples/07_smoother_demonstration.py
 
 Output:
     Saves MP4 video: output/dropout_smoother_comparison.mp4

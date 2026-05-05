@@ -862,9 +862,9 @@ def build_section_5_advanced(builder):
             "Examples: ZUPT (zero velocity update), compass heading, arena bounds",
             "Plugin architecture: Swap measurement models without changing filter",
             "Composable: Combine multiple measurement types",
-            "See models/measurements.py for templates",
+            "Source: src/trodestrack/models/sensors/ — protocols.py + concrete models",
         ],
-        notes="TrodesTrack supports custom measurement models. Built-in models: LED position (x, y), LED heading (from front/back LEDs), velocity pseudo-measurements (when rat is stationary). To add your own: implement h(x) (measurement function) and H (Jacobian). Examples: ZUPT (zero velocity update when stationary), compass heading (magnetometer), arena bounds (soft constraints). Plugin architecture allows swapping models. See models/measurements.py for templates.",
+        notes="TrodesTrack supports custom measurement models. Built-in models live under src/trodestrack/models/sensors/: camera_position.py (2D LED position), camera_position_3d.py (experimental 3D LED), heading_pseudo.py (heading from front/back LEDs), and zupt.py (zero-velocity update when stationary). The shared interface is defined in src/trodestrack/models/sensors/protocols.py — implement h(x) (measurement function) and H (Jacobian) following that protocol to add your own. Examples discussed in the talk: ZUPT (already shipped), compass heading (magnetometer, future), arena bounds (soft constraints). Plugin architecture allows swapping models without changing the filter core.",
     )
 
 

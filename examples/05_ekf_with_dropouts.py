@@ -58,6 +58,7 @@ import numpy as np
 from matplotlib.gridspec import GridSpec
 
 from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
+from trodestrack.models.state_layout import get_layout
 from trodestrack.qa.metrics import compute_dropout_drift, compute_position_rmse
 from trodestrack.sim.rat_imu import RatIMUSimConfig, simulate_rat_imu
 from trodestrack.sim.utils import interp_angle
@@ -159,6 +160,7 @@ def plot_dropout_scenario(
     scenario_name: str,
     metrics: dict,
     output_path: Path,
+    state_mode: str,
 ) -> None:
     """Create visualization showing dropout impact.
 
@@ -168,7 +170,12 @@ def plot_dropout_scenario(
         scenario_name: Scenario name
         metrics: Computed metrics
         output_path: Output file path
+        state_mode: Filter state-mode name; used to resolve the gyro-bias
+            column from ``StateLayout`` so the bias panel does not silently
+            plot heading under the default 10D ``2d_cam_3d_imu`` layout.
     """
+    layout = get_layout(state_mode)
+    gyro_bias_idx = layout.bias_gyro_idx[0]
     fig = plt.figure(figsize=(16, 10))
     gs = GridSpec(3, 3, figure=fig, hspace=0.35, wspace=0.3)
 
@@ -429,7 +436,7 @@ def plot_dropout_scenario(
     ax_bias.set_title("⚙️ Gyro Bias Estimate", fontweight="bold", loc="left")
 
     bias_gyro_truth = np.interp(t_cam, t_imu, sim_data["bias_gyro"])
-    bias_gyro_est = X_est[:, 5]
+    bias_gyro_est = X_est[:, gyro_bias_idx]
 
     ax_bias.plot(
         t_cam,
@@ -613,9 +620,15 @@ def main() -> None:
         )
         print("   " + "-" * 76)
 
-        # Plot
+        # Plot — pass the configured state_mode so the bias panel resolves
+        # the correct gyro-bias column for the active layout.
         plot_dropout_scenario(
-            sim, result, scenario_name, metrics, OUTPUT_DIR / output_file
+            sim,
+            result,
+            scenario_name,
+            metrics,
+            OUTPUT_DIR / output_file,
+            state_mode=ekf_config.state_mode,
         )
 
         all_results.append((scenario_name, dropout_prob, metrics))
