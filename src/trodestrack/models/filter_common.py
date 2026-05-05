@@ -534,6 +534,48 @@ def joseph_update(
     return symmetrize(I_minus_KH @ cov_prior @ I_minus_KH.T + gain @ R @ gain.T)
 
 
+def validate_initial_state(
+    initial_state,
+    layout: StateLayout,
+    *,
+    func_name: str = "Kalman filter",
+) -> None:
+    """Validate that ``initial_state.mean`` / ``cov`` match the active layout.
+
+    The filter wrappers pass ``initial_state`` straight into the JIT'd
+    core. A wrong-dimension mean (e.g. a 5-D state from a previous
+    ``vision_only`` run plugged into an ``2d_full`` filter) silently
+    produced ``filtered_means`` with the wrong second axis instead of
+    failing loudly, and a NaN/inf entry poisoned every downstream state.
+    Validate at the public entry point so the contract failure has a
+    clear ValueError message.
+    """
+    n = layout.n
+    mean = np.asarray(initial_state.mean)
+    if mean.shape != (n,):
+        raise ValueError(
+            f"{func_name}: initial_state.mean must have shape ({n},) for "
+            f"state_mode='{layout}' (n={n}); got {mean.shape}."
+        )
+    if not np.all(np.isfinite(mean)):
+        raise ValueError(
+            f"{func_name}: initial_state.mean contains non-finite value(s) "
+            "(NaN/inf); the initial state must be a finite vector."
+        )
+
+    cov = np.asarray(initial_state.cov)
+    if cov.shape != (n, n):
+        raise ValueError(
+            f"{func_name}: initial_state.cov must have shape ({n}, {n}) for "
+            f"state_mode='{layout}' (n={n}); got {cov.shape}."
+        )
+    if not np.all(np.isfinite(cov)):
+        raise ValueError(
+            f"{func_name}: initial_state.cov contains non-finite value(s) "
+            "(NaN/inf); the initial covariance must be a finite matrix."
+        )
+
+
 def validate_imu_input_shape(
     U_imu,
     layout: StateLayout,
@@ -791,6 +833,25 @@ def validate_camera_input_shapes(
             f"{func_name}: mask_cam must have shape ({n_cam},) to match "
             f"t_cam, got {mask_arr.shape}."
         )
+    # Tighten the mask contract at the Python API: only bool-typed masks
+    # or 0/1 integer masks are accepted. Initialization uses mask_cam in
+    # bitwise expressions (mask & finite-row-check), so mask=2 silently
+    # changes initialization semantics while still producing finite
+    # (but wrong) outputs. The CLI already enforces this via its own
+    # camera-mask loader; mirror the contract for direct API callers.
+    if mask_arr.dtype != np.bool_:
+        if not np.issubdtype(mask_arr.dtype, np.integer):
+            raise ValueError(
+                f"{func_name}: mask_cam must be boolean or 0/1 integer; "
+                f"got dtype {mask_arr.dtype!r}."
+            )
+        if not np.all(np.isin(mask_arr, (0, 1))):
+            bad = mask_arr[~np.isin(mask_arr, (0, 1))]
+            raise ValueError(
+                f"{func_name}: mask_cam must contain only 0 or 1 (or be "
+                f"boolean); found {len(bad)} other value(s) "
+                f"(e.g. {bad[:5].tolist()})."
+            )
 
     if conf_cam is not None:
         conf_arr = np.asarray(conf_cam)

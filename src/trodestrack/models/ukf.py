@@ -46,6 +46,7 @@ from trodestrack.models.filter_common import (
     update_zupt,
     validate_camera_input_shapes,
     validate_imu_input_shape,
+    validate_initial_state,
     validate_timestamps,
     wrap_angle,
 )
@@ -1036,6 +1037,12 @@ def unscented_kalman_filter(
             layout=get_layout(config_for_filter.state_mode),
         )
         initial_state = UKFState(mean=ekf_init.mean, cov=ekf_init.cov)
+    else:
+        validate_initial_state(
+            initial_state,
+            get_layout(config_for_filter.state_mode),
+            func_name="unscented_kalman_filter",
+        )
 
     # Resolve state layout once for this run
     layout = get_layout(config_for_filter.state_mode)

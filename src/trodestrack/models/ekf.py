@@ -68,6 +68,7 @@ from trodestrack.models.filter_common import (
     validate_camera_3d_input_shapes,
     validate_camera_input_shapes,
     validate_imu_input_shape,
+    validate_initial_state,
     validate_timestamps,
     wrap_angle,
 )
@@ -908,6 +909,17 @@ def extended_kalman_filter(
             led_distance=config_for_filter.led_distance,
             layout=get_layout(config_for_filter.state_mode),
         )
+    else:
+        # Validate caller-supplied initial state against the active layout.
+        # A wrong-dimension mean / cov silently propagated through the
+        # JIT'd core and emitted plausible-looking but layout-mismatched
+        # filtered_means; non-finite entries poisoned every downstream
+        # state.
+        validate_initial_state(
+            initial_state,
+            get_layout(config_for_filter.state_mode),
+            func_name="extended_kalman_filter",
+        )
 
     # Resolve state layout once for this run
     layout = get_layout(config_for_filter.state_mode)
@@ -1024,6 +1036,10 @@ def extended_kalman_filter_3d(
             led_offsets_body_jax,
             layout=layout,
             mask_cam_leds=mask_cam_leds_jax,
+        )
+    else:
+        validate_initial_state(
+            initial_state, layout, func_name="extended_kalman_filter_3d"
         )
 
     # Uses NumPy interval construction, so keep it outside the traceable core.
