@@ -44,7 +44,12 @@ from trodestrack.models.state_layout import get_layout
 from trodestrack.qa.metrics import compute_nees
 from trodestrack.qa.report import generate_qa_report
 
-# Load your data into simulation format (see I/O guide)
+# Load your data into the dict shape this guide uses below: keys
+# ``t_imu``, ``U_imu``, ``t_cam_exp``, ``Z_cam_led1``, ``Z_cam_led2``,
+# ``mask_cam`` (and ``X_truth`` if available). Native loaders for Trodes,
+# DeepLabCut, and SpikeGadgets are tracked under "In Progress" in
+# README.md; until they ship, build the dict yourself from your own
+# pipeline, e.g. via ``simulate_rat_imu`` for synthetic data.
 # sim = load_my_data(...)
 
 cfg = EKFConfig()

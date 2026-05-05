@@ -355,8 +355,8 @@ uv run mypy src/trodestrack --ignore-missing-imports
 # Linting
 uv run ruff check src/ tests/
 
-# Formatting
-uv run black src/ tests/
+# Formatting (Ruff is the project's formatter; see pyproject.toml [tool.ruff])
+uv run ruff format src/ tests/
 ```
 
 ### Development commands

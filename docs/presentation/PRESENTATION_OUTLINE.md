@@ -187,31 +187,35 @@ from trodestrack.models.ekf import extended_kalman_filter
 ```
 docs/presentation/
 ├── PRESENTATION_OUTLINE.md          # This file
-├── trodestrack_presentation.pptx    # Final PowerPoint
-├── speaker_notes.md                 # Full script
-├── handout.pdf                      # 2-slides-per-page PDF
-├── visuals/                         # Generated images
-│   ├── slide02_failure_modes.png
+├── trodestrack_presentation.pptx    # Final PowerPoint (build via build_presentation.py)
+├── README.md                        # Usage + regenerate-all commands
+├── PROGRESS_REPORT.md               # Detailed status snapshot
+├── TASKS.md                         # Step-by-step checklist
+├── HANDOFF_PROMPT.md                # Continuation prompt for new contributors
+├── visuals/                         # 8 PNGs shipped today
 │   ├── slide03_trajectory_comparison.png
 │   ├── slide05a_accelerometer_physics.png
-│   ├── slide05b_gyro_drift.png
+│   ├── slide05b_gyroscope_physics.png
 │   ├── slide05c_bias_correction.png
-│   ├── slide08_beforeafter.mp4
 │   ├── slide12_imu_integration.png
 │   ├── slide14_uncertainty.png
 │   ├── slide16_smoother_comparison.png
-│   ├── slide18_diagnostic_panel.png
-│   ├── slide21_nees_histogram.png
-│   └── ...
-├── videos/                          # Video files
-│   ├── slide08_beforeafter.mp4
-│   └── slide16_smoother_demo.mp4
-└── code/                            # Scripts to regenerate visuals
-    ├── generate_slide02.py
-    ├── generate_slide03.py
-    ├── generate_slide05abc.py
-    ├── generate_slide08.py
-    └── ...
+│   └── slide21_nees_histogram.png
+│   (slide02_failure_modes.png and slide18_diagnostic_panel.png deferred —
+│    those slides render as bullet content in build_presentation.py.)
+├── videos/                          # 1 MP4 shipped
+│   └── slide08_beforeafter.mp4
+└── code/                            # 7 generator scripts shipped + the builder
+    ├── build_presentation.py
+    ├── generate_slide03_trajectory_comparison.py
+    ├── generate_slide05abc_imu_physics.py
+    ├── generate_slide08_beforeafter_video.py
+    ├── generate_slide12_imu_integration.py
+    ├── generate_slide14_uncertainty.py
+    ├── generate_slide16_smoother.py
+    └── generate_slide21_nees.py
+    (generate_slide02_failure_modes.py and generate_slide18_diagnostic.py
+     deferred — see corresponding slides in build_presentation.py.)
 ```
 
 ---
