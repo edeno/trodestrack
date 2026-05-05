@@ -192,10 +192,15 @@ def compute_heading_error(
     # Mean absolute error in radians (SI unit). Drop non-finite samples so
     # a single NaN/inf in either input does not poison the summary —
     # compute_position_rmse and compute_velocity_rmse already filter NaNs,
-    # and the QA report relies on that contract for both surfaces.
+    # and the QA report relies on that contract for both surfaces. Match
+    # those helpers and raise if no finite samples remain so the QA
+    # report can't silently embed a NaN heading metric.
     finite = np.isfinite(diff_wrapped)
     if not np.any(finite):
-        return float("nan")
+        raise ValueError(
+            "No valid samples remaining after NaN filtering in heading "
+            "MAE; both inputs must share at least one finite-paired sample."
+        )
     mae_rad = np.mean(np.abs(diff_wrapped[finite]))
 
     return float(mae_rad)
@@ -239,11 +244,16 @@ def compute_heading_rmse(
     diff_wrapped = np.arctan2(np.sin(diff), np.cos(diff))
 
     # Root mean square error in radians. Drop non-finite samples so a
-    # single NaN/inf in either input does not poison the summary; matches
-    # the contract used by compute_position_rmse / compute_velocity_rmse.
+    # single NaN/inf in either input does not poison the summary; match
+    # compute_position_rmse / compute_velocity_rmse and raise if no
+    # finite-paired sample remains so the QA report can't silently embed
+    # a NaN heading RMSE.
     finite = np.isfinite(diff_wrapped)
     if not np.any(finite):
-        return float("nan")
+        raise ValueError(
+            "No valid samples remaining after NaN filtering in heading "
+            "RMSE; both inputs must share at least one finite-paired sample."
+        )
     rmse_rad = np.sqrt(np.mean(diff_wrapped[finite] ** 2))
 
     return float(rmse_rad)
@@ -455,6 +465,26 @@ def compute_nis(
     return nis
 
 
+def _validate_finite_1d_samples(values: NDArray[np.float64], name: str) -> None:
+    """Reject empty or non-finite-only sample arrays for QA stats helpers.
+
+    Common precondition for ``compute_nees_stats`` / ``compute_nis_stats``
+    / ``within_envelope`` — np.mean / std / min / max return NaN/inf on
+    these inputs, and the QA report would silently embed a misleading
+    summary.
+    """
+    arr = np.asarray(values)
+    if arr.ndim != 1:
+        raise ValueError(f"{name} must be 1D, got shape {arr.shape}.")
+    if arr.size == 0:
+        raise ValueError(f"{name} must have at least one sample, got an empty array.")
+    finite = np.isfinite(arr)
+    if not np.any(finite):
+        raise ValueError(
+            f"{name} contains no finite samples (all NaN/inf); cannot summarize."
+        )
+
+
 def compute_nis_stats(
     nis: NDArray[np.float64],
     measurement_dim: int,
@@ -496,16 +526,19 @@ def compute_nis_stats(
         >>> stats["pct_in_bounds"] > 90.0
         True
     """
+    _validate_finite_1d_samples(nis, name="nis")
+    nis_finite = np.asarray(nis)[np.isfinite(nis)]
+
     lower, upper = chi2_bounds(df=measurement_dim, confidence=confidence)
     pct_in_bounds = (
-        within_envelope(nis, df=measurement_dim, confidence=confidence) * 100.0
+        within_envelope(nis_finite, df=measurement_dim, confidence=confidence) * 100.0
     )
 
     return {
-        "mean": float(np.mean(nis)),
-        "std": float(np.std(nis)),
-        "min": float(np.min(nis)),
-        "max": float(np.max(nis)),
+        "mean": float(np.mean(nis_finite)),
+        "std": float(np.std(nis_finite)),
+        "min": float(np.min(nis_finite)),
+        "max": float(np.max(nis_finite)),
         "chi2_lower": float(lower),
         "chi2_upper": float(upper),
         "pct_in_bounds": float(pct_in_bounds),
@@ -556,9 +589,22 @@ def compute_residual_autocorrelation(
         - Significant ACF[1] indicates lag-1 correlation (most common issue)
         - 95% confidence bounds: ± 1.96 / sqrt(N) for large N
     """
+    if not isinstance(max_lag, int) or max_lag < 0:
+        raise ValueError(f"max_lag must be a non-negative integer; got {max_lag!r}.")
+
     if residuals.ndim == 1:
         # Univariate residuals
         N = len(residuals)
+        # Need at least max_lag + 2 samples so the slices residuals[:N-lag]
+        # and residuals[lag:] are both non-empty *and* the variance is well
+        # defined (var uses ddof=1). Without this, lag=N produces an empty
+        # slice (NaN) and lag>N raises an opaque broadcasting error.
+        if max_lag >= N:
+            raise ValueError(
+                f"max_lag ({max_lag}) must be < N ({N}); residuals have "
+                "too few samples to compute autocorrelation at the "
+                "requested lag. Reduce max_lag or supply a longer series."
+            )
         mean = np.mean(residuals)
         var = np.var(residuals, ddof=1)
 
@@ -628,14 +674,19 @@ def compute_nees_stats(
         >>> stats["pct_in_bounds"] > 90.0
         True
     """
+    _validate_finite_1d_samples(nees, name="nees")
+    nees_finite = np.asarray(nees)[np.isfinite(nees)]
+
     lower, upper = chi2_bounds(df=state_dim, confidence=confidence)
-    pct_in_bounds = within_envelope(nees, df=state_dim, confidence=confidence) * 100.0
+    pct_in_bounds = (
+        within_envelope(nees_finite, df=state_dim, confidence=confidence) * 100.0
+    )
 
     return {
-        "mean": float(np.mean(nees)),
-        "std": float(np.std(nees)),
-        "min": float(np.min(nees)),
-        "max": float(np.max(nees)),
+        "mean": float(np.mean(nees_finite)),
+        "std": float(np.std(nees_finite)),
+        "min": float(np.min(nees_finite)),
+        "max": float(np.max(nees_finite)),
         "chi2_lower": float(lower),
         "chi2_upper": float(upper),
         "pct_in_bounds": float(pct_in_bounds),
@@ -766,8 +817,11 @@ def within_envelope(
         - Too many outside lower bound → underconfident filter (P too large);
           actual error² is smaller than the covariance reports
     """
+    _validate_finite_1d_samples(values, name="values")
+    values_finite = np.asarray(values)[np.isfinite(values)]
+
     lower, upper = chi2_bounds(df=df, confidence=confidence)
-    within_bounds = (values >= lower) & (values <= upper)
+    within_bounds = (values_finite >= lower) & (values_finite <= upper)
     return float(np.mean(within_bounds))
 
 
