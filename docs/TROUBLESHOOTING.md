@@ -673,7 +673,7 @@ jax.config.update('jax_platform_name', 'gpu')
 
 **Symptom:** NEES histogram is not centered around 2.0 (position-only NEES; expected mean equals state_dim).
 
-See **[TUNING.md](TUNING.md)** for detailed parameter tuning guidance.
+See **[Filter Tuning](tuning.md)** for detailed parameter tuning guidance.
 
 **Quick fixes:**
 
@@ -951,8 +951,8 @@ print(f"Problem: Position RMSE is {compute_position_rmse(...):.4f} m (expected <
 
 ### Useful Resources
 
-- **[TUNING.md](TUNING.md)** - Parameter selection guide
-- **[Examples](examples/index.md)** - Educational examples with expected outputs
+- **[Filter Tuning](tuning.md)** - Parameter selection guide
+- **[Examples](../examples/index.md)** - Educational examples with expected outputs
 - **[GitHub Issues](https://github.com/edeno/trodestrack/issues)** - Report bugs
 
 ---

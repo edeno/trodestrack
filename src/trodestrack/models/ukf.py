@@ -63,8 +63,14 @@ class UKFConfig(FilterCoreConfig):
     Parameters
     ----------
     alpha : float, default 1.732
-        Sigma-point spread parameter. Smaller (e.g., 1e-3) is more conservative;
-        larger (≈√3) captures stronger nonlinearities.
+        Sigma-point spread parameter. Larger (≈√3) captures stronger
+        nonlinearities; smaller spreads concentrate the sigma points near
+        the mean, but values that drive ``(n + λ) = α²(n + κ)`` below
+        ``_MIN_N_PLUS_LAMBDA = 1e-2`` are rejected by ``__post_init__``
+        because the central weight ``w_mean[0] = λ/(n+λ)`` blows up and
+        covariance reconstruction loses precision. With ``kappa=0`` and
+        ``n=10``, for example, ``alpha=1e-3`` resolves to
+        ``(n+λ) ≈ 1e-5`` and is rejected.
     beta : float, default 2.0
         Prior knowledge parameter (2 is optimal for Gaussian priors).
     kappa : float, default 1.0

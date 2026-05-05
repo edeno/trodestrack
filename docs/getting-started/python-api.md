@@ -146,8 +146,10 @@ from trodestrack.models.ukf import UKFConfig
 
 # UKF uses same base parameters plus sigma-point settings.
 # Defaults: alpha=sqrt(3)≈1.732, beta=2.0, kappa=1.0 (UKFConfig.aggressive()).
-# Note: alpha must be large enough that (n + λ) = α² (n + κ) > 1e-3
-# (UKFConfig validates and rejects degenerate spreads like alpha=1e-3).
+# Note: alpha must be large enough that (n + λ) = α² (n + κ) ≥ 1e-2
+# (UKFConfig._MIN_N_PLUS_LAMBDA). UKFConfig validates this in __post_init__
+# and rejects degenerate spreads — e.g. alpha=1e-3 with kappa=0.0, n=10
+# resolves to (n+λ)≈1e-5 and raises ValueError.
 cfg = UKFConfig(
     state_mode="2d_full",
     # ... same parameters as EKFConfig ...
@@ -406,5 +408,5 @@ except ValueError as e:
 ## Next Steps
 
 - **[State Layouts](../user-guide/state-layouts.md)**: Deep dive into dimension-agnostic coding
-- **[Tuning Guide](../TUNING.md)**: Optimize filter parameters
-- **[Troubleshooting Guide](../TROUBLESHOOTING.md)**: Common filter failures and solutions
+- **[Tuning Guide](../user-guide/tuning.md)**: Optimize filter parameters
+- **[Troubleshooting Guide](../user-guide/troubleshooting.md)**: Common filter failures and solutions

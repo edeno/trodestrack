@@ -250,5 +250,6 @@ exact filename. Quick reference for the shipped examples:
 - **Example 07** (`07_smoother_demonstration.py`) →
   `output/dropout_smoother_comparison.mp4` (resolved relative to the
   process working directory).
-- **Example 08** (`08_qa_report_generation.py`) → `example_qa_report.pdf`
-  in the current working directory.
+- **Example 08** (`08_qa_report_generation.py`) →
+  `examples/example_qa_report.pdf` (next to the script via
+  `Path(__file__).parent`).

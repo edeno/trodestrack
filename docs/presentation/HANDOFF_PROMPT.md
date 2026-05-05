@@ -245,6 +245,9 @@ video_path = create_diagnostic_video(
     sim,                                                 # SimOut (positional)
     "docs/presentation/videos/slideXX_name.mp4",         # output_path (positional)
     filter_results=result,                               # plural; takes EKFResult/EKF3DResult
+    state_mode=cfg.state_mode,                           # required when filter_results is set;
+                                                         # resolves heading and bias indices
+                                                         # for the filter overlay
     fps=30,
     speedup=1.0,        # Realtime
     time_window_s=2.0,  # Show 2s of history

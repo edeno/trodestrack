@@ -41,6 +41,8 @@ markdown_extensions:
   - md_in_html
   - abbr
   - pymdownx.snippets:
+      base_path:
+        - docs
       auto_append:
         - docs/includes/abbreviations.md
   - toc:
@@ -54,12 +56,16 @@ extra_css:
   - stylesheets/extra.css
 
 not_in_nav: |
-  /TROUBLESHOOTING.md
-  /TUNING.md
   /includes/**
 
+# TUNING.md and TROUBLESHOOTING.md are pulled into the User Guide pages
+# (user-guide/tuning.md, user-guide/troubleshooting.md) via pymdownx.snippets;
+# excluding them from the build avoids duplicate /TUNING/ and /TROUBLESHOOTING/
+# pages outside the navigation that the snippet pages render redundantly.
 exclude_docs: |
   presentation/
+  TUNING.md
+  TROUBLESHOOTING.md
 
 plugins:
   - search

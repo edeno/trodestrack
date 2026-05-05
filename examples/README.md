@@ -238,7 +238,7 @@ Each example writes to a different path. Quick reference:
 - **Example 02** (`02_rat_imu_simulation.py`) → five PNGs in the current working directory (`02_basic_sim.png`, `02_two_led_sim.png`, `03_confidence_sim.png`, `04_noise_validation.png`, `05_vision_robustness.png`).
 - **Examples 03 / 03b / 04 / 05 / 06** → PNGs next to each script (`examples/<name>.png`).
 - **Example 07** (`07_smoother_demonstration.py`) → `output/dropout_smoother_comparison.mp4` (resolved relative to the process working directory).
-- **Example 08** (`08_qa_report_generation.py`) → `example_qa_report.pdf` in the current working directory.
+- **Example 08** (`08_qa_report_generation.py`) → `examples/example_qa_report.pdf` (next to the script via `Path(__file__).parent`).
 
 ---
 

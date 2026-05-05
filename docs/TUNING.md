@@ -613,8 +613,8 @@ covariance grows to match observed error.
 
 ## Further Reading
 
-- **[Examples](examples/index.md)** - See Examples 03-04 for NEES interpretation
-- **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** - Detailed failure mode analysis
+- **[Examples](../examples/index.md)** - See Examples 03-04 for NEES interpretation
+- **[Troubleshooting](troubleshooting.md)** - Detailed failure mode analysis
 - **Särkkä (2013)** - "Bayesian Filtering and Smoothing" (textbook reference)
 
 ---
