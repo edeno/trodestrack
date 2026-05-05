@@ -401,6 +401,25 @@ def rts_smoother(
         func_name="rts_smoother",
     )
 
+    # Layout-vs-filter-result dimension check. The dynamics path uses
+    # ``ekf_config.state_mode`` (and thus its layout's vel/heading/bias
+    # indices), while the arrays and process-noise sizing are driven by
+    # ``filter_result.filtered_means.shape[1]``. A mismatch silently
+    # produced layout-wrong but finite output (e.g. running 2d_full
+    # dynamics on a 5D vision_only filter_result returned a 5D smoothed
+    # array). Catch this at the boundary so the failure names the actual
+    # contract.
+    expected_n = get_layout(ekf_config.state_mode).n
+    actual_n = int(filter_result.filtered_means.shape[1])
+    if actual_n != expected_n:
+        raise ValueError(
+            f"rts_smoother: filter_result.filtered_means.shape[1]={actual_n} "
+            f"does not match ekf_config.state_mode='{ekf_config.state_mode}' "
+            f"(layout.n={expected_n}). Use the same state_mode that produced "
+            "filter_result, or rerun the forward filter with the requested "
+            "state_mode."
+        )
+
     # Reject non-finite / non-monotonic timestamps so np.diff(t_imu) and
     # the smoother's IMU pre-integration don't silently propagate NaN.
     validate_timestamps(t_imu, name="t_imu", func_name="rts_smoother", min_size=2)
@@ -753,6 +772,24 @@ def sigma_point_smoother(
         t_imu=t_imu,
         func_name="sigma_point_smoother",
     )
+
+    # Layout-vs-filter-result dimension check. The dynamics path uses
+    # ``ukf_config.state_mode``, while the arrays and process-noise
+    # sizing are driven by ``filter_result.filtered_means.shape[1]``.
+    # A mismatch silently produced layout-wrong but finite output
+    # (e.g. running 2d_full dynamics on a 5D vision_only filter_result
+    # returned a 5D smoothed array). Catch this at the boundary so the
+    # failure names the actual contract.
+    expected_n = get_layout(ukf_config.state_mode).n
+    actual_n = int(filter_result.filtered_means.shape[1])
+    if actual_n != expected_n:
+        raise ValueError(
+            f"sigma_point_smoother: filter_result.filtered_means.shape[1]="
+            f"{actual_n} does not match ukf_config.state_mode="
+            f"'{ukf_config.state_mode}' (layout.n={expected_n}). Use the "
+            "same state_mode that produced filter_result, or rerun the "
+            "forward UKF with the requested state_mode."
+        )
 
     # Reject non-finite / non-monotonic timestamps so np.diff(t_imu) and
     # the sigma-point smoother's IMU pre-integration don't silently
