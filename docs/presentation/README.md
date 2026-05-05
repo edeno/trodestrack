@@ -19,32 +19,35 @@ A comprehensive 30-minute presentation explaining TrodesTrack sensor-fusion trac
 - **[HANDOFF_PROMPT.md](HANDOFF_PROMPT.md)** - Instructions for continuing work
 
 ### Generated Assets
-- **`visuals/`** - 10 high-quality images (150 DPI, PNG format):
-  - `slide02_failure_modes.png` (675 KB)
-  - `slide03_trajectory_comparison.png` (305 KB)
-  - `slide05a_accelerometer_physics.png` (136 KB)
-  - `slide05b_gyroscope_physics.png` (187 KB)
-  - `slide05c_bias_correction.png` (127 KB)
-  - `slide12_imu_integration.png` (263 KB)
-  - `slide14_uncertainty.png` (267 KB)
-  - `slide16_smoother_comparison.png` (192 KB)
-  - `slide18_diagnostic_panel.png` (248 KB)
-  - `slide21_nees_histogram.png` (198 KB)
+- **`visuals/`** - 8 high-quality images (150 DPI, PNG format):
+  - `slide03_trajectory_comparison.png`
+  - `slide05a_accelerometer_physics.png`
+  - `slide05b_gyroscope_physics.png`
+  - `slide05c_bias_correction.png`
+  - `slide12_imu_integration.png`
+  - `slide14_uncertainty.png`
+  - `slide16_smoother_comparison.png`
+  - `slide21_nees_histogram.png`
+
+  Slides 2 (failure modes) and 18 (9-panel diagnostic) are content slides
+  in the current builder; their figure generators have not been landed yet.
 
 - **`videos/`** - 1 demonstration video:
   - `slide08_beforeafter.mp4` (672 KB, 10 seconds)
 
-- **`code/`** - 10 Python scripts to regenerate all assets:
-  - `build_presentation.py` (720 lines) - PowerPoint builder
-  - `generate_slide02_failure_modes.py` (222 lines)
-  - `generate_slide03_trajectory_comparison.py` (189 lines)
-  - `generate_slide05abc_imu_physics.py` (458 lines)
-  - `generate_slide08_beforeafter_video.py` (322 lines)
-  - `generate_slide12_imu_integration.py` (260 lines)
-  - `generate_slide14_uncertainty.py` (263 lines)
-  - `generate_slide16_smoother.py` (256 lines)
-  - `generate_slide18_diagnostic.py` (101 lines)
-  - `generate_slide21_nees.py` (219 lines)
+- **`code/`** - Python scripts to regenerate all shipped assets:
+  - `build_presentation.py` - PowerPoint builder
+  - `generate_slide03_trajectory_comparison.py`
+  - `generate_slide05abc_imu_physics.py`
+  - `generate_slide08_beforeafter_video.py`
+  - `generate_slide12_imu_integration.py`
+  - `generate_slide14_uncertainty.py`
+  - `generate_slide16_smoother.py`
+  - `generate_slide21_nees.py`
+
+  Generators for slide 2 (failure modes) and slide 18 (9-panel diagnostic)
+  are not yet implemented; those slides render as bullet content in the
+  current builder.
 
 ## 🚀 Quick Start
 
@@ -67,17 +70,19 @@ The presentation is 99% complete. One manual step required:
 
 ### Regenerate All Visuals
 ```bash
-# Run all generation scripts
-uv run python docs/presentation/code/generate_slide02_failure_modes.py
+# Run all generation scripts that ship in this repo
 uv run python docs/presentation/code/generate_slide03_trajectory_comparison.py
 uv run python docs/presentation/code/generate_slide05abc_imu_physics.py
 uv run python docs/presentation/code/generate_slide08_beforeafter_video.py
 uv run python docs/presentation/code/generate_slide12_imu_integration.py
 uv run python docs/presentation/code/generate_slide14_uncertainty.py
 uv run python docs/presentation/code/generate_slide16_smoother.py
-uv run python docs/presentation/code/generate_slide18_diagnostic.py
 uv run python docs/presentation/code/generate_slide21_nees.py
 ```
+
+Slide 2 (failure modes) and slide 18 (9-panel diagnostic) generators
+are not yet implemented; the builder currently renders those as bullet
+slides instead of full-image slides.
 
 ### Rebuild Presentation from Scratch
 ```bash
