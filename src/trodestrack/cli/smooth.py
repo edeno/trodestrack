@@ -20,7 +20,9 @@ Output files:
     run1/marginal_loglik.txt: Marginal log-likelihood (scalar)
 
 Note:
-    n is the state dimension (default: 8 for standard 2D tracking with biases)
+    n is the state dimension (default: 10 for the "2d_cam_3d_imu" mode used
+    by EKFConfig() out of the box; pass --led-distance, --use-heading-measurement,
+    etc. to override individual filter parameters).
 """
 
 from __future__ import annotations
@@ -279,6 +281,10 @@ def run_smooth(args: argparse.Namespace) -> None:
 
     # Configure filter. Filter only the kwargs the user explicitly set so
     # EKFConfig falls back to its own defaults for anything not on the CLI.
+    # ``led_distance`` is special-cased: extended_kalman_filter auto-detects
+    # LED spacing only when ekf_config.led_distance is None, so an omitted
+    # ``--led-distance`` must pass ``None`` through (rather than fall back
+    # to the FilterCoreConfig default of 0.04 m).
     print("\nConfiguring Extended Kalman Filter...")
     config_overrides = {
         "process_noise_pos": args.process_noise_pos,
@@ -290,11 +296,11 @@ def run_smooth(args: argparse.Namespace) -> None:
         "imu_gyro_noise_density": args.imu_gyro_noise_density,
         "imu_accel_noise_density": args.imu_accel_noise_density,
         "damping_coeff": args.damping_coeff,
-        "led_distance": args.led_distance,
         "use_heading_measurement": args.use_heading_measurement,
     }
     ekf_config = EKFConfig(
-        **{k: v for k, v in config_overrides.items() if v is not None}
+        led_distance=args.led_distance,  # None -> auto-detect
+        **{k: v for k, v in config_overrides.items() if v is not None},
     )
 
     print(f"  Process noise (pos): {ekf_config.process_noise_pos:.2e} m²/s")
@@ -362,18 +368,29 @@ def run_smooth(args: argparse.Namespace) -> None:
         f.write(f"  LED1 positions: {args.led1_positions}\n")
         f.write(f"  LED2 positions: {args.led2_positions}\n")
         f.write(f"  Camera mask: {args.camera_mask}\n\n")
-        f.write("Filter Configuration:\n")
-        f.write(f"  Process noise (pos): {args.process_noise_pos}\n")
-        f.write(f"  Process noise (vel): {args.process_noise_vel}\n")
-        f.write(f"  Process noise (heading): {args.process_noise_heading}\n")
-        f.write(f"  Process noise (gyro bias): {args.process_noise_gyro_bias}\n")
-        f.write(f"  Process noise (accel bias): {args.process_noise_accel_bias}\n")
-        f.write(f"  Measurement noise (pos): {args.measurement_noise_pos}\n")
-        f.write(f"  IMU gyro noise density: {args.imu_gyro_noise_density}\n")
-        f.write(f"  IMU accel noise density: {args.imu_accel_noise_density}\n")
-        f.write(f"  Damping coefficient: {args.damping_coeff}\n")
-        f.write(f"  LED distance: {args.led_distance}\n")
-        f.write(f"  Use heading measurement: {args.use_heading_measurement}\n\n")
+        f.write("Filter Configuration (effective values):\n")
+        f.write(f"  Process noise (pos): {ekf_config.process_noise_pos}\n")
+        f.write(f"  Process noise (vel): {ekf_config.process_noise_vel}\n")
+        f.write(f"  Process noise (heading): {ekf_config.process_noise_heading}\n")
+        f.write(f"  Process noise (gyro bias): {ekf_config.process_noise_gyro_bias}\n")
+        f.write(
+            f"  Process noise (accel bias): {ekf_config.process_noise_accel_bias}\n"
+        )
+        f.write(f"  Measurement noise (pos): {ekf_config.measurement_noise_pos}\n")
+        f.write(f"  IMU gyro noise density: {ekf_config.imu_gyro_noise_density}\n")
+        f.write(f"  IMU accel noise density: {ekf_config.imu_accel_noise_density}\n")
+        f.write(f"  Damping coefficient: {ekf_config.damping_coeff}\n")
+        if (
+            args.led_distance is None
+            and filter_result.estimated_led_distance is not None
+        ):
+            f.write(
+                f"  LED distance: {filter_result.estimated_led_distance:.4f} m (auto-detected)\n"
+            )
+        else:
+            f.write(f"  LED distance: {ekf_config.led_distance}\n")
+        f.write(f"  Use heading measurement: {ekf_config.use_heading_measurement}\n")
+        f.write(f"  State mode: {ekf_config.state_mode}\n\n")
         f.write("Smoother Configuration:\n")
         f.write(f"  IEKS iterations: {args.num_iter}\n\n")
         f.write("Results:\n")

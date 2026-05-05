@@ -283,7 +283,7 @@ cfg = EKFConfig(
 **Option 3: Increase gyro bias process noise (allow faster adaptation)**
 ```python
 cfg = EKFConfig(
-    process_noise_gyro_bias=1e-5  # Increase from 2e-6
+    process_noise_gyro_bias=5e-7  # Increase from 5e-8 (current default)
 )
 ```
 
@@ -539,8 +539,8 @@ cfg = EKFConfig(
 **Option 1: Decrease process noise**
 ```python
 cfg = EKFConfig(
-    process_noise_pos=0.01,   # Decrease from 0.02
-    process_noise_vel=1.0     # Decrease from 2.0
+    process_noise_pos=5e-5,   # Decrease from 1e-4 (current default)
+    process_noise_vel=2.5e-3  # Decrease from 5e-3 (current default)
 )
 ```
 
