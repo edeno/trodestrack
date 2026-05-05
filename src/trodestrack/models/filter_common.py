@@ -583,12 +583,23 @@ def validate_initial_state(
             f"{func_name}: initial_state.cov must be symmetric (cov == cov.T); "
             "got an asymmetric matrix."
         )
+    # The JIT'd filter inverts the innovation covariance ``H P Hᵀ + R``
+    # and propagates ``F P Fᵀ + Q`` through psd_solve / triangular solves
+    # that expect a strictly-positive-definite ``P``. A singular
+    # (zero-row / zero-column) prior expresses "this state component is
+    # known exactly" but causes those solves to lose rank downstream, so
+    # we require strict positive-definiteness here. If you genuinely
+    # need a deterministic component, add a small floor (e.g. 1e-9 on the
+    # corresponding diagonal) before constructing initial_state.cov.
     try:
         np.linalg.cholesky(cov)
     except np.linalg.LinAlgError as exc:
         raise ValueError(
-            f"{func_name}: initial_state.cov must be positive semi-definite; "
-            f"Cholesky factorization failed: {exc}."
+            f"{func_name}: initial_state.cov must be symmetric and "
+            "STRICTLY positive definite (the filter's covariance solves "
+            "require a non-singular prior; add a small diagonal floor "
+            "to express deterministic components instead of zero "
+            f"variance). Cholesky factorization failed: {exc}."
         ) from exc
 
 
