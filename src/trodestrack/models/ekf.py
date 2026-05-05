@@ -65,6 +65,7 @@ from trodestrack.models.filter_common import (
     state_yaw,
     symmetrize,
     update_zupt,
+    validate_camera_3d_input_shapes,
     validate_camera_input_shapes,
     validate_imu_input_shape,
     wrap_angle,
@@ -958,6 +959,20 @@ def extended_kalman_filter_3d(
         layout,
         func_name="extended_kalman_filter_3d",
     )
+
+    # Validate the 3D camera-aligned arrays match len(t_cam) and the LED
+    # offset count. Without this, JAX out-of-bounds indexing silently
+    # clamps a too-short Z_cam_leds / mask_cam_leds / conf_cam to its
+    # last in-range row and the filter returns finite-but-wrong outputs.
+    validate_camera_3d_input_shapes(
+        t_cam,
+        Z_cam_leds,
+        led_offsets_body,
+        mask_cam_leds=mask_cam_leds,
+        conf_cam=conf_cam,
+        func_name="extended_kalman_filter_3d",
+    )
+
     config_for_filter = ekf_config
 
     t_imu_jax = jnp.asarray(t_imu)

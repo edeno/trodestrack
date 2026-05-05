@@ -620,6 +620,106 @@ def validate_camera_input_shapes(
                 "([x1, y1, x2, y2] per frame) to match t_cam, got "
                 f"{conf_arr.shape}."
             )
+        # Confidence is later clipped to [1e-2, 1.0] and used as the
+        # denominator in confidence_to_R_diagonal (R = base / conf). NaN
+        # / inf survive np.clip and propagate into R, the innovation
+        # covariance, and every downstream state. With gating disabled
+        # there is no second-line defense, so reject non-finite
+        # confidence at ingress.
+        if not np.all(np.isfinite(conf_arr)):
+            n_bad = int(np.sum(~np.isfinite(conf_arr)))
+            raise ValueError(
+                f"{func_name}: conf_cam contains {n_bad} non-finite "
+                "value(s) (NaN/inf); confidence must be finite in [0, 1]."
+            )
+
+
+def validate_camera_3d_input_shapes(
+    t_cam,
+    Z_cam_leds,
+    led_offsets_body,
+    *,
+    mask_cam_leds=None,
+    conf_cam=None,
+    func_name: str = "Kalman filter (3D)",
+) -> None:
+    """Validate 3D camera-aligned arrays against ``len(t_cam)`` and offsets.
+
+    Sibling of :func:`validate_camera_input_shapes` for the experimental
+    3D camera path (``extended_kalman_filter_3d``), where the LED-position
+    array is ``(n_cam, n_leds, 3)`` rather than the 2D contract's
+    ``(n_cam, 2)``. Without this guard, JAX out-of-bounds indexing would
+    silently clamp a too-short ``Z_cam_leds`` (or ``mask_cam_leds`` /
+    ``conf_cam``) to its last in-range row and the filter would return
+    finite-but-wrong outputs (verified: a 4-frame ``t_cam`` with
+    ``Z_cam_leds.shape == (1, 3, 3)`` previously produced a finite
+    ``(4, 16)`` filtered_means).
+
+    Parameters
+    ----------
+    t_cam : array-like
+        Camera timestamps; defines ``N_cam``.
+    Z_cam_leds : array-like
+        3D LED observations. Must have shape ``(N_cam, n_leds, 3)`` matching
+        ``led_offsets_body``.
+    led_offsets_body : array-like
+        Body-frame LED offsets, ``(n_leds, 3)``.
+    mask_cam_leds : array-like or None, optional
+        Per-frame, per-LED validity mask; must have shape ``(N_cam, n_leds)``.
+    conf_cam : array-like or None, optional
+        Per-frame confidence. The 3D camera model accepts either
+        ``(N_cam, n_leds)`` or ``(N_cam, n_leds, 3)``. Non-finite values
+        are rejected (they propagate through R = base/conf otherwise).
+    func_name : str, optional
+        Caller name for error-message prefixing.
+
+    Raises
+    ------
+    ValueError
+        On any shape or finiteness mismatch.
+    """
+    t_cam_arr = np.asarray(t_cam)
+    if t_cam_arr.ndim != 1:
+        raise ValueError(f"{func_name}: t_cam must be 1D, got shape {t_cam_arr.shape}.")
+    n_cam = int(t_cam_arr.shape[0])
+
+    offsets = np.asarray(led_offsets_body)
+    if offsets.ndim != 2 or offsets.shape[1] != 3:
+        raise ValueError(
+            f"{func_name}: led_offsets_body must have shape (n_leds, 3); "
+            f"got {offsets.shape}."
+        )
+    n_leds = int(offsets.shape[0])
+
+    leds = np.asarray(Z_cam_leds)
+    if leds.shape != (n_cam, n_leds, 3):
+        raise ValueError(
+            f"{func_name}: Z_cam_leds must have shape ({n_cam}, {n_leds}, 3) "
+            f"to match t_cam and led_offsets_body, got {leds.shape}."
+        )
+
+    if mask_cam_leds is not None:
+        mask_arr = np.asarray(mask_cam_leds)
+        if mask_arr.shape != (n_cam, n_leds):
+            raise ValueError(
+                f"{func_name}: mask_cam_leds must have shape "
+                f"({n_cam}, {n_leds}) to match t_cam and led_offsets_body, "
+                f"got {mask_arr.shape}."
+            )
+
+    if conf_cam is not None:
+        conf_arr = np.asarray(conf_cam)
+        if conf_arr.shape not in ((n_cam, n_leds), (n_cam, n_leds, 3)):
+            raise ValueError(
+                f"{func_name}: conf_cam must have shape ({n_cam}, {n_leds}) "
+                f"or ({n_cam}, {n_leds}, 3), got {conf_arr.shape}."
+            )
+        if not np.all(np.isfinite(conf_arr)):
+            n_bad = int(np.sum(~np.isfinite(conf_arr)))
+            raise ValueError(
+                f"{func_name}: conf_cam contains {n_bad} non-finite "
+                "value(s) (NaN/inf); confidence must be finite in [0, 1]."
+            )
 
 
 def wrap_angle(theta: jnp.ndarray) -> jnp.ndarray:
