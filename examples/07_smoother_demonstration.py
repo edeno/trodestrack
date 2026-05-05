@@ -114,7 +114,12 @@ def main() -> None:
         "reduce_imu_noise_during_blackout": True,
         "blackout_imu_noise_scale": 0.5,
     }
+    # Pin to the 8D ``2d_full`` layout so the heading/bias index extraction
+    # below (heading_idx=4, bias_accel_idx=(6, 7)) matches the filter state.
+    # The current EKFConfig() default is "2d_cam_3d_imu" (10D) where heading
+    # is at index 5 and accel biases start at 7.
     ekf_params = dict(
+        state_mode="2d_full",
         process_noise_pos=0.02,
         process_noise_vel=2.0,
         process_noise_heading=0.02,

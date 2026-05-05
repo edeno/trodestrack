@@ -332,7 +332,7 @@
 ## Completion Checklist
 
 ### Minimal Viable Presentation (MVP)
-- [x] ~~Phase 1: Core visuals (slides 2, 3, 8, 12, 14, 16, 18, 21)~~ → **11/11 complete ✅**
+- [ ] Phase 1: Core visuals (slides 2, 3, 8, 12, 14, 16, 18, 21) → **8 of 10 PNGs shipped + 1 MP4; slides 2 and 18 deferred (bullet content for now)**
 - [ ] Phase 2: Presentation assembly (Option A or B)
 - [ ] Phase 5: Basic review
 
@@ -351,33 +351,35 @@
 
 ## Progress Tracker
 
-**Current Status**: Phase 1 COMPLETE! ✅ (11/11 Priority 1 visuals done)
+**Current Status**: Phase 1 partially shipped — 8 of 10 PNGs + 1 MP4. Slide 2 (failure modes) and slide 18 (9-panel diagnostic) deferred and rendered as bullet content in `build_presentation.py`.
 
 | Phase | Tasks Complete | Tasks Remaining | % Done |
 |-------|----------------|-----------------|--------|
-| **Phase 1** | 11 | 0 | 100% ✅ |
+| **Phase 1** | 8 | 2 (slides 2, 18) | 80% |
 | **Phase 2** | 0 | 1 | 0% |
 | **Phase 3** | 0 | 2 | 0% |
 | **Phase 4** | 0 | 13 | 0% |
 | **Phase 5** | 0 | 4 | 0% |
-| **TOTAL** | **11** | **20** | **35%** |
+| **TOTAL** | **8** | **22** | **27%** |
 
 ---
 
 ## Quick Reference
 
-### Already Complete ✅ (ALL PRIORITY 1 VISUALS)
+### Shipped ✅
 - Slide 5A: Accelerometer physics
 - Slide 5B: Gyroscope physics
 - Slide 5C: Bias correction
-- Slide 2: Failure modes grid
 - Slide 3: Trajectory comparison
 - Slide 8: Before/after video
 - Slide 12: IMU integration
 - Slide 14: Uncertainty evolution
 - Slide 16: Smoother comparison
-- Slide 18: 9-panel diagnostic
 - Slide 21: NEES histogram
+
+### Deferred ⏳ (bullet content in `build_presentation.py`)
+- Slide 2: Failure modes grid — generator script not yet written
+- Slide 18: 9-panel diagnostic — generator script not yet written
 
 ### Next Up (Phase 2) ⏭️
 1. **Presentation Assembly** (4-8 hours) ← **NEXT**
@@ -387,5 +389,7 @@
 
 ---
 
-**Last Updated**: 2025-10-18 13:01 (Updated progress: 11/11 Priority 1 complete - 100% visual work done ✅)
+**Last Updated**: see git log for the most recent presentation-tree change.
+Phase 1: 8 of 10 visuals shipped + 1 MP4; slides 2 and 18 deferred (bullet
+content in `build_presentation.py`).
 **Author**: Claude Code
