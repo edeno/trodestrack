@@ -771,7 +771,19 @@ def extended_kalman_filter(
     t_imu : np.ndarray
         IMU timestamps (N_imu,) in seconds.
     U_imu : np.ndarray
-        IMU measurements [ω_z(rad/s), f_x(m/s^2), f_y(m/s^2)] (N_imu, 3).
+        IMU measurements ``(N_imu, K)``. The accepted channel count
+        ``K`` is layout-dependent and enforced by
+        :func:`trodestrack.models.filter_common.validate_imu_input_shape`:
+
+        - ``K = 3``: ``[ω_z, f_x, f_y]`` for ``vision_only``, ``2d_full``,
+          and ``2d_cam_3d_imu`` (degenerate, vz idle).
+        - ``K = 4``: ``[ω_z, f_x, f_y, f_z]`` for ``2d_cam_3d_imu`` with
+          3D vertical velocity active.
+        - ``K = 6``: ``[ω_x, ω_y, ω_z, f_x, f_y, f_z]`` for the
+          quaternion-orientation layouts ``2d_cam_6dof_imu_orientation``
+          and the experimental ``3d_cam_6dof_imu``.
+
+        Units: rad/s for gyro components, m/s² for specific-force.
     t_cam : np.ndarray
         Camera timestamps (N_cam,) in seconds.
     Z_cam_led1 : np.ndarray

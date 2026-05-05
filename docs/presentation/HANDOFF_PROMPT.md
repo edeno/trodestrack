@@ -18,25 +18,27 @@ CONTEXT:
   2. docs/presentation/PROGRESS_REPORT.md (what's done, what's remaining)
   3. docs/presentation/TASKS.md (step-by-step checklist)
   4. .claude/docs/PRD.md (package requirements and specs)
-  5. .claude/docs/CLAUDE.md (development commands and workflow)
+  5. CLAUDE.md (project root — development commands and workflow)
 
-WHAT'S ALREADY DONE:
+WHAT'S ALREADY DONE (see "File Paths Reference" below for the authoritative
+list, but as of this writing):
 - ✅ Complete 43-slide outline with pedagogical design
-- ✅ 3 IMU physics visuals generated (slides 5A, 5B, 5C)
-- ✅ Working code template: docs/presentation/code/generate_slide05abc_imu_physics.py
+- ✅ Generators shipped for slides 3, 5A/5B/5C, 8, 12, 14, 16, and 21
+- ✅ build_presentation.py assembles the .pptx end-to-end
 - ✅ Folder structure created in docs/presentation/
+- ⏳ Generators NOT yet shipped: slide 2 (failure modes) and slide 18
+  (9-panel diagnostic). Those slides currently render as bullet content
+  in build_presentation.py and are the only Phase-1 visual gaps.
 
 YOUR TASK:
-Continue generating visuals following TASKS.md Phase 1 checklist. Start with the easiest:
+Pick up the remaining gaps. The outstanding generators are:
 
-1. Slide 3: Trajectory comparison (ground truth vs noisy vision-only)
-2. Slide 21: NEES histogram
-3. Slide 18: 9-panel diagnostic screenshot
-4. Slide 14: Uncertainty evolution (covariance ellipses)
-5. Slide 16: Smoother comparison (3 algorithms on dropout)
-6. Slide 2: Failure modes grid (occlusion, reflection, blur, dim)
-7. Slide 12: IMU integration visualization
-8. Slide 8: Before/after video (10s, split-screen)
+1. Slide 2: Failure modes grid (occlusion, reflection, blur, dim)
+2. Slide 18: 9-panel diagnostic screenshot
+
+For everything else under "WHAT'S ALREADY DONE", regenerate locally only
+if you actually need to (the .pptx and .mp4 are gitignored — see the
+project README for the rebuild commands).
 
 IMPORTANT TECHNICAL DETAILS:
 - Use the simulator: from trodestrack.sim.rat_imu import simulate_rat_imu, RatIMUSimConfig

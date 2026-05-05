@@ -149,16 +149,22 @@ smoothed = rts_smoother(
 
 ```python
 import numpy as np
+
+from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
+from trodestrack.models.state_layout import get_layout
 from trodestrack.qa.metrics import compute_nees
 
+# `sim` is the SimOut produced upstream (e.g. by simulate_rat_imu).
 X_truth_at_cam = np.array(
     [sim["X_truth"][np.argmin(np.abs(sim["t_imu"] - t_c))] for t_c in sim["t_cam_exp"]]
 )
-truth_pos = X_truth_at_cam[:, :2]
+truth_pos = X_truth_at_cam[:, :2]  # X_truth is laid out [x, y, vx, vy, theta]
 
 results = []
 for q_pos in [0.01, 0.02, 0.05, 0.1]:
     cfg = EKFConfig(process_noise_pos=q_pos)
+    layout = get_layout(cfg.state_mode)
+    pos_idx = list(layout.pos_idx)[:2]  # x, y columns under the active layout
     result = extended_kalman_filter(
         cfg,
         sim["t_imu"],
@@ -168,10 +174,14 @@ for q_pos in [0.01, 0.02, 0.05, 0.1]:
         sim["Z_cam_led2"],
         sim["mask_cam"],
     )
+    means = np.asarray(result.filtered_means)
+    covs = np.asarray(result.filtered_covariances)
+    pos_means = means[:, pos_idx]
+    pos_covs = covs[np.ix_(np.arange(means.shape[0]), pos_idx, pos_idx)]
     nees = compute_nees(
         states_true=truth_pos,
-        states_est=np.asarray(result.filtered_means[:, :2]),
-        covariances_est=np.asarray(result.filtered_covariances[:, :2, :2]),
+        states_est=pos_means,
+        covariances_est=pos_covs,
     )
     results.append((q_pos, float(nees.mean())))
 

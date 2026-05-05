@@ -134,11 +134,13 @@ uv run python docs/presentation/code/build_presentation.py
 
 ### Section 2: HOW IT WORKS (Slides 9-18)
 - Kalman filtering (predict-update cycle)
-- State vector (8D: position, velocity, heading, biases)
+- State vector — registered modes (5D vision-only, 8D `2d_full`, 10D
+  default `2d_cam_3d_imu`, 14D `2d_cam_6dof_imu_orientation`, and the
+  experimental 16D `3d_cam_6dof_imu`); slide 23 enumerates them
 - IMU pre-integration between camera frames
 - Uncertainty evolution (covariance)
 - EKF vs UKF vs RTS smoothing
-- Robustness features (gating, LED swaps, damping)
+- Robustness features (gating, transient LED-swap mitigation via dual-LED residuals, damping; persistent LED swaps NOT auto-detected — tracked by the `test_filter_stable_under_frequent_swaps` xfail)
 - 9-panel diagnostic video
 
 ### Section 3: FEATURES & CAPABILITIES (Slides 19-25)
@@ -147,7 +149,11 @@ uv run python docs/presentation/code/build_presentation.py
 - Automated QA reports
 - Flexible state tracking modes
 - Performance (300× realtime on CPU)
-- Real data support (Trodes, DeepLabCut, SpikeGadgets)
+- Real-data ingestion **today**: generic NumPy arrays (timestamps + LED
+  positions + IMU samples). Native loaders for Trodes LED CSV,
+  DeepLabCut CSV, and SpikeGadgets MDA/REC are on the roadmap, not
+  shipped — slide 25 calls this out. Bring your own conversion to
+  NumPy, then call the filters / CLIs.
 
 ### Section 4: GETTING STARTED (Slides 26-32)
 - Installation (Python + uv)
