@@ -252,6 +252,27 @@ class FilterCoreConfig:
                     f"(squared physical units); got {value!r}."
                 )
 
+        # led_distance is None when auto-detection is desired and is
+        # otherwise the dual-LED spacing in meters used by the camera
+        # measurement model. A NaN/inf or non-positive value silently
+        # poisons every predicted LED position.
+        if self.led_distance is not None:
+            value = self.led_distance
+            if not np.isfinite(value) or value <= 0:
+                raise ValueError(
+                    "led_distance must be None (auto-detect) or a finite "
+                    f"strictly-positive value in meters; got {value!r}."
+                )
+
+        if (
+            not np.isfinite(self.led_distance_tolerance)
+            or self.led_distance_tolerance < 0
+        ):
+            raise ValueError(
+                "led_distance_tolerance must be a finite non-negative "
+                f"fraction; got {self.led_distance_tolerance!r}."
+            )
+
     def tree_flatten(self) -> tuple[tuple, dict]:
         """Flatten config for JAX PyTree registration.
 
@@ -688,6 +709,15 @@ def validate_camera_3d_input_shapes(
         raise ValueError(
             f"{func_name}: led_offsets_body must have shape (n_leds, 3); "
             f"got {offsets.shape}."
+        )
+    # Camera3DPositionModel.predict rotates these offsets into world frame
+    # and adds them to the predicted body position; a single NaN entry
+    # poisons every predicted LED, every residual, R, and the loglik.
+    if not np.all(np.isfinite(offsets)):
+        n_bad = int(np.sum(~np.isfinite(offsets)))
+        raise ValueError(
+            f"{func_name}: led_offsets_body contains {n_bad} non-finite "
+            "value(s) (NaN/inf); offsets must be finite body-frame meters."
         )
     n_leds = int(offsets.shape[0])
 

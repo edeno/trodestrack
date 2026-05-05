@@ -103,6 +103,28 @@ class UKFConfig(FilterCoreConfig):
         # Parent-class validation (mahalanobis_threshold_prob etc.)
         super().__post_init__()
 
+        # Reject non-finite scaling parameters before computing (n + λ): a
+        # NaN here passes the < _MIN_N_PLUS_LAMBDA inequality below and
+        # propagates through compute_weights into every sigma-point
+        # update, returning NaN means / loglik with no other warning.
+        # alpha must additionally be > 0 (it appears squared but a 0
+        # collapses (n + λ) to -n, yielding negative weights everywhere).
+        if not np.isfinite(self.alpha) or self.alpha <= 0:
+            raise ValueError(
+                "UKFConfig.alpha must be a finite strictly-positive value; "
+                f"got {self.alpha!r}."
+            )
+        if not np.isfinite(self.beta):
+            raise ValueError(
+                "UKFConfig.beta must be a finite value (typically 2.0 for "
+                f"Gaussian priors); got {self.beta!r}."
+            )
+        if not np.isfinite(self.kappa):
+            raise ValueError(
+                "UKFConfig.kappa must be a finite secondary-scaling value; "
+                f"got {self.kappa!r}."
+            )
+
         # Need the layout dimension to check (n + λ); imported here to avoid a
         # top-level cycle (state_layout is pulled in by the shared config).
         from trodestrack.models.state_layout import get_layout

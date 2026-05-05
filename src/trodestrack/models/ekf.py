@@ -98,10 +98,22 @@ class EKFConfig(FilterCoreConfig):
     Parameters
     ----------
     num_iter : int, default 1
-        Number of inner IEKF iterations per measurement update.
+        Number of inner IEKF iterations per measurement update. Must be
+        ``>= 1``; ``num_iter=0`` is rejected because the 2D path indexes
+        ``nis_all[-1]`` after a zero-length scan (IndexError) and the 3D
+        path silently skips the camera update entirely.
     """
 
     num_iter: int = 1
+
+    def __post_init__(self) -> None:
+        # Run shared (FilterCoreConfig) validation first.
+        super().__post_init__()
+        if not isinstance(self.num_iter, int) or self.num_iter < 1:
+            raise ValueError(
+                "num_iter must be an integer >= 1 (1 = standard EKF, "
+                f">1 = IEKF iterations); got {self.num_iter!r}."
+            )
 
 
 tree_util.register_pytree_node_class(EKFConfig)
