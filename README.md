@@ -199,7 +199,7 @@ plt.show()
 | Layout String | Dimensions | State Vector | Use Case |
 |--------------|-----------|--------------|----------|
 | `"2d_full"` | 8D | `[x, y, vx, vy, θ, b_gz, b_ax, b_ay]` | Standard sensor fusion (camera + IMU) |
-| `"vision_only"` | 5D | `[x, y, vx, vy, θ]` | Camera-only tracking (no biases) |
+| `"vision_only"` | 5D | `[x, y, vx, vy, θ]` | Camera-driven tracking, no IMU integration (the public APIs still require placeholder IMU timestamps/measurements; see `docs/user-guide/state-layouts.md`) |
 | `"2d_cam_3d_imu"` | 10D | `[x, y, vx, vy, vz, θ, b_gz, b_ax, b_ay, b_az]` | 2D camera with 3D accel (detect rearing) |
 | `"3d_euler"` | 15D | `[x, y, z, vx, vy, vz, roll, pitch, yaw, b_gx, b_gy, b_gz, b_ax, b_ay, b_az]` | Full 3D tracking with Euler angles |
 | `"3d_quat"` | 16D | `[x, y, z, vx, vy, vz, qw, qx, qy, qz, b_gx, b_gy, b_gz, b_ax, b_ay, b_az]` | Full 3D tracking with quaternions |

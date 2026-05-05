@@ -68,7 +68,24 @@ The presentation is 99% complete. One manual step required:
 
 **Why manual?** python-pptx doesn't support video embedding programmatically.
 
+### Setup (one-time)
+
+Both the slide-08 video generator and `build_presentation.py` need
+extras that are **not** in the default install:
+
+```bash
+# Install python-pptx + matplotlib animation deps (declared under the
+# ``video`` extra in pyproject.toml).
+uv sync --extra video
+
+# System ffmpeg is required for the matplotlib FFMpegWriter used by
+# generate_slide08_beforeafter_video.py:
+#   macOS:   brew install ffmpeg
+#   Ubuntu:  sudo apt install ffmpeg
+```
+
 ### Regenerate All Visuals
+
 ```bash
 # Run all generation scripts that ship in this repo
 uv run python docs/presentation/code/generate_slide03_trajectory_comparison.py
@@ -85,9 +102,12 @@ are not yet implemented; the builder currently renders those as bullet
 slides instead of full-image slides.
 
 ### Rebuild Presentation from Scratch
+
 ```bash
-# Regenerate PowerPoint file (includes all visuals)
+# Requires the ``video`` extra (see Setup above) for python-pptx.
 uv run python docs/presentation/code/build_presentation.py
+# If you skipped uv sync, the one-shot equivalent is:
+# uv run --with python-pptx python docs/presentation/code/build_presentation.py
 ```
 
 ## 📊 Presentation Structure

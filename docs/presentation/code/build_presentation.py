@@ -544,14 +544,14 @@ def build_section_2_how_it_works(builder):
     builder.add_content_slide(
         title="What We Track: The State Vector",
         bullets=[
-            "8-dimensional state: [x, y, vₓ, vᵧ, θ, b_gz, b_ax, b_ay]",
-            "Position: (x, y) in meters",
-            "Velocity: (vₓ, vᵧ) in m/s",
-            "Heading: θ in radians",
-            "Biases: b_gz (gyro), b_ax, b_ay (accel)",
+            "Default state (mode 2d_cam_3d_imu, 10D):",
+            "  [x, y, vₓ, vᵧ, vz, θ, b_gz, b_ax, b_ay, b_az]",
+            "Position (x, y) m · velocity (vₓ, vᵧ, vz) m/s · heading θ rad",
+            "Gyro bias b_gz · accel biases (b_ax, b_ay, b_az)",
             "Why biases? Prevent unbounded drift over time",
+            "Other modes via state_mode: vision_only (5D), 2d_full (8D), 3d_quat (16D)",
         ],
-        notes="TrodesTrack uses an 8D state vector. Position and velocity are obvious. Heading θ tracks rat orientation. The key innovation: estimating IMU biases [b_gz, b_ax, b_ay] as part of the state. These biases drift slowly (random walk), and estimating them prevents unbounded integration error. Camera measurements provide the observability needed to correct biases.",
+        notes="TrodesTrack's default state vector is the 10D 2d_cam_3d_imu layout: [x, y, vx, vy, vz, θ, b_gz, b_ax, b_ay, b_az]. Position and velocity are obvious; vz is included for rearing detection. Heading θ tracks rat orientation in 2D. The key innovation: estimating IMU biases as part of the state — they drift slowly (random walk), and estimating them prevents unbounded integration error. Camera measurements provide the observability needed to correct biases. Other state_mode choices: vision_only (5D, camera-only) for the simplest case, 2d_full (8D, 2D-IMU only) for sessions without vertical motion, and 3d_quat / 3d_cam_6dof_imu (16D, experimental) for full 3D pose with quaternion orientation.",
     )
 
     # Slide 12: The Predict Step (IMU Integration)
@@ -842,14 +842,15 @@ def build_section_5_advanced(builder):
     builder.add_content_slide(
         title="Roadmap: Extending to 3D",
         bullets=[
-            "Current: 2D state (x, y, θ, vx, vy, biases) - 8D",
-            "Future: 3D pose (x, y, z, roll, pitch, yaw, velocities, biases) - 16D",
-            "Requires: Full gyro/accel (all 3 axes), magnetometer (heading)",
-            "Challenge: Quaternion vs Euler angles (gimbal lock)",
-            "Use case: Rearing, climbing, non-planar behaviors",
-            "Timeline: Prototype in 2025",
+            "Today (default): 10D 2d_cam_3d_imu — 2D camera + 3D-velocity IMU,",
+            "  scalar yaw, with vz / accel-z bias for rearing detection",
+            "Today (experimental): 14D 2d_cam_6dof_imu_orientation",
+            "  (quaternion orientation + 2D camera) and 16D 3d_cam_6dof_imu",
+            "  (full 3D pose, 6-DOF IMU, 3D camera observations)",
+            "Future: validated 3D-camera datasets, RTS smoother in 3D mode,",
+            "  magnetometer fusion, non-planar arenas",
         ],
-        notes="Current version: 2D tracking (x, y, heading). Future roadmap: Full 3D pose (x, y, z, roll, pitch, yaw). Requires using all 3 gyro axes, full accelerometer, and magnetometer for heading. Mathematical challenge: Quaternion representation (no gimbal lock) vs Euler angles (intuitive but singular). Use case: Rearing behavior, climbing, non-planar arenas. Prototype targeted for 2025. Architecture is designed to support this extension.",
+        notes="Today's default is the 10D 2d_cam_3d_imu layout: 2D camera + 3D-velocity IMU with scalar-yaw orientation, and vz / b_az for vertical-motion behaviors like rearing. The 14D 2d_cam_6dof_imu_orientation layout (quaternion orientation with a 2D camera) and the 16D 3d_cam_6dof_imu layout (full 3D pose using extended_kalman_filter_3d with 3D camera observations and 6-DOF IMU) are shipped but experimental — see the tilt-orientation/3D-camera implementation plan in docs/plans/. Future work focuses on validating the 3D camera path against real datasets, finishing RTS smoothing in 3D, and integrating magnetometer fusion. The architecture is layout-driven, so adding a new state_mode is a registry edit rather than a refactor.",
     )
 
     # Slide 36: Custom Measurement Models

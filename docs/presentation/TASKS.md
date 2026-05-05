@@ -121,17 +121,18 @@
 - [ ] Review PDF output
 - [ ] **Estimated time**: 4-5 hours
 
-### Option B: Python-PPTX (Most Flexible)
-- [ ] Install `python-pptx`: `uv add python-pptx`
-- [ ] Create `code/build_presentation.py`
-- [ ] Define slide template/theme
-- [ ] For each slide:
-  - [ ] Create slide with layout (title, content, image)
-  - [ ] Add title text
-  - [ ] Add body text (bullet points or paragraphs)
-  - [ ] Insert image (if applicable)
-  - [ ] Set fonts, colors, alignment
-- [ ] Save as `trodestrack_presentation.pptx`
+### Option B: Python-PPTX (Most Flexible) — DONE
+- [x] Install `python-pptx`: available via the optional ``video`` extra
+  (``uv sync --extra video`` or ``uv run --with python-pptx ...``)
+- [x] Create `code/build_presentation.py`
+- [x] Define slide template/theme
+- [x] For each slide:
+  - [x] Create slide with layout (title, content, image)
+  - [x] Add title text
+  - [x] Add body text (bullet points or paragraphs)
+  - [x] Insert image (if applicable)
+  - [x] Set fonts, colors, alignment
+- [x] Save as `trodestrack_presentation.pptx` (gitignored — regenerate locally)
 - [ ] Open in PowerPoint/LibreOffice to verify
 - [ ] **Estimated time**: 6-8 hours
 
@@ -356,11 +357,11 @@
 | Phase | Tasks Complete | Tasks Remaining | % Done |
 |-------|----------------|-----------------|--------|
 | **Phase 1** | 8 | 2 (slides 2, 18) | 80% |
-| **Phase 2** | 0 | 1 | 0% |
+| **Phase 2** | 1 (build_presentation.py) | 0 | 100% |
 | **Phase 3** | 0 | 2 | 0% |
 | **Phase 4** | 0 | 13 | 0% |
 | **Phase 5** | 0 | 4 | 0% |
-| **TOTAL** | **8** | **22** | **27%** |
+| **TOTAL** | **9** | **21** | **30%** |
 
 ---
 
@@ -381,11 +382,14 @@
 - Slide 2: Failure modes grid — generator script not yet written
 - Slide 18: 9-panel diagnostic — generator script not yet written
 
-### Next Up (Phase 2) ⏭️
-1. **Presentation Assembly** (4-8 hours) ← **NEXT**
-   - Option A: Markdown → PDF (fastest, 4-5 hours)
-   - Option B: Python-PPTX (most flexible, 6-8 hours)
-   - Option C: Manual (most control, 10-12 hours)
+### Next Up
+1. **Generator scripts for slides 2 (failure modes) and 18 (9-panel
+   diagnostic)** — both currently render as bullet content in
+   `build_presentation.py`.
+2. **Phase 3 (speaker notes + handout)** and **Phase 4 (optional
+   visuals)** are still open; the Python-PPTX builder itself
+   (Phase 2 Option B) shipped earlier and is invoked via
+   `build_presentation.py`.
 
 ---
 

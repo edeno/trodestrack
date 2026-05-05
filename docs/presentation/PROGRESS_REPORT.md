@@ -233,8 +233,9 @@ documented failure modes (occlusion, reflection, motion blur, dim lighting).
 docs/presentation/
 ├── PRESENTATION_OUTLINE.md          ✅ Complete (43 slides outlined)
 ├── PROGRESS_REPORT.md               ✅ This file (updated)
-├── TASKS.md                         ✅ Updated (Phase 1 complete)
-├── trodestrack_presentation.pptx    ⏳ Not started
+├── TASKS.md                         ✅ Updated (Phase 1 partial: 8/10)
+├── trodestrack_presentation.pptx    ✅ Built locally via build_presentation.py
+│                                       (gitignored — regenerate after edits)
 ├── speaker_notes.md                 ⏳ Not started
 ├── handout.pdf                      ⏳ Not started
 │
