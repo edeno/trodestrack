@@ -460,6 +460,17 @@ def _prepare_camera_inputs(
         raise ValueError(
             f"led2 must have shape ({t_cam_arr.shape[0]}, 2); got {led2_arr.shape}."
         )
+    # Reject non-finite timestamps before the strict-increase check —
+    # ``np.diff`` of [..., +inf] is NaN, which fails ``> 0`` and would
+    # mask the real problem; an array like [0.0, +inf] also passes the
+    # diff-positive check but propagates inf into the np.interp /
+    # np.searchsorted paths below.
+    if not np.all(np.isfinite(t_cam_arr)):
+        n_bad = int(np.sum(~np.isfinite(t_cam_arr)))
+        raise ValueError(
+            f"t_cam contains {n_bad} non-finite value(s) (NaN/inf); "
+            "timestamps must be finite seconds."
+        )
     if not np.all(np.diff(t_cam_arr) > 0):
         raise ValueError("t_cam must be strictly increasing.")
 

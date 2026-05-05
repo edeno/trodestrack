@@ -284,6 +284,19 @@ def estimate_stationary_mask(
 
     t_imu_arr = np.asarray(t_imu, dtype=float)
     gyro_arr = np.asarray(gyro_z, dtype=float)
+    if t_imu_arr.ndim != 1:
+        raise ValueError(f"t_imu must be 1D; got shape {t_imu_arr.shape}.")
+    if gyro_arr.ndim != 1:
+        raise ValueError(f"gyro_z must be 1D; got shape {gyro_arr.shape}.")
+    if gyro_arr.shape != t_imu_arr.shape:
+        # The returned mask is documented as "over IMU samples". Without
+        # this guard, gyro-only callers got a mask of shape ``gyro_z.shape``
+        # that misaligned with ``(n_imu, 3)`` accelerometer arrays in
+        # downstream estimators (estimate_accel_gravity_body, etc.).
+        raise ValueError(
+            f"gyro_z must have the same length as t_imu; got "
+            f"gyro_z {gyro_arr.shape} vs t_imu {t_imu_arr.shape}."
+        )
     mask = np.isfinite(gyro_arr) & (np.abs(gyro_arr) < gyro_threshold)
 
     camera_inputs = (t_cam, led1, led2)
@@ -360,18 +373,28 @@ def lagged_linear_fit(
         valid = np.asarray(valid_target, dtype=bool).copy()
     valid &= np.isfinite(target_arr)
 
+    # Only accept a candidate when the fit produced a finite correlation —
+    # ``_linear_fit`` returns a NaN-filled ``LagFit`` when fewer than 3
+    # finite samples remain. Initializing ``best_fit`` to that NaN result
+    # would silently report a "no-data fit" as success.
     best_fit: LagFit | None = None
     for lag in lags:
         source_shifted = np.interp(t_target_arr + lag, t_source_arr, source_arr)
         finite = valid & np.isfinite(source_shifted)
         fit = _linear_fit(source_shifted[finite], target_arr[finite], lag)
-        if best_fit is None or _abs_correlation_score(fit) > _abs_correlation_score(
-            best_fit
-        ):
+        score = _abs_correlation_score(fit)
+        if not np.isfinite(score):
+            continue
+        if best_fit is None or score > _abs_correlation_score(best_fit):
             best_fit = fit
 
     if best_fit is None:
-        raise ValueError("No candidate lag produced a valid fit.")
+        raise ValueError(
+            "No candidate lag produced a valid fit. Each tried lag had "
+            "fewer than 3 finite (source, target) pairs after applying "
+            "valid_target / interpolation, so no correlation could be "
+            "computed."
+        )
     return best_fit
 
 
