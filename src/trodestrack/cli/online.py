@@ -38,7 +38,11 @@ from pathlib import Path
 
 import numpy as np
 
-from trodestrack.cli.utils import load_data_file
+from trodestrack.cli.utils import (
+    load_data_file,
+    validate_finite_array,
+    validate_monotonic_timestamps,
+)
 from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
 from trodestrack.models.filter_common import FilterCoreConfig
 
@@ -254,6 +258,14 @@ def run_online(args: argparse.Namespace) -> None:
     U_imu = load_data_file(args.imu_measurements, "IMU measurements")
     t_cam = load_data_file(args.camera_timestamps, "Camera timestamps")
     Z_cam_led1 = load_data_file(args.led1_positions, "LED1 positions")
+
+    # Reject malformed inputs at the boundary so the filter does not
+    # silently produce NaN/poisoned states from non-finite IMU rows or
+    # negative dt from out-of-order timestamps. LED arrays intentionally
+    # tolerate NaN (handled via mask_cam downstream).
+    validate_monotonic_timestamps(t_imu, "IMU timestamps")
+    validate_monotonic_timestamps(t_cam, "Camera timestamps")
+    validate_finite_array(U_imu, "IMU measurements")
 
     n_imu = len(t_imu)
     n_cam = len(t_cam)

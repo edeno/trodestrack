@@ -20,6 +20,14 @@ jobs:
   build:
     name: Build distribution
     runs-on: ubuntu-latest
+    # Outputs a single source-of-truth flag for prerelease detection. We
+    # parse the actual tag with PEP 440 (packaging.version.Version) so
+    # tags like v0.2.0rc1, v1.0.0a3, v0.5.0.dev2, v0.5.0.post1.dev1 are
+    # classified correctly. Bare contains() checks on the ref name are
+    # too loose (e.g. they'd misclassify a tag that happens to contain
+    # the letter "a" in the project name).
+    outputs:
+      is_prerelease: ${{ steps.classify.outputs.is_prerelease }}
 
     steps:
       - uses: actions/checkout@v4
@@ -30,6 +38,39 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+
+      - name: Classify release vs prerelease
+        id: classify
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_TAG: ${{ github.event.inputs.release_tag }}
+          EVENT_NAME: ${{ github.event_name }}
+          # GitHub release event sets this on the payload; missing for tag pushes.
+          GH_PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          python - <<'PY'
+          import os, sys
+          from packaging.version import Version, InvalidVersion
+
+          event = os.environ.get("EVENT_NAME", "")
+          gh_pre = os.environ.get("GH_PRERELEASE", "").lower()
+          if event == "release" and gh_pre in {"true", "false"}:
+              is_pre = gh_pre == "true"
+          else:
+              raw = os.environ.get("INPUT_TAG") or os.environ.get("REF_NAME") or ""
+              tag = raw.lstrip("v")
+              try:
+                  v = Version(tag)
+                  is_pre = bool(v.is_prerelease or v.is_devrelease)
+              except InvalidVersion:
+                  # Fail safe: if the tag is unparseable, treat as prerelease
+                  # so we don't accidentally publish to real PyPI.
+                  is_pre = True
+          out = "true" if is_pre else "false"
+          print(f"is_prerelease={out}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"is_prerelease={out}\n")
+          PY
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3
@@ -54,14 +95,13 @@ jobs:
     name: Publish to PyPI
     needs: [build]
     runs-on: ubuntu-latest
-    # Only publish to real PyPI for full (non-prerelease) GitHub releases
-    # or for an explicit workflow_dispatch with a release_tag. The release
-    # event sets github.event.release.prerelease to true for prereleases;
-    # gating here keeps prereleases off pypi.org.
-    if: |
-      (github.event_name == 'release' && github.event.release.prerelease == false) ||
-      github.event_name == 'workflow_dispatch' ||
-      github.event_name == 'push'
+    # Real PyPI is reached only when the build job classified the version
+    # as a final release (not prerelease/dev). That covers GitHub releases
+    # with prerelease=false, workflow_dispatch, and tag pushes whose tag
+    # parses as a final PEP 440 version (e.g. v0.1.0). Prerelease tags
+    # such as v0.2.0rc1 or v0.5.0.dev2 are routed to TestPyPI by the next
+    # job; unparseable tags are treated as prerelease (fail-safe).
+    if: needs.build.outputs.is_prerelease == 'false'
     environment:
       name: pypi
       url: https://pypi.org/p/trodestrack
@@ -82,8 +122,11 @@ jobs:
     name: Publish to TestPyPI (for testing)
     needs: [build]
     runs-on: ubuntu-latest
-    # TestPyPI is the destination for prerelease GitHub releases.
-    if: github.event_name == 'release' && github.event.release.prerelease == true
+    # TestPyPI is the destination for prerelease/dev versions: GitHub
+    # releases marked prerelease=true, and tag pushes whose tag parses
+    # as a PEP 440 prerelease (a/b/rc/dev). Mirrors the publish-to-pypi
+    # gate above via the build job's classified output.
+    if: needs.build.outputs.is_prerelease == 'true'
     environment:
       name: testpypi
       url: https://test.pypi.org/p/trodestrack
