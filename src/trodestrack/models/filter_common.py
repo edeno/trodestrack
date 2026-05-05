@@ -12,7 +12,7 @@ from typing import ClassVar, NamedTuple
 
 import jax.numpy as jnp
 import numpy as np
-from jax import Array, lax, tree_util
+from jax import Array, jacfwd, lax, tree_util
 from jax.scipy.linalg import cho_factor, cho_solve
 
 from trodestrack.models.quaternion import (
@@ -1563,6 +1563,49 @@ def build_quaternion_transition_jacobian(
                 F_x = F_x.at[vel_i, bias_i].set(dt_arr * coeff)
                 F_x = F_x.at[pos_i, bias_i].set(0.5 * dt_arr**2 * coeff)
 
+        # Position / velocity dependence on the quaternion. The mean
+        # dynamics rotate accel through ``q_next``:
+        #   accel_world = R(q_next) · (imu_accel - bias) - g_world
+        #   vel_next   = vel + accel_world[:dim] · dt - damping · vel · dt
+        #   pos_next   = pos + vel · dt + 0.5 · accel_world[:dim] · dt² - …
+        # so position and velocity *do* depend on q_next through R(q_next).
+        # Without this block, EKF covariance propagation and RTS smoothing
+        # silently dropped the pos/vel-vs-quat coupling (autodiff parity
+        # check: max abs diff ≈ 0.37 with all-zero entries here vs
+        # autodiff entries up to 0.366). Build the block via local
+        # jax.jacfwd of the rotation-of-accel lambda — this is
+        # non-singular even at exact zero rotation (unlike the propagation
+        # step) so it is safe to autodiff. Requires ``u_imu`` to read the
+        # accel measurement; if it isn't supplied we leave the block at
+        # zero with a noisy comment so the caller is aware.
+        if u_imu is not None and len(layout.bias_accel_idx) >= 3:
+            accel_meas = jnp.asarray(u_imu, dtype=dtype)[3:6]
+            bias_accel = linearization_mean[
+                jnp.array(layout.bias_accel_idx, dtype=jnp.int32)
+            ]
+            a_meas = accel_meas - bias_accel  # body-frame, bias-removed
+
+            def _accel_world_of_q(q4):
+                # accel_world = R(q) @ a_meas - g_world. The constant
+                # g_world drops out under d/dq, so we only need the
+                # rotated component here. q4 is treated as unit-norm
+                # post-integration (the projector is applied below).
+                return rotate_vector_body_to_world(q4, a_meas)
+
+            d_accel_world_d_q = jacfwd(_accel_world_of_q)(q_pred)
+            # d_accel_world_d_q has shape (3, 4). Project onto the unit-
+            # quaternion tangent (post-normalize Jacobian) for parity
+            # with the qq / q-vs-bias_gyro blocks above.
+            d_accel_world_d_q_proj = d_accel_world_d_q @ projector
+
+            for dim, (pos_i, vel_i) in enumerate(
+                zip(layout.pos_idx, layout.vel_idx, strict=True)
+            ):
+                F_x = F_x.at[vel_i, quat_idx].set(dt_arr * d_accel_world_d_q_proj[dim])
+                F_x = F_x.at[pos_i, quat_idx].set(
+                    0.5 * dt_arr**2 * d_accel_world_d_q_proj[dim]
+                )
+
     return F_x
 
 
@@ -1788,13 +1831,29 @@ def initialize_state(
             0.0,
         ]
     )
+
+    # When *no* LED frame is valid we fall back to (0, 0) for position
+    # and (0, 0) for velocity — that mean is arbitrary, so the prior has
+    # to advertise that arbitrariness through a wide variance instead of
+    # the tight 0.01 m / 0.1 m/s defaults used when at least one frame
+    # observed an LED. Without this widening the docstring's "large
+    # uncertainty" claim was wrong: an all-invalid LED stream produced
+    # an over-confident origin prior (pos_var = 1e-4) that the filter
+    # then anchored against.
+    pos_var_valid = 0.01**2
+    pos_var_uninformative = 10.0**2  # ~10 m std covers any reasonable arena
+    pos_var = jnp.where(has_valid_obs, pos_var_valid, pos_var_uninformative)
+    vel_var_valid = 0.1**2
+    vel_var_uninformative = 1.0**2  # 1 m/s std covers any reasonable speed
+    vel_var = jnp.where(has_valid_obs, vel_var_valid, vel_var_uninformative)
+
     cov8 = jnp.diag(
         jnp.array(
             [
-                0.01**2,
-                0.01**2,
-                0.1**2,
-                0.1**2,
+                pos_var,
+                pos_var,
+                vel_var,
+                vel_var,
                 heading_std**2,
                 0.05**2,
                 0.1**2,
@@ -1912,31 +1971,34 @@ def update_zupt(
 
     # Extract measurement components (all pure functions, JIT-safe)
     meas_pred = zupt_model.predict(mean)
-    H = zupt_model.jacobian(mean)
-    R = zupt_model.meas_cov_from_pred(meas_pred)  # Pure: derive R from velocity
-    innovation = zupt_model.innovation(frame_idx=0, meas_pred=meas_pred)
-
-    # Standard Kalman update
-    S = H @ cov @ H.T + R
-    K = psd_solve(S, H @ cov).T
-
-    mean_updated = mean + K @ innovation
-    cov_updated = joseph_update(cov, K, H, R)
-
-    # Log-likelihood
-    log_det = jnp.linalg.slogdet(S)[1]
-    innov_quad = innovation @ psd_solve(S, innovation)
-    meas_dim = innovation.shape[0]
-    log_likelihood = -0.5 * (meas_dim * jnp.log(2 * jnp.pi) + log_det + innov_quad)
-
-    # Zero out log-likelihood when ZUPT is gated out (derive from same R)
-    # R diagonal is 1e6 when disabled (moving or ZUPT off)
-    is_active = jnp.trace(R) < 1e5
-    log_likelihood = lax.select(
-        is_active, log_likelihood, jnp.array(0.0, dtype=log_likelihood.dtype)
+    speed = jnp.linalg.norm(meas_pred)
+    is_active = jnp.asarray(config.enable_zupt) & (
+        speed < jnp.asarray(config.zupt_velocity_threshold, dtype=mean.dtype)
     )
 
-    return FilterState(mean=mean_updated, cov=cov_updated), log_likelihood
+    def do_update(_: None) -> tuple[FilterState, jnp.ndarray]:
+        H = zupt_model.jacobian(mean)
+        R = zupt_model.meas_cov_from_pred(meas_pred)  # Pure: derive R from velocity
+        innovation = zupt_model.innovation(frame_idx=0, meas_pred=meas_pred)
+
+        # Standard Kalman update
+        S = H @ cov @ H.T + R
+        K = psd_solve(S, H @ cov).T
+
+        mean_updated = mean + K @ innovation
+        cov_updated = joseph_update(cov, K, H, R)
+
+        # Log-likelihood
+        log_det = jnp.linalg.slogdet(S)[1]
+        innov_quad = innovation @ psd_solve(S, innovation)
+        meas_dim = innovation.shape[0]
+        log_likelihood = -0.5 * (meas_dim * jnp.log(2 * jnp.pi) + log_det + innov_quad)
+        return FilterState(mean=mean_updated, cov=cov_updated), log_likelihood
+
+    def no_update(_: None) -> tuple[FilterState, jnp.ndarray]:
+        return state, jnp.asarray(0.0, dtype=mean.dtype)
+
+    return lax.cond(is_active, do_update, no_update, operand=None)
 
 
 def confidence_to_R_diagonal(

@@ -1255,11 +1255,21 @@ def _initialize_3d_state(
         )
         mean = mean.at[pos_idx].set(centroid_world - centroid_body)
 
+    # Position / velocity prior tightness depends on whether we actually
+    # observed an LED in this frame. With ``has_valid`` the centroid is a
+    # good initial guess (5 cm std). Without it the mean is the arbitrary
+    # origin, and the prior must advertise that arbitrariness via wide
+    # variance — otherwise downstream camera updates anchor against a
+    # falsely-confident origin (verified: pre-fix returned origin with
+    # 0.05² position variance even when no LEDs were observed).
+    pos_var = 0.05**2 if has_valid else 10.0**2
+    vel_var = 0.2**2 if has_valid else 1.0**2
+
     cov = jnp.eye(layout.n) * 1.0
     for idx in layout.pos_idx:
-        cov = cov.at[idx, idx].set(0.05**2)
+        cov = cov.at[idx, idx].set(pos_var)
     for idx in layout.vel_idx:
-        cov = cov.at[idx, idx].set(0.2**2)
+        cov = cov.at[idx, idx].set(vel_var)
     for idx in layout.heading_idx:
         cov = cov.at[idx, idx].set(0.5**2)
     for idx in layout.bias_gyro_idx:

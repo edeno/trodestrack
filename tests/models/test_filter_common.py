@@ -115,6 +115,40 @@ def test_update_zupt_accepts_filter_configs() -> None:
     assert bool(jnp.isfinite(log_lik_ukf))
 
 
+def test_update_zupt_disabled_is_exact_noop_with_large_covariance() -> None:
+    mean = jnp.array([0.0, 0.0, 10.0, -5.0, 0.0, 0.0, 0.0, 0.0])
+    cov = jnp.eye(8) * 1e6
+    state = FilterState(mean=mean, cov=cov)
+
+    posterior, log_lik = update_zupt(
+        state,
+        EKFConfig(enable_zupt=False, state_mode="2d_full"),
+    )
+
+    np.testing.assert_allclose(posterior.mean, mean)
+    np.testing.assert_allclose(posterior.cov, cov)
+    assert float(log_lik) == 0.0
+
+
+def test_update_zupt_moving_state_is_exact_noop_with_large_covariance() -> None:
+    mean = jnp.array([0.0, 0.0, 10.0, -5.0, 0.0, 0.0, 0.0, 0.0])
+    cov = jnp.eye(8) * 1e6
+    state = FilterState(mean=mean, cov=cov)
+
+    posterior, log_lik = update_zupt(
+        state,
+        EKFConfig(
+            enable_zupt=True,
+            zupt_velocity_threshold=0.02,
+            state_mode="2d_full",
+        ),
+    )
+
+    np.testing.assert_allclose(posterior.mean, mean)
+    np.testing.assert_allclose(posterior.cov, cov)
+    assert float(log_lik) == 0.0
+
+
 # =============================================================================
 # Tests for 3D IMU → 2D Pose Helpers (M5)
 # =============================================================================
