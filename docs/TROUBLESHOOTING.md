@@ -316,21 +316,21 @@ smoothed = rts_smoother(
 **Option 1: Increase velocity process noise**
 ```python
 cfg = EKFConfig(
-    process_noise_vel=5.0  # Increase from 2.0
+    process_noise_vel=2e-2  # Increase from 5e-3 (current default)
 )
 ```
 
 **Option 2: Decrease damping coefficient**
 ```python
 cfg = EKFConfig(
-    damping_coeff=0.2  # Decrease from 0.5 (less friction)
+    damping_coeff=0.1  # Decrease from 0.2 (current default; less friction)
 )
 ```
 
 **Option 3: Increase measurement trust**
 ```python
 cfg = EKFConfig(
-    measurement_noise_pos=0.0025**2  # Decrease from 0.005² (trust camera more)
+    measurement_noise_pos=0.005**2  # Decrease from 0.01² (trust camera more)
 )
 ```
 
@@ -455,8 +455,8 @@ smoothed = rts_smoother(
 **Option 3: Increase IMU noise densities (if IMU is low quality)**
 ```python
 cfg = EKFConfig(
-    imu_gyro_noise_density=0.0005,   # Increase from 0.0001
-    imu_accel_noise_density=0.02     # Increase from 0.005
+    imu_gyro_noise_density=5e-4,    # Increase from 0.00017453 (SpikeGadgets default)
+    imu_accel_noise_density=5e-3,   # Increase from 0.00196133 (SpikeGadgets default)
 )
 ```
 
@@ -502,14 +502,14 @@ cfg = EKFConfig(
 **Option 2: Increase velocity damping**
 ```python
 cfg = EKFConfig(
-    damping_coeff=1.0  # Increase from 0.5 (faster velocity decay)
+    damping_coeff=0.5  # Increase from 0.2 (current default; faster velocity decay)
 )
 ```
 
 **Option 3: Decrease velocity process noise**
 ```python
 cfg = EKFConfig(
-    process_noise_vel=0.5  # Decrease from 2.0 (trust low-velocity model)
+    process_noise_vel=2.5e-3  # Decrease from 5e-3 (current default; trust low-velocity model)
 )
 ```
 

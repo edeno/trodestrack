@@ -356,7 +356,7 @@ cfg = EKFConfig(
 
 ```python
 cfg = EKFConfig(
-    measurement_noise_pos=0.01**2,         # Increase from 0.005² (was 5mm, now 1cm)
+    measurement_noise_pos=0.02**2,         # Increase from 0.01² default (1 cm → 2 cm)
     use_mahalanobis_gating=True,           # Reject outliers
     mahalanobis_threshold_prob=0.99        # Reject top 1% (tighter than 0.997)
 )
@@ -407,8 +407,8 @@ cfg = EKFConfig(
 
 ```python
 cfg = EKFConfig(
-    process_noise_vel=5.0,                 # Increase from 2.0 (default)
-    damping_coeff=0.3                      # Decrease damping (animal doesn't stop quickly)
+    process_noise_vel=2e-2,                # Increase from 5e-3 default
+    damping_coeff=0.1                      # Decrease damping (animal doesn't stop quickly)
 )
 ```
 

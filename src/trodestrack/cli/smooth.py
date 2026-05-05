@@ -79,7 +79,7 @@ producing lower-variance trajectories than forward filtering alone.
         "--imu-measurements",
         type=Path,
         required=True,
-        help="Path to IMU measurements file. Channel count depends on state_mode: (N_imu, 3) [ω_z, f_x, f_y] for 2D layouts (and degenerate 2d_cam_3d_imu); (N_imu, 4) [ω_z, f_x, f_y, f_z] for 2d_cam_3d_imu with 3D velocity; (N_imu, 6) [ω_x, ω_y, ω_z, f_x, f_y, f_z] for quaternion-orientation layouts. Units: rad/s and m/s².",
+        help="Path to IMU measurements file. Channel count depends on --state-mode: (N_imu, 3) [ω_z, f_x, f_y] for 2d_full / vision_only and the default 2d_cam_3d_imu (degenerate, vz idle); (N_imu, 4) [ω_z, f_x, f_y, f_z] for 2d_cam_3d_imu with 3D velocity. Units: rad/s and m/s². Quaternion-orientation layouts (6-channel) are not exposed by this CLI; use the Python API.",
         metavar="FILE",
     )
     input_group.add_argument(
@@ -186,7 +186,20 @@ producing lower-variance trajectories than forward filtering alone.
         "--led-distance",
         type=float,
         default=None,
-        help="Expected LED spacing in meters (default: auto-detect from first valid frame, falling back to FilterCoreConfig.led_distance)",
+        help="Expected LED spacing in meters (default: auto-detect via the median pairwise distance over frames where both LEDs are finite, with a hardcoded 0.04 m fallback when no such frames exist)",
+    )
+    filter_group.add_argument(
+        "--state-mode",
+        type=str,
+        default=None,
+        choices=("2d_full", "vision_only", "2d_cam_3d_imu"),
+        help=(
+            f"State layout (default: {_FILTER_DEFAULTS.state_mode}). "
+            "Quaternion-orientation layouts (2d_cam_6dof_imu_orientation, "
+            "3d_cam_6dof_imu) are not exposed by this CLI yet — those modes "
+            "require a 6-channel IMU and the experimental 3D camera entry "
+            "point; use the Python API."
+        ),
     )
 
     # Smoother configuration
@@ -229,14 +242,16 @@ def run_smooth(args: argparse.Namespace) -> None:
     n_imu = len(t_imu)
     n_cam = len(t_cam)
 
-    # Validate IMU data shape. Channel count depends on layout:
-    # 3 for 2D layouts, 4 for 3D-velocity layouts, 6 for quaternion layouts.
-    # The filter's validate_imu_input_shape enforces layout-specific rules.
-    if U_imu.ndim != 2 or U_imu.shape[0] != n_imu or U_imu.shape[1] not in (3, 4, 6):
+    # Validate IMU data shape. The CLI exposes 2D / vision-only / 2d_cam_3d_imu
+    # layouts only, so 3 or 4 channels. Layout-specific compatibility (e.g.
+    # 4-channel only valid for 2d_cam_3d_imu) is enforced by the filter's
+    # validate_imu_input_shape downstream.
+    if U_imu.ndim != 2 or U_imu.shape[0] != n_imu or U_imu.shape[1] not in (3, 4):
         print(
             f"Error: IMU measurements shape {U_imu.shape} must be "
-            f"(n_imu={n_imu}, 3 | 4 | 6) — column count depends on the "
-            f"configured state layout.",
+            f"(n_imu={n_imu}, 3 | 4). Use 3 channels [ω_z, f_x, f_y] for "
+            "any --state-mode, or 4 channels [ω_z, f_x, f_y, f_z] only "
+            "with --state-mode 2d_cam_3d_imu.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -287,6 +302,7 @@ def run_smooth(args: argparse.Namespace) -> None:
     # to the FilterCoreConfig default of 0.04 m).
     print("\nConfiguring Extended Kalman Filter...")
     config_overrides = {
+        "state_mode": args.state_mode,
         "process_noise_pos": args.process_noise_pos,
         "process_noise_vel": args.process_noise_vel,
         "process_noise_heading": args.process_noise_heading,
