@@ -353,14 +353,15 @@ def generate_slide05c():
     for i in range(1, len(t_imu)):
         dt = t_imu[i] - t_imu[i - 1]
 
+        # U_imu columns are [omega_z, f_x, f_y] (see rat_imu.py).
         # Gyro integration (raw, includes bias)
-        omega_z = U_imu[i, 2]  # Gyro Z
+        omega_z = U_imu[i, 0]  # Gyro Z
         heading += omega_z * dt
         naive_heading[i] = heading
 
         # Accel integration (raw, includes bias and gravity contamination)
-        accel_x = U_imu[i, 0]  # Accel X
-        accel_y = U_imu[i, 1]  # Accel Y
+        accel_x = U_imu[i, 1]  # f_x (body-frame specific force, x)
+        accel_y = U_imu[i, 2]  # f_y (body-frame specific force, y)
 
         # Rotate to world frame (using current heading estimate)
         cos_h = np.cos(heading)
