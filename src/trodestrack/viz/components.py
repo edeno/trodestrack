@@ -1029,18 +1029,26 @@ class FilterArtist:
     def update(self, x_pred: float, y_pred: float, P: np.ndarray | Array) -> list[Any]:
         """Update filter prediction and uncertainty.
 
-        Args:
-            x_pred: Predicted x position in meters
-            y_pred: Predicted y position in meters
-            P: 2×2 position covariance matrix. The caller is responsible
-                for selecting the position rows/cols from the full state
-                covariance via the filter layout.
+        Parameters
+        ----------
+        x_pred : float
+            Predicted x position in meters.
+        y_pred : float
+            Predicted y position in meters.
+        P : np.ndarray or jax.Array
+            2x2 position covariance matrix. The caller is responsible
+            for selecting the position rows/cols from the full state
+            covariance via the filter layout.
 
-        Returns:
-            List of modified artists
+        Returns
+        -------
+        list[Any]
+            List of modified artists.
 
-        Raises:
-            ValueError: If P is not shape (2, 2).
+        Raises
+        ------
+        ValueError
+            If ``P`` is not shape ``(2, 2)``.
         """
         # Validate input shape
         P_np = np.asarray(P)
