@@ -70,6 +70,73 @@ class OrientationEstimatorConfig:
     initial_gyro_bias_rad_s: NDArray[np.floating] | None = None
     initial_quaternion: NDArray[np.floating] | None = None
 
+    def __post_init__(self) -> None:
+        """Reject configs that would silently propagate NaN or invert physics.
+
+        Mirrors the validation pattern in ``FilterCoreConfig.__post_init__``.
+        Without these guards, a NaN ``initial_gyro_bias_rad_s`` would
+        produce a NaN final bias array, and a negative ``gravity_m_s2`` /
+        ``accel_correction_gain`` would invert the sign of the gravity
+        correction step.
+        """
+        positive_fields = ("gravity_m_s2",)
+        for fname in positive_fields:
+            value = getattr(self, fname)
+            if not np.isfinite(value) or value <= 0:
+                raise ValueError(
+                    f"{fname} must be a finite strictly-positive value "
+                    f"(physical magnitude); got {value!r}."
+                )
+
+        # Gains are non-negative: 0 is a valid "disable this correction"
+        # value used by tests, but negative or NaN gains would invert the
+        # sign of the correction step.
+        non_negative_fields = (
+            "accel_magnitude_tolerance_m_s2",
+            "gyro_norm_threshold_rad_s",
+            "accel_correction_gain",
+            "accel_bias_correction_gain",
+            "camera_yaw_correction_gain",
+            "camera_yaw_bias_correction_gain",
+        )
+        for fname in non_negative_fields:
+            value = getattr(self, fname)
+            if not np.isfinite(value) or value < 0:
+                raise ValueError(
+                    f"{fname} must be a finite non-negative value; got {value!r}."
+                )
+
+        if self.camera_speed_threshold_m_s is not None:
+            v = self.camera_speed_threshold_m_s
+            if not np.isfinite(v) or v < 0:
+                raise ValueError(
+                    "camera_speed_threshold_m_s must be None or a finite "
+                    f"non-negative value; got {v!r}."
+                )
+
+        if self.initial_gyro_bias_rad_s is not None:
+            arr = np.asarray(self.initial_gyro_bias_rad_s, dtype=float)
+            if arr.shape != (3,) or not np.all(np.isfinite(arr)):
+                raise ValueError(
+                    "initial_gyro_bias_rad_s must be a length-3 finite "
+                    f"sequence in rad/s; got {self.initial_gyro_bias_rad_s!r}."
+                )
+
+        if self.initial_quaternion is not None:
+            q = np.asarray(self.initial_quaternion, dtype=float)
+            if q.shape != (4,) or not np.all(np.isfinite(q)):
+                raise ValueError(
+                    "initial_quaternion must be a length-4 finite "
+                    "scalar-first [qw, qx, qy, qz] sequence; got "
+                    f"{self.initial_quaternion!r}."
+                )
+            qnorm = float(np.linalg.norm(q))
+            if not (0.5 < qnorm < 2.0):
+                raise ValueError(
+                    "initial_quaternion must be near unit norm (||q|| in "
+                    f"(0.5, 2.0)); got ||q||={qnorm:.3e}."
+                )
+
 
 @dataclass(frozen=True)
 class OrientationDiagnostics:

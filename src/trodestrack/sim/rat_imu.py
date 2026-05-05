@@ -680,16 +680,33 @@ def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> Si
         U_imu[t] = np.array([gyro_meas, accel_x_meas, accel_y_meas])
 
     # --- 8) Camera observations ---
-    # Apply timestamp jitter and latency
-    # Exposure time: when light hits sensor (jittered from nominal)
-    # Arrival time: when data is available (exposure + latency)
-    # Note: No clipping to preserve Gaussian jitter; np.interp handles extrapolation
+    # Apply timestamp jitter and latency.
+    #   Exposure time: when light hits sensor (jittered from nominal)
+    #   Arrival time:  when data is available (exposure + latency)
+    # We then:
+    #   1) Clip `t_cam_exp` to the IMU support range so np.interp does not
+    #      extrapolate.
+    #   2) Compute `t_cam_obs` from the *clipped* exposure so the documented
+    #      contract `t_cam_obs[i] - t_cam_exp[i] == cam_latency_s` holds at
+    #      the clipping boundaries.
+    #   3) Sort by exposure time so downstream code that assumes
+    #      monotonically increasing camera timestamps holds. The EKF
+    #      builds (t_cam[i-1], t_cam[i]] IMU intervals via
+    #      compute_imu_index_arrays; a non-monotonic step empties an
+    #      interval and silently drops IMU propagation for that frame.
+    #      np.searchsorted in the diagnostic-video loader also requires a
+    #      sorted t_cam_exp. We sort jittered timestamps (rather than
+    #      forbidding cross-frame jitter outright) and bring the matching
+    #      `t_cam_obs` along; this preserves jitter realism without
+    #      reordering jittered samples relative to anything that depends
+    #      on the original frame index later, because all camera-indexed
+    #      arrays (LED positions, masks, confidence) are derived from the
+    #      sorted `t_cam_exp` below.
     jitter = config.cam_jitter_s * rng.standard_normal(T_cam)
-    t_cam_exp = t_cam_clean + jitter
+    t_cam_exp = np.clip(t_cam_clean + jitter, t_imu[0], t_imu[-1])
+    cam_sort_order = np.argsort(t_cam_exp, kind="stable")
+    t_cam_exp = t_cam_exp[cam_sort_order]
     t_cam_obs = t_cam_exp + config.cam_latency_s
-
-    # Clamp exposure times to IMU range (prevent extrapolation errors)
-    t_cam_exp = np.clip(t_cam_exp, t_imu[0], t_imu[-1])
 
     # Interpolate truth at EXPOSURE time (what pixels actually measure)
     px_interp = np.interp(t_cam_exp, t_imu, X_truth[:, 0])

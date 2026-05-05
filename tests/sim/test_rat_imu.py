@@ -777,49 +777,55 @@ def test_array_shapes_consistent(minimal_config) -> None:
 
 
 def test_time_vectors_monotonic(minimal_config) -> None:
-    """Test that time vectors are mostly monotonic (camera jitter can cause reordering).
+    """Time vectors must be monotonically non-decreasing.
 
-    Policy: IMU time is strictly monotonic (no jitter). Camera exposure time
-    has Gaussian jitter which can occasionally cause non-monotonic timestamps.
-    This is realistic behavior - we require ≥95% of intervals to be positive.
+    Policy:
+      - IMU time is strictly monotonic (no jitter applied to IMU samples).
+      - Camera exposure / observation time may include Gaussian jitter, but
+        the simulator sorts jittered camera samples after clipping so that
+        downstream code (compute_imu_index_arrays, np.searchsorted in the
+        diagnostic-video loader, np.interp into IMU time) sees a sorted
+        t_cam_exp / t_cam_obs. A reversed camera step produces an empty
+        IMU interval and silently drops IMU propagation for that frame, so
+        we require non-decreasing — not merely "mostly monotonic" — here.
     """
     sim = simulate_rat_imu(minimal_config, seed=42)
 
-    # IMU time should be perfectly uniform (no jitter)
+    # IMU time should be perfectly uniform (no jitter).
     assert np.all(np.diff(sim["t_imu"]) > 0), "IMU time must be strictly monotonic"
 
-    # Camera exposure time has jitter, so check that MOST diffs are positive
-    # Jitter is Gaussian, so occasional negative diffs can occur
+    # Sorted camera timestamps: monotonically non-decreasing. Ties are
+    # possible at the IMU support boundary if jitter pushes multiple
+    # frames past the clip, so we use >= 0 rather than > 0.
     cam_exp_diffs = np.diff(sim["t_cam_exp"])
-    positive_rate_exp = (cam_exp_diffs > 0).mean()
-    assert positive_rate_exp > 0.95, (
-        f"Camera exposure time mostly monotonic: {positive_rate_exp:.1%} positive"
+    assert np.all(cam_exp_diffs >= 0), (
+        "t_cam_exp must be sorted (non-decreasing); the simulator "
+        "stable-sorts jittered camera samples to keep filter intervals well "
+        "defined."
     )
-
-    # Observation time = exposure + latency (should also be mostly monotonic)
-    # Inherits jitter from exposure time
     cam_obs_diffs = np.diff(sim["t_cam_obs"])
-    positive_rate_obs = (cam_obs_diffs > 0).mean()
-    assert positive_rate_obs > 0.95, (
-        f"Camera observation time mostly monotonic: {positive_rate_obs:.1%} positive"
+    assert np.all(cam_obs_diffs >= 0), (
+        "t_cam_obs must be sorted (non-decreasing); inherits ordering from "
+        "t_cam_exp via t_cam_obs = t_cam_exp + cam_latency_s."
     )
 
 
 def test_camera_timestamps_relationship(minimal_config) -> None:
-    """Test that t_cam_obs = t_cam_exp + latency."""
+    """Test that t_cam_obs == t_cam_exp + cam_latency_s exactly.
+
+    The simulator now clips ``t_cam_exp`` to the IMU support range first
+    and computes ``t_cam_obs`` from the *clipped* exposure, so this
+    contract holds exactly even at the clipping boundaries (previously a
+    boundary-clipped sample had ``t_cam_obs - t_cam_exp != cam_latency_s``).
+    """
     sim = simulate_rat_imu(minimal_config, seed=42)
 
     t_exp = sim["t_cam_exp"]
     t_obs = sim["t_cam_obs"]
 
-    # Difference should be approximately equal to latency
     diff = t_obs - t_exp
 
-    # All differences should be positive and close to latency
-    assert np.all(diff >= 0)
-    assert np.allclose(
-        diff, minimal_config.cam_latency_s, atol=minimal_config.cam_jitter_s * 3
-    )
+    np.testing.assert_allclose(diff, minimal_config.cam_latency_s, atol=1e-12)
 
 
 # =============================================================================
