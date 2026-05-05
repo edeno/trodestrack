@@ -755,7 +755,7 @@ def build_section_4_getting_started(builder):
             "Unsure? → Start with EKF (default)",
             "All filters have identical API: just swap config",
         ],
-        notes="Decision tree for choosing filter. Real-time requirement → EKF (fastest). Strong nonlinearities (e.g., 3D rotations) → UKF. Offline analysis + max accuracy → RTS smoother. Iterative refinement → IEKS (not yet implemented). When unsure, start with EKF (default, works for 95% of cases). All filters share identical API (filter config object + same input arrays), so switching is trivial.",
+        notes="Decision tree for choosing filter. Real-time requirement → EKF (fastest). Strong nonlinearities (e.g., 3D rotations) → UKF. Offline analysis + max accuracy → RTS smoother. Iterative refinement → IEKS, exposed today as ``rts_smoother(..., num_iter=N)`` and as the ``--num-iter`` flag on ``trodestrack smooth``; example 07 demonstrates ``num_iter=2``. When unsure, start with EKF (default, works for 95% of cases). All filters share identical API (filter config object + same input arrays), so switching is trivial.",
     )
 
     # Slide 30: When to Use TrodesTrack

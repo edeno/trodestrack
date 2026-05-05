@@ -334,10 +334,16 @@ def rts_smoother(
     t_imu : np.ndarray
         IMU timestamps (N_imu,) in seconds.
     U_imu : np.ndarray
-        IMU measurements. Shape depends on the layout: 2D layouts use
-        [ω_z(rad/s), f_x(m/s^2), f_y(m/s^2)] with shape (N_imu, 3);
-        3D quaternion layouts use [ω_x, ω_y, ω_z, f_x, f_y, f_z] with
-        shape (N_imu, 6).
+        IMU measurements. Shape depends on the state layout:
+        - (N_imu, 3) ``[ω_z, f_x, f_y]`` for non-quaternion layouts
+          (``"2d_full"``, ``"vision_only"``, and the default
+          ``"2d_cam_3d_imu"`` as a degenerate path that leaves ``vz`` idle);
+        - (N_imu, 4) ``[ω_z, f_x, f_y, f_z]`` for the default
+          ``"2d_cam_3d_imu"`` layout when 3D-velocity dynamics are desired;
+        - (N_imu, 6) ``[ω_x, ω_y, ω_z, f_x, f_y, f_z]`` for
+          quaternion-orientation layouts (e.g. ``"3d_cam_6dof_imu"``).
+        Channel-vs-layout compatibility is enforced by
+        :func:`trodestrack.models.filter_common.validate_imu_input_shape`.
     t_cam : np.ndarray
         Camera timestamps (N_cam,) in seconds.
     num_iter : int, default 1
