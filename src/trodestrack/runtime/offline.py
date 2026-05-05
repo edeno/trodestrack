@@ -125,6 +125,7 @@ def _transition_mean_and_jacobian(
         dt_imu,
         ekf_config.damping_coeff,
         layout,
+        u_imu=u_imu,
         enable_experimental_accel_translation=(
             ekf_config.enable_experimental_accel_translation
         ),

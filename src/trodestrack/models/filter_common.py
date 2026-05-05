@@ -574,6 +574,22 @@ def validate_initial_state(
             f"{func_name}: initial_state.cov contains non-finite value(s) "
             "(NaN/inf); the initial covariance must be a finite matrix."
         )
+    # Catch invalid covariance content at the public boundary. An
+    # asymmetric or non-PSD prior previously slipped through and either
+    # crashed deep in eigvalsh / Cholesky inside the JIT'd core or
+    # silently produced negative-eigenvalue covariances.
+    if not np.allclose(cov, cov.T, atol=1e-10):
+        raise ValueError(
+            f"{func_name}: initial_state.cov must be symmetric (cov == cov.T); "
+            "got an asymmetric matrix."
+        )
+    try:
+        np.linalg.cholesky(cov)
+    except np.linalg.LinAlgError as exc:
+        raise ValueError(
+            f"{func_name}: initial_state.cov must be positive semi-definite; "
+            f"Cholesky factorization failed: {exc}."
+        ) from exc
 
 
 def validate_imu_input_shape(
@@ -956,6 +972,23 @@ def validate_camera_3d_input_shapes(
                 f"({n_cam}, {n_leds}) to match t_cam and led_offsets_body, "
                 f"got {mask_arr.shape}."
             )
+        # Mirror the 2D mask_cam contract: only bool or 0/1 integer values
+        # are accepted. The downstream call jnp.asarray(..., dtype=bool)
+        # would otherwise silently coerce 2/-1/NaN to True and treat
+        # invalid LEDs as visible.
+        if mask_arr.dtype != np.bool_:
+            if not np.issubdtype(mask_arr.dtype, np.integer):
+                raise ValueError(
+                    f"{func_name}: mask_cam_leds must be boolean or 0/1 "
+                    f"integer; got dtype {mask_arr.dtype!r}."
+                )
+            if not np.all(np.isin(mask_arr, (0, 1))):
+                bad = mask_arr[~np.isin(mask_arr, (0, 1))]
+                raise ValueError(
+                    f"{func_name}: mask_cam_leds must contain only 0 or 1 "
+                    f"(or be boolean); found {len(bad)} other value(s) "
+                    f"(e.g. {bad[:5].tolist()})."
+                )
 
     if conf_cam is not None:
         conf_arr = np.asarray(conf_cam)
@@ -1388,6 +1421,7 @@ def build_quaternion_transition_jacobian(
     damping_coeff: float,
     layout: StateLayout,
     *,
+    u_imu: jnp.ndarray | None = None,
     enable_experimental_accel_translation: bool = False,
 ) -> jnp.ndarray:
     """Build the first-order transition Jacobian for quaternion layouts.
@@ -1404,6 +1438,15 @@ def build_quaternion_transition_jacobian(
         Linear velocity damping coefficient.
     layout : StateLayout
         Quaternion state layout.
+    u_imu : jnp.ndarray or None, optional
+        IMU sample at this step (gyro in the first three channels). When
+        provided the quaternion-vs-quaternion block is set to the proper
+        first-order Jacobian ``I_4 + 0.5·dt·Ω_R(ω)`` of
+        ``q_next = q_prev ⊗ exp(ω_unbiased · dt)``. Without it the block
+        defaults to identity, which is only correct at exactly zero
+        rotation; passing ``None`` is supported for legacy callers but
+        makes covariance / gating / smoothing inconsistent with the mean
+        for non-zero gyro samples.
     enable_experimental_accel_translation : bool, default False
         Whether accelerometer-driven translation is active.
 
@@ -1431,6 +1474,25 @@ def build_quaternion_transition_jacobian(
     quat_idx = jnp.array(layout.heading_idx, dtype=jnp.int32)
     gyro_bias_idx = jnp.array(layout.bias_gyro_idx, dtype=jnp.int32)
     qw, qx, qy, qz = linearization_mean[quat_idx]
+
+    # Quaternion blocks. The mean propagation is
+    #   q_intermediate = q_prev ⊗ exp(ω_unbiased · dt)
+    #   q_next         = normalize(q_intermediate)
+    # with ω_unbiased = u_imu[gyro] - bias_gyro_state. The first-order
+    # Jacobian of the un-normalized step is
+    #   ∂q_intermediate/∂q_prev   = I_4 + 0.5·dt·Ω_R(ω_unbiased)
+    #   ∂q_intermediate/∂bias_gyro = -0.5·dt · M_q(q_prev)
+    # where Ω_R is the right-quaternion-product matrix and M_q is the
+    # left-quaternion-product matrix used in the q ⊗ ω term. The
+    # post-normalize step composes a unit-sphere projection
+    # P = (I - q_pred q_predᵀ) on the left, since q_pred is unit-norm.
+    # Without this projection the manual Jacobian disagreed with
+    # jacfwd(dynamics_function) by O(1) for nonzero gyro samples
+    # (verified: quaternion-self diagonal was 1.0 vs autodiff ~0.6–0.9
+    # for a 0.5–0.7 rad/s sample at dt=5 ms).
+    q_pred = linearization_pred[quat_idx]
+    projector = jnp.eye(4, dtype=dtype) - jnp.outer(q_pred, q_pred)
+
     quat_gyro_matrix = jnp.array(
         [
             [-qx, -qy, -qz],
@@ -1440,9 +1502,31 @@ def build_quaternion_transition_jacobian(
         ],
         dtype=dtype,
     )
+    bias_gyro_block_unnormalized = -0.5 * dt_arr * quat_gyro_matrix
     F_x = F_x.at[quat_idx[:, None], gyro_bias_idx[None, :]].set(
-        -0.5 * dt_arr * quat_gyro_matrix
+        projector @ bias_gyro_block_unnormalized
     )
+
+    if u_imu is not None:
+        gyro_meas = jnp.asarray(u_imu, dtype=dtype)[:3]
+        bias_gyro = linearization_mean[gyro_bias_idx]
+        omega_unbiased = gyro_meas - bias_gyro
+        wx, wy, wz = omega_unbiased[0], omega_unbiased[1], omega_unbiased[2]
+        omega_right_matrix = jnp.array(
+            [
+                [0.0, -wx, -wy, -wz],
+                [wx, 0.0, wz, -wy],
+                [wy, -wz, 0.0, wx],
+                [wz, wy, -wx, 0.0],
+            ],
+            dtype=dtype,
+        )
+        quat_self_unnormalized = (
+            jnp.eye(4, dtype=dtype) + 0.5 * dt_arr * omega_right_matrix
+        )
+        F_x = F_x.at[quat_idx[:, None], quat_idx[None, :]].set(
+            projector @ quat_self_unnormalized
+        )
 
     if enable_experimental_accel_translation:
         basis_body = jnp.eye(3, dtype=dtype)

@@ -385,6 +385,7 @@ def predict_step(
             dt_imu,
             config.damping_coeff,
             layout,
+            u_imu=u_imu,
             enable_experimental_accel_translation=(
                 config.enable_experimental_accel_translation
             ),
@@ -590,28 +591,47 @@ def update_step(
 
         # If at least one LED valid, perform update (with optional IEKF)
         def do_leds_update(m_in, P_in):
-            # IEKF: Iterate re-linearization around posterior
+            # IEKF: re-linearize at the current iterate while updating the
+            # same FIXED prior every step. The previous implementation re-
+            # fed each posterior as a fresh prior, which is sequential
+            # filtering — running it ``num_iter`` times against a zero-
+            # residual measurement shrank position variance by 1/num_iter
+            # with no mean change. The fixed-prior corrected-innovation
+            # pattern below matches Sarkka (2013, Algorithm 5.7) and the
+            # 3D path's ``_camera_3d_linear_update``.
+            prior_state = EKFState(mean=m_in, cov=P_in)
+
             def iekf_step(carry, _):
-                """Single IEKF iteration using generic ekf_projected_update() primitive."""
-                m_iter, P_iter = carry
-                state_iter = EKFState(mean=m_iter, cov=P_iter)
+                """One IEKF iteration: linearize at m_iter, update from prior."""
+                m_iter, _P_iter_unused = carry
 
-                # Get measurement prediction from camera model
+                # Linearize at the current iterate.
                 meas_pred = camera_model.predict(m_iter)
-
-                # Get Jacobian from camera model
                 H = camera_model.jacobian(m_iter)
 
-                # Get innovation from camera model (handles NaN → zero residual)
+                # Innovation z - h(m_iter), NaN-zeroed by camera_model.
                 innovation = camera_model.innovation(frame_idx, meas_pred)
 
-                # Get measurement covariance from camera model (confidence-scaled)
-                R = camera_model.meas_cov(frame_idx)
-                R_diag = jnp.diag(R)
+                # Confidence-scaled R diagonal.
+                R_diag = jnp.diag(camera_model.meas_cov(frame_idx))
 
-                # Call generic EKF projected update primitive
+                # Corrected innovation:
+                #   y_corr = (z - h(m_iter)) + H @ (m_iter - m_prior)
+                # When m_iter == m_prior this reduces to a standard EKF
+                # update; for subsequent IEKF iterations it shifts the
+                # innovation so the same prior absorbs the linearization
+                # change instead of the posterior of the previous step.
+                corrected_innovation = innovation + H @ (m_iter - prior_state.mean)
+
+                # Update the fixed prior with the corrected innovation.
                 state_upd, nis, log_lik = ekf_projected_update(
-                    state_iter, innovation, H, R_diag, both_leds, only_led1, only_led2
+                    prior_state,
+                    corrected_innovation,
+                    H,
+                    R_diag,
+                    both_leds,
+                    only_led1,
+                    only_led2,
                 )
 
                 # Wrap scalar heading or normalize quaternion after update.
