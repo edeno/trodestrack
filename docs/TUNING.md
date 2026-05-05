@@ -482,47 +482,58 @@ from trodestrack.models.ekf import EKFConfig
 
 cfg = EKFConfig(
     # --- Process Noise ---
-    process_noise_pos=0.02,                # Position random walk (m²/s)
-    process_noise_vel=2.0,                 # Velocity random walk (m²/s³)
-    process_noise_heading=0.02,            # Heading random walk (rad²/s)
-    process_noise_gyro_bias=2e-6,          # Gyro bias random walk (rad²/s³)
-    process_noise_accel_bias=2e-4,         # Accel bias random walk (m²/s⁵)
+    process_noise_pos=1e-4,                # Position random walk (m²/s)
+    process_noise_vel=5e-3,                # Velocity random walk (m²/s³)
+    process_noise_heading=5e-4,            # Heading random walk (rad²/s)
+    process_noise_gyro_bias=5e-8,          # Gyro bias random walk (rad²/s³)
+    process_noise_accel_bias=2e-5,         # Accel bias random walk (m²/s⁵)
 
     # --- Measurement Noise ---
-    measurement_noise_pos=0.005**2,        # Position measurement variance (m²)
+    measurement_noise_pos=0.01**2,         # Position measurement variance (m²)
     measurement_noise_heading=0.05**2,     # Heading measurement variance (rad²)
 
-    # --- IMU Noise ---
-    imu_gyro_noise_density=0.0001,         # Gyro noise density (rad/s/√Hz)
-    imu_accel_noise_density=0.005,         # Accel noise density (m/s²/√Hz)
+    # --- IMU Noise (SpikeGadgets product manual) ---
+    imu_gyro_noise_density=0.00017453,     # Gyro noise density (rad/s/√Hz, 0.01°/s/√Hz)
+    imu_accel_noise_density=0.00196133,    # Accel noise density (m/s²/√Hz, 0.2 mg/√Hz)
+    imu_gravity_body=(0.0, 0.0, 9.81),     # World-frame gravity vector (m/s²)
 
     # --- Dynamics ---
-    damping_coeff=0.5,                     # Velocity damping λ (1/s)
-    led_distance=None,                     # Auto-detect LED spacing (m)
+    damping_coeff=0.2,                     # Velocity damping λ (1/s)
+    led_distance=0.04,                     # LED spacing (m); set to None to auto-detect
 
     # --- Mahalanobis Gating ---
-    use_mahalanobis_gating=False,          # Enable outlier rejection
+    use_mahalanobis_gating=True,           # Default: reject outliers (3σ)
     mahalanobis_threshold_prob=0.997,      # Reject beyond 3σ
 
     # --- Heading Measurement ---
-    use_heading_measurement=False,         # Use dual-LED heading constraint
+    use_heading_measurement=True,          # Use dual-LED heading constraint
     led_distance_tolerance=0.3,            # Reject if spacing > 30% off
     adaptive_heading_noise=True,           # Scale noise with geometry quality
 
     # --- Adaptive Q During Dropout ---
     adaptive_q_during_dropout=True,        # Inflate Q during camera blackout
-    dropout_q_pos_multiplier=10.0,         # Position uncertainty multiplier
-    dropout_q_vel_multiplier=10.0,         # Velocity uncertainty multiplier
-    dropout_q_bias_multiplier=0.1,         # Bias drift multiplier
+    dropout_q_pos_multiplier=2.0,          # Position uncertainty multiplier
+    dropout_q_vel_multiplier=2.0,          # Velocity uncertainty multiplier
+    dropout_q_bias_multiplier=0.5,         # Bias drift multiplier
+    freeze_bias_during_blackout=True,      # Hold bias estimates during dropout
+    reduce_imu_noise_during_blackout=True, # Tighten IMU noise during dropout
+    blackout_imu_noise_scale=0.3,          # IMU-noise scale during dropout
+
+    # --- 6-DOF Orientation (used only by quaternion layouts) ---
+    enable_experimental_accel_translation=False,   # Off by default in 2D modes
+    use_gravity_orientation_update=True,           # Gated gravity-direction update
+    gravity_orientation_measurement_noise=0.05**2,
+    gravity_accel_magnitude_tolerance_m_s2=0.5,
+    gravity_gyro_norm_threshold_rad_s=0.2,
 
     # --- Zero-Velocity Update (ZUPT) ---
-    enable_zupt=False,                     # Enable stationary detection
-    zupt_velocity_threshold=0.05,          # Trigger if |v| < 5 cm/s
+    enable_zupt=True,                      # Enable stationary detection
+    zupt_velocity_threshold=0.02,          # Trigger if |v| < 2 cm/s
     zupt_measurement_noise=0.01**2,        # ZUPT measurement noise (m²/s²)
 
     # --- Advanced ---
     num_iter=1,                            # IEKF iterations (1 = standard EKF)
-    state_mode="2d_full"                   # State layout (8D: "2d_full")
+    state_mode="2d_cam_3d_imu",            # Default 10D layout
 )
 ```
 
@@ -565,9 +576,11 @@ cfg = EKFConfig(
 
 ### Position Accurate but NEES High
 
-**Diagnosis:** Covariance is too large (underconfident).
+**Diagnosis:** Covariance is too small (overconfident); the filter's
+reported uncertainty is tighter than the actual error magnitude warrants.
 
-**Solution:** Decrease process noise or increase measurement trust.
+**Solution:** Increase process noise (Q) or measurement noise (R) so the
+covariance grows to match observed error.
 
 ### Position Inaccurate but NEES Low
 

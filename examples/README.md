@@ -112,6 +112,37 @@ uv run python examples/04_ukf_basic_scenarios.py
 
 ---
 
+#### [03b_using_plot_utilities.py](03b_using_plot_utilities.py)
+**Learn:** Build dimension-agnostic analysis code with `qa.plots` helpers
+**Topics:** `get_layout(cfg.state_mode)`, layout-driven slicing, covariance
+ellipses, error time series.
+
+```bash
+uv run python examples/03b_using_plot_utilities.py
+```
+
+---
+
+### **Robustness to Camera Dropouts (05-06)**
+
+#### [05_ekf_with_dropouts.py](05_ekf_with_dropouts.py)
+**Learn:** EKF behavior under 10%, 20%, and 30% camera dropout.
+**Topics:** Adaptive Q during dropout, bias-freeze policy, IMU-only drift.
+
+```bash
+uv run python examples/05_ekf_with_dropouts.py
+```
+
+#### [06_ukf_with_dropouts.py](06_ukf_with_dropouts.py)
+**Learn:** Same dropout stress-test, UKF variant, for direct comparison
+with example 05.
+
+```bash
+uv run python examples/06_ukf_with_dropouts.py
+```
+
+---
+
 ### **Advanced Techniques (07-08)**
 
 Smoother and quality assurance workflows.
@@ -162,7 +193,10 @@ uv run python examples/08_qa_report_generation.py
 | 01 | Simulations | 1 PNG | ~5s | None |
 | 02 | Realistic IMU | 5 PNGs | ~10s | Example 01 |
 | 03 ⭐ | **EKF Basics** | **3 PNGs** | **~5s** | **Example 02** |
+| 03b | Plot utilities | PNGs | ~5s | Example 03 |
 | 04 | UKF vs EKF | 3 PNGs | ~10s | Example 03 |
+| 05 | EKF dropouts | PNGs | ~10s | Example 03 |
+| 06 | UKF dropouts | PNGs | ~10s | Example 04 |
 | 07 | Smoothing | 1 video | ~15s | Example 03 |
 | 08 | QA Reports | 1 PDF | ~2s | Any filter example |
 

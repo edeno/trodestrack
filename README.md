@@ -295,7 +295,7 @@ See [`examples/README.md`](examples/README.md) for the complete learning path. E
   - CLI tool: `trodestrack report --run qa_inputs/ --pdf report.pdf` (consumes a separately-prepared QA-input directory; see `--help`)
   - Diagnostic videos with 9-panel filter state visualization
 - ✅ **Testing & Validation**
-  - 236+ unit, integration, and property tests (all passing)
+  - 660+ unit, integration, regression, and property tests (all passing)
   - PRD acceptance criteria achieved:
     - Position RMSE ≤ 2 cm ✓
     - Velocity RMSE ≤ 10 cm/s ✓

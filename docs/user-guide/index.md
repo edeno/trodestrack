@@ -81,12 +81,19 @@ See the [Tuning Guide](tuning.md) for how to achieve consistency.
 
 ### IMU Data
 
-TrodesTrack expects 6-axis IMU data:
+TrodesTrack consumes IMU data from 6-axis hardware (3-axis gyro +
+3-axis accelerometer). The number of channels passed to the filter
+depends on the configured ``state_mode``:
 
-- **Gyroscope**: Angular velocity (rad/s)
-- **Accelerometer**: Linear acceleration (m/s^2)
+- **3 channels** ``[ω_z, f_x, f_y]`` — 2D layouts (``"2d_full"``, ``"vision_only"``).
+- **4 channels** ``[ω_z, f_x, f_y, f_z]`` — default ``"2d_cam_3d_imu"`` layout
+  (3D velocity, 1-axis gyro). Select these columns from your raw 6-axis stream.
+- **6 channels** ``[ω_x, ω_y, ω_z, f_x, f_y, f_z]`` — quaternion-orientation
+  layouts (``"2d_cam_6dof_imu_orientation"``, ``"3d_cam_6dof_imu"``).
 
-Units must be SI (not raw sensor counts).
+Units must be SI (rad/s for gyro, m/s² for accelerometer), not raw
+sensor counts. ``trodestrack.models.filter_common.validate_imu_input_shape``
+enforces the layout-specific channel rules at filter entry.
 
 ### Camera Data
 

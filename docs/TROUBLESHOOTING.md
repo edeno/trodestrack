@@ -801,7 +801,7 @@ create_diagnostic_video(
 2. **Position error**: Should be < 5 cm most of the time
 3. **Velocity error**: Should be < 20 cm/s most of the time
 4. **Heading error**: Should be < 10° most of the time
-5. **NEES**: Should stay in [6, 10] envelope
+5. **NEES**: Should stay in [1, 4] envelope (position-only NEES, ``state_dim=2``)
 6. **Bias estimates**: Should converge during rotation
 
 ### Run Integration Tests
