@@ -199,20 +199,58 @@ class FilterCoreConfig:
                 f"[g_x, g_y, g_z] in world-frame m/s²; got "
                 f"{self.imu_gravity_body!r}."
             )
-        if self.gravity_orientation_measurement_noise <= 0:
+        # Use np.isfinite explicitly: NaN compares False to both <= 0 and
+        # < 0, so the previous bare comparisons silently accepted NaN and
+        # the value then poisoned the gravity / quaternion update path
+        # (a NaN gravity_orientation_measurement_noise made
+        # quaternion predict_step fail with LinAlgError mid-filter).
+        if (
+            not np.isfinite(self.gravity_orientation_measurement_noise)
+            or self.gravity_orientation_measurement_noise <= 0
+        ):
             raise ValueError(
-                "gravity_orientation_measurement_noise must be > 0; got "
-                f"{self.gravity_orientation_measurement_noise}."
+                "gravity_orientation_measurement_noise must be a finite "
+                f"strictly-positive value; got "
+                f"{self.gravity_orientation_measurement_noise!r}."
             )
-        if self.gravity_accel_magnitude_tolerance_m_s2 < 0:
+        if (
+            not np.isfinite(self.gravity_accel_magnitude_tolerance_m_s2)
+            or self.gravity_accel_magnitude_tolerance_m_s2 < 0
+        ):
             raise ValueError(
-                "gravity_accel_magnitude_tolerance_m_s2 must be >= 0; got "
-                f"{self.gravity_accel_magnitude_tolerance_m_s2}."
+                "gravity_accel_magnitude_tolerance_m_s2 must be a finite "
+                f"non-negative value; got "
+                f"{self.gravity_accel_magnitude_tolerance_m_s2!r}."
             )
-        if self.gravity_gyro_norm_threshold_rad_s < 0:
+        if (
+            not np.isfinite(self.gravity_gyro_norm_threshold_rad_s)
+            or self.gravity_gyro_norm_threshold_rad_s < 0
+        ):
             raise ValueError(
-                "gravity_gyro_norm_threshold_rad_s must be >= 0; got "
-                f"{self.gravity_gyro_norm_threshold_rad_s}."
+                "gravity_gyro_norm_threshold_rad_s must be a finite "
+                f"non-negative value; got "
+                f"{self.gravity_gyro_norm_threshold_rad_s!r}."
+            )
+
+        # ZUPT measurement-noise variance and velocity threshold flow into
+        # update_zupt as R_scalar / gating threshold respectively. NaN
+        # propagates through R into the innovation covariance and every
+        # downstream state; update_zupt's own checks were <= 0 / < 0 only.
+        if (
+            not np.isfinite(self.zupt_measurement_noise)
+            or self.zupt_measurement_noise <= 0
+        ):
+            raise ValueError(
+                "zupt_measurement_noise must be a finite strictly-positive "
+                f"variance (m²/s²); got {self.zupt_measurement_noise!r}."
+            )
+        if (
+            not np.isfinite(self.zupt_velocity_threshold)
+            or self.zupt_velocity_threshold < 0
+        ):
+            raise ValueError(
+                "zupt_velocity_threshold must be a finite non-negative speed "
+                f"in m/s; got {self.zupt_velocity_threshold!r}."
             )
 
         # Process- and measurement-noise fields are variances or spectral
@@ -587,6 +625,58 @@ def validate_imu_input_shape(
                 "filtering, or pass mode='2d' when loading."
             )
     raise ValueError(msg)
+
+
+def validate_timestamps(
+    t,
+    *,
+    name: str,
+    func_name: str = "Kalman filter",
+) -> None:
+    """Reject timestamp arrays that are non-finite or not strictly increasing.
+
+    Mirrors the CLI's :func:`trodestrack.cli.utils.validate_monotonic_timestamps`
+    so the same contract is enforced when callers reach the filter through
+    the Python API rather than the CLI. ``np.diff(t)`` is used to derive
+    sample periods inside ``compute_imu_index_arrays`` and the IMU
+    pre-integration step; non-finite or decreasing entries produce NaN /
+    negative dt and silently poison the filter outputs.
+
+    Parameters
+    ----------
+    t : array-like
+        Timestamp array (N,) in seconds.
+    name : str
+        Field name for error messages (e.g. ``"t_imu"`` / ``"t_cam"``).
+    func_name : str, optional
+        Caller name for error-message prefixing.
+
+    Raises
+    ------
+    ValueError
+        If ``t`` is not 1-D, contains a non-finite value, or is not
+        strictly increasing.
+    """
+    arr = np.asarray(t)
+    if arr.ndim != 1:
+        raise ValueError(f"{func_name}: {name} must be 1D, got shape {arr.shape}.")
+    if not np.all(np.isfinite(arr)):
+        n_bad = int(np.sum(~np.isfinite(arr)))
+        raise ValueError(
+            f"{func_name}: {name} contains {n_bad} non-finite value(s) "
+            "(NaN/inf); timestamps must be finite seconds."
+        )
+    if arr.size >= 2:
+        diffs = np.diff(arr)
+        if not np.all(diffs > 0):
+            first_bad = int(np.argmax(diffs <= 0))
+            raise ValueError(
+                f"{func_name}: {name} must be strictly increasing; first "
+                f"non-increasing step at index {first_bad + 1} "
+                f"({name}[{first_bad}]={arr[first_bad]!r}, "
+                f"{name}[{first_bad + 1}]={arr[first_bad + 1]!r}, "
+                f"dt={diffs[first_bad]!r})."
+            )
 
 
 def validate_camera_input_shapes(

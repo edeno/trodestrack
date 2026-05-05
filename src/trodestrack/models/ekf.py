@@ -68,6 +68,7 @@ from trodestrack.models.filter_common import (
     validate_camera_3d_input_shapes,
     validate_camera_input_shapes,
     validate_imu_input_shape,
+    validate_timestamps,
     wrap_angle,
 )
 from trodestrack.models.filter_update import ekf_projected_update
@@ -842,6 +843,15 @@ def extended_kalman_filter(
         func_name="extended_kalman_filter",
     )
 
+    # Validate timestamps (finite + strictly increasing). The CLI already
+    # enforces this; replicate at the Python API boundary so callers using
+    # the function directly get the same guard. Without this, NaN / inf
+    # / decreasing entries propagate through np.diff into compute_imu_-
+    # index_arrays and IMU pre-integration and silently produce NaN
+    # filtered_means.
+    validate_timestamps(t_imu, name="t_imu", func_name="extended_kalman_filter")
+    validate_timestamps(t_cam, name="t_cam", func_name="extended_kalman_filter")
+
     # Validate camera-aligned arrays match len(t_cam). Without this, JAX
     # indexing silently clamps a too-short Z_cam_led* / mask_cam / conf_cam
     # to its last in-range row, reusing a stale frame for every later step
@@ -971,6 +981,13 @@ def extended_kalman_filter_3d(
         layout,
         func_name="extended_kalman_filter_3d",
     )
+
+    # Reject non-finite / non-monotonic timestamps before any filtering,
+    # for the same reason as the 2D path: dt derivation feeds compute_-
+    # imu_index_arrays and IMU pre-integration and silently propagates
+    # NaN / negative dt otherwise.
+    validate_timestamps(t_imu, name="t_imu", func_name="extended_kalman_filter_3d")
+    validate_timestamps(t_cam, name="t_cam", func_name="extended_kalman_filter_3d")
 
     # Validate the 3D camera-aligned arrays match len(t_cam) and the LED
     # offset count. Without this, JAX out-of-bounds indexing silently

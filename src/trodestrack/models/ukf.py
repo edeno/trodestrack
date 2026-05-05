@@ -46,6 +46,7 @@ from trodestrack.models.filter_common import (
     update_zupt,
     validate_camera_input_shapes,
     validate_imu_input_shape,
+    validate_timestamps,
     wrap_angle,
 )
 from trodestrack.models.filter_update import ukf_projected_update
@@ -954,6 +955,12 @@ def unscented_kalman_filter(
         layout,
         func_name="unscented_kalman_filter",
     )
+
+    # Reject non-finite / non-monotonic timestamps. Without this, NaN
+    # entries propagate through compute_imu_index_arrays / dt and the
+    # filter silently returns NaN means.
+    validate_timestamps(t_imu, name="t_imu", func_name="unscented_kalman_filter")
+    validate_timestamps(t_cam, name="t_cam", func_name="unscented_kalman_filter")
 
     # Validate camera-aligned arrays match len(t_cam). JAX out-of-bounds
     # indexing silently clamps, so a too-short Z_cam_led* / mask_cam /
