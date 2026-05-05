@@ -189,8 +189,14 @@ def compute_heading_error(
     diff = headings_true - headings_est
     diff_wrapped = np.arctan2(np.sin(diff), np.cos(diff))
 
-    # Mean absolute error in radians (SI unit)
-    mae_rad = np.mean(np.abs(diff_wrapped))
+    # Mean absolute error in radians (SI unit). Drop non-finite samples so
+    # a single NaN/inf in either input does not poison the summary —
+    # compute_position_rmse and compute_velocity_rmse already filter NaNs,
+    # and the QA report relies on that contract for both surfaces.
+    finite = np.isfinite(diff_wrapped)
+    if not np.any(finite):
+        return float("nan")
+    mae_rad = np.mean(np.abs(diff_wrapped[finite]))
 
     return float(mae_rad)
 
@@ -232,8 +238,13 @@ def compute_heading_rmse(
     diff = headings_true - headings_est
     diff_wrapped = np.arctan2(np.sin(diff), np.cos(diff))
 
-    # Root mean square error in radians
-    rmse_rad = np.sqrt(np.mean(diff_wrapped**2))
+    # Root mean square error in radians. Drop non-finite samples so a
+    # single NaN/inf in either input does not poison the summary; matches
+    # the contract used by compute_position_rmse / compute_velocity_rmse.
+    finite = np.isfinite(diff_wrapped)
+    if not np.any(finite):
+        return float("nan")
+    rmse_rad = np.sqrt(np.mean(diff_wrapped[finite] ** 2))
 
     return float(rmse_rad)
 

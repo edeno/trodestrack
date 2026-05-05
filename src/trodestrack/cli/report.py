@@ -162,10 +162,19 @@ def load_run_data(run_dir: Path) -> dict[str, NDArray | int]:
     if data["nees"].shape != (N,):
         raise ValueError(f"nees has shape {data['nees'].shape}, expected ({N},)")
 
-    # Load optional NIS if available
+    # Load optional NIS if available. Shape must match the trajectory
+    # length so the report's NIS summary aligns with the same frames as
+    # positions/headings; otherwise consistency stats would be attached
+    # to the wrong sample set.
     nis_path = run_dir / "nis.npy"
     if nis_path.exists():
-        data["nis"] = np.load(nis_path)
+        nis = np.load(nis_path)
+        if nis.shape != (N,):
+            raise ValueError(
+                f"nis has shape {nis.shape}, expected ({N},) to match the "
+                "trajectory time base."
+            )
+        data["nis"] = nis
         # Load measurement dimension if NIS exists
         meas_dim_path = run_dir / "measurement_dim.txt"
         if meas_dim_path.exists():

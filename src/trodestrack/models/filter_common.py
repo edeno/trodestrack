@@ -215,6 +215,43 @@ class FilterCoreConfig:
                 f"{self.gravity_gyro_norm_threshold_rad_s}."
             )
 
+        # Process- and measurement-noise fields are variances or spectral
+        # densities — they must be non-negative or build_Q_rate would write
+        # negative entries straight into the diagonal of Q and produce a
+        # non-PSD process covariance (verified: process_noise_pos=-1e-4
+        # under n=8 gives min eig ≈ -1e-6). Strict positivity is required
+        # for the measurement-noise fields because they appear in
+        # innovation-covariance inverses and gating thresholds, where 0
+        # collapses the gate.
+        non_negative_fields = (
+            "process_noise_pos",
+            "process_noise_vel",
+            "process_noise_heading",
+            "process_noise_gyro_bias",
+            "process_noise_accel_bias",
+            "imu_gyro_noise_density",
+            "imu_accel_noise_density",
+        )
+        for fname in non_negative_fields:
+            value = getattr(self, fname)
+            if not np.isfinite(value) or value < 0:
+                raise ValueError(
+                    f"{fname} must be a finite non-negative variance/spectral "
+                    f"density (squared physical units); got {value!r}."
+                )
+
+        positive_fields = (
+            "measurement_noise_pos",
+            "measurement_noise_heading",
+        )
+        for fname in positive_fields:
+            value = getattr(self, fname)
+            if not np.isfinite(value) or value <= 0:
+                raise ValueError(
+                    f"{fname} must be a finite strictly-positive variance "
+                    f"(squared physical units); got {value!r}."
+                )
+
     def tree_flatten(self) -> tuple[tuple, dict]:
         """Flatten config for JAX PyTree registration.
 

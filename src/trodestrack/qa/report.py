@@ -171,6 +171,16 @@ def generate_qa_report(
     if nis is not None and measurement_dim is None:
         raise ValueError("measurement_dim required when nis is provided")
 
+    # NIS shape: documented as (N,), aligned to the same time base as the
+    # other arrays. Without this guard a mismatched NIS (e.g. NIS over a
+    # different sample set) silently summarised next to the trajectory
+    # plots, attaching consistency stats to the wrong frames.
+    if nis is not None and nis.shape != (N,):
+        raise ValueError(
+            f"Shape mismatch: nis {nis.shape} vs t {t.shape}; nis must be "
+            f"({N},) so its time alignment matches positions/headings."
+        )
+
     # Validation: Check PDF path is writable
     if not pdf_path.parent.exists():
         raise FileNotFoundError(f"Directory does not exist: {pdf_path.parent}")
