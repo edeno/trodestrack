@@ -783,9 +783,9 @@ def build_section_4_getting_started(builder):
             "",
             "❌ NOT RECOMMENDED FOR:",
             "  • Production 3D tracking (3D EKF is experimental)",
-            "  • Real-time closed-loop (<33 ms latency)",
+            "  • Closed-loop / per-frame streaming (no streaming ingest API today)",
         ],
-        notes="TrodesTrack is ideal for: SpikeGadgets IMU + camera setups, 2D planar tracking, high accuracy requirements, long sessions with occlusions. Python-based. NOT recommended for: production 3D tracking (the extended_kalman_filter_3d entry point exists today but is experimental — 2D is the supported path), real-time closed-loop control (latency ~33 ms may be too slow), non-planar arenas (assumes flat surface). For production 3D, use top-down projection. For closed-loop, consider simpler trackers or specialized hardware.",
+        notes="TrodesTrack is ideal for: SpikeGadgets IMU + camera setups, 2D planar tracking, high accuracy requirements, long sessions with occlusions. Python-based. NOT recommended for: production 3D tracking (the extended_kalman_filter_3d entry point exists today but is experimental — 2D is the supported path); closed-loop / per-frame streaming (the trodestrack online CLI is forward-only batch over complete files, not a streaming ingest harness — there is no per-frame ingest API today, so closed-loop is unsupported regardless of latency); non-planar arenas (assumes flat surface). For production 3D, use top-down projection. For closed-loop, consider simpler trackers or specialized hardware.",
     )
 
     # Slide 31: Troubleshooting Common Issues
@@ -835,7 +835,7 @@ def build_section_5_advanced(builder):
             "Speedup: 300× vs pure Python loops",
             "GPU: Same code runs on GPU via jax.device_put()",
         ],
-        notes="TrodesTrack is built on JAX (Google's NumPy successor). jax.lax.scan fuses loops for efficient filtering. Pure functional design enables JIT compilation and parallelization. XLA backend compiles Python to machine code (first run slow, subsequent runs instant). Result: 300× speedup vs pure Python. GPU support is trivial: same code, just change device. This architecture enables real-time performance on modest hardware.",
+        notes="TrodesTrack is built on JAX (Google's NumPy successor). jax.lax.scan fuses loops for efficient filtering. Pure functional design enables JIT compilation and parallelization. XLA backend compiles Python to machine code (first run slow, subsequent runs instant). Result: 300× speedup vs pure Python. GPU support is trivial: same code, just change device. The JAX architecture is what makes the forward-only batch filter cheap to run end-to-end (mean per-frame ≤33 ms over a 30-min session on commodity CPU); it does NOT itself provide a streaming / per-frame ingest API — see slides 8-9 and the trodestrack online CLI docs.",
     )
 
     # Slide 35: Extending to 3D

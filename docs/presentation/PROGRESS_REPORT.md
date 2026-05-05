@@ -82,24 +82,6 @@ renders as bullet content in `build_presentation.py` describing the
 
 ### Priority 1: Core Concept Visuals (Required for MVP)
 
-#### Slide 2: Failure Modes Grid
-**File**: `code/generate_slide02_failure_modes.py`
-**Description**: 2×2 grid showing occlusion, reflection, blur, dim lighting
-**Estimated time**: 1-2 hours
-**Status**: Not started
-
-#### Slide 8: Before/After Video
-**File**: `code/generate_slide08_beforeafter.py`
-**Description**: 10-second video comparing vision-only vs sensor fusion during dropout
-**Estimated time**: 2-3 hours (video rendering)
-**Status**: Not started
-
-#### Slide 12: IMU Integration Visualization
-**File**: `code/generate_slide12_imu_integration.py`
-**Description**: Show IMU pre-integration between camera frames
-**Estimated time**: 1-2 hours
-**Status**: Not started
-
 #### ⏳ Slide 2: Failure Modes Grid
 **File**: `code/generate_slide02_failure_modes.py`
 **Visual**: `visuals/slide02_failure_modes.png`

@@ -803,6 +803,24 @@ def extended_kalman_filter(
     EKFResult
         Filtered and predicted states at camera times, and log-likelihood.
     """
+    # Reject the 3D-camera state mode at the 2D entry point. `3d_cam_6dof_imu`
+    # is registered as a 16D quaternion layout that the experimental 3D
+    # camera filter (`extended_kalman_filter_3d`) consumes. Without this
+    # guard, the 2D `extended_kalman_filter` would happily build the 2D
+    # `CameraPositionModel` (which assumes (N, 2) LED arrays) on top of a
+    # 16D state and return a 16D `filtered_means`, giving a false success
+    # for users who think they ran the 3D camera path. Force them to use
+    # `extended_kalman_filter_3d` for that mode.
+    if ekf_config.state_mode == "3d_cam_6dof_imu":
+        raise ValueError(
+            "state_mode='3d_cam_6dof_imu' is the 3D-camera + 6-DOF-IMU layout "
+            "and must be run through the experimental "
+            "`extended_kalman_filter_3d` entry point — the 2D "
+            "`extended_kalman_filter` would silently apply the 2D LED "
+            "measurement model to a 16D state. "
+            "See docs/user-guide/state-layouts.md for the routing table."
+        )
+
     # Validate IMU input shape early so silent channel mismatches fail loudly.
     validate_imu_input_shape(
         U_imu,
