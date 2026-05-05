@@ -6,7 +6,9 @@ dimension assumptions ("magic 8s") and enable extensibility to:
 - IMU-only tracking (8D)
 - 2D camera + 3D IMU (10D)
     - 2D camera + 6-DOF IMU orientation (14D)
-    - Full 3D tracking (16D)
+    - 3D state vectors (15D Euler / 16D quaternion); the experimental
+        ``extended_kalman_filter_3d`` consumes the 16D ``3d_cam_6dof_imu``
+        alias.
 
 Each layout explicitly specifies which indices correspond to position,
 velocity, orientation, and bias states.
@@ -221,7 +223,7 @@ LAYOUT_3D_EULER = StateLayout(
     bias_gyro_idx=(9, 10, 11),  # b_gx, b_gy, b_gz
     bias_accel_idx=(12, 13, 14),  # b_ax, b_ay, b_az
 )
-"""Full 3D tracking with Euler angle orientation.
+"""15D state vector for 3D pose with Euler-angle orientation.
 
 State: [x, y, z, vx, vy, vz, roll, pitch, yaw, b_gx, b_gy, b_gz, b_ax, b_ay, b_az]
 
@@ -231,10 +233,13 @@ State: [x, y, z, vx, vy, vz, roll, pitch, yaw, b_gx, b_gy, b_gz, b_ax, b_ay, b_a
 - Gyro bias: (b_gx, b_gy, b_gz) in rad/s
 - Accel bias: (b_ax, b_ay, b_az) in m/s²
 
-Used for: Full 6-DOF pose tracking with 3D camera + 6-axis IMU
+No public filter entry point currently consumes this layout (the 2D
+``extended_kalman_filter`` rejects 15D states; the 3D path uses
+``LAYOUT_3D_CAM_6DOF_IMU``). Provided as a registered state vector for
+custom analyses or future filter work.
 
-Warning: Euler angles suffer from gimbal lock at pitch = ±90°
-Consider using quaternion representation (LAYOUT_3D_QUAT) for full 3D.
+Warning: Euler angles suffer from gimbal lock at pitch = ±90°. Prefer
+``LAYOUT_3D_QUAT`` / ``LAYOUT_3D_CAM_6DOF_IMU`` for tracking work.
 """
 
 
@@ -246,7 +251,7 @@ LAYOUT_3D_QUAT = StateLayout(
     bias_gyro_idx=(10, 11, 12),  # b_gx, b_gy, b_gz
     bias_accel_idx=(13, 14, 15),  # b_ax, b_ay, b_az
 )
-"""Full 3D tracking with quaternion orientation (preferred for 3D).
+"""16D state vector for 3D pose with quaternion orientation.
 
 State: [x, y, z, vx, vy, vz, qw, qx, qy, qz, b_gx, b_gy, b_gz, b_ax, b_ay, b_az]
 
@@ -256,7 +261,10 @@ State: [x, y, z, vx, vy, vz, qw, qx, qy, qz, b_gx, b_gy, b_gz, b_ax, b_ay, b_az]
 - Gyro bias: (b_gx, b_gy, b_gz) in rad/s
 - Accel bias: (b_ax, b_ay, b_az) in m/s²
 
-Used for: Full 6-DOF pose tracking with 3D camera + 6-axis IMU
+The UKF rejects quaternion layouts and the 2D ``extended_kalman_filter``
+rejects 16D states. To run 3D tracking on this state vector, use the
+separately registered ``LAYOUT_3D_CAM_6DOF_IMU`` alias with the
+experimental ``extended_kalman_filter_3d`` entry point.
 
 Preferred over Euler angles:
 - No gimbal lock

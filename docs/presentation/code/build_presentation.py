@@ -782,10 +782,10 @@ def build_section_4_getting_started(builder):
             "  • High accuracy needs (RMSE <2 cm)",
             "",
             "❌ NOT RECOMMENDED FOR:",
-            "  • Full 3D tracking (2D only for now)",
+            "  • Production 3D tracking (3D EKF is experimental)",
             "  • Real-time closed-loop (<33 ms latency)",
         ],
-        notes="TrodesTrack is ideal for: SpikeGadgets IMU + camera setups, 2D planar tracking, high accuracy requirements, long sessions with occlusions. Python-based. NOT recommended for: Full 3D tracking (2D only for now), real-time closed-loop control (latency ~33 ms may be too slow), non-planar arenas (assumes flat surface). For 3D, use top-down projection. For closed-loop, consider simpler trackers or specialized hardware.",
+        notes="TrodesTrack is ideal for: SpikeGadgets IMU + camera setups, 2D planar tracking, high accuracy requirements, long sessions with occlusions. Python-based. NOT recommended for: production 3D tracking (the extended_kalman_filter_3d entry point exists today but is experimental — 2D is the supported path), real-time closed-loop control (latency ~33 ms may be too slow), non-planar arenas (assumes flat surface). For production 3D, use top-down projection. For closed-loop, consider simpler trackers or specialized hardware.",
     )
 
     # Slide 31: Troubleshooting Common Issues

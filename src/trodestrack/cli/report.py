@@ -1,7 +1,8 @@
-"""CLI command for generating QA reports from filter results.
+"""CLI command for generating QA reports from QA-prepared run directories.
 
-This module provides the 'trodestrack report' command that reads filter outputs
-from a run directory and generates a comprehensive PDF report.
+This module provides the 'trodestrack report' command that reads a directory
+of QA-prepared arrays (paired ground-truth and estimated trajectories plus
+NEES/NIS series) and generates a comprehensive PDF report.
 """
 
 from __future__ import annotations
@@ -26,10 +27,15 @@ def add_report_parser(subparsers: argparse._SubParsersAction) -> None:
     """
     parser = subparsers.add_parser(
         "report",
-        help="Generate PDF quality assurance report from filter results",
+        help="Generate PDF QA report from a QA-prepared run directory",
         description=(
             "Generate a comprehensive PDF report with accuracy metrics, "
-            "consistency checks, and diagnostic plots from filter results."
+            "consistency checks, and diagnostic plots from a QA-prepared "
+            "run directory containing paired ground-truth and estimated "
+            "trajectories (positions_true.npy, positions_est.npy, etc.) "
+            "and NEES/NIS series. Filter outputs from `trodestrack online` "
+            "or `trodestrack smooth` are not in this format directly — "
+            "ground-truth arrays must be supplied alongside the estimates."
         ),
     )
 
@@ -37,7 +43,8 @@ def add_report_parser(subparsers: argparse._SubParsersAction) -> None:
         "--run",
         type=Path,
         required=True,
-        help="Path to run directory containing filter results",
+        help="Path to QA-prepared run directory (paired ground-truth and "
+        "estimated arrays plus NEES/NIS .npy files; see command description)",
         metavar="DIR",
     )
 

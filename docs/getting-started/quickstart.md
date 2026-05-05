@@ -85,18 +85,17 @@ result = extended_kalman_filter(
     sim["mask_cam"],
 )
 
-# Access results
-positions = result.filtered_means[:, :2]  # (N, 2) positions
-covariances = result.filtered_covariances  # (N, layout.n, layout.n)
+# Access results — use layout indices, never hardcoded slices (see warning below).
+from trodestrack.models.state_layout import get_layout
+layout = get_layout(cfg.state_mode)
+positions = result.filtered_means[:, layout.pos_idx]   # (N, 2)
+covariances = result.filtered_covariances              # (N, layout.n, layout.n)
 ```
 
 ### Use State Layouts (Recommended!)
 
 ```python
-from trodestrack.models.state_layout import get_layout
-
-# Get layout from config (dimension-agnostic!)
-layout = get_layout(cfg.state_mode)
+# Get layout from config (dimension-agnostic!) — already imported above.
 
 # Extract states using layout indices.
 # Defaults: state_mode="2d_cam_3d_imu" -> layout.n=10, layout.vel_idx=(2,3,4) (vx, vy, vz).

@@ -164,7 +164,11 @@ Indices:
 
 ### `"3d_euler"` (15D)
 
-Full 3D tracking with Euler angles.
+3D-pose state vector with Euler-angle orientation. **No public filter
+entry point currently consumes this layout** — the 2D `extended_kalman_filter`
+rejects 15D states and the 3D path requires `3d_cam_6dof_imu`. Use it
+as a registered state vector (e.g. for custom analyses or as a target
+for future filter work), not as a tracking entry point.
 
 ```
 State vector: [x, y, z, vx, vy, vz, roll, pitch, yaw, b_gx, b_gy, b_gz, b_ax, b_ay, b_az]
@@ -177,11 +181,18 @@ Indices:
 - bias_accel_idx: (12, 13, 14)
 ```
 
-**Use when:** You need full 3D pose estimation.
+**Use when:** You need a registered 15D Euler-orientation state vector for
+custom analysis. For tracking, use `"3d_cam_6dof_imu"` with
+`extended_kalman_filter_3d` instead.
 
 ### `"3d_quat"` (16D)
 
-Full 3D tracking with quaternions (avoids gimbal lock).
+3D-pose state vector with quaternion orientation (avoids gimbal lock).
+**The UKF rejects quaternion layouts** and the 2D `extended_kalman_filter`
+rejects 16D states, so this layout has no direct public entry point. To
+run the experimental 3D camera EKF on the same vector, use
+`"3d_cam_6dof_imu"` (a separately registered alias of this layout) with
+`extended_kalman_filter_3d`.
 
 ```
 State vector: [x, y, z, vx, vy, vz, qw, qx, qy, qz, b_gx, b_gy, b_gz, b_ax, b_ay, b_az]
@@ -194,7 +205,9 @@ Indices:
 - bias_accel_idx: (13, 14, 15)
 ```
 
-**Use when:** You need 3D tracking without gimbal lock issues.
+**Use when:** You need a registered 16D quaternion state vector for
+custom analysis. For tracking, use `"3d_cam_6dof_imu"` with
+`extended_kalman_filter_3d` instead.
 
 ### `"3d_cam_6dof_imu"` (16D)
 

@@ -204,9 +204,9 @@ plt.show()
 | `"2d_full"` | 8D | `[x, y, vx, vy, θ, b_gz, b_ax, b_ay]` | Standard 2D sensor fusion (camera + 2-axis IMU) |
 | `"vision_only"` | 5D | `[x, y, vx, vy, θ]` | Camera-driven tracking, no IMU integration (the public APIs still require placeholder IMU timestamps/measurements; see `docs/user-guide/state-layouts.md`) |
 | `"2d_cam_6dof_imu_orientation"` | 14D | `[x, y, vx, vy, qw, qx, qy, qz, b_gx, b_gy, b_gz, b_ax, b_ay, b_az]` | Experimental: 2D camera + 6-DOF IMU with quaternion orientation |
-| `"3d_euler"` | 15D | `[x, y, z, vx, vy, vz, roll, pitch, yaw, b_gx, b_gy, b_gz, b_ax, b_ay, b_az]` | Full 3D tracking with Euler-angle orientation |
-| `"3d_quat"` | 16D | `[x, y, z, vx, vy, vz, qw, qx, qy, qz, b_gx, b_gy, b_gz, b_ax, b_ay, b_az]` | Full 3D tracking with quaternion orientation |
-| `"3d_cam_6dof_imu"` | 16D | same as `"3d_quat"` | **Required** by the experimental `extended_kalman_filter_3d` entry point (3D LED observations + 6-channel IMU) |
+| `"3d_euler"` | 15D | `[x, y, z, vx, vy, vz, roll, pitch, yaw, b_gx, b_gy, b_gz, b_ax, b_ay, b_az]` | State vector for 3D pose with Euler-angle orientation. **No public entry point today** — the 2D `extended_kalman_filter` rejects 15D states and the 3D path requires `3d_cam_6dof_imu`. |
+| `"3d_quat"` | 16D | `[x, y, z, vx, vy, vz, qw, qx, qy, qz, b_gx, b_gy, b_gz, b_ax, b_ay, b_az]` | State vector for 3D pose with quaternion orientation. **UKF rejects quaternion layouts**; consume via the experimental `extended_kalman_filter_3d` using `"3d_cam_6dof_imu"` (same vector, distinct registration). |
+| `"3d_cam_6dof_imu"` | 16D | same as `"3d_quat"` | **Required** by the experimental `extended_kalman_filter_3d` entry point (3D LED observations + 6-channel IMU). This is the only registered mode that flows end-to-end through a 3D camera filter today. |
 
 **Why use state layouts?**
 

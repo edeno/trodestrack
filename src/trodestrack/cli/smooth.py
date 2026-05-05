@@ -195,10 +195,13 @@ producing lower-variance trajectories than forward filtering alone.
         choices=("2d_full", "vision_only", "2d_cam_3d_imu"),
         help=(
             f"State layout (default: {_FILTER_DEFAULTS.state_mode}). "
-            "Quaternion-orientation layouts (2d_cam_6dof_imu_orientation, "
-            "3d_cam_6dof_imu) are not exposed by this CLI yet — those modes "
-            "require a 6-channel IMU and the experimental 3D camera entry "
-            "point; use the Python API."
+            "Quaternion-orientation layouts are not exposed by this CLI yet "
+            "— `2d_cam_6dof_imu_orientation` is a 2D-camera + 6-channel-IMU "
+            "layout supported by `extended_kalman_filter` but requires a "
+            "6-channel IMU input the CLI does not yet wire up; "
+            "`3d_cam_6dof_imu` requires the experimental "
+            "`extended_kalman_filter_3d` entry point. Use the Python API "
+            "for either."
         ),
     )
 

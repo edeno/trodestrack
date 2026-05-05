@@ -1,8 +1,9 @@
 """3D LED camera measurement model for quaternion pose states.
 
-This module defines the camera-side measurement convention needed for future
-full 3D camera + 6-DOF IMU tracking. It is intentionally independent of any
-loader or Arthur-specific data shape.
+This module defines the camera-side measurement convention used today by
+the experimental ``extended_kalman_filter_3d`` entry point for 3D camera +
+6-DOF IMU tracking. It is intentionally independent of any loader or
+Arthur-specific data shape.
 
 Convention
 ----------
