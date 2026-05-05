@@ -742,6 +742,7 @@ def validate_timestamps(
     *,
     name: str,
     func_name: str = "Kalman filter",
+    min_size: int = 1,
 ) -> None:
     """Reject timestamp arrays that are non-finite or not strictly increasing.
 
@@ -760,22 +761,31 @@ def validate_timestamps(
         Field name for error messages (e.g. ``"t_imu"`` / ``"t_cam"``).
     func_name : str, optional
         Caller name for error-message prefixing.
+    min_size : int, default 1
+        Minimum acceptable array length. Pass ``min_size=2`` for IMU
+        timestamps — the filter computes ``dt_imu_mean = mean(diff(t_imu))``
+        which is NaN for a single-sample array and silently poisons every
+        downstream prediction.
 
     Raises
     ------
     ValueError
-        If ``t`` is not 1-D, contains a non-finite value, or is not
-        strictly increasing.
+        If ``t`` is not 1-D, contains a non-finite value, is shorter than
+        ``min_size``, or is not strictly increasing.
     """
     arr = np.asarray(t)
     if arr.ndim != 1:
         raise ValueError(f"{func_name}: {name} must be 1D, got shape {arr.shape}.")
-    # Reject empty arrays. Initialization indexes t_imu[0] / t_cam[0]
-    # downstream, and dt derivation needs at least one sample interval;
-    # without this guard, callers got an opaque IndexError mid-filter.
-    if arr.size < 1:
+    if arr.size < min_size:
+        if min_size == 1:
+            raise ValueError(
+                f"{func_name}: {name} must have at least one sample, got "
+                f"shape {arr.shape}."
+            )
         raise ValueError(
-            f"{func_name}: {name} must have at least one sample, got shape {arr.shape}."
+            f"{func_name}: {name} must have at least {min_size} samples to "
+            "derive a sample period (mean(diff(t)) is NaN for shorter "
+            f"arrays); got shape {arr.shape}."
         )
     if not np.all(np.isfinite(arr)):
         n_bad = int(np.sum(~np.isfinite(arr)))

@@ -871,7 +871,9 @@ def extended_kalman_filter(
     # / decreasing entries propagate through np.diff into compute_imu_-
     # index_arrays and IMU pre-integration and silently produce NaN
     # filtered_means.
-    validate_timestamps(t_imu, name="t_imu", func_name="extended_kalman_filter")
+    validate_timestamps(
+        t_imu, name="t_imu", func_name="extended_kalman_filter", min_size=2
+    )
     validate_timestamps(t_cam, name="t_cam", func_name="extended_kalman_filter")
 
     # Validate camera-aligned arrays match len(t_cam). Without this, JAX
@@ -1020,7 +1022,9 @@ def extended_kalman_filter_3d(
     # for the same reason as the 2D path: dt derivation feeds compute_-
     # imu_index_arrays and IMU pre-integration and silently propagates
     # NaN / negative dt otherwise.
-    validate_timestamps(t_imu, name="t_imu", func_name="extended_kalman_filter_3d")
+    validate_timestamps(
+        t_imu, name="t_imu", func_name="extended_kalman_filter_3d", min_size=2
+    )
     validate_timestamps(t_cam, name="t_cam", func_name="extended_kalman_filter_3d")
 
     # Validate the 3D camera-aligned arrays match len(t_cam) and the LED

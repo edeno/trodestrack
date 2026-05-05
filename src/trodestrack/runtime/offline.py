@@ -403,7 +403,7 @@ def rts_smoother(
 
     # Reject non-finite / non-monotonic timestamps so np.diff(t_imu) and
     # the smoother's IMU pre-integration don't silently propagate NaN.
-    validate_timestamps(t_imu, name="t_imu", func_name="rts_smoother")
+    validate_timestamps(t_imu, name="t_imu", func_name="rts_smoother", min_size=2)
     validate_timestamps(t_cam, name="t_cam", func_name="rts_smoother")
 
     # Validate t_cam / mask_cam alignment with the filter result. JAX
@@ -757,7 +757,9 @@ def sigma_point_smoother(
     # Reject non-finite / non-monotonic timestamps so np.diff(t_imu) and
     # the sigma-point smoother's IMU pre-integration don't silently
     # propagate NaN.
-    validate_timestamps(t_imu, name="t_imu", func_name="sigma_point_smoother")
+    validate_timestamps(
+        t_imu, name="t_imu", func_name="sigma_point_smoother", min_size=2
+    )
     validate_timestamps(t_cam, name="t_cam", func_name="sigma_point_smoother")
 
     # Validate t_cam / mask_cam alignment with the filter result so a

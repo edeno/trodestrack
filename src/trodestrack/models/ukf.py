@@ -978,7 +978,9 @@ def unscented_kalman_filter(
     # Reject non-finite / non-monotonic timestamps. Without this, NaN
     # entries propagate through compute_imu_index_arrays / dt and the
     # filter silently returns NaN means.
-    validate_timestamps(t_imu, name="t_imu", func_name="unscented_kalman_filter")
+    validate_timestamps(
+        t_imu, name="t_imu", func_name="unscented_kalman_filter", min_size=2
+    )
     validate_timestamps(t_cam, name="t_cam", func_name="unscented_kalman_filter")
 
     # Validate camera-aligned arrays match len(t_cam). JAX out-of-bounds
