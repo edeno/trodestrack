@@ -362,6 +362,36 @@ def rts_smoother(
         Smoothed means and covariances at camera times; log-likelihood copied
         from the forward EKF pass.
     """
+    # Reject num_iter < 1 explicitly. The inner ``for _ in range(num_iter)``
+    # loop never runs for 0 / negative values and the wrapper would
+    # otherwise return the filtered result as if smoothing succeeded.
+    # Mirrors EKFConfig.num_iter validation.
+    if not isinstance(num_iter, int) or num_iter < 1:
+        raise ValueError(
+            "num_iter must be an integer >= 1 (1 = standard RTS, "
+            f">1 = IEKS iterations); got {num_iter!r}."
+        )
+
+    # Reject non-finite filter_result entries up front. The smoother runs
+    # IMU pre-integration around these means and would otherwise propagate
+    # NaN/inf through every backward pass and report a "successful"
+    # smoothed result.
+    fmeans = np.asarray(filter_result.filtered_means)
+    fcovs = np.asarray(filter_result.filtered_covariances)
+    if not np.all(np.isfinite(fmeans)):
+        n_bad = int(np.sum(~np.isfinite(fmeans)))
+        raise ValueError(
+            f"rts_smoother: filter_result.filtered_means contains {n_bad} "
+            "non-finite value(s) (NaN/inf); the smoother cannot recover "
+            "from a corrupted forward pass."
+        )
+    if not np.all(np.isfinite(fcovs)):
+        n_bad = int(np.sum(~np.isfinite(fcovs)))
+        raise ValueError(
+            f"rts_smoother: filter_result.filtered_covariances contains "
+            f"{n_bad} non-finite value(s) (NaN/inf)."
+        )
+
     # Validate IMU input shape early so silent channel mismatches fail loudly.
     validate_imu_input_shape(
         U_imu,
@@ -694,6 +724,26 @@ def sigma_point_smoother(
     - Helps tighten how hard post-gap vision "pulls" backward through gaps
     - Mirrors EKF RTS smoother behavior for consistency
     """
+    # Reject non-finite filter_result entries up front. The smoother runs
+    # IMU pre-integration around these means and would otherwise propagate
+    # NaN/inf through every backward pass and report a "successful"
+    # smoothed result.
+    fmeans = np.asarray(filter_result.filtered_means)
+    fcovs = np.asarray(filter_result.filtered_covariances)
+    if not np.all(np.isfinite(fmeans)):
+        n_bad = int(np.sum(~np.isfinite(fmeans)))
+        raise ValueError(
+            f"sigma_point_smoother: filter_result.filtered_means contains "
+            f"{n_bad} non-finite value(s) (NaN/inf); the smoother cannot "
+            "recover from a corrupted forward pass."
+        )
+    if not np.all(np.isfinite(fcovs)):
+        n_bad = int(np.sum(~np.isfinite(fcovs)))
+        raise ValueError(
+            f"sigma_point_smoother: filter_result.filtered_covariances "
+            f"contains {n_bad} non-finite value(s) (NaN/inf)."
+        )
+
     # Validate IMU input shape early so silent channel mismatches fail loudly.
     validate_imu_input_shape(
         U_imu,

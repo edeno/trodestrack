@@ -660,6 +660,13 @@ def validate_timestamps(
     arr = np.asarray(t)
     if arr.ndim != 1:
         raise ValueError(f"{func_name}: {name} must be 1D, got shape {arr.shape}.")
+    # Reject empty arrays. Initialization indexes t_imu[0] / t_cam[0]
+    # downstream, and dt derivation needs at least one sample interval;
+    # without this guard, callers got an opaque IndexError mid-filter.
+    if arr.size < 1:
+        raise ValueError(
+            f"{func_name}: {name} must have at least one sample, got shape {arr.shape}."
+        )
     if not np.all(np.isfinite(arr)):
         n_bad = int(np.sum(~np.isfinite(arr)))
         raise ValueError(
