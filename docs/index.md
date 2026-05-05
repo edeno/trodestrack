@@ -132,4 +132,4 @@ If you use TrodesTrack in your research, please cite:
 
 ## License
 
-MIT License - see [LICENSE](https://github.com/edeno/trodestrack/blob/main/LICENSE) for details.
+MIT License - see [LICENSE](https://github.com/edeno/trodestrack/blob/master/LICENSE) for details.

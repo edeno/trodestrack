@@ -930,7 +930,7 @@ def build_section_6_conclusion(builder):
             "",
             "Try it: uv sync && uv run python examples/01_simple_simulations.py",
             "",
-            "Slides + code: github.com/edeno/trodestrack/docs/presentation/",
+            "Slides + code: github.com/edeno/trodestrack/tree/master/docs/presentation",
         ],
         notes="Thank you for your attention! Questions welcome. Try TrodesTrack yourself: clone the repo, run 'uv sync', then 'uv run python examples/01_simple_simulations.py'. Full slides and generation code available in docs/presentation/ folder. Contributions and feedback welcome via GitHub Issues or email.",
     )

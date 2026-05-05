@@ -307,7 +307,7 @@ See [`examples/README.md`](examples/README.md) for the complete learning path. E
   - CLI tool: `trodestrack report --run qa_inputs/ --pdf report.pdf` (consumes a separately-prepared QA-input directory; see `--help`)
   - Diagnostic videos with 9-panel filter state visualization
 - ✅ **Testing & Validation**
-  - 660+ unit, integration, regression, and property tests (656 passing, 1 skipped, 1 expected-fail tracking the unimplemented persistent-LED-swap detection)
+  - 660+ unit, integration, regression, and property tests. Last full-suite run: 667 collected → 665 passed, 1 skipped, 1 xfailed (`uv run pytest`, ~4:40). The single xfail tracks the unimplemented persistent-LED-swap detection (`test_filter_stable_under_frequent_swaps` in `tests/filters/test_robustness.py`); rerun `uv run pytest` for current numbers.
   - PRD acceptance criteria achieved:
     - Position RMSE ≤ 2 cm ✓
     - Velocity RMSE ≤ 10 cm/s ✓

@@ -118,10 +118,11 @@ streaming — there is no per-frame ingest loop. "Online" here means
 "forward-only / suitable for online use offline" rather than "incremental
 real-time".
 
-True frame-by-frame ingest would require driving `predict_step` /
-`update_step` from `trodestrack.models.filter_common` directly; that is
-not exposed as a CLI today. See `uv run trodestrack online --help` for
-the batch CLI.
+True frame-by-frame ingest would require driving
+`trodestrack.models.ekf.predict_step` /
+`trodestrack.models.ekf.update_step` directly from Python; that is not
+exposed as a CLI today. See `uv run trodestrack online --help` for the
+batch CLI.
 
 ### Offline Analysis
 

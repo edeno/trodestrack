@@ -6,9 +6,9 @@ camera data. "Online" here means "forward-pass / no future-frame
 dependence" — the command is *not* a streaming ingest loop. It loads the
 full IMU / camera / LED arrays from disk and calls
 ``extended_kalman_filter`` once over the batch. Per-frame ingest would
-require driving ``predict_step`` / ``update_step`` from
-``trodestrack.models.filter_common`` directly; that is not exposed as a
-CLI today.
+require driving ``trodestrack.models.ekf.predict_step`` /
+``trodestrack.models.ekf.update_step`` directly from Python; that is not
+exposed as a CLI today.
 
 Usage:
     trodestrack online \\
@@ -82,8 +82,8 @@ For best accuracy when you do have access to all data, use
 `trodestrack smooth` instead.
 
 True per-frame / real-time streaming is not provided by this CLI; for
-that, drive `predict_step` / `update_step` from
-`trodestrack.models.filter_common` directly via the Python API.
+that, drive `trodestrack.models.ekf.predict_step` /
+`trodestrack.models.ekf.update_step` directly via the Python API.
         """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

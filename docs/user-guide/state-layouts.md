@@ -435,5 +435,5 @@ else:
 
 ## See Also
 
-- [src/trodestrack/models/state_layout.py](https://github.com/edeno/trodestrack/blob/main/src/trodestrack/models/state_layout.py) - Full implementation
+- [src/trodestrack/models/state_layout.py](https://github.com/edeno/trodestrack/blob/master/src/trodestrack/models/state_layout.py) - Full implementation
 - [Example 03b](../examples/index.md) - Using state layouts in practice
