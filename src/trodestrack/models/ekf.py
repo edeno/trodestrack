@@ -840,6 +840,7 @@ def extended_kalman_filter(
     validate_imu_input_shape(
         U_imu,
         get_layout(ekf_config.state_mode),
+        t_imu=t_imu,
         func_name="extended_kalman_filter",
     )
 
@@ -979,6 +980,7 @@ def extended_kalman_filter_3d(
     validate_imu_input_shape(
         U_imu,
         layout,
+        t_imu=t_imu,
         func_name="extended_kalman_filter_3d",
     )
 

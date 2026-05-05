@@ -94,7 +94,16 @@ def test_position_rmse_wrong_dimension():
     true_pos = np.array([[0.0, 0.0, 0.0]])  # 3D
     est_pos = np.array([[0.0, 0.0, 0.0]])
 
-    with pytest.raises(ValueError, match="Expected 2D positions"):
+    with pytest.raises(ValueError, match=r"positions of shape \(N, 2\)"):
+        compute_position_rmse(true_pos, est_pos)
+
+
+def test_position_rmse_one_d_input():
+    """1-D positions should raise ValueError, not IndexError."""
+    true_pos = np.array([1, 2])
+    est_pos = np.array([1, 2])
+
+    with pytest.raises(ValueError, match=r"positions of shape \(N, 2\)"):
         compute_position_rmse(true_pos, est_pos)
 
 
@@ -139,6 +148,15 @@ def test_velocity_rmse_with_mask():
     mask = np.array([True, True, False])
     rmse = compute_velocity_rmse(true_vel, est_vel, valid_mask=mask)
     assert_allclose(rmse, 0.0, atol=1e-10)
+
+
+def test_velocity_rmse_one_d_input():
+    """1-D velocities should raise ValueError, not IndexError."""
+    true_vel = np.array([1, 2])
+    est_vel = np.array([1, 2])
+
+    with pytest.raises(ValueError, match=r"velocities of shape \(N, 2\)"):
+        compute_velocity_rmse(true_vel, est_vel)
 
 
 # =============================================================================

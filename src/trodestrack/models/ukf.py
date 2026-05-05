@@ -970,6 +970,7 @@ def unscented_kalman_filter(
     validate_imu_input_shape(
         U_imu,
         layout,
+        t_imu=t_imu,
         func_name="unscented_kalman_filter",
     )
 

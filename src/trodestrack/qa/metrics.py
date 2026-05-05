@@ -67,8 +67,12 @@ def compute_position_rmse(
             f"Shape mismatch: true {positions_true.shape} vs est {positions_est.shape}"
         )
 
-    if positions_true.shape[1] != 2:
-        raise ValueError(f"Expected 2D positions, got shape {positions_true.shape}")
+    # Check ndim before indexing shape[1] — a 1-D input would otherwise
+    # raise IndexError instead of the documented ValueError.
+    if positions_true.ndim != 2 or positions_true.shape[1] != 2:
+        raise ValueError(
+            f"Expected positions of shape (N, 2); got shape {positions_true.shape}."
+        )
 
     # Build validity mask: finite values + optional user-provided mask
     valid = np.isfinite(positions_true).all(axis=1) & np.isfinite(positions_est).all(
@@ -127,8 +131,12 @@ def compute_velocity_rmse(
             f"Shape mismatch: true {velocities_true.shape} vs est {velocities_est.shape}"
         )
 
-    if velocities_true.shape[1] != 2:
-        raise ValueError(f"Expected 2D velocities, got shape {velocities_true.shape}")
+    # Check ndim before indexing shape[1] — a 1-D input would otherwise
+    # raise IndexError instead of the documented ValueError.
+    if velocities_true.ndim != 2 or velocities_true.shape[1] != 2:
+        raise ValueError(
+            f"Expected velocities of shape (N, 2); got shape {velocities_true.shape}."
+        )
 
     # Build validity mask: finite values + optional user-provided mask
     valid = np.isfinite(velocities_true).all(axis=1) & np.isfinite(velocities_est).all(

@@ -538,6 +538,7 @@ def validate_imu_input_shape(
     U_imu,
     layout: StateLayout,
     *,
+    t_imu=None,
     func_name: str = "Kalman filter",
 ) -> None:
     """Validate that ``U_imu`` has a shape ``dynamics_function`` can consume.
@@ -586,6 +587,34 @@ def validate_imu_input_shape(
         raise ValueError(
             f"{func_name}: U_imu must be a 2-D array of shape "
             f"(N_imu, n_channels); got ndim={arr.ndim}, shape={arr.shape}."
+        )
+
+    # Length and finiteness checks. The filter pre-integration loop
+    # indexes ``U_imu_jax[imu_idx]`` where imu_idx comes from
+    # compute_imu_index_arrays(t_imu, t_cam); a length mismatch would
+    # silently clamp via JAX's out-of-bounds clamp, and a NaN/inf
+    # sample would propagate through every downstream state from that
+    # frame onward. The CLI already enforces these via
+    # validate_finite_array / validate_monotonic_timestamps; mirror
+    # them here so direct Python-API callers get the same contract.
+    if t_imu is not None:
+        t_arr = np.asarray(t_imu)
+        if t_arr.ndim != 1:
+            raise ValueError(f"{func_name}: t_imu must be 1D, got shape {t_arr.shape}.")
+        if arr.shape[0] != t_arr.shape[0]:
+            raise ValueError(
+                f"{func_name}: U_imu.shape[0]={arr.shape[0]} does not match "
+                f"len(t_imu)={t_arr.shape[0]}."
+            )
+    if not np.all(np.isfinite(arr)):
+        bad = ~np.isfinite(arr).all(axis=1)
+        n_bad = int(bad.sum())
+        first_bad = int(np.argmax(bad))
+        raise ValueError(
+            f"{func_name}: U_imu contains non-finite value(s) (NaN/inf) "
+            f"in {n_bad} row(s); first offending row at index {first_bad}. "
+            "The IMU integration path does not support partial-sample "
+            "masking — clean U_imu before calling the filter."
         )
 
     got = arr.shape[1]

@@ -396,6 +396,7 @@ def rts_smoother(
     validate_imu_input_shape(
         U_imu,
         get_layout(ekf_config.state_mode),
+        t_imu=t_imu,
         func_name="rts_smoother",
     )
 
@@ -748,6 +749,7 @@ def sigma_point_smoother(
     validate_imu_input_shape(
         U_imu,
         get_layout(ukf_config.state_mode),
+        t_imu=t_imu,
         func_name="sigma_point_smoother",
     )
 
