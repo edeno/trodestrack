@@ -546,3 +546,22 @@ def test_different_seeds_produce_different_results(config, sim_func, kwargs):
     assert not np.allclose(
         sim1["Z_cam_led1"][finite_both], sim2["Z_cam_led1"][finite_both]
     )
+
+
+def test_simple_short_duration_with_too_few_samples_is_rejected():
+    """SimpleSimConfig must reject durations producing < 2 IMU/camera samples.
+
+    The simple simulators compute counts as ``int(duration_s * fs_*)``;
+    very small positive durations previously produced empty camera
+    streams, which crashed downstream in prepare_video_data with an
+    IndexError on nearest-neighbor indexing.
+    """
+    # 0.02s @ fs_cam=30 → 0 camera samples (was: empty camera stream).
+    with pytest.raises(ValueError, match=r"need at least 2 of each"):
+        SimpleSimConfig(duration_s=0.02, fs_imu=100.0, fs_cam=30.0)
+    # 0.05s @ fs_cam=30 → 1 camera sample (still < 2).
+    with pytest.raises(ValueError, match=r"need at least 2 of each"):
+        SimpleSimConfig(duration_s=0.05, fs_imu=100.0, fs_cam=30.0)
+    # 0.1s @ fs_cam=30 → 3 camera samples (boundary, must accept).
+    cfg = SimpleSimConfig(duration_s=0.1, fs_imu=100.0, fs_cam=30.0)
+    assert cfg.duration_s == 0.1

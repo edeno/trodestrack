@@ -111,3 +111,40 @@ def test_coincident_offsets_return_false():
     assert not _led_label_direction_anomaly(
         np.array([0.0, 0.0]), np.array([0.04, 0.0]), 0.0, same, same
     )
+
+
+def test_create_diagnostic_video_accepts_simple_sim_config(tmp_path):
+    """create_diagnostic_video must work with SimpleSimConfig sims.
+
+    SimpleSimConfig has no led1_offset_body / led2_offset_body fields,
+    but simulate_circular returns the same SimOut shape with both LEDs
+    populated. Hard-coding ``config.led1_offset_body`` previously raised
+    AttributeError; the video should now resolve LED offsets via a
+    sensible default that matches what simulate_circular actually emits.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    from trodestrack.sim.simple import SimpleSimConfig, simulate_circular
+    from trodestrack.viz.video import create_diagnostic_video
+
+    sim = simulate_circular(
+        center=[0.5, 0.5],
+        radius=0.3,
+        angular_velocity=0.5,
+        config=SimpleSimConfig(duration_s=2.0, cam_dropout_prob=0.0),
+    )
+    assert not hasattr(sim["config"], "led1_offset_body"), (
+        "SimpleSimConfig should not expose led1_offset_body — guard relies on getattr"
+    )
+
+    from pathlib import Path as _Path
+
+    out_path = tmp_path / "diagnostic.mp4"
+    # Low fps + short duration so the test stays fast; we only verify it
+    # doesn't raise AttributeError on the missing offset fields.
+    result = create_diagnostic_video(sim, str(out_path), fps=5, speedup=10.0)
+    # ``return_animation=False`` (default) → just a Path is returned. The
+    # mp4 codec may not be available in CI; fall back to .gif sibling.
+    result_path = result if isinstance(result, _Path) else result[0]
+    assert result_path.exists(), f"video output {result_path} not written"

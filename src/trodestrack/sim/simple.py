@@ -98,6 +98,22 @@ class SimpleSimConfig:
                 f"Example: fs_cam=30.0 (30 Hz)"
             )
 
+        # Minimum-sample-count gate (mirrors RatIMUSimConfig). The simple
+        # simulators compute counts as ``int(duration_s * fs_*)``; very
+        # short positive durations therefore produce zero or one sample
+        # per stream and crash downstream (e.g. ``prepare_video_data``
+        # nearest-neighbor indexing raises IndexError when the camera
+        # stream is empty). Require at least 2 IMU and 2 camera samples.
+        T_imu = int(self.duration_s * self.fs_imu)
+        T_cam = int(self.duration_s * self.fs_cam)
+        if T_imu < 2 or T_cam < 2:
+            raise ValueError(
+                f"duration_s={self.duration_s}s at fs_imu={self.fs_imu} Hz, "
+                f"fs_cam={self.fs_cam} Hz produces only T_imu={T_imu}, "
+                f"T_cam={T_cam} samples; need at least 2 of each. "
+                f"Increase duration_s or sampling rates."
+            )
+
         # Probability validation
         if not 0 <= self.cam_dropout_prob <= 1:
             raise ValueError(

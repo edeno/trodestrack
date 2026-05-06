@@ -347,6 +347,18 @@ def create_diagnostic_video(
     # Extract config for convenience
     config = sim_data["config"]
 
+    # Resolve LED body-frame offsets. ``RatIMUSimConfig`` exposes them
+    # explicitly; ``SimpleSimConfig`` does not, but ``simulate_circular``
+    # places LED1 = -0.02 m / LED2 = +0.02 m along heading. Use those as
+    # defaults so the spacing-deviation check, direction check, and
+    # legend labels work for both config types without an AttributeError.
+    led1_offset_body = np.asarray(
+        getattr(config, "led1_offset_body", np.array([-0.02, 0.0]))
+    )
+    led2_offset_body = np.asarray(
+        getattr(config, "led2_offset_body", np.array([0.02, 0.0]))
+    )
+
     # Set arena bounds based on data
     X_truth = video_data["X_truth"]
     x_min, x_max = X_truth[:, 0].min(), X_truth[:, 0].max()
@@ -481,9 +493,7 @@ def create_diagnostic_video(
         if led1_visible and led2_visible:
             # Check 1: Spacing deviation (catches occlusion-induced swaps)
             spacing = np.linalg.norm(led1_pos - led2_pos)
-            expected_spacing = np.linalg.norm(
-                config.led1_offset_body - config.led2_offset_body
-            )
+            expected_spacing = np.linalg.norm(led1_offset_body - led2_offset_body)
             spacing_anomaly = abs(spacing - expected_spacing) > 0.5 * expected_spacing
 
             # Check 2: LED vector direction (catches reflection/labeling swaps).
@@ -494,8 +504,8 @@ def create_diagnostic_video(
                 led1_pos,
                 led2_pos,
                 theta,
-                config.led1_offset_body,
-                config.led2_offset_body,
+                led1_offset_body,
+                led2_offset_body,
             )
 
             if spacing_anomaly or direction_anomaly:
@@ -533,10 +543,10 @@ def create_diagnostic_video(
     )
 
     # Add legend entries for heading and velocity. Derive front/rear
-    # labels from the configured body-frame offsets so custom orderings
+    # labels from the resolved body-frame offsets so custom orderings
     # (e.g. LED1 in front) render correctly.
-    led1_body_x = float(np.asarray(config.led1_offset_body).reshape(-1)[0])
-    led2_body_x = float(np.asarray(config.led2_offset_body).reshape(-1)[0])
+    led1_body_x = float(led1_offset_body.reshape(-1)[0])
+    led2_body_x = float(led2_offset_body.reshape(-1)[0])
     if led1_body_x > led2_body_x:
         led1_label, led2_label = "LED1 (front)", "LED2 (rear)"
     elif led1_body_x < led2_body_x:
