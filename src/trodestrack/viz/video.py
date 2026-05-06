@@ -751,13 +751,18 @@ def create_diagnostic_video(
                 "accel_y": U_imu_window[:, 2],
             }
 
-            # Extract ground truth for truth overlay (expected IMU values)
+            # Extract ground truth for truth overlay. The accelerometer
+            # measures *specific force* (a_body - g_body), not inertial
+            # acceleration; using ``accel_body_truth`` for the overlay
+            # under a tilted IMU shows a phantom ~|g·sin(tilt)| offset
+            # between measured and "truth" that's purely a quantity
+            # mismatch, not a model discrepancy.
             yaw_rate_truth_window = sim_data["yaw_rate_truth"][imu_mask]
-            accel_body_truth_window = sim_data["accel_body_truth"][imu_mask]
+            specific_force_truth_window = sim_data["specific_force_truth"][imu_mask]
             imu_truth = {
                 "yaw_rate": yaw_rate_truth_window,
-                "accel_x": accel_body_truth_window[:, 0],
-                "accel_y": accel_body_truth_window[:, 1],
+                "accel_x": specific_force_truth_window[:, 0],
+                "accel_y": specific_force_truth_window[:, 1],
             }
 
             imu_panel.update(

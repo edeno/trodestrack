@@ -320,6 +320,8 @@ def simulate_stationary(
         "accel_body_truth": np.zeros(
             (T_imu, 2)
         ),  # No motion, no tilt → specific force = 0
+        # Level IMU + no motion → specific force = inertial accel = 0.
+        "specific_force_truth": np.zeros((T_imu, 2)),
         "config": config,
     }
 
@@ -473,6 +475,8 @@ def simulate_constant_velocity(
         "accel_body_truth": np.zeros(
             (T_imu, 2)
         ),  # Constant velocity, no tilt → specific force = 0
+        # Level IMU + constant velocity → specific force = inertial accel = 0.
+        "specific_force_truth": np.zeros((T_imu, 2)),
         "config": config,
     }
 
@@ -668,5 +672,8 @@ def simulate_circular(
         "yaw_rate_truth": np.full(T_imu, omega),
         "accel_world_truth": np.column_stack([accel_world_x, accel_world_y]),
         "accel_body_truth": np.column_stack([accel_body_x, accel_body_y]),
+        # Level IMU (no tilt in simple sims) → specific force equals
+        # inertial acceleration in body frame.
+        "specific_force_truth": np.column_stack([accel_body_x, accel_body_y]),
         "config": config,
     }

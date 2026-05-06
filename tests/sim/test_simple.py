@@ -73,6 +73,7 @@ def test_stationary_returns_correct_keys(config):
         "yaw_rate_truth",
         "accel_world_truth",
         "accel_body_truth",
+        "specific_force_truth",
         "config",
     }
 

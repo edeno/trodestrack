@@ -737,6 +737,7 @@ def test_output_keys_complete(minimal_config) -> None:
         "yaw_rate_truth",
         "accel_world_truth",
         "accel_body_truth",
+        "specific_force_truth",
         "U_imu",
         "bias_gyro",
         "bias_accel_x",
@@ -1166,6 +1167,108 @@ def test_led_wall_reflection_is_bernoulli_not_rounded_count():
         f"reflection counts identical across seeds {set(counts)} — "
         "Bernoulli sampling should produce binomial variance."
     )
+
+
+def test_specific_force_truth_matches_measured_imu():
+    """``specific_force_truth`` must equal noiseless ``U_imu[:, 1:3]``.
+
+    The diagnostic-video IMU panel previously plotted ``accel_body_truth``
+    (inertial accel in body frame) as the IMU truth overlay, but
+    ``U_imu[:, 1:3]`` measures specific force = a_body - g_body. Under
+    the default tilt of (3°, 2°), no-motion runs showed a phantom ~|g·
+    sin(tilt)| offset between the two. ``specific_force_truth`` is the
+    quantity the overlay actually wants.
+    """
+    cfg = RatIMUSimConfig(
+        duration_s=2.0,
+        fs_imu=200.0,
+        fs_cam=30.0,
+        cam_dropout_prob=0.0,
+        use_second_led=True,
+        gyro_noise_density=0.0,
+        accel_noise_density=0.0,
+        gyro_bias_rw_density=0.0,
+        accel_bias_rw_density=0.0,
+        sigma_yaw_rate=0.0,
+        sigma_a_fwd=0.0,
+        sigma_a_lat=0.0,
+        m0=np.array([0.5, 0.5, 0.0, 0.0, 0.0]),
+        P0=np.zeros((5, 5)),
+    )
+    sim = simulate_rat_imu(cfg, seed=0)
+
+    # With all noise / process drivers zero the measured specific force
+    # equals the truth specific force exactly (modulo float precision).
+    np.testing.assert_allclose(
+        sim["U_imu"][:, 1:3], sim["specific_force_truth"], atol=1e-12
+    )
+
+    # The default tilt produces a non-zero specific force at rest, so
+    # ``accel_body_truth`` (which omits the gravity term) is *not* an
+    # acceptable substitute — guard against a future regression.
+    sf_mean = np.linalg.norm(sim["specific_force_truth"].mean(axis=0))
+    assert sf_mean > 0.1, (
+        "Default tilt should produce a measurable resting specific force "
+        f"(got |mean|={sf_mean:.3f} m/s²) — sim setup may have changed."
+    )
+    accel_body_mean = np.linalg.norm(sim["accel_body_truth"].mean(axis=0))
+    assert accel_body_mean < 1e-3, (
+        "accel_body_truth should be near zero at rest (got "
+        f"|mean|={accel_body_mean:.3f}); the two truths must differ for "
+        "the diagnostic panel mismatch test to be meaningful."
+    )
+
+
+def test_p0_validation_accepts_psd_including_zero_covariance():
+    """P0 contract is positive semi-definite — accept zero, reject negative.
+
+    The previous Cholesky-based check enforced strictly positive-definite
+    despite the docstring promising PSD. That blocked P0=0 (deterministic
+    initial state) and any diagonal with a zero variance.
+    """
+    m0 = np.array([0.5, 0.5, 0.0, 0.0, 0.0])
+
+    # Zero covariance: deterministic initial state — must construct.
+    RatIMUSimConfig(duration_s=1.0, m0=m0, P0=np.zeros((5, 5)))
+
+    # Diagonal with one zero variance: must construct.
+    RatIMUSimConfig(duration_s=1.0, m0=m0, P0=np.diag([0.01, 0.01, 0.0, 0.01, 0.01]))
+
+    # Negative-definite must still be rejected.
+    with pytest.raises(ValueError, match=r"positive semi-definite"):
+        RatIMUSimConfig(
+            duration_s=1.0,
+            m0=m0,
+            P0=np.diag([0.01, 0.01, -0.01, 0.01, 0.01]),
+        )
+
+
+def test_p0_zero_yields_deterministic_initial_state():
+    """P0=0 + zero process noise + zero initial velocity ⇒ truth stays at m0.
+
+    The simulator integrates one IMU step before storing ``X_truth[0]``,
+    so we choose ``m0`` with zero velocity (and disable all stochastic
+    drivers) so the recorded truth equals the configured initial state.
+    With any non-zero P0 + a fixed seed the perturbation would shift
+    these values; the assertion below is bit-exact at the 1e-12 level.
+    """
+    m0 = np.array([0.25, 0.5, 0.0, 0.0, 0.3])
+    cfg = RatIMUSimConfig(
+        duration_s=1.0,
+        fs_imu=200.0,
+        fs_cam=30.0,
+        m0=m0,
+        P0=np.zeros((5, 5)),
+        sigma_yaw_rate=0.0,
+        sigma_a_fwd=0.0,
+        sigma_a_lat=0.0,
+        gyro_noise_density=0.0,
+        accel_noise_density=0.0,
+        gyro_bias_rw_density=0.0,
+        accel_bias_rw_density=0.0,
+    )
+    sim = simulate_rat_imu(cfg, seed=0)
+    np.testing.assert_allclose(sim["X_truth"][0], m0, atol=1e-12)
 
 
 def test_persistent_swap_with_single_led_warns():

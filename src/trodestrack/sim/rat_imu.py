@@ -614,19 +614,23 @@ class RatIMUSimConfig:
             raise ValueError(
                 f"P0 must contain finite values; got non-finite entries in {self.P0!r}."
             )
-        # Symmetric-PSD check via Cholesky. ``np.linalg.cholesky`` raises
-        # LinAlgError on non-PSD matrices; surface that as ValueError.
+        # Symmetric-PSD check. ``np.linalg.cholesky`` would only accept
+        # strictly *positive-definite* matrices, contradicting the
+        # documented contract and rejecting useful edge cases like
+        # ``P0 == 0`` for a deterministic initial state. Use ``eigvalsh``
+        # (which works for PSD) and tolerate small negative eigenvalues
+        # from floating-point noise.
         if not np.allclose(self.P0, self.P0.T, atol=1e-10):
             raise ValueError(
                 "P0 must be symmetric (P0 == P0.T); got an asymmetric matrix."
             )
-        try:
-            np.linalg.cholesky(self.P0)
-        except np.linalg.LinAlgError as exc:
+        eigvals = np.linalg.eigvalsh(self.P0)
+        psd_tol = 1e-10
+        if eigvals.min() < -psd_tol:
             raise ValueError(
-                "P0 must be a positive semi-definite covariance matrix; "
-                f"Cholesky factorization failed: {exc}."
-            ) from exc
+                "P0 must be a positive semi-definite covariance matrix; got "
+                f"minimum eigenvalue {eigvals.min():.3e} (tolerance {psd_tol:.0e})."
+            )
 
 
 # -----------------------------------------------------------------------------
@@ -671,8 +675,20 @@ def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> Si
     t_imu = np.arange(T_imu) * dt_imu
     t_cam_clean = np.arange(T_cam) * dt_cam
 
-    # Initialize truth state
-    L0 = np.linalg.cholesky(config.P0)
+    # Initialize truth state. Prefer Cholesky for the strictly
+    # positive-definite case so existing seeded tests stay bit-compatible
+    # (Cholesky and an eigendecomposition give different but equally
+    # valid square roots, and either choice produces a different sample
+    # for a fixed RNG state). Fall back to an eigendecomposition-based
+    # square root only for PSD-but-not-PD covariances (including
+    # ``P0 == 0`` for a deterministic initial state), where Cholesky
+    # would fail.
+    try:
+        L0 = np.linalg.cholesky(config.P0)
+    except np.linalg.LinAlgError:
+        eigvals_p0, eigvecs_p0 = np.linalg.eigh(config.P0)
+        eigvals_p0 = np.clip(eigvals_p0, 0.0, None)
+        L0 = eigvecs_p0 * np.sqrt(eigvals_p0)
     x = config.m0 + L0 @ rng.standard_normal(5)
     x[4] = wrap_angle(x[4])  # wrap θ
 
@@ -692,6 +708,7 @@ def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> Si
     yaw_rate_truth = np.zeros(T_imu)
     accel_world_truth = np.zeros((T_imu, 2))
     accel_body_truth = np.zeros((T_imu, 2))
+    specific_force_truth = np.zeros((T_imu, 2))
 
     # IMU noise parameters
     std_gyro = density_to_sample_std(config.gyro_noise_density, dt_imu)
@@ -832,6 +849,14 @@ def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> Si
 
         specific_force_x = ax_body - g_body_x
         specific_force_y = ay_body - g_body_y
+
+        # Stash the noiseless specific force so diagnostic overlays can
+        # compare measured U_imu (noisy specific force) against the
+        # quantity it actually represents. ``accel_body_truth`` is the
+        # *inertial* acceleration and differs by the rotated gravity
+        # term — using it as an overlay misreads the IMU panel as
+        # showing a tilt-induced bias.
+        specific_force_truth[t] = [specific_force_x, specific_force_y]
 
         # Add bias and white noise to specific force
         gyro_meas = yaw_rate + b_gyro + std_gyro * rng.standard_normal()
@@ -1175,6 +1200,7 @@ def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> Si
         "yaw_rate_truth": yaw_rate_truth,
         "accel_world_truth": accel_world_truth,
         "accel_body_truth": accel_body_truth,
+        "specific_force_truth": specific_force_truth,
         # IMU
         "U_imu": U_imu,
         "bias_gyro": bias_gyro,

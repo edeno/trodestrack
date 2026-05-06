@@ -47,6 +47,10 @@ class SimOut(TypedDict):
         yaw_rate_truth: Ground truth yaw rate (N_imu,)
         accel_world_truth: Ground truth inertial accel in world frame (N_imu, 2)
         accel_body_truth: Ground truth inertial accel in body frame (N_imu, 2)
+        specific_force_truth: Ground truth noiseless specific force in body
+            frame (N_imu, 2). This is the quantity ``U_imu[:, 1:3]`` measures
+            (a_body - g_body); for a level IMU it equals ``accel_body_truth``
+            but for a tilted IMU it differs by the rotated gravity term.
 
         config: Configuration object used for this simulation
     """
@@ -61,6 +65,7 @@ class SimOut(TypedDict):
     yaw_rate_truth: np.ndarray
     accel_world_truth: np.ndarray
     accel_body_truth: np.ndarray
+    specific_force_truth: np.ndarray
 
     # IMU measurements
     U_imu: np.ndarray

@@ -232,9 +232,13 @@ class LEDArtist:
             self.expected_marker = None
             self.residual_line = None
 
-        # Track last known position for dropout marker
-        self.last_x = 0.0
-        self.last_y = 0.0
+        # Track last known position for dropout marker. Initialize to
+        # None so a session that opens with a dropout doesn't render a
+        # phantom red X at the origin — the dropout marker should only
+        # appear after at least one *visible* sample establishes a real
+        # last-known position.
+        self.last_x: float | None = None
+        self.last_y: float | None = None
 
     def update(
         self,
@@ -304,8 +308,14 @@ class LEDArtist:
             self.marker.set_data([], [])
             self.halo.set_alpha(0.0)
 
-            # Show red X at last known position
-            self.dropout_marker.set_data([self.last_x], [self.last_y])
+            # Show red X at last known position — but only if we've seen
+            # at least one visible sample. Before the first detection
+            # there is no meaningful "last known position" and rendering
+            # at (0, 0) draws a phantom dropout in the arena corner.
+            if self.last_x is not None and self.last_y is not None:
+                self.dropout_marker.set_data([self.last_x], [self.last_y])
+            else:
+                self.dropout_marker.set_data([], [])
 
             # Hide residuals when dropped out
             if (
