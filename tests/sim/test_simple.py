@@ -549,6 +549,36 @@ def test_different_seeds_produce_different_results(config, sim_func, kwargs):
     )
 
 
+def test_simulate_circular_rejects_non_positive_radius():
+    """``simulate_circular`` must reject radius ≤ 0.
+
+    Heading is computed as ``angle + π/2`` (tangent direction),
+    independent of ``radius``'s sign, while position / velocity scale
+    linearly with ``radius``. A negative radius therefore desynchronizes
+    heading from velocity direction by π — breaking the documented
+    "heading tangent to motion" invariant. Zero radius collapses to a
+    stationary point, also degenerate.
+    """
+    cfg = SimpleSimConfig(duration_s=1.0)
+
+    with pytest.raises(ValueError, match=r"radius must be strictly positive"):
+        simulate_circular(config=cfg, radius=-0.3, angular_velocity=1.0, seed=0)
+    with pytest.raises(ValueError, match=r"radius must be strictly positive"):
+        simulate_circular(config=cfg, radius=0.0, angular_velocity=1.0, seed=0)
+
+    # Positive radius must still construct, and heading must agree with
+    # velocity direction (sanity check that the validation didn't change
+    # the positive-case behavior).
+    sim = simulate_circular(config=cfg, radius=0.3, angular_velocity=1.0, seed=0)
+    X = sim["X_truth"]
+    vx, vy, heading = X[10, 2], X[10, 3], X[10, 4]
+    v_angle = float(np.arctan2(vy, vx))
+    diff = float(np.arctan2(np.sin(heading - v_angle), np.cos(heading - v_angle)))
+    assert abs(diff) < 1e-6, (
+        f"heading and velocity should agree under radius>0; got diff={diff}"
+    )
+
+
 def test_simple_short_duration_with_too_few_samples_is_rejected():
     """SimpleSimConfig must reject durations producing < 2 IMU/camera samples.
 

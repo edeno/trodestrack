@@ -524,6 +524,18 @@ def simulate_circular(
     center = _validate_xy_array(center, "center")
     radius = _validate_finite_scalar(radius, "radius")
     angular_velocity = _validate_finite_scalar(angular_velocity, "angular_velocity")
+    # Heading is computed as ``angle + π/2`` (tangent direction)
+    # independent of the sign of ``radius``, while position and
+    # velocity scale linearly with ``radius``. A negative radius
+    # therefore breaks the documented "heading tangent to motion"
+    # invariant — heading and velocity-direction differ by π. Zero
+    # radius collapses position to the center and produces zero
+    # velocity, which is degenerate for a "circular motion" sim.
+    if radius <= 0:
+        raise ValueError(
+            f"radius must be strictly positive (heading is computed as "
+            f"angle + π/2 and is sign-blind to radius); got {radius}."
+        )
 
     rng = np.random.default_rng(seed)
 
