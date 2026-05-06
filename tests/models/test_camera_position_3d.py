@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 from trodestrack.models.filter_common import (
     FilterState,
@@ -194,3 +195,48 @@ def test_camera_3d_update_recovers_low_noise_synthetic_pose() -> None:
         np.asarray(true_position),
         atol=1e-3,
     )
+
+
+def _minimal_camera_3d_kwargs() -> dict:
+    """Build a minimal valid kwargs dict for Camera3DPositionModel."""
+    return dict(
+        led_offsets_body=jnp.array(
+            [[0.02, 0.0, 0.0], [-0.02, 0.0, 0.0]], dtype=jnp.float32
+        ),
+        measurement_noise_base=1e-4,
+        layout=get_layout("3d_quat"),
+        z_leds_all=jnp.zeros((1, 2, 3), dtype=jnp.float32),
+    )
+
+
+def test_camera_3d_rejects_integer_mask_outside_zero_one() -> None:
+    """Integer values other than 0 or 1 must be rejected at construction.
+
+    Without this guard, ``valid_coordinates()`` later does ``astype(bool)``
+    which silently coerces 2 into True and treats invalid LEDs as visible.
+    """
+    kwargs = _minimal_camera_3d_kwargs()
+    bad_mask = np.array([[1, 2]], dtype=np.int32)
+    with pytest.raises(ValueError, match=r"only 0 or 1 \(or be boolean\)"):
+        Camera3DPositionModel(**kwargs, mask_leds_all=bad_mask)
+
+
+def test_camera_3d_rejects_nonbool_float_mask() -> None:
+    """Float dtype masks must be rejected even if values look bool-like.
+
+    NaN values would silently coerce to True via ``astype(bool)`` and
+    treat invalid LEDs as visible.
+    """
+    kwargs = _minimal_camera_3d_kwargs()
+    bad_mask = np.array([[1.0, np.nan]], dtype=np.float32)
+    with pytest.raises(ValueError, match=r"boolean or 0/1 integer"):
+        Camera3DPositionModel(**kwargs, mask_leds_all=bad_mask)
+
+
+def test_camera_3d_accepts_bool_and_zero_one_int_mask() -> None:
+    """Valid mask shapes must continue to construct successfully."""
+    kwargs = _minimal_camera_3d_kwargs()
+    bool_mask = np.array([[True, False]])
+    int_mask = np.array([[1, 0]], dtype=np.int32)
+    Camera3DPositionModel(**kwargs, mask_leds_all=bool_mask)
+    Camera3DPositionModel(**kwargs, mask_leds_all=int_mask)

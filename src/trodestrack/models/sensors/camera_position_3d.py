@@ -134,6 +134,30 @@ class Camera3DPositionModel:
                     "mask_leds_all must have shape (n_time, n_leds); got "
                     f"{mask_leds.shape} for z_leds_all {z_leds.shape}."
                 )
+            # Reject non-bool / non-0-or-1-integer masks for concrete
+            # (non-traced) inputs. ``valid_coordinates()`` later does
+            # ``astype(bool)`` which silently coerces 2 / -1 / NaN into
+            # True and treats invalid LEDs as visible. The 3D filter
+            # entry point already enforces this contract via
+            # ``validate_camera_3d_input_shapes``; mirror it here so
+            # callers constructing Camera3DPositionModel directly (e.g.
+            # in tests or custom pipelines) get the same gate.
+            if not _is_traced(mask_leds_all):
+                mask_arr_host = np.asarray(mask_leds_all)
+                if mask_arr_host.dtype != np.bool_:
+                    if not np.issubdtype(mask_arr_host.dtype, np.integer):
+                        raise ValueError(
+                            "mask_leds_all must be boolean or 0/1 integer; "
+                            f"got dtype {mask_arr_host.dtype!r}."
+                        )
+                    if not np.all(np.isin(mask_arr_host, (0, 1))):
+                        bad = mask_arr_host[~np.isin(mask_arr_host, (0, 1))]
+                        raise ValueError(
+                            "mask_leds_all must contain only 0 or 1 (or be "
+                            f"boolean); found {len(bad)} other value(s) "
+                            f"(e.g. {bad[:5].tolist()})."
+                        )
+            mask_leds = mask_leds.astype(bool)
         else:
             mask_leds = None
 
