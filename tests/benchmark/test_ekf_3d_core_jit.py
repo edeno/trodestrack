@@ -110,6 +110,7 @@ def make_ekf_3d_benchmark_case(
 def _run_core(case: EKF3DBenchmarkCase, U_imu: jnp.ndarray, z_leds: jnp.ndarray):
     return _extended_kalman_filter_3d_core(
         case.config,
+        jnp.asarray(True),
         case.t_imu,
         U_imu,
         case.t_cam,
@@ -126,6 +127,7 @@ def _run_core(case: EKF3DBenchmarkCase, U_imu: jnp.ndarray, z_leds: jnp.ndarray)
 def _run_core_jit(case: EKF3DBenchmarkCase, U_imu: jnp.ndarray, z_leds: jnp.ndarray):
     return _extended_kalman_filter_3d_jit(
         case.config,
+        jnp.asarray(True),
         case.t_imu,
         U_imu,
         case.t_cam,

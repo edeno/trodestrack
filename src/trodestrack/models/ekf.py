@@ -192,6 +192,7 @@ EXTENDED_KALMAN_FILTER_3D_DONATE_ARGNUMS: tuple[int, ...] = ()
 
 def _extended_kalman_filter_impl(
     initial_state: EKFState,
+    initial_zupt_context: jnp.ndarray,
     t_imu_jax: jnp.ndarray,
     U_imu_jax: jnp.ndarray,
     t_cam_jax: jnp.ndarray,
@@ -228,7 +229,7 @@ def _extended_kalman_filter_impl(
 
     def filter_step(carry, t_idx):
         """Single filtering step at camera frame t_idx."""
-        state_prev, log_lik_accum = carry
+        state_prev, log_lik_accum, has_seen_vision_prev = carry
         has_vision_t = mask_cam_jax[t_idx]
 
         def propagate_from_prev(state_in):
@@ -278,9 +279,13 @@ def _extended_kalman_filter_impl(
             layout=layout,
         )
 
+        both_leds, only_led1, only_led2, _ = camera_model.subspace(t_idx)
+        frame_has_led = mask_cam_jax[t_idx] & (both_leds | only_led1 | only_led2)
+        has_seen_vision_next = has_seen_vision_prev | frame_has_led
         state_filt, log_lik_zupt = update_zupt(
             state_after_heading,
             config_for_filter,
+            active=has_seen_vision_next,
         )
 
         log_lik_k = log_lik_pos + log_lik_heading + log_lik_zupt
@@ -292,15 +297,18 @@ def _extended_kalman_filter_impl(
             "predicted_cov": state_pred.cov,
         }
 
-        carry_next = (state_filt, log_lik_accum + log_lik_k)
+        carry_next = (state_filt, log_lik_accum + log_lik_k, has_seen_vision_next)
         return carry_next, outputs
 
     carry_init = (
         initial_state,
         jnp.asarray(0.0, dtype=initial_state.mean.dtype),
+        jnp.asarray(initial_zupt_context, dtype=bool),
     )
 
-    (_, log_lik_total), outputs = lax.scan(filter_step, carry_init, jnp.arange(n_cam))
+    (_, log_lik_total, _), outputs = lax.scan(
+        filter_step, carry_init, jnp.arange(n_cam)
+    )
 
     return EKFComputationResult(
         filtered_means=outputs["filtered_mean"],
@@ -839,28 +847,25 @@ def extended_kalman_filter(
     EKFResult
         Filtered and predicted states at camera times, and log-likelihood.
     """
-    # Reject the 3D-camera state mode at the 2D entry point. `3d_cam_6dof_imu`
-    # is registered as a 16D quaternion layout that the experimental 3D
-    # camera filter (`extended_kalman_filter_3d`) consumes. Without this
-    # guard, the 2D `extended_kalman_filter` would happily build the 2D
-    # `CameraPositionModel` (which assumes (N, 2) LED arrays) on top of a
-    # 16D state and return a 16D `filtered_means`, giving a false success
-    # for users who think they ran the 3D camera path. Force them to use
-    # `extended_kalman_filter_3d` for that mode.
-    if ekf_config.state_mode == "3d_cam_6dof_imu":
+    layout = get_layout(ekf_config.state_mode)
+
+    # Reject 3D state layouts at the 2D entry point. Without this guard,
+    # the 2D `extended_kalman_filter` builds the 2D `CameraPositionModel`
+    # (which assumes (N, 2) LED arrays) on top of a 3D state and can return
+    # a finite-but-wrong result, e.g. for the `3d_quat` alias.
+    if layout.spatial_dim == 3:
         raise ValueError(
-            "state_mode='3d_cam_6dof_imu' is the 3D-camera + 6-DOF-IMU layout "
-            "and must be run through the experimental "
-            "`extended_kalman_filter_3d` entry point — the 2D "
-            "`extended_kalman_filter` would silently apply the 2D LED "
-            "measurement model to a 16D state. "
-            "See docs/user-guide/state-layouts.md for the routing table."
+            f"state_mode={ekf_config.state_mode!r} is a 3D state layout and "
+            "cannot be run through the 2D `extended_kalman_filter`, which "
+            "uses 2D LED arrays and the 2D `CameraPositionModel`. Use "
+            "`extended_kalman_filter_3d` for `3d_cam_6dof_imu`; other 3D "
+            "layouts are registered for custom analyses / future filter work."
         )
 
     # Validate IMU input shape early so silent channel mismatches fail loudly.
     validate_imu_input_shape(
         U_imu,
-        get_layout(ekf_config.state_mode),
+        layout,
         t_imu=t_imu,
         func_name="extended_kalman_filter",
     )
@@ -920,6 +925,7 @@ def extended_kalman_filter(
     assert config_for_filter.led_distance is not None, (
         "led_distance must be set or auto-detected before filter"
     )
+    initial_zupt_context = initial_state is not None
     if initial_state is None:
         initial_state = initialize_state(
             Z_cam_led1_jax,
@@ -929,7 +935,7 @@ def extended_kalman_filter(
                 jnp.diff(t_cam_jax)
             ),  # Keep as JAX scalar for JIT compatibility
             led_distance=config_for_filter.led_distance,
-            layout=get_layout(config_for_filter.state_mode),
+            layout=layout,
         )
     else:
         # Validate caller-supplied initial state against the active layout.
@@ -939,12 +945,9 @@ def extended_kalman_filter(
         # state.
         validate_initial_state(
             initial_state,
-            get_layout(config_for_filter.state_mode),
+            layout,
             func_name="extended_kalman_filter",
         )
-
-    # Resolve state layout once for this run
-    layout = get_layout(config_for_filter.state_mode)
 
     # Compute mean IMU timestep for fallback when imu_idx == 0
     dt_imu_mean = jnp.mean(
@@ -956,6 +959,7 @@ def extended_kalman_filter(
 
     computation = _extended_kalman_filter_jit(
         initial_state,
+        jnp.asarray(initial_zupt_context, dtype=bool),
         t_imu_jax,
         U_imu_jax,
         t_cam_jax,
@@ -1054,6 +1058,7 @@ def extended_kalman_filter_3d(
         None if conf_cam is None else jnp.clip(jnp.asarray(conf_cam), 1e-2, 1.0)
     )
 
+    initial_zupt_context = initial_state is not None
     if initial_state is None:
         initial_state = _initialize_3d_state(
             Z_cam_leds_jax,
@@ -1071,6 +1076,7 @@ def extended_kalman_filter_3d(
     imu_index_arrays = compute_imu_index_arrays(t_imu, t_cam)
     computation = _extended_kalman_filter_3d_jit(
         config_for_filter,
+        jnp.asarray(initial_zupt_context, dtype=bool),
         t_imu_jax,
         U_imu_jax,
         t_cam_jax,
@@ -1094,6 +1100,7 @@ def extended_kalman_filter_3d(
 
 def _extended_kalman_filter_3d_core(
     config_for_filter: EKFConfig,
+    initial_zupt_context: jnp.ndarray,
     t_imu_jax: jnp.ndarray,
     U_imu_jax: jnp.ndarray,
     t_cam_jax: jnp.ndarray,
@@ -1129,8 +1136,9 @@ def _extended_kalman_filter_3d_core(
     )
 
     def filter_step(carry, t_idx):
-        state_prev, marginal_loglik_prev = carry
+        state_prev, marginal_loglik_prev, has_seen_vision_prev = carry
         has_vision = jnp.any(camera_model.valid_coordinates(t_idx))
+        has_seen_vision_next = has_seen_vision_prev | has_vision
 
         def propagate_from_prev(state_in: EKFState) -> EKFState:
             imu_indices = imu_index_arrays[t_idx]
@@ -1179,7 +1187,11 @@ def _extended_kalman_filter_3d_core(
             config_for_filter,
             chi2_thresholds,
         )
-        state_filt, log_lik_zupt = update_zupt(state_cam, config_for_filter)
+        state_filt, log_lik_zupt = update_zupt(
+            state_cam,
+            config_for_filter,
+            active=has_seen_vision_next,
+        )
         marginal_loglik = marginal_loglik_prev + log_lik_camera + log_lik_zupt
         outputs = (
             state_filt.mean,
@@ -1187,11 +1199,15 @@ def _extended_kalman_filter_3d_core(
             predicted_mean,
             predicted_covariance,
         )
-        return (state_filt, marginal_loglik), outputs
+        return (state_filt, marginal_loglik, has_seen_vision_next), outputs
 
-    (final_state, marginal_loglik), scan_outputs = lax.scan(
+    (final_state, marginal_loglik, _), scan_outputs = lax.scan(
         filter_step,
-        (initial_state, jnp.asarray(0.0, dtype=initial_state.mean.dtype)),
+        (
+            initial_state,
+            jnp.asarray(0.0, dtype=initial_state.mean.dtype),
+            jnp.asarray(initial_zupt_context, dtype=bool),
+        ),
         jnp.arange(t_cam_jax.shape[0], dtype=jnp.int32),
     )
     del final_state

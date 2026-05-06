@@ -42,6 +42,42 @@ from .utils import (
 # -----------------------------------------------------------------------------
 
 
+def _make_strictly_increasing_within_bounds(
+    times: np.ndarray,
+    *,
+    lower: float,
+    upper: float,
+    min_step: float,
+) -> np.ndarray:
+    """Separate sorted timestamps while keeping them inside fixed bounds."""
+    out = np.clip(np.asarray(times, dtype=float), lower, upper).copy()
+    if out.size <= 1:
+        return out
+
+    span = upper - lower
+    if span <= 0:
+        raise ValueError("timestamp bounds must have positive span")
+
+    step = min(float(min_step), span / (out.size - 1))
+    if step <= 0:
+        step = span / (out.size - 1)
+
+    for idx in range(1, out.size):
+        out[idx] = max(out[idx], out[idx - 1] + step)
+
+    if out[-1] > upper:
+        out[-1] = upper
+        for idx in range(out.size - 2, -1, -1):
+            out[idx] = min(out[idx], out[idx + 1] - step)
+
+    if out[0] < lower:
+        out[0] = lower
+        for idx in range(1, out.size):
+            out[idx] = max(out[idx], out[idx - 1] + step)
+
+    return out
+
+
 def compute_gravity_in_tilted_frame(
     tilt_roll_rad: float, tilt_pitch_rad: float, gravity: float
 ) -> tuple[float, float]:
@@ -767,11 +803,11 @@ def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> Si
     #   2) Compute `t_cam_obs` from the *clipped* exposure so the documented
     #      contract `t_cam_obs[i] - t_cam_exp[i] == cam_latency_s` holds at
     #      the clipping boundaries.
-    #   3) Sort by exposure time so downstream code that assumes
-    #      monotonically increasing camera timestamps holds. The EKF
+    #   3) Sort by exposure time so downstream code that assumes strictly
+    #      increasing camera timestamps holds. The EKF
     #      builds (t_cam[i-1], t_cam[i]] IMU intervals via
     #      compute_imu_index_arrays; a non-monotonic step empties an
-    #      interval and silently drops IMU propagation for that frame.
+    #      interval, while a tied step is rejected by validate_timestamps.
     #      np.searchsorted in the diagnostic-video loader also requires a
     #      sorted t_cam_exp. We sort jittered timestamps (rather than
     #      forbidding cross-frame jitter outright) and bring the matching
@@ -784,6 +820,17 @@ def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> Si
     t_cam_exp = np.clip(t_cam_clean + jitter, t_imu[0], t_imu[-1])
     cam_sort_order = np.argsort(t_cam_exp, kind="stable")
     t_cam_exp = t_cam_exp[cam_sort_order]
+    positive_time_steps = [
+        np.min(np.diff(t_imu)),
+        np.min(np.diff(t_cam_clean)) if T_cam > 1 else np.min(np.diff(t_imu)),
+    ]
+    min_timestamp_step = min(positive_time_steps) * 1e-6
+    t_cam_exp = _make_strictly_increasing_within_bounds(
+        t_cam_exp,
+        lower=float(t_imu[0]),
+        upper=float(t_imu[-1]),
+        min_step=float(min_timestamp_step),
+    )
     t_cam_obs = t_cam_exp + config.cam_latency_s
 
     # Interpolate truth at EXPOSURE time (what pixels actually measure)

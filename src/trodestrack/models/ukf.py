@@ -752,6 +752,7 @@ UNSCENTED_KALMAN_FILTER_DONATE_ARGNUMS: tuple[int, ...] = ()
 
 def _unscented_kalman_filter_impl(
     initial_state: UKFState,
+    initial_zupt_context: jnp.ndarray,
     t_imu_jax: jnp.ndarray,
     U_imu_jax: jnp.ndarray,
     t_cam_jax: jnp.ndarray,
@@ -789,7 +790,7 @@ def _unscented_kalman_filter_impl(
 
     def filter_step(carry, t_idx):
         """Single filtering step at camera frame t_idx."""
-        state_prev, log_lik_accum = carry
+        state_prev, log_lik_accum, has_seen_vision_prev = carry
 
         # Check if we have vision at this timestep (for blackout-aware Q scaling)
         has_vision_t = mask_cam_jax[t_idx]
@@ -854,10 +855,15 @@ def _unscented_kalman_filter_impl(
             layout=layout,
         )
 
+        both_leds, only_led1, only_led2, _ = camera_model.subspace(t_idx)
+        frame_has_led = mask_cam_jax[t_idx] & (both_leds | only_led1 | only_led2)
+        has_seen_vision_next = has_seen_vision_prev | frame_has_led
+
         # Zero-velocity update (reuse shared implementation for parity)
         state_after_zupt, log_lik_zupt = update_zupt(
             state_after_heading,
             config_for_filter,
+            active=has_seen_vision_next,
         )
         state_filt = UKFState(
             mean=state_after_zupt.mean,
@@ -876,13 +882,19 @@ def _unscented_kalman_filter_impl(
         }
 
         # Update carry with accumulated log-likelihood
-        carry = (state_filt, log_lik_accum + log_lik_k)
+        carry = (state_filt, log_lik_accum + log_lik_k, has_seen_vision_next)
 
         return carry, outputs
 
     # Run filter over all camera frames
-    carry_init = (initial_state, jnp.array(0.0))
-    (_, log_lik_total), outputs = lax.scan(filter_step, carry_init, jnp.arange(n_cam))
+    carry_init = (
+        initial_state,
+        jnp.array(0.0, dtype=initial_state.mean.dtype),
+        jnp.asarray(initial_zupt_context, dtype=bool),
+    )
+    (_, log_lik_total, _), outputs = lax.scan(
+        filter_step, carry_init, jnp.arange(n_cam)
+    )
 
     return (
         outputs["filtered_mean"],
@@ -1027,6 +1039,7 @@ def unscented_kalman_filter(
     assert config_for_filter.led_distance is not None, (
         "led_distance must be set or auto-detected before filter"
     )
+    initial_zupt_context = initial_state is not None
     if initial_state is None:
         ekf_init = initialize_state(
             Z_cam_led1_jax,
@@ -1061,6 +1074,7 @@ def unscented_kalman_filter(
     filtered_means, filtered_covs, predicted_means, predicted_covs, log_lik_total = (
         _unscented_kalman_filter_jit(
             initial_state,
+            jnp.asarray(initial_zupt_context, dtype=bool),
             t_imu_jax,
             U_imu_jax,
             t_cam_jax,

@@ -777,36 +777,51 @@ def test_array_shapes_consistent(minimal_config) -> None:
 
 
 def test_time_vectors_monotonic(minimal_config) -> None:
-    """Time vectors must be monotonically non-decreasing.
+    """Time vectors must be strictly increasing.
 
     Policy:
       - IMU time is strictly monotonic (no jitter applied to IMU samples).
-      - Camera exposure / observation time may include Gaussian jitter, but
-        the simulator sorts jittered camera samples after clipping so that
-        downstream code (compute_imu_index_arrays, np.searchsorted in the
-        diagnostic-video loader, np.interp into IMU time) sees a sorted
-        t_cam_exp / t_cam_obs. A reversed camera step produces an empty
-        IMU interval and silently drops IMU propagation for that frame, so
-        we require non-decreasing — not merely "mostly monotonic" — here.
+      - Camera exposure / observation time may include Gaussian jitter, but the
+        simulator sorts and minimally separates jittered camera samples after
+        clipping so downstream filter timestamp validation accepts them.
     """
     sim = simulate_rat_imu(minimal_config, seed=42)
 
     # IMU time should be perfectly uniform (no jitter).
     assert np.all(np.diff(sim["t_imu"]) > 0), "IMU time must be strictly monotonic"
 
-    # Sorted camera timestamps: monotonically non-decreasing. Ties are
-    # possible at the IMU support boundary if jitter pushes multiple
-    # frames past the clip, so we use >= 0 rather than > 0.
+    # Sorted camera timestamps: strictly increasing to match filter validation.
     cam_exp_diffs = np.diff(sim["t_cam_exp"])
-    assert np.all(cam_exp_diffs >= 0), (
-        "t_cam_exp must be sorted (non-decreasing); the simulator "
-        "stable-sorts jittered camera samples to keep filter intervals well "
-        "defined."
+    assert np.all(cam_exp_diffs > 0), (
+        "t_cam_exp must be strictly increasing; the simulator stable-sorts and "
+        "minimally separates jittered camera samples to keep filter intervals "
+        "well defined."
     )
     cam_obs_diffs = np.diff(sim["t_cam_obs"])
-    assert np.all(cam_obs_diffs >= 0), (
-        "t_cam_obs must be sorted (non-decreasing); inherits ordering from "
+    assert np.all(cam_obs_diffs > 0), (
+        "t_cam_obs must be strictly increasing; inherits ordering from "
         "t_cam_exp via t_cam_obs = t_cam_exp + cam_latency_s."
+    )
+
+
+def test_camera_timestamps_strict_with_large_jitter() -> None:
+    """Boundary-clipped jitter must not create tied camera timestamps."""
+    config = RatIMUSimConfig(
+        duration_s=5.0,
+        fs_imu=200.0,
+        fs_cam=30.0,
+        cam_jitter_s=0.5,
+    )
+    sim = simulate_rat_imu(config, seed=42)
+
+    assert np.all(np.diff(sim["t_cam_exp"]) > 0)
+    assert np.all(np.diff(sim["t_cam_obs"]) > 0)
+    assert sim["t_cam_exp"][0] >= sim["t_imu"][0]
+    assert sim["t_cam_exp"][-1] <= sim["t_imu"][-1]
+    np.testing.assert_allclose(
+        sim["t_cam_obs"] - sim["t_cam_exp"],
+        config.cam_latency_s,
+        atol=1e-12,
     )
 
 

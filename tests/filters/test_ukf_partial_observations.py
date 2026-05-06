@@ -221,7 +221,12 @@ def test_ukf_no_leds_skips_update() -> None:
     )
     sim = simulate_rat_imu(config=sim_config, seed=42)
     # Disable gating for this edge case (all measurements are NaN)
-    config = UKFConfig(use_mahalanobis_gating=False)
+    config = UKFConfig(
+        use_mahalanobis_gating=False,
+        enable_zupt=True,
+        zupt_velocity_threshold=0.05,
+        zupt_measurement_noise=1e-4,
+    )
 
     # Create scenario with no LED observations (complete dropout)
     sim_no_leds = dict(sim)
@@ -229,6 +234,10 @@ def test_ukf_no_leds_skips_update() -> None:
     sim_no_leds["Z_cam_led2"] = np.full_like(sim["Z_cam_led2"], np.nan)
 
     result = unscented_kalman_filter(config, **_prepare_ukf_inputs(sim_no_leds))
+    result_no_zupt = unscented_kalman_filter(
+        UKFConfig(use_mahalanobis_gating=False, enable_zupt=False),
+        **_prepare_ukf_inputs(sim_no_leds),
+    )
 
     # With no measurements, covariance should grow (prediction-only)
     initial_var = result.filtered_covariances[0, 0, 0]
@@ -236,6 +245,17 @@ def test_ukf_no_leds_skips_update() -> None:
 
     assert final_var > initial_var, (
         "Covariance should grow with prediction-only (no measurement updates)"
+    )
+
+    np.testing.assert_allclose(
+        result.filtered_covariances[0, 2, 2],
+        result_no_zupt.filtered_covariances[0, 2, 2],
+        atol=1e-7,
+    )
+    np.testing.assert_allclose(
+        result.filtered_covariances[0, 3, 3],
+        result_no_zupt.filtered_covariances[0, 3, 3],
+        atol=1e-7,
     )
 
     # Filter should remain stable

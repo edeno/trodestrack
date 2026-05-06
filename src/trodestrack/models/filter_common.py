@@ -1528,6 +1528,7 @@ def build_quaternion_transition_jacobian(
         projector @ bias_gyro_block_unnormalized
     )
 
+    quat_self_block = projector
     if u_imu is not None:
         gyro_meas = jnp.asarray(u_imu, dtype=dtype)[:3]
         bias_gyro = linearization_mean[gyro_bias_idx]
@@ -1545,9 +1546,8 @@ def build_quaternion_transition_jacobian(
         quat_self_unnormalized = (
             jnp.eye(4, dtype=dtype) + 0.5 * dt_arr * omega_right_matrix
         )
-        F_x = F_x.at[quat_idx[:, None], quat_idx[None, :]].set(
-            projector @ quat_self_unnormalized
-        )
+        quat_self_block = projector @ quat_self_unnormalized
+        F_x = F_x.at[quat_idx[:, None], quat_idx[None, :]].set(quat_self_block)
 
     if enable_experimental_accel_translation:
         basis_body = jnp.eye(3, dtype=dtype)
@@ -1572,12 +1572,10 @@ def build_quaternion_transition_jacobian(
         # Without this block, EKF covariance propagation and RTS smoothing
         # silently dropped the pos/vel-vs-quat coupling (autodiff parity
         # check: max abs diff ≈ 0.37 with all-zero entries here vs
-        # autodiff entries up to 0.366). Build the block via local
-        # jax.jacfwd of the rotation-of-accel lambda — this is
-        # non-singular even at exact zero rotation (unlike the propagation
-        # step) so it is safe to autodiff. Requires ``u_imu`` to read the
-        # accel measurement; if it isn't supplied we leave the block at
-        # zero with a noisy comment so the caller is aware.
+        # autodiff entries up to 0.366). Build d(accel_world)/d(q_next)
+        # via a local jax.jacfwd of the rotation-of-accel lambda, then
+        # compose with the same first-order q_prev -> q_next transition
+        # block used above. Requires ``u_imu`` to read the accel measurement.
         if u_imu is not None and len(layout.bias_accel_idx) >= 3:
             accel_meas = jnp.asarray(u_imu, dtype=dtype)[3:6]
             bias_accel = linearization_mean[
@@ -1593,17 +1591,17 @@ def build_quaternion_transition_jacobian(
                 return rotate_vector_body_to_world(q4, a_meas)
 
             d_accel_world_d_q = jacfwd(_accel_world_of_q)(q_pred)
-            # d_accel_world_d_q has shape (3, 4). Project onto the unit-
-            # quaternion tangent (post-normalize Jacobian) for parity
-            # with the qq / q-vs-bias_gyro blocks above.
-            d_accel_world_d_q_proj = d_accel_world_d_q @ projector
+            # d_accel_world_d_q has shape (3, 4) with respect to q_next.
+            # Compose it with the same q_prev -> q_next transition block used
+            # above so this F_x block is also with respect to the prior state.
+            d_accel_world_d_q_prev = d_accel_world_d_q @ quat_self_block
 
             for dim, (pos_i, vel_i) in enumerate(
                 zip(layout.pos_idx, layout.vel_idx, strict=True)
             ):
-                F_x = F_x.at[vel_i, quat_idx].set(dt_arr * d_accel_world_d_q_proj[dim])
+                F_x = F_x.at[vel_i, quat_idx].set(dt_arr * d_accel_world_d_q_prev[dim])
                 F_x = F_x.at[pos_i, quat_idx].set(
-                    0.5 * dt_arr**2 * d_accel_world_d_q_proj[dim]
+                    0.5 * dt_arr**2 * d_accel_world_d_q_prev[dim]
                 )
 
     return F_x
@@ -1912,6 +1910,8 @@ def initialize_state(
 def update_zupt(
     state: FilterState,
     config: FilterCoreConfig,
+    *,
+    active: bool | jnp.ndarray = True,
 ) -> tuple[FilterState, jnp.ndarray]:
     """Apply zero-velocity pseudo-measurement when nearly stationary.
 
@@ -1921,6 +1921,10 @@ def update_zupt(
         Current state.
     config : FilterCoreConfig
         ZUPT parameters in config.
+    active : bool | jnp.ndarray, optional
+        Additional caller-side gate. Use this to disable ZUPT until the filter
+        has a meaningful velocity context, without mutating static config
+        inside JIT-compiled scans.
 
     Returns
     -------
@@ -1972,9 +1976,9 @@ def update_zupt(
     # Extract measurement components (all pure functions, JIT-safe)
     meas_pred = zupt_model.predict(mean)
     speed = jnp.linalg.norm(meas_pred)
-    is_active = jnp.asarray(config.enable_zupt) & (
-        speed < jnp.asarray(config.zupt_velocity_threshold, dtype=mean.dtype)
-    )
+    is_active = (
+        jnp.asarray(active, dtype=bool) & jnp.asarray(config.enable_zupt, dtype=bool)
+    ) & (speed < jnp.asarray(config.zupt_velocity_threshold, dtype=mean.dtype))
 
     def do_update(_: None) -> tuple[FilterState, jnp.ndarray]:
         H = zupt_model.jacobian(mean)

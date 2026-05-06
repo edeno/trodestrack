@@ -3,6 +3,7 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 from trodestrack.models.ekf import (
     EKFConfig,
@@ -15,6 +16,7 @@ from trodestrack.models.ekf import (
 )
 from trodestrack.models.filter_common import (
     FilterState,
+    build_quaternion_transition_jacobian,
     compute_imu_index_arrays,
     dynamics_function,
     initialize_state,
@@ -30,6 +32,68 @@ from trodestrack.models.quaternion import (
 from trodestrack.models.state_layout import get_layout
 from trodestrack.models.ukf import UKFConfig, unscented_kalman_filter
 from trodestrack.runtime.offline import rts_smoother
+
+
+@pytest.mark.parametrize("state_mode", ["3d_euler", "3d_quat", "3d_cam_6dof_imu"])
+def test_2d_ekf_rejects_3d_state_layouts(state_mode: str) -> None:
+    """The 2D EKF must not run 3D layouts through the 2D LED model."""
+    t_imu = np.array([0.0, 0.01], dtype=np.float32)
+    t_cam = np.array([0.0], dtype=np.float32)
+    z1 = np.array([[0.0, 0.0]], dtype=np.float32)
+    z2 = np.array([[0.04, 0.0]], dtype=np.float32)
+    mask = np.array([True])
+    u_imu = np.zeros((2, 6), dtype=np.float32)
+
+    with pytest.raises(ValueError, match="3D state layout"):
+        extended_kalman_filter(
+            EKFConfig(state_mode=state_mode),
+            t_imu,
+            u_imu,
+            t_cam,
+            z1,
+            z2,
+            mask,
+        )
+
+
+def test_ekf_zupt_waits_for_vision_context_with_auto_initialized_dropout() -> None:
+    t_imu = np.array([0.0, 0.05, 0.1], dtype=np.float32)
+    t_cam = np.array([0.0, 0.1], dtype=np.float32)
+    u_imu = np.zeros((t_imu.shape[0], 3), dtype=np.float32)
+    z1 = np.full((t_cam.shape[0], 2), np.nan, dtype=np.float32)
+    z2 = np.full((t_cam.shape[0], 2), np.nan, dtype=np.float32)
+    mask = np.ones(t_cam.shape[0], dtype=bool)
+
+    result_no_zupt = extended_kalman_filter(
+        EKFConfig(enable_zupt=False, led_distance=0.04),
+        t_imu,
+        u_imu,
+        t_cam,
+        z1,
+        z2,
+        mask,
+    )
+    result_with_zupt = extended_kalman_filter(
+        EKFConfig(
+            enable_zupt=True,
+            led_distance=0.04,
+            zupt_velocity_threshold=0.05,
+            zupt_measurement_noise=1e-4,
+        ),
+        t_imu,
+        u_imu,
+        t_cam,
+        z1,
+        z2,
+        mask,
+    )
+
+    vel_idx = np.array(get_layout("2d_full").vel_idx)
+    np.testing.assert_allclose(
+        np.asarray(result_with_zupt.filtered_covariances[0][vel_idx, vel_idx]),
+        np.asarray(result_no_zupt.filtered_covariances[0][vel_idx, vel_idx]),
+        atol=1e-7,
+    )
 
 
 def test_initialize_state_vision_only_layout() -> None:
@@ -532,6 +596,7 @@ def test_ekf_3d_core_traces_with_jax_scalar_loglik() -> None:
     def run_core(U_imu_arg: jnp.ndarray, z_leds_arg: jnp.ndarray) -> jnp.ndarray:
         result = _extended_kalman_filter_3d_core(
             config,
+            jnp.asarray(True),
             t_imu_jax,
             U_imu_arg,
             t_cam_jax,
@@ -677,6 +742,56 @@ def test_predict_step_3d_quaternion_couples_bias_covariance() -> None:
     )
     assert np.any(
         np.abs(np.asarray(predicted.cov[vel_idx[:, None], accel_bias_idx])) > 0.0
+    )
+
+
+def test_quaternion_translation_jacobian_chains_through_gyro_step() -> None:
+    """The accel-translation F block is with respect to q_prev, not q_next."""
+    layout = get_layout("3d_cam_6dof_imu")
+    quat_idx = jnp.array(layout.heading_idx)
+    mean = jnp.zeros(layout.n, dtype=jnp.float32)
+    mean = mean.at[jnp.array(layout.pos_idx)].set(jnp.array([0.1, -0.2, 0.3]))
+    mean = mean.at[jnp.array(layout.vel_idx)].set(jnp.array([0.4, -0.1, 0.2]))
+    quat = quaternion_from_rotation_vector(jnp.array([0.4, -0.2, 0.7]))
+    mean = mean.at[quat_idx].set(quat)
+    mean = mean.at[jnp.array(layout.bias_gyro_idx)].set(jnp.array([0.01, -0.02, 0.015]))
+    mean = mean.at[jnp.array(layout.bias_accel_idx)].set(jnp.array([0.03, -0.04, 0.02]))
+    u_imu = jnp.array([2.0, -1.5, 3.0, 0.4, -0.1, 9.9], dtype=jnp.float32)
+    dt = jnp.asarray(0.05, dtype=jnp.float32)
+    config = EKFConfig(
+        state_mode="3d_cam_6dof_imu",
+        enable_experimental_accel_translation=True,
+    )
+
+    def transition(x):
+        return dynamics_function(
+            x,
+            u_imu,
+            dt,
+            config.damping_coeff,
+            layout,
+            gravity_body=config.imu_gravity_body,
+            enable_experimental_accel_translation=True,
+        )
+
+    pred = transition(mean)
+    F_auto = jax.jacfwd(transition)(mean)
+    F_manual = build_quaternion_transition_jacobian(
+        mean,
+        pred,
+        dt,
+        config.damping_coeff,
+        layout,
+        u_imu=u_imu,
+        enable_experimental_accel_translation=True,
+    )
+
+    rows = np.r_[np.array(layout.pos_idx), np.array(layout.vel_idx)]
+    cols = np.array(layout.heading_idx)
+    np.testing.assert_allclose(
+        np.asarray(F_manual[np.ix_(rows, cols)]),
+        np.asarray(F_auto[np.ix_(rows, cols)]),
+        atol=1e-2,
     )
 
 
