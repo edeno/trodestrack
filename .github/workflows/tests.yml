@@ -56,8 +56,15 @@ jobs:
           UV_PYTHON: python${{ matrix.python-version }}
 
       - name: Run tests with coverage
+        # Exclude wall-clock benchmark tests by default. Their throughput
+        # / latency assertions are hardware-dependent and the tests
+        # themselves take ~45-60s each; running them across the full
+        # OS × Python matrix on every push/PR is both slow and flaky on
+        # GitHub-hosted runners. They can be invoked explicitly with
+        # ``uv run pytest -m "slow or benchmark"`` locally or in a
+        # dedicated workflow.
         run: |
-          uv run pytest --cov=src/trodestrack --cov-report=xml --cov-report=term
+          uv run pytest -m "not slow and not benchmark" --cov=src/trodestrack --cov-report=xml --cov-report=term
         env:
           MPLBACKEND: Agg  # Use non-GUI backend for matplotlib
           UV_PYTHON: python${{ matrix.python-version }}

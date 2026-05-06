@@ -10,7 +10,7 @@ TrodesTrack combines video tracking (Trodes LEDs and/or DeepLabCut keypoints) wi
 - **3D IMU Support**: Full 6-axis IMU processing (3-axis gyro + 3-axis accel) with gravity compensation
 - **Online & Offline Processing**: Forward-only EKF and RTS smoothing — both run as batch operations over complete input arrays. The "online" CLI is forward-only, not a streaming ingest loop.
 - **Robust Handling**: Occlusions, reflections, and camera/sensor dropout. Transient LED swaps are mitigated by Mahalanobis gating on dual-LED measurements; persistent LED swaps are *not* automatically detected (tracked by the `test_filter_stable_under_frequent_swaps` xfail in `tests/filters/test_robustness.py`) and require pre-filter LED-identity correction.
-- **JAX-Accelerated**: High-performance implementation using JAX - **316x realtime** on CPU, GPU-ready
+- **JAX-Accelerated**: JIT-compiled JAX. The CI-enforced floors are ≥10× realtime offline on CPU and ≤33 ms amortized mean per frame online on a 30-minute session ([tests/benchmark/test_throughput.py](https://github.com/edeno/trodestrack/blob/master/tests/benchmark/test_throughput.py)). Absolute throughput is hardware-dependent.
 - **Rich Simulation**: Comprehensive synthetic data generation for testing and validation
 - **Diagnostic Visualization**: Publication-quality video output for quality control
 
@@ -23,7 +23,8 @@ TrodesTrack achieves production-ready accuracy:
 | Position RMSE | < 2 cm | < 2 cm |
 | Velocity RMSE | < 10 cm/s | < 10 cm/s |
 | Heading RMSE | < 7 deg | < 7 deg |
-| Throughput | > 10x realtime | **316x realtime** |
+| Throughput (offline) | ≥ 10× realtime | enforced; reference run on M-series Mac CPU ~316× realtime |
+| Latency (online, amortized mean) | ≤ 33 ms / frame | enforced; reference run on M-series Mac CPU ~0.11 ms / frame |
 
 ## Quick Example
 

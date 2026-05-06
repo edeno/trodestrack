@@ -36,6 +36,20 @@ from trodestrack.viz.utils import VideoData, prepare_video_data
 log = logging.getLogger(__name__)
 
 
+def _led_label_direction_anomaly(
+    led1_pos: np.ndarray, led2_pos: np.ndarray, theta: float
+) -> bool:
+    """Return True when the LED1/LED2 labels appear swapped relative to heading.
+
+    Simulator convention (``trodestrack.sim.rat_imu``): LED1 is rear and
+    LED2 is front, so ``led2 - led1`` projects positively onto the body
+    +x axis under correct labeling. A negative projection indicates the
+    labels are swapped.
+    """
+    body_x_axis = np.array([np.cos(theta), np.sin(theta)])
+    return float(np.dot(led2_pos - led1_pos, body_x_axis)) < 0
+
+
 def create_diagnostic_video(
     sim_data: SimOut,
     output_path: str | Path,
@@ -415,7 +429,16 @@ def create_diagnostic_video(
         state_error_panel = StateErrorPanelArtist(
             ax_vel_error, ax_heading_error, window_s=time_window_s, fps=fps
         )
-        bias_panel = BiasEstimatePanelArtist(ax_bias, window_s=time_window_s, fps=fps)
+        # The bias panel reads ``layout.bias_gyro_idx[0]`` and
+        # ``layout.bias_accel_idx[0]`` per frame. Layouts without
+        # IMU biases (e.g. ``vision_only``) have empty bias index
+        # tuples, so leave bias_panel = None for those layouts; the
+        # update path already gates on ``bias_panel is not None``.
+        assert overlay_layout is not None
+        if overlay_layout.has_biases:
+            bias_panel = BiasEstimatePanelArtist(
+                ax_bias, window_s=time_window_s, fps=fps
+            )
         nees_panel = NEESPanelArtist(
             ax_nees, window_s=time_window_s, fps=fps, state_dim=2
         )
@@ -442,17 +465,11 @@ def create_diagnostic_video(
             )
             spacing_anomaly = abs(spacing - expected_spacing) > 0.5 * expected_spacing
 
-            # Check 2: LED vector direction (catches reflection/labeling swaps)
-            # Get body state for this frame
+            # Check 2: LED vector direction (catches reflection/labeling swaps).
+            # See _led_label_direction_anomaly for the convention.
             state = np.asarray(video_data["X_truth"][frame_idx])
             theta = float(state[4])  # heading angle
-            body_x_axis = np.array([np.cos(theta), np.sin(theta)])
-            led_vector = led1_pos - led2_pos  # Vector from LED2 to LED1
-
-            # If LED1 is front and LED2 is back, dot product should be positive
-            # (led_vector should point in same direction as body X-axis)
-            dot_product = np.dot(led_vector, body_x_axis)
-            direction_anomaly = dot_product < 0  # Vector points backward = swap
+            direction_anomaly = _led_label_direction_anomaly(led1_pos, led2_pos, theta)
 
             if spacing_anomaly or direction_anomaly:
                 event_times["led_swap"].append(t)
@@ -499,7 +516,7 @@ def create_diagnostic_video(
             color="w",
             markerfacecolor=COLORS["blue"],
             markersize=8,
-            label="LED1 (front)",
+            label="LED1 (rear)",
         ),
         Line2D(
             [0],
@@ -508,7 +525,7 @@ def create_diagnostic_video(
             color="w",
             markerfacecolor=COLORS["orange"],
             markersize=8,
-            label="LED2 (back)",
+            label="LED2 (front)",
         ),
         Line2D(
             [0],
@@ -699,12 +716,13 @@ def create_diagnostic_video(
 
         camera_panel.update(led1_visible, conf1, led2_visible, conf2, latency_ms)
 
-        # Filter overlay (if provided)
+        # Filter overlay (if provided). bias_panel is gated separately
+        # below so layouts without biases (e.g. ``vision_only``) still
+        # render the position/residual/error/NEES panels.
         if (
             filter_artist is not None
             and residual_panel is not None
             and state_error_panel is not None
-            and bias_panel is not None
             and nees_panel is not None
             and filter_results is not None
         ):
@@ -724,10 +742,6 @@ def create_diagnostic_video(
             pos_x_idx, pos_y_idx = overlay_layout.pos_idx[0], overlay_layout.pos_idx[1]
             vel_x_idx, vel_y_idx = overlay_layout.vel_idx[0], overlay_layout.vel_idx[1]
             heading_idx_int = get_heading_index(overlay_layout)
-            gyro_bias_idx = overlay_layout.bias_gyro_idx[0]
-            accel_bias_idx = overlay_layout.bias_accel_idx
-            accel_bias_x_idx = accel_bias_idx[0]
-            accel_bias_y_idx = accel_bias_idx[1]
 
             # Ground truth at camera time
             x_truth, y_truth, vx_truth, vy_truth, theta_truth = state
@@ -787,18 +801,20 @@ def create_diagnostic_video(
             )
 
             # ================================================================
-            # 4. Update bias estimates (show filter learning IMU biases)
+            # 4. Update bias estimates (show filter learning IMU biases).
+            # Layouts without IMU biases (e.g. ``vision_only``) leave
+            # bias_panel as None and skip this block.
             # ================================================================
-            gyro_bias = x_est[gyro_bias_idx]  # rad/s
-            accel_bias_x = x_est[accel_bias_x_idx]  # m/s²
-            accel_bias_y = x_est[accel_bias_y_idx]  # m/s²
-
-            bias_panel.update(
-                t,
-                float(gyro_bias),
-                float(accel_bias_x),
-                float(accel_bias_y),
-            )
+            if bias_panel is not None:
+                gyro_bias_idx = overlay_layout.bias_gyro_idx[0]
+                accel_bias_x_idx = overlay_layout.bias_accel_idx[0]
+                accel_bias_y_idx = overlay_layout.bias_accel_idx[1]
+                bias_panel.update(
+                    t,
+                    float(x_est[gyro_bias_idx]),
+                    float(x_est[accel_bias_x_idx]),
+                    float(x_est[accel_bias_y_idx]),
+                )
 
             # ================================================================
             # 5. Compute and update NEES (filter consistency metric)

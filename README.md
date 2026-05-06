@@ -10,7 +10,7 @@ trodestrack combines video tracking (Trodes LEDs and/or DeepLabCut keypoints) wi
 - **3D IMU Support**: Full 6-axis IMU processing (3-axis gyro + 3-axis accel) with gravity compensation
 - **Online & Offline Processing**: Forward-only EKF and RTS smoothing — both run as batch operations over complete input arrays. The `trodestrack online` CLI is forward-only ("no future-frame dependence"), not a streaming / real-time ingest loop.
 - **Robust Handling**: Occlusions, reflections, and camera/sensor dropout. Transient LED swaps are mitigated by Mahalanobis gating on dual-LED measurements; persistent LED swaps are *not* automatically detected (tracked by the `test_filter_stable_under_frequent_swaps` xfail in [tests/filters/test_robustness.py](tests/filters/test_robustness.py)) and require pre-filter LED-identity correction.
-- **JAX-Accelerated**: High-performance implementation using JAX - **316× realtime** on CPU, GPU-ready
+- **JAX-Accelerated**: High-performance JIT-compiled JAX implementation. The CI-enforced floors are ≥10× realtime offline on CPU and ≤33 ms amortized mean per frame online on a 30-minute session ([tests/benchmark/test_throughput.py](tests/benchmark/test_throughput.py)). Headline numbers measured on an M-series Mac CPU were ~316× realtime / ~0.11 ms per frame; absolute throughput is hardware-dependent.
 - **Rich Simulation**: Comprehensive synthetic data generation for testing and validation
 - **Diagnostic Visualization**: Publication-quality video output for quality control
 
@@ -107,7 +107,7 @@ Shows how backward RTS smoothing achieves **3× drift reduction** on 5-second dr
 uv run python examples/08_qa_report_generation.py
 ```
 
-Creates a publication-quality PDF with all PRD metrics, NEES/NIS checks, and time series plots.
+Creates a publication-quality PDF with the full set of accuracy metrics, NEES/NIS consistency checks, and time-series plots.
 
 ### Python API Examples
 
@@ -308,11 +308,11 @@ See [`examples/README.md`](examples/README.md) for the complete learning path. E
   - Diagnostic videos with 9-panel filter state visualization
 - ✅ **Testing & Validation**
   - 660+ unit, integration, regression, and property tests. Last full-suite run: 667 collected → 665 passed, 1 skipped, 1 xfailed (`uv run pytest`, ~4:40). The single xfail tracks the unimplemented persistent-LED-swap detection (`test_filter_stable_under_frequent_swaps` in `tests/filters/test_robustness.py`); rerun `uv run pytest` for current numbers.
-  - PRD acceptance criteria achieved:
+  - Accuracy and performance targets achieved on the simulated benchmark:
     - Position RMSE ≤ 2 cm ✓
     - Velocity RMSE ≤ 10 cm/s ✓
     - Heading RMSE ≤ 7° ✓
-    - Throughput: 316× realtime (CPU), latency: 0.11 ms/frame ✓
+    - Throughput: ≥10× realtime offline on CPU and ≤33 ms amortized mean per frame online (30-minute session) are enforced in CI. Headline numbers measured on an M-series Mac CPU were ~316× realtime / ~0.11 ms per frame ([tests/benchmark/test_throughput.py](tests/benchmark/test_throughput.py)); absolute throughput is hardware-dependent.
 - ✅ **3D IMU Support** (M5)
   - Full 6-axis IMU processing (gyro + accel)
   - Gravity-aware dynamics with 3D acceleration
@@ -322,7 +322,7 @@ See [`examples/README.md`](examples/README.md) for the complete learning path. E
   - JIT-compiled UKF (mirrors EKF pattern)
   - Vectorized operations (sigma points, bias freeze)
   - Host-side preprocessing for efficiency
-  - 316× realtime speedup on 5-minute session
+  - On the 30-minute throughput benchmark, headline numbers measured on an M-series Mac CPU were ~316× realtime / ~0.11 ms per frame. The CI-enforced floors are ≥10× realtime offline and ≤33 ms amortized mean per frame online ([tests/benchmark/test_throughput.py](tests/benchmark/test_throughput.py))
 
 ### In Progress 🚧
 
