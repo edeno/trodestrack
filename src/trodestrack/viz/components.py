@@ -1506,10 +1506,19 @@ class NEESPanelArtist:
             time_array = np.array(self.time_buffer)
             nees_array = np.array(self.nees_buffer)
 
-            # Filter out NaN for plotting
+            # Filter out NaN for plotting. The NEES line is stroked through
+            # only the finite samples (the other diagnostic panels pass NaN
+            # straight to set_data, which matplotlib renders as a gap; NEES
+            # filters first to keep its line continuous). When the rolling
+            # window contains no valid samples we must explicitly clear the
+            # line — otherwise the previously-rendered NEES value stays
+            # visible during dropout windows and gives a misleading
+            # "consistency reading" for periods when NEES is unavailable.
             valid_mask = ~np.isnan(nees_array)
             if np.any(valid_mask):
                 self.line_nees.set_data(time_array[valid_mask], nees_array[valid_mask])
+            else:
+                self.line_nees.set_data([], [])
 
             # Auto-scale x-axis
             self.ax.set_xlim(time_array[0], time_array[-1])
