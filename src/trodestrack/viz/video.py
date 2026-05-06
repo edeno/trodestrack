@@ -37,17 +37,38 @@ log = logging.getLogger(__name__)
 
 
 def _led_label_direction_anomaly(
-    led1_pos: np.ndarray, led2_pos: np.ndarray, theta: float
+    led1_pos: np.ndarray,
+    led2_pos: np.ndarray,
+    theta: float,
+    led1_offset_body: np.ndarray,
+    led2_offset_body: np.ndarray,
 ) -> bool:
     """Return True when the LED1/LED2 labels appear swapped relative to heading.
 
-    Simulator convention (``trodestrack.sim.rat_imu``): LED1 is rear and
-    LED2 is front, so ``led2 - led1`` projects positively onto the body
-    +x axis under correct labeling. A negative projection indicates the
-    labels are swapped.
+    The simulator supports both default offsets (LED1 rear, LED2 front) and
+    custom offsets where LED1 may be the front marker. Compare the observed
+    inter-LED vector ``led2_pos - led1_pos`` against the *expected*
+    body-frame offset rotated into world frame: under correct labeling the
+    two vectors project positively onto each other; under swapped labels
+    they oppose. Hard-coding the default convention false-flags every frame
+    in custom-offset configurations.
+
+    Returns False when the configured offsets coincide (or the body-frame
+    inter-LED vector has zero length), since the direction check is
+    undefined.
     """
-    body_x_axis = np.array([np.cos(theta), np.sin(theta)])
-    return float(np.dot(led2_pos - led1_pos, body_x_axis)) < 0
+    expected_body = np.asarray(led2_offset_body) - np.asarray(led1_offset_body)
+    if not np.any(expected_body):
+        return False
+    cos_t, sin_t = np.cos(theta), np.sin(theta)
+    expected_world = np.array(
+        [
+            cos_t * expected_body[0] - sin_t * expected_body[1],
+            sin_t * expected_body[0] + cos_t * expected_body[1],
+        ]
+    )
+    observed_world = np.asarray(led2_pos) - np.asarray(led1_pos)
+    return float(np.dot(observed_world, expected_world)) < 0
 
 
 def create_diagnostic_video(
@@ -469,7 +490,13 @@ def create_diagnostic_video(
             # See _led_label_direction_anomaly for the convention.
             state = np.asarray(video_data["X_truth"][frame_idx])
             theta = float(state[4])  # heading angle
-            direction_anomaly = _led_label_direction_anomaly(led1_pos, led2_pos, theta)
+            direction_anomaly = _led_label_direction_anomaly(
+                led1_pos,
+                led2_pos,
+                theta,
+                config.led1_offset_body,
+                config.led2_offset_body,
+            )
 
             if spacing_anomaly or direction_anomaly:
                 event_times["led_swap"].append(t)
@@ -505,7 +532,18 @@ def create_diagnostic_video(
         ax_progress, duration_s=config.duration_s, event_times=event_times
     )
 
-    # Add legend entries for heading and velocity
+    # Add legend entries for heading and velocity. Derive front/rear
+    # labels from the configured body-frame offsets so custom orderings
+    # (e.g. LED1 in front) render correctly.
+    led1_body_x = float(np.asarray(config.led1_offset_body).reshape(-1)[0])
+    led2_body_x = float(np.asarray(config.led2_offset_body).reshape(-1)[0])
+    if led1_body_x > led2_body_x:
+        led1_label, led2_label = "LED1 (front)", "LED2 (rear)"
+    elif led1_body_x < led2_body_x:
+        led1_label, led2_label = "LED1 (rear)", "LED2 (front)"
+    else:
+        led1_label, led2_label = "LED1", "LED2"
+
     from matplotlib.lines import Line2D
 
     legend_elements = [
@@ -516,7 +554,7 @@ def create_diagnostic_video(
             color="w",
             markerfacecolor=COLORS["blue"],
             markersize=8,
-            label="LED1 (rear)",
+            label=led1_label,
         ),
         Line2D(
             [0],
@@ -525,7 +563,7 @@ def create_diagnostic_video(
             color="w",
             markerfacecolor=COLORS["orange"],
             markersize=8,
-            label="LED2 (front)",
+            label=led2_label,
         ),
         Line2D(
             [0],

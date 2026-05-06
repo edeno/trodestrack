@@ -993,5 +993,82 @@ def test_second_led_disabled() -> None:
     assert not mask2.any()
 
 
+def test_led_offset_body_must_be_2d_finite_array():
+    """LED offsets must validate at construction (shape (2,), all finite)."""
+    # Scalar offsets used to crash mid-simulation with a raw IndexError.
+    with pytest.raises(ValueError, match=r"led1_offset_body must be a body-frame"):
+        RatIMUSimConfig(
+            duration_s=1.0,
+            use_second_led=True,
+            led1_offset_body=0.025,
+            led2_offset_body=np.array([-0.025, 0.0]),
+        )
+    # NaN offsets used to construct silently and emit non-finite Z_cam values.
+    with pytest.raises(ValueError, match=r"led2_offset_body must contain only finite"):
+        RatIMUSimConfig(
+            duration_s=1.0,
+            use_second_led=True,
+            led1_offset_body=np.array([0.02, 0.0]),
+            led2_offset_body=np.array([np.nan, 0.0]),
+        )
+    # Wrong-length offsets must also be rejected.
+    with pytest.raises(ValueError, match=r"led1_offset_body must be a body-frame"):
+        RatIMUSimConfig(
+            duration_s=1.0,
+            use_second_led=True,
+            led1_offset_body=np.array([0.02, 0.0, 0.0]),
+            led2_offset_body=np.array([-0.02, 0.0]),
+        )
+
+
+def test_short_duration_with_too_few_samples_is_rejected():
+    """duration_s producing < 2 IMU or camera samples must be rejected.
+
+    The simulator rounds ``duration_s * fs_*`` to integer counts; very
+    small positive durations previously crashed with IndexError or
+    zero-size reduction errors mid-simulation.
+    """
+    with pytest.raises(ValueError, match=r"need at least 2 of each"):
+        RatIMUSimConfig(duration_s=0.001, fs_imu=100.0, fs_cam=30.0)
+    with pytest.raises(ValueError, match=r"need at least 2 of each"):
+        RatIMUSimConfig(duration_s=0.01, fs_imu=100.0, fs_cam=30.0)
+    # 0.05s @ fs_cam=30 → 2 camera samples (boundary, must accept).
+    cfg = RatIMUSimConfig(duration_s=0.05, fs_imu=100.0, fs_cam=30.0)
+    sim = simulate_rat_imu(cfg, seed=0)
+    assert len(sim["t_cam_exp"]) >= 2
+    assert len(sim["t_imu"]) >= 2
+
+
+def test_persistent_swap_with_single_led_warns():
+    """Persistent-swap settings on a single-LED sim should emit a warning.
+
+    Previously the warning only checked led_swap_prob (per_frame mode); a
+    user enabling persistent swaps with use_second_led=False got no
+    warning and silently zero swaps.
+    """
+    import warnings as warnings_module
+
+    with warnings_module.catch_warnings(record=True) as caught:
+        warnings_module.simplefilter("always")
+        RatIMUSimConfig(
+            duration_s=1.0,
+            fs_imu=200.0,
+            fs_cam=30.0,
+            use_second_led=False,
+            led_swap_mode="persistent",
+            led_swap_rate=2.0,
+        )
+
+    persistent_warnings = [
+        str(w.message)
+        for w in caught
+        if "persistent" in str(w.message).lower() and "use_second_led" in str(w.message)
+    ]
+    assert len(persistent_warnings) == 1, (
+        f"Expected exactly one persistent-swap warning; got "
+        f"{len(persistent_warnings)}: {persistent_warnings}"
+    )
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

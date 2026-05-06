@@ -389,6 +389,23 @@ class RatIMUSimConfig:
                 stacklevel=2,
             )
 
+        # Minimum-sample-count gate. ``simulate_rat_imu`` rounds
+        # ``duration_s * fs_*`` to integer sample counts; very short
+        # positive durations therefore produce zero or one sample per
+        # stream and crash mid-simulation (e.g. ``IndexError`` on
+        # ``Z_cam_led1[0]`` or ``zero-size reduction`` on ``min(t_imu)``).
+        # Require at least 2 samples for both IMU and camera streams so
+        # downstream ``np.diff`` / boundary indexing is well-defined.
+        T_imu = int(np.round(self.duration_s * self.fs_imu))
+        T_cam = int(np.round(self.duration_s * self.fs_cam))
+        if T_imu < 2 or T_cam < 2:
+            raise ValueError(
+                f"duration_s={self.duration_s}s at fs_imu={self.fs_imu} Hz, "
+                f"fs_cam={self.fs_cam} Hz produces only T_imu={T_imu}, "
+                f"T_cam={T_cam} samples; need at least 2 of each. "
+                f"Increase duration_s or sampling rates."
+            )
+
         # Arena validation
         if self.arena_w <= 0 or self.arena_h <= 0:
             raise ValueError(
@@ -535,11 +552,41 @@ class RatIMUSimConfig:
                 f"Example: drag_lat=1.2 (high lateral sliding drag)"
             )
 
+        # LED offset shape / finiteness validation. Offsets are documented
+        # as body-frame [x, y] arrays; the simulator later indexes ``[0]``
+        # / ``[1]`` and folds them into camera observations, so a scalar
+        # offset raises a raw IndexError mid-simulation and a NaN offset
+        # silently propagates non-finite world-frame LED positions.
+        for fname in ("led1_offset_body", "led2_offset_body"):
+            value = np.asarray(getattr(self, fname))
+            if value.ndim != 1 or value.shape[0] != 2:
+                raise ValueError(
+                    f"{fname} must be a body-frame [x, y] array of shape (2,); "
+                    f"got shape {value.shape}."
+                )
+            if not np.all(np.isfinite(value)):
+                raise ValueError(
+                    f"{fname} must contain only finite values; got {value!r}."
+                )
+
         # LED configuration validation
         if not self.use_second_led and self.led_swap_prob > 0:
             warnings.warn(
                 f"LED swap probability is {self.led_swap_prob} but use_second_led=False. "
                 f"Swaps require two LEDs. Set use_second_led=True or led_swap_prob=0.0",
+                UserWarning,
+                stacklevel=2,
+            )
+        if (
+            not self.use_second_led
+            and self.led_swap_mode == "persistent"
+            and self.led_swap_rate > 0
+        ):
+            warnings.warn(
+                f"led_swap_mode='persistent' with led_swap_rate="
+                f"{self.led_swap_rate} but use_second_led=False. Persistent "
+                f"swaps require two LEDs. Set use_second_led=True or "
+                f"led_swap_rate=0.0 (or led_swap_mode='per_frame').",
                 UserWarning,
                 stacklevel=2,
             )

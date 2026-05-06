@@ -7,14 +7,31 @@ import numpy as np
 from trodestrack.sim.rat_imu import RatIMUSimConfig, simulate_rat_imu
 from trodestrack.viz.video import _led_label_direction_anomaly
 
+DEFAULT_LED1_OFFSET = np.array([-0.02, 0.0])  # Rear (simulator default)
+DEFAULT_LED2_OFFSET = np.array([0.02, 0.0])  # Front
+
+
+def _flag_count(sim, led1_offset, led2_offset, swap_args=False):
+    """Count direction anomalies across a simulation."""
+    theta_cam = np.interp(sim["t_cam_exp"], sim["t_imu"], sim["X_truth"][:, 4])
+    n = len(sim["Z_cam_led1"])
+    if swap_args:
+        a, b = sim["Z_cam_led2"], sim["Z_cam_led1"]
+    else:
+        a, b = sim["Z_cam_led1"], sim["Z_cam_led2"]
+    return sum(
+        _led_label_direction_anomaly(
+            a[i], b[i], float(theta_cam[i]), led1_offset, led2_offset
+        )
+        for i in range(n)
+    ), n
+
 
 def test_correctly_labeled_led_pair_is_not_flagged_as_swap():
-    """LED2 in front, LED1 in rear should not flag as a directional swap.
+    """Default offsets (LED1 rear, LED2 front) should not flag clean frames.
 
     Without the convention fix in `_led_label_direction_anomaly`, every
-    correctly-labeled frame in a clean simulation flagged as a swap (the
-    helper computed (led1 - led2) and asserted dot > 0 with body +x;
-    simulator convention is the opposite).
+    correctly-labeled frame in a clean simulation flagged as a swap.
     """
     cfg = RatIMUSimConfig(
         duration_s=1.0,
@@ -25,24 +42,12 @@ def test_correctly_labeled_led_pair_is_not_flagged_as_swap():
         led_wall_reflection_prob=0.0,
     )
     sim = simulate_rat_imu(cfg, seed=0)
-
-    # Heading at each camera frame, interpolated from IMU truth.
-    theta_cam = np.interp(sim["t_cam_exp"], sim["t_imu"], sim["X_truth"][:, 4])
-
-    n_anomalies = sum(
-        _led_label_direction_anomaly(
-            sim["Z_cam_led1"][i], sim["Z_cam_led2"][i], float(theta_cam[i])
-        )
-        for i in range(len(sim["Z_cam_led1"]))
-    )
-    assert n_anomalies == 0, (
-        f"Clean simulation flagged {n_anomalies} frames as LED swaps; "
-        "expected 0 with simulator convention LED1=rear, LED2=front."
-    )
+    flagged, n = _flag_count(sim, DEFAULT_LED1_OFFSET, DEFAULT_LED2_OFFSET)
+    assert flagged == 0, f"Clean default-offset sim flagged {flagged}/{n} as swaps."
 
 
-def test_label_swap_is_detected():
-    """Swapping LED1/LED2 should make the helper return True."""
+def test_label_swap_is_detected_default_offsets():
+    """Swapping LED1/LED2 inputs should flag every frame under default offsets."""
     cfg = RatIMUSimConfig(
         duration_s=1.0,
         cam_dropout_prob=0.0,
@@ -52,26 +57,57 @@ def test_label_swap_is_detected():
         led_wall_reflection_prob=0.0,
     )
     sim = simulate_rat_imu(cfg, seed=0)
-    theta_cam = np.interp(sim["t_cam_exp"], sim["t_imu"], sim["X_truth"][:, 4])
+    flagged, n = _flag_count(
+        sim, DEFAULT_LED1_OFFSET, DEFAULT_LED2_OFFSET, swap_args=True
+    )
+    assert flagged == n, f"Swapped labels should flag every frame, got {flagged}/{n}."
 
-    # Pass LED1 and LED2 swapped — should flag as a direction anomaly on every
-    # frame where the body has a non-zero forward extent.
-    n_swap_flags = sum(
-        _led_label_direction_anomaly(
-            sim["Z_cam_led2"][i], sim["Z_cam_led1"][i], float(theta_cam[i])
-        )
-        for i in range(len(sim["Z_cam_led1"]))
+
+def test_custom_led1_front_ordering_is_not_flagged_as_swap():
+    """Custom config (LED1 front, LED2 rear) should not flag clean frames.
+
+    Hard-coding the default convention previously false-flagged 30/30 frames
+    with this supported configuration.
+    """
+    led1_offset = np.array([0.025, 0.0])  # Front
+    led2_offset = np.array([-0.025, 0.0])  # Rear
+    cfg = RatIMUSimConfig(
+        duration_s=1.0,
+        cam_dropout_prob=0.0,
+        cam_sigma_m=0.0,
+        led_swap_prob=0.0,
+        use_second_led=True,
+        led_wall_reflection_prob=0.0,
+        led1_offset_body=led1_offset,
+        led2_offset_body=led2_offset,
     )
-    assert n_swap_flags == len(sim["Z_cam_led1"]), (
-        f"Swapped labels should flag every frame, got {n_swap_flags}/"
-        f"{len(sim['Z_cam_led1'])}."
+    sim = simulate_rat_imu(cfg, seed=0)
+    flagged, n = _flag_count(sim, led1_offset, led2_offset)
+    assert flagged == 0, (
+        f"Custom-offset clean sim flagged {flagged}/{n} as swaps; "
+        "expected 0 when offsets are passed through."
     )
+
+    # And swapping the inputs should still flag every frame.
+    flagged_swap, _ = _flag_count(sim, led1_offset, led2_offset, swap_args=True)
+    assert flagged_swap == n
 
 
 def test_synthetic_pose_with_known_heading():
-    """Synthetic LED pair with heading=0 (x-axis) and LED2 ahead in +x is OK."""
-    led1 = np.array([0.0, 0.0])  # rear
-    led2 = np.array([0.04, 0.0])  # front (along +x)
-    assert not _led_label_direction_anomaly(led1, led2, theta=0.0)
-    # Swap them → flagged.
-    assert _led_label_direction_anomaly(led2, led1, theta=0.0)
+    """Synthetic pose along +x: LED2 ahead is correct under default offsets."""
+    led1 = np.array([0.0, 0.0])
+    led2 = np.array([0.04, 0.0])
+    assert not _led_label_direction_anomaly(
+        led1, led2, 0.0, DEFAULT_LED1_OFFSET, DEFAULT_LED2_OFFSET
+    )
+    assert _led_label_direction_anomaly(
+        led2, led1, 0.0, DEFAULT_LED1_OFFSET, DEFAULT_LED2_OFFSET
+    )
+
+
+def test_coincident_offsets_return_false():
+    """If LED1/LED2 share offsets the direction check is undefined; return False."""
+    same = np.array([0.0, 0.0])
+    assert not _led_label_direction_anomaly(
+        np.array([0.0, 0.0]), np.array([0.04, 0.0]), 0.0, same, same
+    )
