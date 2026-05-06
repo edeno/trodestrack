@@ -228,16 +228,27 @@ def test_create_diagnostic_video_accepts_simple_sim_config(tmp_path):
     assert result_path.exists(), f"video output {result_path} not written"
 
 
-def test_video_event_detection_iterates_all_camera_frames():
+def test_video_event_detection_iterates_all_camera_frames(tmp_path, caplog):
     """Event markers must be derived from all camera frames, not video samples.
 
     Previously the event-detection loop iterated rendered video frames
-    (``range(n_frames)``), which at high speedup / low fps samples only a
-    fraction of camera frames. A ground-truth swap that fell between
+    (``range(n_frames)``), which at high speedup / low fps samples only
+    a fraction of camera frames. A ground-truth swap that fell between
     sampled video frames was silently dropped from the progress-bar
-    markers. Walk the full camera-rate masks instead.
+    markers. This test runs the production ``create_diagnostic_video``
+    pipeline and inspects its event-count log line — anything weaker
+    (e.g. asserting only on ``sim["swap_applied"].sum() == 1``) would
+    pass even if the production loop reverted to ``range(n_frames)``.
     """
+    import logging
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+
     from trodestrack.sim.rat_imu import RatIMUSimConfig, simulate_rat_imu
+    from trodestrack.viz.utils import prepare_video_data
+    from trodestrack.viz.video import create_diagnostic_video
 
     cfg = RatIMUSimConfig(
         duration_s=4.0,
@@ -252,24 +263,42 @@ def test_video_event_detection_iterates_all_camera_frames():
 
     # Inject a single ground-truth swap at t≈1.0s. With fps=5 and
     # speedup=10 the rendered video samples sit at t = 0, 2, 4 s, so the
-    # naïve video-frame loop would never visit cam_idx=30.
+    # buggy video-frame loop would never visit cam_idx=30.
     target_idx = int(np.argmin(np.abs(sim["t_cam_exp"] - 1.0)))
     sim["swap_applied"][target_idx] = True
-    assert sim["t_cam_exp"][target_idx] != 0.0  # not a video sample
-
-    # Run the same setup the production video uses for event detection
-    # by importing the helpers it relies on; we don't render video here
-    # because that requires ffmpeg.
-    from trodestrack.viz.utils import prepare_video_data
-
-    video_data = prepare_video_data(sim, fps=5, speedup=10.0)
+    assert sim["t_cam_exp"][target_idx] != 0.0
 
     # Sanity: with these settings the rendered video samples skip the
-    # injected event entirely (the original bug condition).
+    # injected event entirely (the original bug condition). This makes
+    # the test setup actually exercise the bug — without this gate the
+    # detection might "succeed" by accidentally sampling the right
+    # camera frame.
+    video_data = prepare_video_data(sim, fps=5, speedup=10.0)
     rendered_cam_indices = {int(c) for c in np.asarray(video_data["cam_idx"]).tolist()}
     assert target_idx not in rendered_cam_indices, (
-        "test setup precondition: target frame should not be a sampled"
-        " video frame so the regression actually exercises the bug."
+        "test setup precondition: target frame should not be a sampled "
+        "video frame so the regression actually exercises the bug."
+    )
+
+    # Run the production pipeline and capture the log line that reports
+    # the (debounced) event counts. Under the bug this would say
+    # "Found 0 LED swaps, ..."; the fix routes the count through the
+    # full camera-rate mask scan and yields "Found 1 LED swaps, ...".
+    out_path = tmp_path / "diagnostic.mp4"
+    with caplog.at_level(logging.INFO, logger="trodestrack.viz.video"):
+        create_diagnostic_video(sim, str(out_path), fps=5, speedup=10.0)
+
+    swap_log_lines = [
+        rec.getMessage()
+        for rec in caplog.records
+        if "LED swap" in rec.getMessage() and "debounced" in rec.getMessage()
+    ]
+    assert swap_log_lines, (
+        "expected an event-count log line containing 'LED swap' and "
+        f"'debounced', got records: {[r.getMessage() for r in caplog.records]}"
+    )
+    assert "Found 1 LED swaps" in swap_log_lines[-1], (
+        f"event detector missed the injected swap: {swap_log_lines[-1]!r}"
     )
 
     # Reproduce the new camera-frame walk and confirm it picks up the swap.

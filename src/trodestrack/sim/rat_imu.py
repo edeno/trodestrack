@@ -853,19 +853,36 @@ def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> Si
         vy = vy_new
 
         # --- 5) Wall reflections (inelastic) ---
-        if px < 0.0:
-            px = -px
-            vx = -0.5 * vx
-        elif px > config.arena_w:
-            px = 2 * config.arena_w - px
-            vx = -0.5 * vx
-
-        if py < 0.0:
-            py = -py
-            vy = -0.5 * vy
-        elif py > config.arena_h:
-            py = 2 * config.arena_h - py
-            vy = -0.5 * vy
+        # A single reflection only handles one wall crossing per step:
+        # if ``displacement > arena_w`` (e.g. small arena × high speed
+        # × low fs_imu) the reflected position can still be outside the
+        # arena, breaking the documented "positions stay in bounds"
+        # contract. Loop the reflection until ``px`` lies in
+        # ``[0, arena_w]``. Each iteration strictly reduces
+        # ``|px - center|``, so this terminates in
+        # ``ceil(|px_overshoot| / arena_w)`` steps. Cap iterations to
+        # guard against pathological NaN/Inf inputs (already validated
+        # at the public entry point but defensive against future
+        # callers).
+        max_reflections = 1000
+        for _ in range(max_reflections):
+            if px < 0.0:
+                px = -px
+                vx = -0.5 * vx
+            elif px > config.arena_w:
+                px = 2 * config.arena_w - px
+                vx = -0.5 * vx
+            else:
+                break
+        for _ in range(max_reflections):
+            if py < 0.0:
+                py = -py
+                vy = -0.5 * vy
+            elif py > config.arena_h:
+                py = 2 * config.arena_h - py
+                vy = -0.5 * vy
+            else:
+                break
 
         # Save truth
         x = np.array([px, py, vx, vy, theta])

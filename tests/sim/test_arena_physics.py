@@ -483,3 +483,50 @@ class TestPhysicalRealism:
         assert max_diff > 0.01, (
             f"Different seeds should produce different trajectories, max_diff={max_diff}"
         )
+
+
+def test_arena_no_tunneling_at_high_displacement_per_step():
+    """Positions must stay in bounds even when one step exceeds arena width.
+
+    The previous single-pass reflection only handled one wall crossing
+    per step: with ``displacement = speed_clip / fs_imu`` greater than
+    one arena width, the reflected position could still land outside
+    the arena (probe with arena_w=0.1, fs_imu=2 Hz, m0 v_x=1.5 m/s
+    showed x ranging over ~(-1.1, 1.2) — over an order of magnitude
+    outside a 10 cm arena). Loop reflection now handles arbitrary
+    overshoot.
+    """
+    config = RatIMUSimConfig(
+        duration_s=2.0,
+        fs_imu=2.0,
+        fs_cam=1.0,
+        arena_w=0.1,
+        arena_h=0.1,
+        m0=np.array([0.05, 0.05, 1.5, 0.0, 0.0]),
+        sigma_yaw_rate=0.0,
+        sigma_a_fwd=0.0,
+        sigma_a_lat=0.0,
+        gyro_noise_density=0.0,
+        accel_noise_density=0.0,
+        gyro_bias_rw_density=0.0,
+        accel_bias_rw_density=0.0,
+        cam_dropout_prob=0.0,
+        cam_sigma_m=0.0,
+        cam_jitter_s=0.0,
+        drag_fwd=0.0,
+        drag_lat=0.0,
+        vel_drag=0.0,
+        speed_clip=10.0,
+    )
+    sim = simulate_rat_imu(config=config, seed=0)
+
+    xs = sim["X_truth"][:, 0]
+    ys = sim["X_truth"][:, 1]
+    assert (xs.min() >= 0.0 - 1e-12) and (xs.max() <= config.arena_w + 1e-12), (
+        f"x out of bounds: range ({xs.min():.6f}, {xs.max():.6f}) for "
+        f"arena_w={config.arena_w}"
+    )
+    assert (ys.min() >= 0.0 - 1e-12) and (ys.max() <= config.arena_h + 1e-12), (
+        f"y out of bounds: range ({ys.min():.6f}, {ys.max():.6f}) for "
+        f"arena_h={config.arena_h}"
+    )
