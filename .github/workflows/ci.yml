@@ -73,9 +73,13 @@ jobs:
               is_pre = gh_pre == "true"
           else:
               raw = os.environ.get("INPUT_TAG") or os.environ.get("REF_NAME") or ""
-              tag = raw.lstrip("v")
+              # Don't strip the leading 'v' ourselves: ``packaging.Version``
+              # already accepts a single optional ``v`` prefix and rejects
+              # malformed prefixes like ``vv0.1.0`` as InvalidVersion. Any
+              # manual ``lstrip("v")`` or single-char strip would silently
+              # promote ``vv0.1.0`` (or ``vvv...``) into a valid 0.1.0.
               try:
-                  v = Version(tag)
+                  v = Version(raw)
                   is_pre = bool(v.is_prerelease or v.is_devrelease)
               except InvalidVersion:
                   # Fail safe: if the tag is unparseable, treat as prerelease
@@ -107,9 +111,11 @@ jobs:
           from packaging.version import InvalidVersion, Version
 
           raw = os.environ.get("INPUT_TAG") or os.environ.get("REF_NAME") or ""
-          tag = raw.lstrip("v")
+          # Don't strip leading 'v' ourselves — ``packaging.Version``
+          # accepts a single optional ``v`` and rejects malformed prefixes
+          # like ``vv0.1.0`` (a manual strip-once would silently accept).
           try:
-              tag_version = Version(tag)
+              tag_version = Version(raw)
           except InvalidVersion:
               print(
                   f"ERROR: tag {raw!r} does not parse as a PEP 440 version.",

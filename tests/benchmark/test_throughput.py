@@ -45,6 +45,27 @@ def _block_until_ready(result: Any) -> Any:
     return result
 
 
+def _assert_cpu_backend() -> None:
+    """Assert the active JAX backend is CPU and report it.
+
+    The PRD floors are explicitly described as CPU targets ("≥10× realtime
+    on CPU", "≤33 ms per frame on CPU"). Without this gate, a runner with
+    ``JAX_PLATFORMS=cuda`` (or a local machine where jaxlib finds an
+    accelerator) would silently use the GPU and the printed numbers would
+    misrepresent what the floors actually cover. Run with
+    ``JAX_PLATFORMS=cpu pytest -m benchmark`` to enforce.
+    """
+    backend = jax.default_backend()
+    print(f"   JAX backend: {backend}")
+    if backend != "cpu":
+        raise RuntimeError(
+            f"Throughput benchmarks claim CPU floors but jax.default_backend()"
+            f" is {backend!r}. Set ``JAX_PLATFORMS=cpu`` (or "
+            "``JAX_PLATFORM_NAME=cpu``) before running, or skip these tests "
+            "on accelerator-equipped machines."
+        )
+
+
 # =============================================================================
 # PRD Performance Requirements (from PRD.md Section 4)
 # =============================================================================
@@ -113,6 +134,7 @@ def test_offline_smoother_throughput():
 
     Expected runtime: ~45-60 seconds (on modern CPU, measured on M-series Mac)
     """
+    _assert_cpu_backend()
     # Generate 30-minute realistic rat tracking session
     config = RatIMUSimConfig(
         duration_s=BENCHMARK_SESSION_DURATION_S,
@@ -245,6 +267,7 @@ def test_online_ekf_latency():
 
     Expected runtime: ~45-60 seconds (on modern CPU, measured on M-series Mac)
     """
+    _assert_cpu_backend()
     # Generate 30-minute realistic rat tracking session
     # (same as offline smoother benchmark for consistency)
     config = RatIMUSimConfig(

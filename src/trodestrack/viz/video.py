@@ -509,14 +509,35 @@ def create_diagnostic_video(
     swap_mask = sim_data.get("swap_applied")
     reflection_mask = sim_data.get("led_reflection_applied")
 
-    for frame_idx in range(n_frames):
-        t = float(video_data["t_video"][frame_idx])
-        cam_idx = int(video_data["cam_idx"][frame_idx])
+    # Walk every camera frame, not just the rendered video frames. The
+    # video frame loop visits one sample per (1/fps × speedup) seconds
+    # of simulation time and silently skips swap/reflection/dropout
+    # events that fall between samples — a 30 Hz camera at fps=5,
+    # speedup=10 only sees 1 in 60 camera frames. Render decisions
+    # (which event markers to draw on the progress bar) must be
+    # derived from the full camera-rate ground truth.
+    cam_times = np.asarray(sim_data["t_cam_exp"])
+    n_cam = int(cam_times.shape[0])
+    mask_led1_all = np.asarray(sim_data["mask_led1"])
+    mask_led2_all = np.asarray(sim_data["mask_led2"])
+    z_led1_all = np.asarray(sim_data["Z_cam_led1"])
+    z_led2_all = np.asarray(sim_data["Z_cam_led2"])
 
-        led1_pos = sim_data["Z_cam_led1"][cam_idx]
-        led2_pos = sim_data["Z_cam_led2"][cam_idx]
-        led1_visible = sim_data["mask_led1"][cam_idx]
-        led2_visible = sim_data["mask_led2"][cam_idx]
+    # Theta at each camera frame for the geometric direction-anomaly
+    # fallback. Interpolating from the IMU-rate truth (X_truth column 4
+    # is heading) is fine because direction_anomaly only uses sin/cos.
+    use_geometric_fallback = swap_mask is None and reflection_mask is None
+    if use_geometric_fallback:
+        theta_imu = np.asarray(sim_data["X_truth"][:, 4])
+        t_imu_arr = np.asarray(sim_data["t_imu"])
+        # Unwrap before interp so wraparound between IMU samples doesn't
+        # produce a midpoint-to-zero artifact across the ±π discontinuity.
+        theta_cam = np.interp(cam_times, t_imu_arr, np.unwrap(theta_imu))
+
+    for cam_idx in range(n_cam):
+        t = float(cam_times[cam_idx])
+        led1_visible = bool(mask_led1_all[cam_idx])
+        led2_visible = bool(mask_led2_all[cam_idx])
 
         # Prefer simulator-emitted ground-truth masks when available so
         # reflection artifacts don't get collapsed into "LED swap" by the
@@ -534,22 +555,19 @@ def create_diagnostic_video(
         # Geometric fallback (real-data inputs lacking the masks). Only
         # fire when neither ground-truth mask was present, so we don't
         # double-count under simulator inputs.
-        if (
-            swap_mask is None
-            and reflection_mask is None
-            and led1_visible
-            and led2_visible
-        ):
-            spacing = np.linalg.norm(led1_pos - led2_pos)
-            expected_spacing = np.linalg.norm(led1_offset_body - led2_offset_body)
+        if use_geometric_fallback and led1_visible and led2_visible:
+            led1_pos = z_led1_all[cam_idx]
+            led2_pos = z_led2_all[cam_idx]
+            spacing = float(np.linalg.norm(led1_pos - led2_pos))
+            expected_spacing = float(
+                np.linalg.norm(led1_offset_body - led2_offset_body)
+            )
             spacing_anomaly = abs(spacing - expected_spacing) > 0.5 * expected_spacing
 
-            state = np.asarray(video_data["X_truth"][frame_idx])
-            theta = float(state[4])  # heading angle
             direction_anomaly = _led_label_direction_anomaly(
                 led1_pos,
                 led2_pos,
-                theta,
+                float(theta_cam[cam_idx]),
                 led1_offset_body,
                 led2_offset_body,
             )
@@ -557,12 +575,10 @@ def create_diagnostic_video(
             if spacing_anomaly or direction_anomaly:
                 event_times["led_swap"].append(t)
 
-        # Long dropout detection
+        # Long dropout detection: mark the start of each dropout run.
         if not (led1_visible or led2_visible):
-            # Only mark start of dropout sequence (avoid many markers)
-            if frame_idx == 0 or (
-                sim_data["mask_led1"][int(video_data["cam_idx"][frame_idx - 1])]
-                or sim_data["mask_led2"][int(video_data["cam_idx"][frame_idx - 1])]
+            if cam_idx == 0 or (
+                bool(mask_led1_all[cam_idx - 1]) or bool(mask_led2_all[cam_idx - 1])
             ):
                 event_times["long_dropout"].append(t)
 
