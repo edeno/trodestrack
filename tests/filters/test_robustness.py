@@ -517,11 +517,12 @@ class TestBiasEstimationStability:
         ]  # Mid-dropout
         bias_cov_after = result.filtered_covariances[dropout_end + 50, 5:8, 5:8]
 
-        # Bias covariance should grow during dropout (no observability)
-        # But remain bounded (not diverge)
-        assert np.trace(bias_cov_during) > np.trace(bias_cov_before), (
-            "Bias cov didn't grow during dropout"
-        )
+        # With freeze_bias_during_blackout=True (production default), bias rows
+        # of Q are zeroed during blackout: bias covariance is frozen, not
+        # growing. Verify that during dropout the bias cov is finite, stays
+        # at the pre-dropout level (no random-walk drift), and remains bounded.
+        assert np.all(np.isfinite(bias_cov_during)), "Bias cov non-finite in dropout"
+        np.testing.assert_allclose(bias_cov_during, bias_cov_before, rtol=0, atol=1e-12)
         assert np.trace(bias_cov_during) < 0.1, "Bias cov diverged during dropout"
 
         # After recovery, bias cov should stabilize or decrease
@@ -620,9 +621,13 @@ class TestBiasEstimationStability:
         bias_var_during = result.filtered_covariances[dropout_start + 75, 5, 5]
         bias_var_after = result.filtered_covariances[-1, 5, 5]  # End of session
 
-        # Variance should grow during dropout
-        assert bias_var_during > bias_var_before, (
-            "Bias variance didn't grow during dropout"
+        # With freeze_bias_during_blackout=True (production default), bias
+        # process noise is zeroed during dropout, so bias variance is paused
+        # at the pre-dropout level. The "convergence not disrupted" guarantee
+        # is that the variance is preserved (not inflated) during dropout and
+        # convergence resumes once vision returns.
+        np.testing.assert_allclose(
+            float(bias_var_during), float(bias_var_before), rtol=0, atol=1e-12
         )
 
         # After recovery, variance should eventually decrease below dropout level
