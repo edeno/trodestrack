@@ -1271,6 +1271,28 @@ def test_p0_zero_yields_deterministic_initial_state():
     np.testing.assert_allclose(sim["X_truth"][0], m0, atol=1e-12)
 
 
+def test_camera_latency_and_jitter_must_be_non_negative():
+    """cam_latency_s and cam_jitter_s must be ≥ 0 at construction.
+
+    cam_latency_s is the exposure → arrival latency, so a negative value
+    would have observations arrive before they were exposed. cam_jitter_s
+    is a jitter standard deviation; a negative std is meaningless. Both
+    were previously only finite-checked.
+    """
+    with pytest.raises(ValueError, match=r"cam_latency_s must be non-negative"):
+        RatIMUSimConfig(duration_s=1.0, fs_imu=200.0, fs_cam=30.0, cam_latency_s=-0.05)
+    with pytest.raises(ValueError, match=r"cam_jitter_s must be non-negative"):
+        RatIMUSimConfig(duration_s=1.0, fs_imu=200.0, fs_cam=30.0, cam_jitter_s=-0.01)
+    # Zero must remain acceptable (constant exposure timing / no latency).
+    RatIMUSimConfig(
+        duration_s=1.0,
+        fs_imu=200.0,
+        fs_cam=30.0,
+        cam_latency_s=0.0,
+        cam_jitter_s=0.0,
+    )
+
+
 def test_persistent_swap_with_single_led_warns():
     """Persistent-swap settings on a single-LED sim should emit a warning.
 

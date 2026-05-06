@@ -406,6 +406,24 @@ class RatIMUSimConfig:
                 f"Increase duration_s or sampling rates."
             )
 
+        # Camera-timestamp model validation. cam_latency_s is the
+        # *exposure → arrival* latency, so a negative value would mean
+        # observations arrive before they're exposed. cam_jitter_s is a
+        # timestamp jitter standard deviation and a negative std is
+        # meaningless. Validating finiteness alone (above) lets both
+        # silently propagate into ``t_cam_obs = t_cam_exp + cam_latency_s``
+        # and ``rng.standard_normal(T_cam) * cam_jitter_s``.
+        if self.cam_latency_s < 0:
+            raise ValueError(
+                f"cam_latency_s must be non-negative (it's an exposure → "
+                f"arrival latency); got {self.cam_latency_s}."
+            )
+        if self.cam_jitter_s < 0:
+            raise ValueError(
+                f"cam_jitter_s must be non-negative (it's a timestamp jitter "
+                f"standard deviation); got {self.cam_jitter_s}."
+            )
+
         # Arena validation
         if self.arena_w <= 0 or self.arena_h <= 0:
             raise ValueError(
