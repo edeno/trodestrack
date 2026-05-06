@@ -87,6 +87,51 @@ jobs:
               f.write(f"is_prerelease={out}\n")
           PY
 
+      # Verify that the tag (or workflow_dispatch input) matches the
+      # version declared in pyproject.toml *before* invoking ``uv build``.
+      # The tag is otherwise only used to choose PyPI vs TestPyPI; nothing
+      # checks that ``pyproject.toml`` was bumped, so a tag like v0.2.0
+      # would happily build a trodestrack-0.1.0 wheel and either fail at
+      # PyPI's duplicate-version check or (worse, on TestPyPI) ship an
+      # artifact whose version does not match the release tag.
+      - name: Verify tag matches pyproject.toml version
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_TAG: ${{ github.event.inputs.release_tag }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          uv run python - <<'PY'
+          import os
+          import sys
+          import tomllib
+          from packaging.version import InvalidVersion, Version
+
+          raw = os.environ.get("INPUT_TAG") or os.environ.get("REF_NAME") or ""
+          tag = raw.lstrip("v")
+          try:
+              tag_version = Version(tag)
+          except InvalidVersion:
+              print(
+                  f"ERROR: tag {raw!r} does not parse as a PEP 440 version.",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
+          with open("pyproject.toml", "rb") as f:
+              project_version_str = tomllib.load(f)["project"]["version"]
+          project_version = Version(project_version_str)
+
+          if tag_version != project_version:
+              print(
+                  f"ERROR: release tag {raw!r} (parsed as {tag_version}) does "
+                  f"not match pyproject.toml version {project_version_str!r}. "
+                  "Bump the version in pyproject.toml before tagging the release.",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          print(f"OK: tag {tag_version} matches pyproject.toml version {project_version_str}.")
+          PY
+
       - name: Build package
         run: |
           uv build

@@ -1143,12 +1143,17 @@ def main() -> None:
     else:
         print("   No occlusions detected")
 
-    # Count LED swaps (approximate by checking if both LEDs visible)
+    # Count LED swaps from the simulator's ground-truth ``swap_applied``
+    # mask. ``int(n_candidates * led_swap_prob)`` is only an expectation
+    # under the (now Bernoulli) sampling and was diverging from the
+    # simulated reality. Since this example exists to demonstrate
+    # simulator artifacts, the actual mask is the better evidence.
     both_visible = sim5["mask_led1"] & sim5["mask_led2"]
-    n_swap_candidates = np.sum(both_visible)
-    expected_swaps = int(n_swap_candidates * config5.led_swap_prob)
+    n_swap_candidates = int(np.sum(both_visible))
+    n_swaps_actual = int(np.sum(sim5["swap_applied"]))
     print(
-        f"   LED swap candidates: {n_swap_candidates}, expected swaps: ~{expected_swaps}"
+        f"   LED swap candidates: {n_swap_candidates}, actual swaps "
+        f"(swap_applied mask): {n_swaps_actual}"
     )
 
     # Mean confidence

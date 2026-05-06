@@ -518,18 +518,31 @@ def main() -> None:
     📊 SUMMARY:
 
     Accuracy:
-      • Position RMSE: {"UKF better by " + f"{pos_improvement:.2f} cm" if pos_improvement > 0 else "EKF better by " + f"{-pos_improvement:.2f} cm"}
-      • Dropout Drift: {"UKF better by " + f"{drift_improvement:.1f} cm" if drift_improvement > 0 else "EKF better by " + f"{-drift_improvement:.1f} cm"}
+      • Position RMSE: {
+            "UKF better by " + f"{pos_improvement:.2f} cm"
+            if pos_improvement > 0
+            else "EKF better by " + f"{-pos_improvement:.2f} cm"
+        }
+      • Dropout Drift: {
+            "UKF better by " + f"{drift_improvement:.1f} cm"
+            if drift_improvement > 0
+            else "EKF better by " + f"{-drift_improvement:.1f} cm"
+        }
 
     Computational Cost:
-      • UKF is {cost_summary_label} ({ekf_time * 1000:.1f} ms vs {ukf_time * 1000:.1f} ms)
+      • UKF is {cost_summary_label} ({ekf_time * 1000:.1f} ms vs {
+            ukf_time * 1000:.1f} ms)
 
     🎓 KEY TAKEAWAYS:
 
     1. DROPOUT ROBUSTNESS:
        • Both filters handle 30% dropout reasonably well
-       • Differences are {"significant" if abs(pos_improvement) > 0.2 else "marginal"} (< 0.5 cm)
-       • UKF's nonlinearity handling {"does" if pos_improvement > 0.1 else "does NOT"} provide meaningful benefit
+       • Differences are {
+            "significant" if abs(pos_improvement) > 0.2 else "marginal"
+        } (< 0.5 cm)
+       • UKF's nonlinearity handling {
+            "does" if pos_improvement > 0.1 else "does NOT"
+        } provide meaningful benefit
 
     2. WHEN DROPOUTS OCCUR:
        • Both filters rely on IMU integration (same physics)
@@ -537,12 +550,21 @@ def main() -> None:
        • Bias estimation quality matters MORE than filter type
 
     3. COMPUTATIONAL TRADEOFF:
-       • Wall-clock comparison ({cost_summary_label}) for {"minimal" if abs(pos_improvement) < 0.2 else "moderate"} accuracy gain
+       • Wall-clock comparison ({cost_summary_label}) for {
+            "minimal" if abs(pos_improvement) < 0.2 else "moderate"
+        } accuracy gain
        • Re-measure on the target backend before relying on the ratio
        • For offline: Consider UKF if every cm matters
 
     4. PRACTICAL RECOMMENDATION:
-       {"✓ Use EKF - faster and nearly as accurate under dropouts" if abs(pos_improvement) < 0.2 else "✓ Consider UKF - accuracy improvement may justify cost for critical applications"}
+       {
+            (
+                "✓ Use EKF - simpler default with negligible accuracy loss"
+                if abs(pos_improvement) < 0.2
+                else "✓ Consider UKF - accuracy improvement may justify any wall-clock cost for critical applications"
+            )
+        }
+       (Wall-clock direction is backend-dependent — see Computational Tradeoff above.)
 
     NEXT STEPS:
     • Run examples/07_smoother_demonstration.py to see how smoothing helps
