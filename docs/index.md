@@ -23,8 +23,8 @@ TrodesTrack achieves production-ready accuracy:
 | Position RMSE | < 2 cm | < 2 cm |
 | Velocity RMSE | < 10 cm/s | < 10 cm/s |
 | Heading RMSE | < 7 deg | < 7 deg |
-| Throughput (offline) | ≥ 10× realtime | reference run on M-series Mac CPU ~316× realtime (floor checked by `pytest -m benchmark`, not on every PR) |
-| Latency (online, amortized mean) | ≤ 33 ms / frame | reference run on M-series Mac CPU ~0.11 ms / frame (floor checked by `pytest -m benchmark`, not on every PR) |
+| Throughput (offline) | ≥ 10× realtime | reference run on M-series Mac CPU ~44× realtime under block-until-ready timing (floor checked by `pytest -m benchmark`, not on every PR) |
+| Latency (online, amortized mean) | ≤ 33 ms / frame | reference run on M-series Mac CPU ~0.38 ms / frame under block-until-ready timing (floor checked by `pytest -m benchmark`, not on every PR) |
 
 ## Quick Example
 
