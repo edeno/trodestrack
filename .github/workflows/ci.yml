@@ -39,6 +39,21 @@ jobs:
         with:
           python-version: '3.13'
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Install dependencies
+        run: |
+          uv sync --extra dev
+
+      # Run classification *after* `uv sync` so `packaging.version` is
+      # available from the project's resolved environment. `packaging`
+      # is not declared as a project / dev dep, but is pulled in
+      # transitively (and pinned in uv.lock); `actions/setup-python@v5`
+      # alone does not provide it, so the prior ordering would crash
+      # with ModuleNotFoundError on a clean runner.
       - name: Classify release vs prerelease
         id: classify
         env:
@@ -48,7 +63,7 @@ jobs:
           # GitHub release event sets this on the payload; missing for tag pushes.
           GH_PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
-          python - <<'PY'
+          uv run python - <<'PY'
           import os, sys
           from packaging.version import Version, InvalidVersion
 
@@ -71,15 +86,6 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"is_prerelease={out}\n")
           PY
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
-        with:
-          version: "latest"
-
-      - name: Install dependencies
-        run: |
-          uv sync --extra dev
 
       - name: Build package
         run: |
