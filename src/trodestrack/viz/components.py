@@ -1174,10 +1174,12 @@ class ResidualPanelArtist:
             # Auto-scale x-axis to show scrolling window
             self.ax.set_xlim(time_array[0], time_array[-1])
 
-            # Auto-scale y-axis based on recent data (with some margin)
-            # Filter out NaN values for scaling
+            # Auto-scale y-axis based on recent data (with some margin).
+            # Use ``np.isfinite`` (not ``not np.isnan``): a diverged filter
+            # can emit ±Inf residuals and matplotlib's set_ylim raises
+            # "Axis limits cannot be NaN or Inf", aborting video render.
             all_resid = list(self.resid_led1_buffer) + list(self.resid_led2_buffer)
-            valid_resid = [r for r in all_resid if not np.isnan(r)]
+            valid_resid = [r for r in all_resid if np.isfinite(r)]
             if len(valid_resid) > 0:
                 y_max = max(abs(min(valid_resid)), abs(max(valid_resid)))
                 y_lim = max(y_max * 1.2, 1.0)  # At least ±1 cm
@@ -1406,12 +1408,18 @@ class BiasEstimatePanelArtist:
             # Auto-scale x-axis
             self.ax.set_xlim(time_array[0], time_array[-1])
 
-            # Auto-scale y-axis based on data range
-            all_biases = (
-                list(self.gyro_bias_buffer)
-                + list(self.accel_bias_x_buffer)
-                + list(self.accel_bias_y_buffer)
-            )
+            # Auto-scale y-axis based on data range. Filter out non-finite
+            # samples — a diverged filter can emit ±Inf bias estimates and
+            # matplotlib's set_ylim raises on Inf, aborting video render.
+            all_biases = [
+                b
+                for b in (
+                    list(self.gyro_bias_buffer)
+                    + list(self.accel_bias_x_buffer)
+                    + list(self.accel_bias_y_buffer)
+                )
+                if np.isfinite(b)
+            ]
             if len(all_biases) > 0:
                 y_max = max(abs(min(all_biases)), abs(max(all_biases)))
                 y_lim = max(y_max * 1.2, 0.01)  # At least ±0.01
@@ -1516,15 +1524,19 @@ class NEESPanelArtist:
             time_array = np.array(self.time_buffer)
             nees_array = np.array(self.nees_buffer)
 
-            # Filter out NaN for plotting. The NEES line is stroked through
-            # only the finite samples (the other diagnostic panels pass NaN
-            # straight to set_data, which matplotlib renders as a gap; NEES
-            # filters first to keep its line continuous). When the rolling
-            # window contains no valid samples we must explicitly clear the
-            # line — otherwise the previously-rendered NEES value stays
-            # visible during dropout windows and gives a misleading
+            # Filter to *finite* samples (not just non-NaN). A diverged
+            # filter or near-singular covariance can emit ±Inf NEES, which
+            # downstream matplotlib set_ylim rejects with "Axis limits
+            # cannot be NaN or Inf" and aborts video render. The NEES line
+            # is stroked through only the finite samples (the other
+            # diagnostic panels pass NaN straight to set_data, which
+            # matplotlib renders as a gap; NEES filters first to keep its
+            # line continuous). When the rolling window contains no
+            # finite samples we must explicitly clear the line —
+            # otherwise the previously-rendered NEES value stays visible
+            # during dropout / divergence windows and gives a misleading
             # "consistency reading" for periods when NEES is unavailable.
-            valid_mask = ~np.isnan(nees_array)
+            valid_mask = np.isfinite(nees_array)
             if np.any(valid_mask):
                 self.line_nees.set_data(time_array[valid_mask], nees_array[valid_mask])
             else:

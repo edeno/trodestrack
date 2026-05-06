@@ -8,7 +8,11 @@ import numpy as np
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from trodestrack.viz.components import NEESPanelArtist
+from trodestrack.viz.components import (
+    BiasEstimatePanelArtist,
+    NEESPanelArtist,
+    ResidualPanelArtist,
+)
 
 
 def test_nees_panel_clears_line_when_window_is_nan_only():
@@ -49,5 +53,53 @@ def test_nees_panel_clears_line_when_window_is_nan_only():
         panel.update(3.5, 2.7)
         y_recovered = np.asarray(panel.line_nees.get_ydata())
         assert y_recovered.size >= 1 and y_recovered[-1] == 2.7
+    finally:
+        plt.close(fig)
+
+
+def test_panels_tolerate_inf_diagnostics_without_crashing():
+    """Inf residuals, biases, or NEES must not abort the panel update.
+
+    A diverged filter or near-singular covariance can emit ±Inf
+    diagnostics. Previously the panels filtered NaN but kept Inf, which
+    propagated into matplotlib's ``set_ylim`` and raised
+    ``Axis limits cannot be NaN or Inf`` — aborting the entire
+    diagnostic-video render.
+    """
+    # ResidualPanelArtist: Inf residuals
+    fig, ax = plt.subplots()
+    try:
+        panel = ResidualPanelArtist(ax, window_s=2.0, fps=10)
+        panel.update(0.0, np.inf, np.inf)  # Both LEDs diverged
+        # Follow up with a finite sample to confirm autoscaling recovers.
+        panel.update(0.1, 0.5, 0.7)
+        ylim = ax.get_ylim()
+        assert np.all(np.isfinite(ylim)), f"residual y-limits not finite: {ylim}"
+    finally:
+        plt.close(fig)
+
+    # BiasEstimatePanelArtist: Inf biases
+    fig, ax = plt.subplots()
+    try:
+        panel = BiasEstimatePanelArtist(ax, window_s=2.0, fps=10)
+        panel.update(0.0, np.inf, np.inf, np.inf)
+        panel.update(0.1, 0.001, -0.005, 0.002)
+        ylim = ax.get_ylim()
+        assert np.all(np.isfinite(ylim)), f"bias y-limits not finite: {ylim}"
+    finally:
+        plt.close(fig)
+
+    # NEESPanelArtist: Inf NEES
+    fig, ax = plt.subplots()
+    try:
+        panel = NEESPanelArtist(ax, window_s=2.0, fps=10, state_dim=2)
+        panel.update(0.0, np.inf)
+        panel.update(0.1, 1.5)
+        ylim = ax.get_ylim()
+        assert np.all(np.isfinite(ylim)), f"NEES y-limits not finite: {ylim}"
+        # Ensure the Inf sample wasn't stroked into the line (line should
+        # contain only the finite sample).
+        y = np.asarray(panel.line_nees.get_ydata())
+        assert np.all(np.isfinite(y)), f"NEES line contains non-finite: {y}"
     finally:
         plt.close(fig)
