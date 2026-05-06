@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from trodestrack.sim.rat_imu import RatIMUSimConfig, simulate_rat_imu
-from trodestrack.viz.video import _led_label_direction_anomaly
+from trodestrack.viz.video import _led_label_direction_anomaly, _predict_led_world
 
 DEFAULT_LED1_OFFSET = np.array([-0.02, 0.0])  # Rear (simulator default)
 DEFAULT_LED2_OFFSET = np.array([0.02, 0.0])  # Front
@@ -110,6 +110,84 @@ def test_coincident_offsets_return_false():
     same = np.array([0.0, 0.0])
     assert not _led_label_direction_anomaly(
         np.array([0.0, 0.0]), np.array([0.04, 0.0]), 0.0, same, same
+    )
+
+
+def test_predict_led_world_translates_and_rotates_offset():
+    """LED world prediction = position + R(theta) @ offset_body."""
+    pos = np.array([1.0, 2.0])
+    # theta=0 → no rotation, just translation by offset.
+    np.testing.assert_allclose(
+        _predict_led_world(pos, 0.0, np.array([0.025, 0.0])),
+        np.array([1.025, 2.0]),
+        atol=1e-12,
+    )
+    # theta=pi/2 → +x body axis maps to +y world axis.
+    np.testing.assert_allclose(
+        _predict_led_world(pos, np.pi / 2, np.array([0.025, 0.0])),
+        np.array([1.0, 2.025]),
+        atol=1e-12,
+    )
+    # Rear LED under default convention should land *behind* the position
+    # along heading +x.
+    np.testing.assert_allclose(
+        _predict_led_world(pos, 0.0, DEFAULT_LED1_OFFSET),
+        np.array([1.0 - 0.02, 2.0]),
+        atol=1e-12,
+    )
+
+
+def test_residual_prediction_uses_custom_offsets_not_default_convention():
+    """Perfect filter on a custom-offset sim must yield ~0 residuals.
+
+    Previously the residual panel computed predicted LED positions as
+    ``±0.5 * led_distance`` along heading, hard-coding the default
+    LED1=rear / LED2=front convention. With the user's custom config
+    (LED1 in front, LED2 in rear), a *perfect* filter produced ~4.5 cm
+    residuals — pure visualization-model mismatch, not filter error.
+    """
+    from trodestrack.sim.rat_imu import RatIMUSimConfig, simulate_rat_imu
+
+    led1_offset = np.array([0.025, 0.0])  # Front
+    led2_offset = np.array([-0.025, 0.0])  # Rear
+    cfg = RatIMUSimConfig(
+        duration_s=2.0,
+        fs_imu=200.0,
+        fs_cam=30.0,
+        cam_dropout_prob=0.0,
+        cam_sigma_m=0.0,
+        led_swap_prob=0.0,
+        led_wall_reflection_prob=0.0,
+        use_second_led=True,
+        led1_offset_body=led1_offset,
+        led2_offset_body=led2_offset,
+    )
+    sim = simulate_rat_imu(cfg, seed=0)
+
+    # Compute residuals using the helper at every frame against the
+    # nearest IMU truth sample. With zero camera noise the residual must
+    # be small (only IMU↔camera-frame interpolation jitter).
+    t_imu = sim["t_imu"]
+    t_cam = sim["t_cam_exp"]
+    X_truth = sim["X_truth"]
+
+    residuals = []
+    for i, t in enumerate(t_cam):
+        j = int(min(np.searchsorted(t_imu, t), len(t_imu) - 1))
+        position = X_truth[j, :2]
+        theta = float(X_truth[j, 4])
+        led1_pred = _predict_led_world(position, theta, led1_offset)
+        led2_pred = _predict_led_world(position, theta, led2_offset)
+        residuals.append(float(np.linalg.norm(sim["Z_cam_led1"][i] - led1_pred)))
+        residuals.append(float(np.linalg.norm(sim["Z_cam_led2"][i] - led2_pred)))
+
+    max_residual_cm = float(np.max(residuals)) * 100
+    # The previous (buggy) code produced ~4.5 cm residuals here. The
+    # interpolation-jitter floor is well under 1 cm at fs_imu=200,
+    # fs_cam=30, so a 1 cm gate is comfortable and locks out the bug.
+    assert max_residual_cm < 1.0, (
+        f"max residual {max_residual_cm:.3f} cm exceeds 1 cm — "
+        "looks like the hard-coded ±0.5*led_distance convention is back."
     )
 
 

@@ -36,6 +36,25 @@ from trodestrack.viz.utils import VideoData, prepare_video_data
 log = logging.getLogger(__name__)
 
 
+def _predict_led_world(
+    position: np.ndarray, theta: float, led_offset_body: np.ndarray
+) -> np.ndarray:
+    """Rotate a body-frame LED offset into world frame and translate by position.
+
+    Used by the diagnostic-video residual panel so that predicted LED
+    positions reflect the actual configured ``led*_offset_body`` (which
+    can place LED1 either rear or front), not the default ±0.5 ×
+    led_distance assumption that hard-codes LED1=rear / LED2=front.
+    """
+    cos_t, sin_t = np.cos(theta), np.sin(theta)
+    return np.array(
+        [
+            position[0] + cos_t * led_offset_body[0] - sin_t * led_offset_body[1],
+            position[1] + sin_t * led_offset_body[0] + cos_t * led_offset_body[1],
+        ]
+    )
+
+
 def _led_label_direction_anomaly(
     led1_pos: np.ndarray,
     led2_pos: np.ndarray,
@@ -75,7 +94,6 @@ def create_diagnostic_video(
     sim_data: SimOut,
     output_path: str | Path,
     filter_results: EKFResult | None = None,
-    led_distance: float = 0.04,
     fps: int = 30,
     speedup: float = 1.0,
     time_window_s: float = 2.0,
@@ -100,8 +118,6 @@ def create_diagnostic_video(
         Output video file path (e.g., "debug.mp4").
     filter_results : EKFResult or None, optional
         If provided, overlays filter predictions and diagnostics.
-    led_distance : float, default 0.04
-        LED spacing (m) for drawing LED markers.
     fps : int, default 30
         Video frame rate.
     speedup : float, default 1.0
@@ -810,12 +826,15 @@ def create_diagnostic_video(
             py_pred = x_pred[pos_y_idx]
             theta_pred = x_pred[heading_idx_int]
 
-            # Apply measurement function to compute predicted LED positions
-            dx = 0.5 * led_distance * np.cos(theta_pred)
-            dy = 0.5 * led_distance * np.sin(theta_pred)
-
-            led1_pred = np.array([px_pred - dx, py_pred - dy])  # Back LED
-            led2_pred = np.array([px_pred + dx, py_pred + dy])  # Front LED
+            # Apply measurement function to compute predicted LED positions.
+            # Use the resolved body-frame offsets, not ±0.5 * led_distance:
+            # the latter hard-codes the default LED1=rear / LED2=front
+            # convention and produces a constant ~LED-spacing-magnitude
+            # residual on configurations where LED1 is in front (a pure
+            # visualization-model mismatch, not filter error).
+            position_pred = np.array([px_pred, py_pred])
+            led1_pred = _predict_led_world(position_pred, theta_pred, led1_offset_body)
+            led2_pred = _predict_led_world(position_pred, theta_pred, led2_offset_body)
 
             # Compute residuals (innovation = observed - predicted)
             resid_led1 = (
