@@ -138,6 +138,25 @@ class HeadingPseudoModel:
         z_led2_all : jnp.ndarray
             LED2 positions (T, 2) [x, y] in meters.
         """
+        # Shape gate: ``meas_cov`` / ``use_measurement`` / ``innovation``
+        # index the frame arrays by ``frame_idx``. JAX silently clamps
+        # out-of-range indices to the last row, so an undersized z_led1_all
+        # reuses frame 0 for every later step. Validate (n_time, 2) for
+        # both LEDs at the constructor boundary so direct callers (tests,
+        # custom pipelines) see the same gate the public EKF/UKF entry
+        # points already enforce via validate_camera_input_shapes.
+        z_led1_arr = jnp.asarray(z_led1_all)
+        z_led2_arr = jnp.asarray(z_led2_all)
+        if z_led1_arr.ndim != 2 or z_led1_arr.shape[1] != 2:
+            raise ValueError(
+                f"z_led1_all must have shape (n_time, 2); got {z_led1_arr.shape}."
+            )
+        if z_led2_arr.shape != z_led1_arr.shape:
+            raise ValueError(
+                "z_led1_all and z_led2_all must share shape (n_time, 2); "
+                f"got z_led1_all={z_led1_arr.shape}, z_led2_all={z_led2_arr.shape}."
+            )
+
         self.config = config
         self.layout = layout
 

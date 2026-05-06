@@ -184,6 +184,34 @@ class CameraPositionModel:
                 "non-finite entries (NaN/inf)."
             )
 
+        # Shape gate: ``innovation`` / ``meas_cov`` / ``subspace`` index the
+        # frame arrays by ``frame_idx``. JAX silently clamps out-of-range
+        # indices to the last row, so an undersized z_led1_all reuses
+        # frame 0 for every later step. Validate (n_time, 2) for both LEDs
+        # and (n_time, 4) for conf at the constructor boundary so direct
+        # callers (tests, custom pipelines) see the same gate the public
+        # entry points already enforce via validate_camera_input_shapes.
+        z_led1_arr = jnp.asarray(z_led1_all)
+        z_led2_arr = jnp.asarray(z_led2_all)
+        if z_led1_arr.ndim != 2 or z_led1_arr.shape[1] != 2:
+            raise ValueError(
+                f"z_led1_all must have shape (n_time, 2); got {z_led1_arr.shape}."
+            )
+        if z_led2_arr.shape != z_led1_arr.shape:
+            raise ValueError(
+                "z_led1_all and z_led2_all must share shape (n_time, 2); "
+                f"got z_led1_all={z_led1_arr.shape}, z_led2_all={z_led2_arr.shape}."
+            )
+        if conf_all is not None:
+            conf_arr = jnp.asarray(conf_all)
+            expected_conf_shape = (z_led1_arr.shape[0], 4)
+            if conf_arr.shape != expected_conf_shape:
+                raise ValueError(
+                    "conf_all must have shape (n_time, 4) matching "
+                    f"z_led1_all/z_led2_all; got {conf_arr.shape} for "
+                    f"n_time={z_led1_arr.shape[0]}."
+                )
+
         self.led_distance = led_distance
         self.measurement_noise_base = measurement_noise_base
         self.layout = layout
