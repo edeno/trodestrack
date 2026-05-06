@@ -129,7 +129,7 @@ uv run python examples/04_ukf_basic_scenarios.py
 **Output:** 3 comparison PNGs + side-by-side metrics tables
 
 !!! note "Verdict"
-    EKF won 6/9 metrics vs UKF's 3/9. UKF is ~1-5x slower. **Recommendation:** Start with EKF; switch to UKF only if EKF fails to meet accuracy requirements.
+    EKF won 6/9 metrics vs UKF's 3/9. Under JIT-compiled JAX with warm dispatch, UKF and EKF run at a comparable wall-clock cost on these scenarios; on backends without JIT (per-step Python loops) UKF can be several times slower. **Recommendation:** Start with EKF and re-measure on your target backend; switch to UKF only if EKF fails to meet accuracy requirements.
 
 ## Robustness (05-06)
 
@@ -221,7 +221,7 @@ uv run python examples/08_qa_report_generation.py
 **Example 04** demonstrates:
 
 - EKF: 1 linearization point -> fast
-- UKF: 17 sigma points -> 1-5x slower but handles nonlinearity better
+- UKF: 17 sigma points -> comparable wall-clock under JIT-compiled JAX with warm dispatch; several times slower on per-step Python loops. Better handling of strong nonlinearity is the reason to choose it.
 - **Verdict:** EKF is sufficient for most scenarios
 
 ## Running All Examples

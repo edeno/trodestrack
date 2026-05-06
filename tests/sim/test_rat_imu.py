@@ -1298,6 +1298,25 @@ def test_m0_and_p0_accept_list_inputs_with_clear_error():
         RatIMUSimConfig(duration_s=1.0, P0=[[1.0, 0.0], [0.0, 1.0]])
 
 
+def test_non_numeric_array_inputs_raise_clear_valueerror():
+    """Non-numeric m0 / P0 / LED-offset inputs must raise ValueError, not TypeError.
+
+    Previously the validation coerced via ``np.asarray`` without a dtype
+    check, then called ``np.isfinite`` which raised a raw NumPy
+    ``TypeError: ufunc 'isfinite' not supported for the input types``.
+    Inspect the un-forced dtype kind first and reject anything outside
+    ``{int, uint, float, bool}`` with a clear ValueError.
+    """
+    with pytest.raises(ValueError, match=r"m0 must contain numeric values"):
+        RatIMUSimConfig(duration_s=1.0, m0=["0", "0", "0", "0", "0"])
+    with pytest.raises(ValueError, match=r"P0 must contain numeric values"):
+        RatIMUSimConfig(duration_s=1.0, P0=[["1", "0", "0", "0", "0"]] * 5)
+    with pytest.raises(
+        ValueError, match=r"led1_offset_body must contain numeric values"
+    ):
+        RatIMUSimConfig(duration_s=1.0, led1_offset_body=["a", "b"])
+
+
 def test_camera_latency_and_jitter_must_be_non_negative():
     """cam_latency_s and cam_jitter_s must be ≥ 0 at construction.
 

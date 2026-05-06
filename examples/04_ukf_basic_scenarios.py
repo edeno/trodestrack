@@ -49,7 +49,11 @@ KEY CONCEPTS ILLUSTRATED:
 -------------------------
 1. **Sigma-Point Transforms**: UKF propagates (2n+1) = 17 points vs EKF's 1 point
 2. **Linearization Error**: Where EKF's Jacobian approximation breaks down
-3. **Computational Tradeoff**: UKF ≈ 3-5× slower but can be more accurate
+3. **Computational Tradeoff**: UKF wall-clock cost depends heavily on the
+   backend; on JIT-compiled JAX with warm dispatch, UKF and EKF run at a
+   similar wall-clock per step (≈1×) on these scenarios. The general
+   reputation of UKF as several-times slower than EKF reflects unrolled
+   per-step Python loops, not JIT-compiled scan kernels.
 4. **Consistency**: NEES tells us if the filter "knows what it doesn't know"
 """
 
@@ -713,7 +717,9 @@ def main() -> None:
     You will learn:
     • How UKF's sigma-point transform differs from EKF's Jacobian linearization
     • When UKF's improved nonlinearity handling provides real benefits
-    • The computational tradeoff: UKF ≈ 3-5× slower but potentially more accurate
+    • The computational tradeoff: under JIT-compiled JAX with warm dispatch
+      UKF runs at roughly the same wall-clock as EKF on these scenarios; on
+      backends that loop per-step in Python, UKF can be several times slower
     • How to choose between EKF and UKF for your application
 
     Let's compare!
@@ -1109,7 +1115,7 @@ def main() -> None:
        • Circular motion has strong nonlinearity (trigonometric heading dynamics)
        • UKF's sigma-point transform may capture rotation better than EKF's Jacobian
        • This is where UKF's advantages are most likely to appear
-       • Trade computational cost (3-5× slower) against potential accuracy gain
+       • Compare wall-clock cost in the table above against accuracy gain
        • Recommendation: Consider UKF for highly nonlinear scenarios if accuracy critical
     """
     )
@@ -1145,8 +1151,10 @@ def main() -> None:
 
     1. COMPUTATIONAL COST:
        • UKF propagates (2n+1) = 17 sigma points vs EKF's 1 linearization point
-       • UKF is consistently 3-5× slower than EKF
-       • For real-time applications (<33 ms latency), this matters!
+       • Under JIT-compiled JAX with warm dispatch, UKF and EKF run at
+         a similar wall-clock cost on these scenarios. Outside of JIT
+         (per-step Python loops, autograd) UKF can be several times slower.
+         Always re-measure on the target backend before relying on it.
 
     2. ACCURACY COMPARISON:
     """
@@ -1212,7 +1220,8 @@ def main() -> None:
        ✓ Real-time applications requiring low latency (<33 ms)
        ✓ Stationary or near-linear motion patterns
        ✓ Resource-constrained systems (embedded, mobile)
-       ✓ When 3-5× speedup matters more than marginal accuracy gain
+       ✓ When the wall-clock difference (measure on your backend) matters
+         more than the marginal accuracy gain
 
     6. BEST PRACTICE:
        • Start with EKF (simpler, faster, usually sufficient)

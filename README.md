@@ -82,7 +82,7 @@ This generates 3 diagnostic PNGs showing filter performance, bias convergence, a
 uv run python examples/04_ukf_basic_scenarios.py
 ```
 
-Compares sigma-point (UKF) vs Jacobian (EKF) approaches. **Verdict:** EKF wins 6/9 metrics (UKF: 3/9) and is 1-5× faster—start with EKF!
+Compares sigma-point (UKF) vs Jacobian (EKF) approaches. **Verdict:** EKF wins 6/9 metrics (UKF: 3/9). Under JIT-compiled JAX with warm dispatch, the wall-clock cost is comparable on these scenarios; on backends without JIT (per-step Python loops) UKF can be several times slower. Start with EKF and re-measure on your target backend.
 
 ### 3. Test Dropout Robustness
 
@@ -307,7 +307,7 @@ See [`examples/README.md`](examples/README.md) for the complete learning path. E
   - CLI tool: `trodestrack report --run qa_inputs/ --pdf report.pdf` (consumes a separately-prepared QA-input directory; see `--help`)
   - Diagnostic videos with 9-panel filter state visualization
 - ✅ **Testing & Validation**
-  - 660+ unit, integration, regression, and property tests. Last full-suite run: 667 collected → 665 passed, 1 skipped, 1 xfailed (`uv run pytest`, ~4:40). The single xfail tracks the unimplemented persistent-LED-swap detection (`test_filter_stable_under_frequent_swaps` in `tests/filters/test_robustness.py`); rerun `uv run pytest` for current numbers.
+  - 700+ unit, integration, regression, and property tests across the suite. The default CI-style run excludes 32 wall-clock benchmark tests (marked `slow`/`benchmark`); invoke them locally with `uv run pytest -m benchmark`. The single xfail tracks the unimplemented persistent-LED-swap detection (`test_filter_stable_under_frequent_swaps` in `tests/filters/test_robustness.py`). Rerun `uv run pytest` for the current pass count — the absolute number drifts as tests are added.
   - Accuracy and performance targets achieved on the simulated benchmark:
     - Position RMSE ≤ 2 cm ✓
     - Velocity RMSE ≤ 10 cm/s ✓
