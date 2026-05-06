@@ -34,6 +34,20 @@ def _tiny_synthetic_sequence():
     return t_cam, t_imu, U_imu, Z1, Z2, mask
 
 
+def _all_nan_dropout_sequence():
+    layout = get_layout("2d_full")
+    t_cam = np.array([0.0, 0.05, 0.1], dtype=np.float32)
+    t_imu = np.linspace(0.0, 0.1, 11, dtype=np.float32)
+    u_imu = np.zeros((t_imu.shape[0], 3), dtype=np.float32)
+    z1 = np.full((t_cam.shape[0], 2), np.nan, dtype=np.float32)
+    z2 = np.full((t_cam.shape[0], 2), np.nan, dtype=np.float32)
+    initial_state = FilterState(
+        mean=jnp.zeros(layout.n, dtype=jnp.float32),
+        cov=jnp.eye(layout.n, dtype=jnp.float32) * 1e-4,
+    )
+    return t_cam, t_imu, u_imu, z1, z2, initial_state
+
+
 def test_rts_smoother_smoke_vision_only_layout():
     t_cam, t_imu, U_imu, Z1, Z2, mask = _tiny_synthetic_sequence()
 
@@ -47,6 +61,51 @@ def test_rts_smoother_smoke_vision_only_layout():
 
     assert filter_result.filtered_means.shape[1] == 5
     assert smoother_result.smoothed_means.shape[1] == 5
+
+
+def test_rts_smoother_uses_filter_usable_vision_mask_for_all_nan_leds():
+    t_cam, t_imu, u_imu, z1, z2, initial_state = _all_nan_dropout_sequence()
+    mask_true = np.ones(t_cam.shape[0], dtype=bool)
+    mask_false = np.zeros(t_cam.shape[0], dtype=bool)
+    ekf_config = EKFConfig(
+        state_mode="2d_full",
+        led_distance=0.04,
+        enable_zupt=False,
+        adaptive_q_during_dropout=True,
+        dropout_q_pos_multiplier=1000.0,
+        dropout_q_vel_multiplier=1000.0,
+        dropout_q_bias_multiplier=0.0,
+        freeze_bias_during_blackout=True,
+        reduce_imu_noise_during_blackout=False,
+        use_heading_measurement=False,
+    )
+
+    filter_result = extended_kalman_filter(
+        ekf_config,
+        t_imu,
+        u_imu,
+        t_cam,
+        z1,
+        z2,
+        mask_true,
+        initial_state=initial_state,
+    )
+    smoother_mask_true = rts_smoother(
+        filter_result, ekf_config, t_imu, u_imu, t_cam, mask_cam=mask_true
+    )
+    smoother_mask_false = rts_smoother(
+        filter_result, ekf_config, t_imu, u_imu, t_cam, mask_cam=mask_false
+    )
+
+    np.testing.assert_array_equal(
+        np.asarray(filter_result.usable_vision_mask), mask_false
+    )
+    np.testing.assert_allclose(
+        np.asarray(smoother_mask_true.smoothed_covariances),
+        np.asarray(smoother_mask_false.smoothed_covariances),
+        rtol=1e-6,
+        atol=1e-8,
+    )
 
 
 def test_sigma_point_smoother_smoke_2d_cam_3d_imu_layout():
@@ -64,6 +123,51 @@ def test_sigma_point_smoother_smoke_2d_cam_3d_imu_layout():
 
     assert filter_result.filtered_means.shape[1] == 10
     assert smoother_result.smoothed_means.shape[1] == 10
+
+
+def test_sigma_point_smoother_uses_filter_usable_vision_mask_for_all_nan_leds():
+    t_cam, t_imu, u_imu, z1, z2, initial_state = _all_nan_dropout_sequence()
+    mask_true = np.ones(t_cam.shape[0], dtype=bool)
+    mask_false = np.zeros(t_cam.shape[0], dtype=bool)
+    ukf_config = UKFConfig(
+        state_mode="2d_full",
+        led_distance=0.04,
+        enable_zupt=False,
+        adaptive_q_during_dropout=True,
+        dropout_q_pos_multiplier=1000.0,
+        dropout_q_vel_multiplier=1000.0,
+        dropout_q_bias_multiplier=0.0,
+        freeze_bias_during_blackout=True,
+        reduce_imu_noise_during_blackout=False,
+        use_heading_measurement=False,
+    )
+
+    filter_result = unscented_kalman_filter(
+        ukf_config,
+        t_imu,
+        u_imu,
+        t_cam,
+        z1,
+        z2,
+        mask_true,
+        initial_state=initial_state,
+    )
+    smoother_mask_true = sigma_point_smoother(
+        filter_result, ukf_config, t_imu, u_imu, t_cam, mask_cam=mask_true
+    )
+    smoother_mask_false = sigma_point_smoother(
+        filter_result, ukf_config, t_imu, u_imu, t_cam, mask_cam=mask_false
+    )
+
+    np.testing.assert_array_equal(
+        np.asarray(filter_result.usable_vision_mask), mask_false
+    )
+    np.testing.assert_allclose(
+        np.asarray(smoother_mask_true.smoothed_covariances),
+        np.asarray(smoother_mask_false.smoothed_covariances),
+        rtol=1e-6,
+        atol=1e-8,
+    )
 
 
 def test_ukf_layout_no_hardcoded_8d():

@@ -84,6 +84,31 @@ RTS_SMOOTHER_DONATE_ARGNUMS: tuple[int, ...] = (0, 2)
 # =============================================================================
 
 
+def _smoother_vision_mask(
+    filter_result: object,
+    mask_cam: np.ndarray | None,
+    n_cam: int,
+    *,
+    func_name: str,
+) -> tuple[np.ndarray, bool]:
+    """Return the camera-frame vision mask used for blackout-aware smoothing."""
+    usable_mask = getattr(filter_result, "usable_vision_mask", None)
+    if usable_mask is None:
+        if mask_cam is None:
+            return np.ones(n_cam, dtype=bool), False
+        return np.asarray(mask_cam, dtype=bool), True
+
+    usable_arr = np.asarray(usable_mask, dtype=bool)
+    if usable_arr.shape != (n_cam,):
+        raise ValueError(
+            f"{func_name}: filter_result.usable_vision_mask must have shape "
+            f"({n_cam},), got {usable_arr.shape}."
+        )
+    if mask_cam is None:
+        return usable_arr, True
+    return np.asarray(mask_cam, dtype=bool) & usable_arr, True
+
+
 def _transition_mean_and_jacobian(
     state_mean: jnp.ndarray,
     linearization_mean: jnp.ndarray,
@@ -355,7 +380,11 @@ def rts_smoother(
     num_iter : int, default 1
         Number of IEKS iterations; 1 yields standard RTS.
     mask_cam : np.ndarray | None, optional
-        Camera validity mask (N_cam,). If provided, applies blackout-aware noise scaling.
+        Optional camera validity mask (N_cam,). For filter results that carry
+        ``usable_vision_mask``, this is combined with that forward-filter mask
+        so all-NaN LED frames remain blackouts even when the raw camera mask is
+        true. For legacy filter results without ``usable_vision_mask``, this
+        mask enables blackout-aware process-noise scaling.
 
     Returns
     -------
@@ -456,11 +485,13 @@ def rts_smoother(
     dt_imu_mean = jnp.mean(jnp.diff(t_imu_jax))
     imu_index_arrays = compute_imu_index_arrays(t_imu, t_cam)
 
-    mask_is_provided = mask_cam is not None
-    if mask_is_provided:
-        mask_cam_jax = jnp.array(mask_cam, dtype=bool)
-    else:
-        mask_cam_jax = jnp.ones(filtered_means.shape[0], dtype=bool)
+    vision_mask, mask_is_provided = _smoother_vision_mask(
+        filter_result,
+        mask_cam,
+        n_cam,
+        func_name="rts_smoother",
+    )
+    mask_cam_jax = jnp.array(vision_mask, dtype=bool)
 
     layout = get_layout(ekf_config.state_mode)
 
@@ -726,7 +757,11 @@ def sigma_point_smoother(
     t_cam : np.ndarray
         Camera timestamps (N_cam,) in seconds.
     mask_cam : np.ndarray | None, optional
-        Camera validity mask (N_cam,). If provided, applies blackout-aware noise scaling.
+        Optional camera validity mask (N_cam,). For filter results that carry
+        ``usable_vision_mask``, this is combined with that forward-filter mask
+        so all-NaN LED frames remain blackouts even when the raw camera mask is
+        true. For legacy filter results without ``usable_vision_mask``, this
+        mask enables blackout-aware process-noise scaling.
 
     Returns
     -------
@@ -740,7 +775,8 @@ def sigma_point_smoother(
     between filtered[k] and predicted[k+1], which is needed for the gain.
     State dimension is derived from filter_result.filtered_means.shape[1].
 
-    Blackout-aware Q/R scaling (when mask_cam is provided):
+    Blackout-aware process-noise scaling (when a forward usable-vision mask or
+    ``mask_cam`` is available):
     - During vision blackouts, reduces accel bias RW noise and IMU input noise
     - Helps tighten how hard post-gap vision "pulls" backward through gaps
     - Mirrors EKF RTS smoother behavior for consistency
@@ -827,12 +863,13 @@ def sigma_point_smoother(
     filtered_means = filter_result.filtered_means.copy()  # (N_cam, n)
     filtered_covs = filter_result.filtered_covariances.copy()  # (N_cam, n, n)
 
-    # Convert mask_cam to JAX (sentinel all-True when not provided, matching EKF smoother)
-    mask_is_provided = mask_cam is not None
-    if mask_is_provided:
-        mask_cam_jax = jnp.array(mask_cam, dtype=bool)
-    else:
-        mask_cam_jax = jnp.ones(filtered_means.shape[0], dtype=bool)
+    vision_mask, mask_is_provided = _smoother_vision_mask(
+        filter_result,
+        mask_cam,
+        n_cam,
+        func_name="sigma_point_smoother",
+    )
+    mask_cam_jax = jnp.array(vision_mask, dtype=bool)
     n = filtered_means.shape[1]  # Derive state dimension from data
 
     # Compute UKF sigma-point weights (dimension-dependent)

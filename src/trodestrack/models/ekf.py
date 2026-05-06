@@ -141,6 +141,8 @@ class EKFResult(NamedTuple):
         Sum of per-frame Gaussian log-likelihoods.
     estimated_led_distance : float | None
         Auto-detected LED spacing (m), or None if explicitly provided.
+    usable_vision_mask : jnp.ndarray | None
+        Boolean mask of camera frames with at least one finite LED observation.
     """
 
     filtered_means: jnp.ndarray  # (N_cam, n)
@@ -149,6 +151,7 @@ class EKFResult(NamedTuple):
     predicted_covariances: jnp.ndarray  # (N_cam, n, n)
     marginal_loglik: float
     estimated_led_distance: float | None
+    usable_vision_mask: jnp.ndarray | None = None
 
 
 class EKF3DResult(NamedTuple):
@@ -159,6 +162,7 @@ class EKF3DResult(NamedTuple):
     predicted_means: jnp.ndarray
     predicted_covariances: jnp.ndarray
     marginal_loglik: float
+    usable_vision_mask: jnp.ndarray | None = None
 
 
 class EKF3DComputationResult(NamedTuple):
@@ -169,6 +173,7 @@ class EKF3DComputationResult(NamedTuple):
     predicted_means: jnp.ndarray
     predicted_covariances: jnp.ndarray
     marginal_loglik: jnp.ndarray
+    usable_vision_mask: jnp.ndarray
 
 
 class EKFComputationResult(NamedTuple):
@@ -179,6 +184,7 @@ class EKFComputationResult(NamedTuple):
     predicted_means: jnp.ndarray
     predicted_covariances: jnp.ndarray
     marginal_loglik: jnp.ndarray
+    usable_vision_mask: jnp.ndarray
 
 
 EXTENDED_KALMAN_FILTER_STATIC_ARGNAMES = ("layout", "config_for_filter")
@@ -230,7 +236,8 @@ def _extended_kalman_filter_impl(
     def filter_step(carry, t_idx):
         """Single filtering step at camera frame t_idx."""
         state_prev, log_lik_accum, has_seen_vision_prev = carry
-        has_vision_t = mask_cam_jax[t_idx]
+        both_leds, only_led1, only_led2, _ = camera_model.subspace(t_idx)
+        frame_has_led = mask_cam_jax[t_idx] & (both_leds | only_led1 | only_led2)
 
         def propagate_from_prev(state_in):
             imu_indices = imu_index_arrays[t_idx]
@@ -246,7 +253,7 @@ def _extended_kalman_filter_impl(
                         lambda: dt_imu_mean,
                     )
                     return predict_step(
-                        s, u, dt, config_for_filter, has_vision_t, layout=layout
+                        s, u, dt, config_for_filter, frame_has_led, layout=layout
                     )
 
                 def no_propagate(s):
@@ -279,8 +286,6 @@ def _extended_kalman_filter_impl(
             layout=layout,
         )
 
-        both_leds, only_led1, only_led2, _ = camera_model.subspace(t_idx)
-        frame_has_led = mask_cam_jax[t_idx] & (both_leds | only_led1 | only_led2)
         has_seen_vision_next = has_seen_vision_prev | frame_has_led
         state_filt, log_lik_zupt = update_zupt(
             state_after_heading,
@@ -295,6 +300,7 @@ def _extended_kalman_filter_impl(
             "filtered_cov": state_filt.cov,
             "predicted_mean": state_pred.mean,
             "predicted_cov": state_pred.cov,
+            "usable_vision": frame_has_led,
         }
 
         carry_next = (state_filt, log_lik_accum + log_lik_k, has_seen_vision_next)
@@ -316,6 +322,7 @@ def _extended_kalman_filter_impl(
         predicted_means=outputs["predicted_mean"],
         predicted_covariances=outputs["predicted_cov"],
         marginal_loglik=log_lik_total,
+        usable_vision_mask=outputs["usable_vision"],
     )
 
 
@@ -980,6 +987,7 @@ def extended_kalman_filter(
         predicted_covariances=computation.predicted_covariances,
         marginal_loglik=float(computation.marginal_loglik),
         estimated_led_distance=estimated_led_distance,
+        usable_vision_mask=computation.usable_vision_mask,
     )
 
 
@@ -1095,6 +1103,7 @@ def extended_kalman_filter_3d(
         predicted_means=computation.predicted_means,
         predicted_covariances=computation.predicted_covariances,
         marginal_loglik=float(computation.marginal_loglik),
+        usable_vision_mask=computation.usable_vision_mask,
     )
 
 
@@ -1198,6 +1207,7 @@ def _extended_kalman_filter_3d_core(
             state_filt.cov,
             predicted_mean,
             predicted_covariance,
+            has_vision,
         )
         return (state_filt, marginal_loglik, has_seen_vision_next), outputs
 
@@ -1211,9 +1221,13 @@ def _extended_kalman_filter_3d_core(
         jnp.arange(t_cam_jax.shape[0], dtype=jnp.int32),
     )
     del final_state
-    filtered_means, filtered_covariances, predicted_means, predicted_covariances = (
-        scan_outputs
-    )
+    (
+        filtered_means,
+        filtered_covariances,
+        predicted_means,
+        predicted_covariances,
+        usable_vision_mask,
+    ) = scan_outputs
 
     return EKF3DComputationResult(
         filtered_means=filtered_means,
@@ -1221,6 +1235,7 @@ def _extended_kalman_filter_3d_core(
         predicted_means=predicted_means,
         predicted_covariances=predicted_covariances,
         marginal_loglik=marginal_loglik,
+        usable_vision_mask=usable_vision_mask,
     )
 
 

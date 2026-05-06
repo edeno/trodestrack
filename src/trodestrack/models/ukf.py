@@ -249,6 +249,8 @@ class UKFResult(NamedTuple):
         Sum of per-frame Gaussian log-likelihoods.
     estimated_led_distance : float | None
         Auto-detected LED spacing (m), or None if explicitly provided.
+    usable_vision_mask : jnp.ndarray | None
+        Boolean mask of camera frames with at least one finite LED observation.
     """
 
     filtered_means: jnp.ndarray  # (N_cam, n)
@@ -257,6 +259,7 @@ class UKFResult(NamedTuple):
     predicted_covariances: jnp.ndarray  # (N_cam, n, n)
     marginal_loglik: float
     estimated_led_distance: float | None
+    usable_vision_mask: jnp.ndarray | None = None
 
 
 # =============================================================================
@@ -765,7 +768,7 @@ def _unscented_kalman_filter_impl(
     *,
     config_for_filter: UKFConfig,
     layout: StateLayout,
-) -> tuple[Array, Array, Array, Array, Array]:
+) -> tuple[Array, Array, Array, Array, Array, Array]:
     """Core UKF implementation staged under ``jax.jit``."""
     n_cam = int(t_cam_jax.shape[0])
 
@@ -792,8 +795,9 @@ def _unscented_kalman_filter_impl(
         """Single filtering step at camera frame t_idx."""
         state_prev, log_lik_accum, has_seen_vision_prev = carry
 
-        # Check if we have vision at this timestep (for blackout-aware Q scaling)
-        has_vision_t = mask_cam_jax[t_idx]
+        # Check if this frame has usable vision for blackout-aware Q scaling.
+        both_leds, only_led1, only_led2, _ = camera_model.subspace(t_idx)
+        frame_has_led = mask_cam_jax[t_idx] & (both_leds | only_led1 | only_led2)
 
         # Propagate using IMU samples in this segment
         def propagate_from_prev(state_in):
@@ -817,7 +821,7 @@ def _unscented_kalman_filter_impl(
                         lambda: jnp.array(dt_imu_mean),
                     )
                     return predict_step(
-                        s, u, dt, config_for_filter, has_vision_t, layout=layout
+                        s, u, dt, config_for_filter, frame_has_led, layout=layout
                     )
 
                 def no_propagate(s):
@@ -855,8 +859,6 @@ def _unscented_kalman_filter_impl(
             layout=layout,
         )
 
-        both_leds, only_led1, only_led2, _ = camera_model.subspace(t_idx)
-        frame_has_led = mask_cam_jax[t_idx] & (both_leds | only_led1 | only_led2)
         has_seen_vision_next = has_seen_vision_prev | frame_has_led
 
         # Zero-velocity update (reuse shared implementation for parity)
@@ -879,6 +881,7 @@ def _unscented_kalman_filter_impl(
             "filtered_cov": state_filt.cov,
             "predicted_mean": state_pred.mean,
             "predicted_cov": state_pred.cov,
+            "usable_vision": frame_has_led,
         }
 
         # Update carry with accumulated log-likelihood
@@ -902,6 +905,7 @@ def _unscented_kalman_filter_impl(
         outputs["predicted_mean"],
         outputs["predicted_cov"],
         log_lik_total,
+        outputs["usable_vision"],
     )
 
 
@@ -1071,22 +1075,27 @@ def unscented_kalman_filter(
     imu_index_arrays = compute_imu_index_arrays(t_imu, t_cam)
 
     # Call JIT-compiled implementation
-    filtered_means, filtered_covs, predicted_means, predicted_covs, log_lik_total = (
-        _unscented_kalman_filter_jit(
-            initial_state,
-            jnp.asarray(initial_zupt_context, dtype=bool),
-            t_imu_jax,
-            U_imu_jax,
-            t_cam_jax,
-            Z_cam_led1_jax,
-            Z_cam_led2_jax,
-            mask_cam_jax,
-            conf_cam_jax,
-            imu_index_arrays,
-            dt_imu_mean,
-            config_for_filter=config_for_filter,
-            layout=layout,
-        )
+    (
+        filtered_means,
+        filtered_covs,
+        predicted_means,
+        predicted_covs,
+        log_lik_total,
+        usable_vision_mask,
+    ) = _unscented_kalman_filter_jit(
+        initial_state,
+        jnp.asarray(initial_zupt_context, dtype=bool),
+        t_imu_jax,
+        U_imu_jax,
+        t_cam_jax,
+        Z_cam_led1_jax,
+        Z_cam_led2_jax,
+        mask_cam_jax,
+        conf_cam_jax,
+        imu_index_arrays,
+        dt_imu_mean,
+        config_for_filter=config_for_filter,
+        layout=layout,
     )
 
     return UKFResult(
@@ -1096,4 +1105,5 @@ def unscented_kalman_filter(
         predicted_covariances=predicted_covs,
         marginal_loglik=float(log_lik_total),
         estimated_led_distance=estimated_led_distance,
+        usable_vision_mask=usable_vision_mask,
     )

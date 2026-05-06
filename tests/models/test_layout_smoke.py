@@ -96,6 +96,59 @@ def test_ekf_zupt_waits_for_vision_context_with_auto_initialized_dropout() -> No
     )
 
 
+def test_ekf_all_nan_leds_use_dropout_process_noise_even_when_mask_true() -> None:
+    layout = get_layout("2d_full")
+    t_imu = np.linspace(0.0, 0.1, 11, dtype=np.float32)
+    t_cam = np.array([0.0, 0.1], dtype=np.float32)
+    u_imu = np.zeros((t_imu.shape[0], 3), dtype=np.float32)
+    z1 = np.full((t_cam.shape[0], 2), np.nan, dtype=np.float32)
+    z2 = np.full((t_cam.shape[0], 2), np.nan, dtype=np.float32)
+    initial_state = FilterState(
+        mean=jnp.zeros(layout.n, dtype=jnp.float32),
+        cov=jnp.eye(layout.n, dtype=jnp.float32) * 1e-4,
+    )
+    config = EKFConfig(
+        state_mode="2d_full",
+        led_distance=0.04,
+        enable_zupt=False,
+        adaptive_q_during_dropout=True,
+        dropout_q_pos_multiplier=1000.0,
+        dropout_q_vel_multiplier=1000.0,
+        dropout_q_bias_multiplier=0.0,
+        freeze_bias_during_blackout=True,
+        reduce_imu_noise_during_blackout=False,
+        use_heading_measurement=False,
+    )
+
+    result_mask_true = extended_kalman_filter(
+        config,
+        t_imu,
+        u_imu,
+        t_cam,
+        z1,
+        z2,
+        np.ones(t_cam.shape[0], dtype=bool),
+        initial_state=initial_state,
+    )
+    result_mask_false = extended_kalman_filter(
+        config,
+        t_imu,
+        u_imu,
+        t_cam,
+        z1,
+        z2,
+        np.zeros(t_cam.shape[0], dtype=bool),
+        initial_state=initial_state,
+    )
+
+    np.testing.assert_allclose(
+        np.asarray(result_mask_true.predicted_covariances[1]),
+        np.asarray(result_mask_false.predicted_covariances[1]),
+        rtol=1e-6,
+        atol=1e-8,
+    )
+
+
 def test_initialize_state_vision_only_layout() -> None:
     layout = get_layout("vision_only")
 
