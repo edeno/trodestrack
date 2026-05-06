@@ -648,7 +648,9 @@ assert np.isfinite(result.filtered_covariances).all(), "Covariance contains NaN/
 
 **Option 1: Use EKF instead of UKF**
 ```python
-# UKF is 1-5× slower due to sigma-point transforms
+# UKF can be slower than EKF on backends without JIT (per-step Python loops);
+# under JIT-compiled JAX with warm dispatch it usually runs at ~1× EKF.
+# Re-measure on your target backend before assuming UKF is the bottleneck.
 from trodestrack.models.ekf import extended_kalman_filter
 # Instead of:
 # from trodestrack.models.ukf import unscented_kalman_filter

@@ -937,6 +937,10 @@ class ProgressBarArtist:
                     color = COLORS["orange"]
                     marker = "v"
                     label = "LED swap"
+                elif event_type == "led_reflection":
+                    color = COLORS["purple"]
+                    marker = "^"
+                    label = "Wall reflection"
                 elif event_type == "long_dropout":
                     color = COLORS["red"]
                     marker = "x"

@@ -29,7 +29,7 @@ uv run python examples/04_ukf_basic_scenarios.py
 Compares sigma-point (UKF) vs Jacobian (EKF) approaches.
 
 !!! note "Verdict"
-    EKF wins 6/9 metrics (UKF: 3/9) and is 1-5x faster. **Start with EKF!**
+    EKF wins 6/9 metrics (UKF: 3/9). Wall-clock cost is comparable under JIT-compiled JAX with warm dispatch on these scenarios; on backends without JIT (per-step Python loops) UKF can be several times slower. **Start with EKF and re-measure on your target backend.**
 
 ## 3. Test Dropout Robustness
 

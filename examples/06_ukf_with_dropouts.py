@@ -11,8 +11,12 @@ would be most apparent.
 
 WHY THIS MATTERS:
 -----------------
-If UKF provides better robustness during dropouts, it might justify the
-computational cost (~3-5× slower) for applications with frequent occlusions.
+If UKF provides better robustness during dropouts, it might justify any
+computational cost for applications with frequent occlusions. Wall-clock
+cost depends heavily on the backend: under JIT-compiled JAX with warm
+dispatch UKF and EKF run at a comparable cost on this scenario, while on
+backends without JIT (per-step Python loops) UKF can be several times
+slower. Always re-measure on the target backend before relying on it.
 
 KEY QUESTIONS WE'LL ANSWER:
 ---------------------------
@@ -30,7 +34,7 @@ OUTPUT:
     - Console: Side-by-side EKF vs UKF metrics under 30% dropout
     - Files: 06_ukf_vs_ekf_dropout_heavy.png
 
-ESTIMATED RUNTIME: ~20 seconds (UKF is slower)
+ESTIMATED RUNTIME: ~20 seconds (depending on backend)
 
 KEY CONCEPTS ILLUSTRATED:
 -------------------------
@@ -135,12 +139,18 @@ def print_comparison_table(
         f"{'SAME':>12} {'-':>12}"
     )
 
-    # Computation time
-    speedup = ukf_time_s / ekf_time_s
+    # Computation time. Format direction-aware: under JIT-compiled JAX
+    # with warm dispatch the ratio is often near 1× and can flip either
+    # way; an unconditional "slower" would misreport that.
+    ratio = ukf_time_s / ekf_time_s
+    cost_winner = "EKF" if ratio > 1.0 else "UKF" if ratio < 1.0 else "TIE"
+    cost_label = (
+        f"{ratio:.1f}× slower" if ratio >= 1.0 else f"{1.0 / ratio:.1f}× faster"
+    )
     print("-" * 80)
     print(
         f"{'Computation Time (ms)':<30} {ekf_time_s * 1000:>12.1f} {ukf_time_s * 1000:>12.1f} "
-        f"{'EKF':>12} {speedup:>10.1f}× slower"
+        f"{cost_winner:>12} {cost_label:>14}"
     )
     print("-" * 80)
 
@@ -149,12 +159,12 @@ def print_comparison_table(
     if accuracy_wins >= 2:
         print(
             f"  ✓ UKF wins {accuracy_wins}/2 accuracy metrics → UKF more robust "
-            f"(at {speedup:.1f}× cost)"
+            f"(wall-clock: {cost_label})"
         )
     else:
         print(
             f"  ✓ EKF wins {2 - accuracy_wins}/2 accuracy metrics → EKF sufficient "
-            f"(and {speedup:.1f}× faster)"
+            f"(wall-clock: {cost_label})"
         )
 
 
@@ -268,8 +278,16 @@ def main() -> None:
     _block_until_ready(ukf_result)
     ukf_time = time.time() - t0_ukf
 
+    # Format the ratio as "slower" or "faster" depending on direction; on
+    # JIT-compiled JAX with warm dispatch UKF often runs at ~1× EKF and
+    # can occasionally come in faster.
+    ratio = ukf_time / ekf_time
+    if ratio >= 1.0:
+        cost_label = f"{ratio:.1f}× slower"
+    else:
+        cost_label = f"{1.0 / ratio:.1f}× faster"
     print(f"   EKF time: {ekf_time * 1000:.1f} ms")
-    print(f"   UKF time: {ukf_time * 1000:.1f} ms ({ukf_time / ekf_time:.1f}× slower)")
+    print(f"   UKF time: {ukf_time * 1000:.1f} ms ({cost_label})")
 
     # Compute metrics for both
     t_imu = sim["t_imu"]
@@ -464,12 +482,18 @@ def main() -> None:
     ax_status.legend(loc="upper right")
     ax_status.grid(True, alpha=0.2)
 
-    # Overall title
+    # Overall title. Format the wall-clock comparison direction-aware so
+    # we don't claim "UKF is 0.8× slower" when it actually came in faster.
+    ratio = ukf_time / ekf_time
+    if ratio >= 1.0:
+        title_cost = f"UKF is {ratio:.1f}× slower"
+    else:
+        title_cost = f"UKF is {1.0 / ratio:.1f}× faster"
     title = (
         f"UKF vs EKF Under 30% Dropout — Heavy Stress Test\n"
         f"EKF: {ekf_metrics['pos_rmse_cm']:.2f} cm RMSE | "
         f"UKF: {ukf_metrics['pos_rmse_cm']:.2f} cm RMSE | "
-        f"UKF is {ukf_time / ekf_time:.1f}× slower"
+        f"{title_cost}"
     )
     fig.suptitle(title, fontsize=12, fontweight="bold", y=0.98)
 
@@ -481,12 +505,14 @@ def main() -> None:
     # Final verdict
     print_section_header("Final Verdict: UKF vs EKF Under Stress")
 
-    speedup = ukf_time / ekf_time
     pos_improvement = ekf_metrics["pos_rmse_cm"] - ukf_metrics["pos_rmse_cm"]
     drift_improvement = (
         ekf_metrics["dropout_drift_m"] - ukf_metrics["dropout_drift_m"]
     ) * 100
 
+    cost_summary_label = (
+        f"{ratio:.1f}× slower" if ratio >= 1.0 else f"{1.0 / ratio:.1f}× faster"
+    )
     print(
         f"""
     📊 SUMMARY:
@@ -496,7 +522,7 @@ def main() -> None:
       • Dropout Drift: {"UKF better by " + f"{drift_improvement:.1f} cm" if drift_improvement > 0 else "EKF better by " + f"{-drift_improvement:.1f} cm"}
 
     Computational Cost:
-      • UKF is {speedup:.1f}× slower ({ekf_time * 1000:.1f} ms vs {ukf_time * 1000:.1f} ms)
+      • UKF is {cost_summary_label} ({ekf_time * 1000:.1f} ms vs {ukf_time * 1000:.1f} ms)
 
     🎓 KEY TAKEAWAYS:
 
@@ -511,8 +537,8 @@ def main() -> None:
        • Bias estimation quality matters MORE than filter type
 
     3. COMPUTATIONAL TRADEOFF:
-       • {speedup:.1f}× slowdown for {"minimal" if abs(pos_improvement) < 0.2 else "moderate"} accuracy gain
-       • For real-time: EKF recommended
+       • Wall-clock comparison ({cost_summary_label}) for {"minimal" if abs(pos_improvement) < 0.2 else "moderate"} accuracy gain
+       • Re-measure on the target backend before relying on the ratio
        • For offline: Consider UKF if every cm matters
 
     4. PRACTICAL RECOMMENDATION:

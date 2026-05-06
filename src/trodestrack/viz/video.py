@@ -492,9 +492,22 @@ def create_diagnostic_video(
             ax_nees, window_s=time_window_s, fps=fps, state_dim=2
         )
 
-    # Pre-compute event times for progress bar markers
+    # Pre-compute event times for progress bar markers. Track LED
+    # mislabeling (``swap_applied``) and wall reflections
+    # (``led_reflection_applied``) as distinct event categories so the
+    # progress bar can report them separately. The simulator publishes
+    # ground-truth masks for both; when those are present we trust them
+    # over the heuristic anomaly checks. The geometric checks remain as
+    # a fallback for sims that omit the masks (e.g. real-data inputs).
     log.info("Detecting events...")
-    event_times: dict[str, list[float]] = {"led_swap": [], "long_dropout": []}
+    event_times: dict[str, list[float]] = {
+        "led_swap": [],
+        "led_reflection": [],
+        "long_dropout": [],
+    }
+
+    swap_mask = sim_data.get("swap_applied")
+    reflection_mask = sim_data.get("led_reflection_applied")
 
     for frame_idx in range(n_frames):
         t = float(video_data["t_video"][frame_idx])
@@ -505,15 +518,32 @@ def create_diagnostic_video(
         led1_visible = sim_data["mask_led1"][cam_idx]
         led2_visible = sim_data["mask_led2"][cam_idx]
 
-        # LED swap detection (spacing deviation + vector direction)
-        if led1_visible and led2_visible:
-            # Check 1: Spacing deviation (catches occlusion-induced swaps)
+        # Prefer simulator-emitted ground-truth masks when available so
+        # reflection artifacts don't get collapsed into "LED swap" by the
+        # geometric heuristic below.
+        sim_swap = bool(swap_mask[cam_idx]) if swap_mask is not None else False
+        sim_reflection = (
+            bool(reflection_mask[cam_idx]) if reflection_mask is not None else False
+        )
+
+        if sim_swap:
+            event_times["led_swap"].append(t)
+        if sim_reflection:
+            event_times["led_reflection"].append(t)
+
+        # Geometric fallback (real-data inputs lacking the masks). Only
+        # fire when neither ground-truth mask was present, so we don't
+        # double-count under simulator inputs.
+        if (
+            swap_mask is None
+            and reflection_mask is None
+            and led1_visible
+            and led2_visible
+        ):
             spacing = np.linalg.norm(led1_pos - led2_pos)
             expected_spacing = np.linalg.norm(led1_offset_body - led2_offset_body)
             spacing_anomaly = abs(spacing - expected_spacing) > 0.5 * expected_spacing
 
-            # Check 2: LED vector direction (catches reflection/labeling swaps).
-            # See _led_label_direction_anomaly for the convention.
             state = np.asarray(video_data["X_truth"][frame_idx])
             theta = float(state[4])  # heading angle
             direction_anomaly = _led_label_direction_anomaly(
@@ -550,6 +580,7 @@ def create_diagnostic_video(
 
     log.info(
         f"  Found {len(event_times['led_swap'])} LED swaps, "
+        f"{len(event_times['led_reflection'])} wall reflections, "
         f"{len(event_times['long_dropout'])} dropout sequences (debounced)"
     )
 

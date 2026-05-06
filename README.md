@@ -307,7 +307,7 @@ See [`examples/README.md`](examples/README.md) for the complete learning path. E
   - CLI tool: `trodestrack report --run qa_inputs/ --pdf report.pdf` (consumes a separately-prepared QA-input directory; see `--help`)
   - Diagnostic videos with 9-panel filter state visualization
 - ✅ **Testing & Validation**
-  - 700+ unit, integration, regression, and property tests across the suite. The default CI-style run excludes 32 wall-clock benchmark tests (marked `slow`/`benchmark`); invoke them locally with `uv run pytest -m benchmark`. The single xfail tracks the unimplemented persistent-LED-swap detection (`test_filter_stable_under_frequent_swaps` in `tests/filters/test_robustness.py`). Rerun `uv run pytest` for the current pass count — the absolute number drifts as tests are added.
+  - 700+ unit, integration, regression, and property tests across the suite. The default CI-style run uses `pytest -m "not slow and not benchmark"` and excludes ~32 long-running tests (~28 marked `slow`, ~6 marked `benchmark` — small overlap). Invoke the excluded ones locally with `uv run pytest -m "slow or benchmark"`. The single xfail tracks the unimplemented persistent-LED-swap detection (`test_filter_stable_under_frequent_swaps` in `tests/filters/test_robustness.py`). Rerun `uv run pytest` for the current pass count — the absolute number drifts as tests are added.
   - Accuracy and performance targets achieved on the simulated benchmark:
     - Position RMSE ≤ 2 cm ✓
     - Velocity RMSE ≤ 10 cm/s ✓
