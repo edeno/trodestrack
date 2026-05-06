@@ -18,12 +18,32 @@ References:
 import time
 from typing import Any
 
+import jax
 import numpy as np
 import pytest
 
 from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
 from trodestrack.runtime.offline import rts_smoother
 from trodestrack.sim.rat_imu import RatIMUSimConfig, simulate_rat_imu
+
+
+def _block_until_ready(result: Any) -> Any:
+    """Force JAX dispatch to complete on every array leaf in ``result``.
+
+    JAX execution is asynchronous: ``extended_kalman_filter`` and
+    ``rts_smoother`` return ``ArrayImpl`` futures that the host gets back
+    immediately while the underlying XLA computation is still running.
+    Stopping the timer before materializing those leaves measures
+    dispatch latency rather than completed compute, so headline
+    throughput / latency numbers can under-report the real cost. Mirror
+    the existing helper used in ``test_ekf_3d_core_jit.py`` to walk the
+    pytree and call ``block_until_ready`` on every JAX array leaf.
+    """
+    for leaf in jax.tree_util.tree_leaves(result):
+        if hasattr(leaf, "block_until_ready"):
+            leaf.block_until_ready()
+    return result
+
 
 # =============================================================================
 # PRD Performance Requirements (from PRD.md Section 4)
@@ -116,7 +136,9 @@ def test_offline_smoother_throughput():
     # Get production EKF configuration
     ekf_config = get_production_ekf_config()
 
-    # Measure total processing time (filter + smoother)
+    # Measure total processing time (filter + smoother). Block on each
+    # JAX result inside the timed interval so we measure completed
+    # compute, not async dispatch — see ``_block_until_ready`` docstring.
     t_start = time.perf_counter()
 
     # Run forward filter
@@ -129,6 +151,7 @@ def test_offline_smoother_throughput():
         Z_cam_led2=sim_data["Z_cam_led2"],
         mask_cam=sim_data["mask_cam"],
     )
+    _block_until_ready(filter_result)
 
     # Run RTS smoother
     smoother_result = rts_smoother(
@@ -139,6 +162,7 @@ def test_offline_smoother_throughput():
         t_cam=sim_data["t_cam_exp"],
         mask_cam=sim_data["mask_cam"],
     )
+    _block_until_ready(smoother_result)
 
     t_end = time.perf_counter()
     processing_time_s = t_end - t_start
@@ -245,7 +269,8 @@ def test_online_ekf_latency():
     # Get production EKF configuration
     ekf_config = get_production_ekf_config()
 
-    # Measure filter processing time
+    # Measure filter processing time. Block on the JAX result inside the
+    # timed interval so we measure completed compute, not async dispatch.
     t_start = time.perf_counter()
 
     filter_result = extended_kalman_filter(
@@ -257,6 +282,7 @@ def test_online_ekf_latency():
         Z_cam_led2=sim_data["Z_cam_led2"],
         mask_cam=sim_data["mask_cam"],
     )
+    _block_until_ready(filter_result)
 
     t_end = time.perf_counter()
     total_processing_time_s = t_end - t_start
