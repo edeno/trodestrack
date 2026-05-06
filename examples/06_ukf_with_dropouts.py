@@ -45,6 +45,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+import jax
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.gridspec import GridSpec
@@ -55,6 +56,22 @@ from trodestrack.qa.metrics import compute_dropout_drift, compute_position_rmse
 from trodestrack.sim.rat_imu import RatIMUSimConfig, simulate_rat_imu
 from trodestrack.sim.utils import interp_angle
 from trodestrack.viz.styles import COLORS, apply_tufte_style
+
+
+def _block_until_ready(result):
+    """Force JAX dispatch to complete on every array leaf in ``result``.
+
+    JAX execution is asynchronous, so timing a filter call without
+    blocking can measure dispatch latency rather than completed compute.
+    The "EKF vs UKF wall-clock" comparison in this example would be
+    unreliable on platforms where async dispatch dominates without this
+    helper. Mirrors the helper in ``tests/benchmark/test_throughput.py``.
+    """
+    for leaf in jax.tree_util.tree_leaves(result):
+        if hasattr(leaf, "block_until_ready"):
+            leaf.block_until_ready()
+    return result
+
 
 apply_tufte_style()
 
@@ -233,6 +250,7 @@ def main() -> None:
         Z_cam_led2=sim["Z_cam_led2"],
         mask_cam=sim["mask_cam"],
     )
+    _block_until_ready(ekf_result)
     ekf_time = time.time() - t0_ekf
 
     # Run UKF
@@ -247,6 +265,7 @@ def main() -> None:
         Z_cam_led2=sim["Z_cam_led2"],
         mask_cam=sim["mask_cam"],
     )
+    _block_until_ready(ukf_result)
     ukf_time = time.time() - t0_ukf
 
     print(f"   EKF time: {ekf_time * 1000:.1f} ms")

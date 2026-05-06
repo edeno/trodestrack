@@ -1271,6 +1271,33 @@ def test_p0_zero_yields_deterministic_initial_state():
     np.testing.assert_allclose(sim["X_truth"][0], m0, atol=1e-12)
 
 
+def test_m0_and_p0_accept_list_inputs_with_clear_error():
+    """``m0`` / ``P0`` accept list/tuple inputs and surface ValueError on shape errors.
+
+    The shape validation previously read ``self.m0.shape`` *before* any
+    ndarray coercion, so list inputs raised
+    ``AttributeError: 'list' object has no attribute 'shape'`` instead
+    of the documented ``ValueError``. Coerce both via ``np.asarray``
+    first so callers spelling ``m0=[...]`` get the contract violation
+    they expect.
+    """
+    # List inputs must be accepted (after coercion).
+    cfg = RatIMUSimConfig(
+        duration_s=1.0, m0=[0.5, 0.5, 0.0, 0.0, 0.0], P0=np.eye(5).tolist()
+    )
+    assert isinstance(cfg.m0, np.ndarray) and cfg.m0.shape == (5,)
+    assert isinstance(cfg.P0, np.ndarray) and cfg.P0.shape == (5, 5)
+
+    # Tuple inputs must also work.
+    RatIMUSimConfig(duration_s=1.0, m0=(0.0,) * 5)
+
+    # Wrong-shape list still raises ValueError (not AttributeError).
+    with pytest.raises(ValueError, match=r"m0 must have shape"):
+        RatIMUSimConfig(duration_s=1.0, m0=[0.5, 0.5])
+    with pytest.raises(ValueError, match=r"P0 must have shape"):
+        RatIMUSimConfig(duration_s=1.0, P0=[[1.0, 0.0], [0.0, 1.0]])
+
+
 def test_camera_latency_and_jitter_must_be_non_negative():
     """cam_latency_s and cam_jitter_s must be ≥ 0 at construction.
 

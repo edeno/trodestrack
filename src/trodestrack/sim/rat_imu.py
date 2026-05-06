@@ -609,7 +609,12 @@ class RatIMUSimConfig:
                 stacklevel=2,
             )
 
-        # Initial state validation
+        # Initial state validation. Coerce to ndarray first so list /
+        # tuple inputs (a natural way to spell ``m0=[0.5, 0.5, 0, 0, 0]``)
+        # raise the documented ``ValueError`` instead of a raw
+        # ``AttributeError: 'list' object has no attribute 'shape'``.
+        self.m0 = np.asarray(self.m0)
+        self.P0 = np.asarray(self.P0)
         if self.m0.shape != (5,):
             raise ValueError(
                 f"Initial state m0 must have shape (5,), got {self.m0.shape}.\n"

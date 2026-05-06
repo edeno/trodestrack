@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 
 from trodestrack.viz.components import (
     BiasEstimatePanelArtist,
+    FilterArtist,
     NEESPanelArtist,
     ResidualPanelArtist,
 )
@@ -101,5 +102,54 @@ def test_panels_tolerate_inf_diagnostics_without_crashing():
         # contain only the finite sample).
         y = np.asarray(panel.line_nees.get_ydata())
         assert np.all(np.isfinite(y)), f"NEES line contains non-finite: {y}"
+    finally:
+        plt.close(fig)
+
+
+def test_filter_artist_hides_overlay_on_non_finite_state():
+    """Diverged filter inputs (NaN/Inf in mean or covariance) must not produce a
+    bogus overlay.
+
+    The previous code only validated the covariance shape, then wrote the
+    NaN/Inf marker position straight into ``set_data`` and propagated
+    them through ``np.linalg.eigh`` into the ellipse width / height.
+    Hide the overlay (clear marker, zero ellipse) instead — same
+    semantics as the residual / bias / NEES panels under non-finite
+    inputs.
+    """
+    cases = [
+        ("nan_mean_x", np.nan, 0.5, np.eye(2) * 1e-3),
+        ("inf_mean_x", np.inf, 0.5, np.eye(2) * 1e-3),
+        ("nan_mean_y", 0.5, np.nan, np.eye(2) * 1e-3),
+        ("nan_cov", 0.5, 0.5, np.full((2, 2), np.nan)),
+        ("inf_cov", 0.5, 0.5, np.full((2, 2), np.inf)),
+    ]
+    for label, x, y, P in cases:
+        fig, ax = plt.subplots()
+        try:
+            artist = FilterArtist(ax)
+            artist.update(x, y, P)
+            mx = np.asarray(artist.pred_marker.get_xdata())
+            my = np.asarray(artist.pred_marker.get_ydata())
+            w = artist.uncertainty_ellipse.width
+            h = artist.uncertainty_ellipse.height
+            assert mx.size == 0 and my.size == 0, (
+                f"{label}: marker should be hidden, got x={list(mx)}, y={list(my)}"
+            )
+            assert w == 0.0 and h == 0.0, (
+                f"{label}: ellipse should be zeroed, got w={w}, h={h}"
+            )
+        finally:
+            plt.close(fig)
+
+    # Sanity: a finite update after a diverged update must restore the overlay.
+    fig, ax = plt.subplots()
+    try:
+        artist = FilterArtist(ax)
+        artist.update(np.nan, np.nan, np.eye(2) * 1e-3)
+        artist.update(0.5, 0.5, np.eye(2) * 1e-3)
+        mx = np.asarray(artist.pred_marker.get_xdata())
+        assert mx.size == 1 and mx[0] == 0.5
+        assert artist.uncertainty_ellipse.width > 0.0
     finally:
         plt.close(fig)

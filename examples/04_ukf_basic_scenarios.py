@@ -58,6 +58,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+import jax
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.gridspec import GridSpec
@@ -74,6 +75,22 @@ from trodestrack.sim.simple import (
 )
 from trodestrack.sim.utils import interp_angle
 from trodestrack.viz.styles import COLORS, apply_tufte_style
+
+
+def _block_until_ready(result):
+    """Force JAX dispatch to complete on every array leaf in ``result``.
+
+    JAX execution is asynchronous, so timing a filter call without
+    blocking can measure dispatch latency rather than completed compute.
+    The "EKF vs UKF wall-clock" comparisons in this example would be
+    unreliable on platforms where async dispatch dominates without this
+    helper. Mirrors the helper in ``tests/benchmark/test_throughput.py``.
+    """
+    for leaf in jax.tree_util.tree_leaves(result):
+        if hasattr(leaf, "block_until_ready"):
+            leaf.block_until_ready()
+    return result
+
 
 # Apply clean visualization style
 apply_tufte_style()
@@ -811,6 +828,7 @@ def main() -> None:
         Z_cam_led2=sim_stat["Z_cam_led2"],
         mask_cam=sim_stat["mask_cam"],
     )
+    _block_until_ready(ekf_stat)
     ekf_time_stat = time.time() - t0_ekf
 
     print("   Running UKF...")
@@ -824,6 +842,7 @@ def main() -> None:
         Z_cam_led2=sim_stat["Z_cam_led2"],
         mask_cam=sim_stat["mask_cam"],
     )
+    _block_until_ready(ukf_stat)
     ukf_time_stat = time.time() - t0_ukf
 
     # Compute metrics for both filters
@@ -934,6 +953,7 @@ def main() -> None:
         Z_cam_led2=sim_vel["Z_cam_led2"],
         mask_cam=sim_vel["mask_cam"],
     )
+    _block_until_ready(ekf_vel)
     ekf_time_vel = time.time() - t0_ekf
 
     print("   Running UKF...")
@@ -947,6 +967,7 @@ def main() -> None:
         Z_cam_led2=sim_vel["Z_cam_led2"],
         mask_cam=sim_vel["mask_cam"],
     )
+    _block_until_ready(ukf_vel)
     ukf_time_vel = time.time() - t0_ukf
 
     # Compute truth
@@ -1037,6 +1058,7 @@ def main() -> None:
         Z_cam_led2=sim_circ["Z_cam_led2"],
         mask_cam=sim_circ["mask_cam"],
     )
+    _block_until_ready(ekf_circ)
     ekf_time_circ = time.time() - t0_ekf
 
     print("   Running UKF...")
@@ -1050,6 +1072,7 @@ def main() -> None:
         Z_cam_led2=sim_circ["Z_cam_led2"],
         mask_cam=sim_circ["mask_cam"],
     )
+    _block_until_ready(ukf_circ)
     ukf_time_circ = time.time() - t0_ukf
 
     # Compute truth

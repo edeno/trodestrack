@@ -1065,6 +1065,19 @@ class FilterArtist:
         if P_np.shape != (2, 2):
             raise ValueError(f"Expected P shape (2, 2), got {P_np.shape}")
 
+        # Skip the overlay when the filter has diverged (non-finite mean
+        # or covariance). Writing NaN/Inf into the marker position or
+        # ellipse dimensions silently produces an invalid overlay rather
+        # than a hard error — eigh can also return NaNs and propagate
+        # non-finite width/height into the ellipse patch.
+        if not (
+            np.isfinite(x_pred) and np.isfinite(y_pred) and np.all(np.isfinite(P_np))
+        ):
+            self.pred_marker.set_data([], [])
+            self.uncertainty_ellipse.width = 0.0
+            self.uncertainty_ellipse.height = 0.0
+            return [self.pred_marker, self.uncertainty_ellipse]
+
         # Update marker position
         self.pred_marker.set_data([x_pred], [y_pred])
 
