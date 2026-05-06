@@ -118,7 +118,11 @@ markers = [
 [tool.ruff]
 line-length = 88
 target-version = "py311"
-fix = true
+# Do NOT set `fix = true` here. With autofix on by default, CI runs of
+# `ruff check .` rewrite files in the runner workspace and exit 0 even
+# when violations were present, making lint checks pass on dirty
+# branches. Pre-commit and the documented local commands already pass
+# `--fix` explicitly when they want autofix.
 show-fixes = true
 
 [tool.ruff.format]
