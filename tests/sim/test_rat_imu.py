@@ -1094,6 +1094,80 @@ def test_confidence_decays_on_frames_adjacent_to_dropouts():
     _check("led2", sim["mask_led2"], sim["confidence_led2"])
 
 
+def test_led_swap_per_frame_is_bernoulli_not_rounded_count():
+    """Per-frame swaps must use Bernoulli sampling, not round(n*p).
+
+    Previously the simulator picked exactly ``round(len(candidates) * p)``
+    frames, which (a) rounded small ``p × n`` to 0 and silently disabled
+    swaps on short/sparse runs and (b) produced no binomial variance
+    across seeds. With Bernoulli sampling we expect both: a non-zero
+    probability that swaps fire even when ``p × n < 0.5``, and seed-to-
+    seed variability in the swap count.
+    """
+    seeds = list(range(40))
+    counts = []
+    for seed in seeds:
+        cfg = RatIMUSimConfig(
+            duration_s=2.0,
+            fs_imu=200.0,
+            fs_cam=30.0,
+            cam_dropout_prob=0.0,
+            use_second_led=True,
+            led_swap_mode="per_frame",
+            led_swap_prob=0.05,
+            led_wall_reflection_prob=0.0,
+        )
+        sim = simulate_rat_imu(cfg, seed=seed)
+        counts.append(int(sim["swap_applied"].sum()))
+
+    # At least one seed must produce a non-zero swap count (rules out
+    # the "rounded to zero" failure mode).
+    assert max(counts) > 0, (
+        f"led_swap_prob=0.05 produced 0 swaps across {len(seeds)} seeds — "
+        "looks like the rounded-count path is back."
+    )
+    # And the seed-to-seed variability must be non-trivial (rules out
+    # the "exact fixed count" failure mode).
+    assert len(set(counts)) > 1, (
+        f"swap counts identical across seeds {set(counts)} — Bernoulli "
+        "sampling should produce binomial variance."
+    )
+
+
+def test_led_wall_reflection_is_bernoulli_not_rounded_count():
+    """Wall reflections must use Bernoulli sampling, not round(n*p).
+
+    Same bug class as ``led_swap_prob`` above, on the reflection path.
+    """
+    seeds = list(range(40))
+    counts = []
+    for seed in seeds:
+        cfg = RatIMUSimConfig(
+            duration_s=5.0,
+            fs_imu=200.0,
+            fs_cam=30.0,
+            cam_dropout_prob=0.0,
+            use_second_led=True,
+            led_swap_mode="per_frame",
+            led_swap_prob=0.0,
+            led_wall_reflection_prob=0.05,
+            led_wall_reflection_distance=0.05,
+            arena_w=0.5,
+            arena_h=0.5,
+        )
+        sim = simulate_rat_imu(cfg, seed=seed)
+        counts.append(int(sim["led_reflection_applied"].sum()))
+
+    assert max(counts) > 0, (
+        f"led_wall_reflection_prob=0.05 produced 0 reflections across "
+        f"{len(seeds)} seeds — rounded-count path is back."
+    )
+    assert len(set(counts)) > 1, (
+        f"reflection counts identical across seeds {set(counts)} — "
+        "Bernoulli sampling should produce binomial variance."
+    )
+
+
 def test_persistent_swap_with_single_led_warns():
     """Persistent-swap settings on a single-LED sim should emit a warning.
 

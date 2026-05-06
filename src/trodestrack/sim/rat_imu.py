@@ -1043,14 +1043,18 @@ def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> Si
         candidate_indices = np.where(reflection_candidates)[0]
 
         if len(candidate_indices) > 0:
-            # Randomly select frames to apply reflection based on probability
-            n_reflections = int(
-                np.round(len(candidate_indices) * config.led_wall_reflection_prob)
-            )
-            if n_reflections > 0:
-                reflection_indices = rng.choice(
-                    candidate_indices, size=n_reflections, replace=False
-                )
+            # Per-frame Bernoulli sampling. Using
+            # ``round(n_candidates * p)`` produced a deterministic fixed
+            # count: small ``p × n`` rounded to 0 disabled the effect
+            # entirely on short/sparse runs (e.g. 0.25 × 2 → 0 reflections
+            # for every seed), and the exact-count selection eliminated
+            # the binomial variance the docstring promises ("per visible
+            # frame"). True per-frame probability via ``rng.random < p``.
+            draws = rng.random(len(candidate_indices))
+            reflection_indices = candidate_indices[
+                draws < config.led_wall_reflection_prob
+            ]
+            if len(reflection_indices) > 0:
                 led_reflection_applied[reflection_indices] = True
 
                 # Apply reflection for each selected frame
@@ -1099,15 +1103,17 @@ def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> Si
         both_visible = mask_led1 & mask_led2
 
         if config.led_swap_mode == "per_frame":
-            # Legacy per-frame swaps: each frame independently with probability led_swap_prob
+            # Per-frame Bernoulli swap (matches the documented
+            # "each frame independently with probability led_swap_prob").
+            # ``round(n_candidates * p)`` produced a deterministic fixed
+            # count and stripped the binomial variance — small ``p × n``
+            # rounded to 0 silently disabled swaps on short/sparse runs.
             if config.led_swap_prob > 0:
                 swap_candidates = np.where(both_visible)[0]
                 if len(swap_candidates) > 0:
-                    n_swaps = int(np.round(len(swap_candidates) * config.led_swap_prob))
-                    if n_swaps > 0:
-                        swap_indices = rng.choice(
-                            swap_candidates, size=n_swaps, replace=False
-                        )
+                    draws = rng.random(len(swap_candidates))
+                    swap_indices = swap_candidates[draws < config.led_swap_prob]
+                    if len(swap_indices) > 0:
                         swap_applied[swap_indices] = True
 
         elif config.led_swap_mode == "persistent":
