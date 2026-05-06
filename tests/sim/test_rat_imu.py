@@ -1039,6 +1039,61 @@ def test_short_duration_with_too_few_samples_is_rejected():
     assert len(sim["t_imu"]) >= 2
 
 
+def test_confidence_decays_on_frames_adjacent_to_dropouts():
+    """Visible frames adjacent to a dropout must respect confidence_dropout_decay.
+
+    The neighbor-dropout convolution previously had an operator-precedence
+    bug: ``~mask.astype(int)`` parsed as ``~(mask.astype(int))`` and
+    produced strictly-negative integers, so the ``> 0`` check that gates
+    the decay multiplier was never satisfied. Adjacent-to-dropout frames
+    therefore retained the unmodified random envelope (~0.8-1.2 ×
+    confidence_base) instead of being bounded by
+    confidence_base * 1.2 * confidence_dropout_decay.
+    """
+    confidence_base = 1.0
+    decay = 0.25
+    rand_max = 1.2  # 0.8 + 0.4 * 1 (worst-case random multiplier)
+    cfg = RatIMUSimConfig(
+        duration_s=20.0,
+        fs_imu=200.0,
+        fs_cam=30.0,
+        cam_dropout_prob=0.15,
+        cam_dropout_correlation=0.0,
+        use_second_led=True,
+        use_confidence=True,
+        confidence_base=confidence_base,
+        confidence_dropout_decay=decay,
+    )
+    sim = simulate_rat_imu(cfg, seed=42)
+
+    expected_cap = confidence_base * rand_max * decay
+    lower_envelope = 0.8 * confidence_base
+
+    def _check(name: str, mask, conf) -> None:
+        adj = np.zeros_like(mask)
+        adj[1:] |= ~mask[:-1]
+        adj[:-1] |= ~mask[1:]
+        visible_adj = mask & adj
+        if visible_adj.any():
+            adj_confs = conf[visible_adj]
+            assert adj_confs.max() <= expected_cap + 1e-9, (
+                f"{name}: adjacent-to-dropout confidence max "
+                f"{adj_confs.max():.4f} exceeds expected cap "
+                f"{expected_cap:.4f} — decay not applied."
+            )
+        non_adj = mask & ~adj
+        if non_adj.any():
+            non_adj_confs = conf[non_adj]
+            assert non_adj_confs.min() >= lower_envelope - 1e-9, (
+                f"{name}: non-adjacent visible confidence min "
+                f"{non_adj_confs.min():.4f} fell below the random envelope's "
+                "lower bound — decay was applied where it shouldn't."
+            )
+
+    _check("led1", sim["mask_led1"], sim["confidence_led1"])
+    _check("led2", sim["mask_led2"], sim["confidence_led2"])
+
+
 def test_persistent_swap_with_single_led_warns():
     """Persistent-swap settings on a single-LED sim should emit a warning.
 

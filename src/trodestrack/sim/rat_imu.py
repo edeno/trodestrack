@@ -948,10 +948,17 @@ def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> Si
         # Use convolution to detect neighboring dropouts: [0.5, 1.0, 0.5] kernel
         # If any neighbor is a dropout, the convolution will be non-zero
 
-        # LED1: Zero out dropouts, then apply neighbor decay
+        # LED1: Zero out dropouts, then apply neighbor decay.
+        # Operator precedence trap: ``~mask_led1.astype(int)`` parses as
+        # ``~(mask_led1.astype(int))`` and bitwise-negates the int values
+        # (True→1→-2, False→0→-1) instead of producing a 0/1 dropout
+        # indicator. The convolution then yields strictly-negative
+        # values, so ``> 0`` was never satisfied and confidence_dropout_
+        # decay was silently a no-op for adjacent visible frames. Force
+        # boolean negation first, then cast.
         confidence_led1 = np.where(mask_led1, confidence_led1, 0.0)
         neighbor_dropout_led1 = np.convolve(
-            ~mask_led1.astype(int), [0.5, 1.0, 0.5], mode="same"
+            (~mask_led1).astype(int), [0.5, 1.0, 0.5], mode="same"
         )
         # Decay confidence where neighbors are dropouts (but current is valid)
         confidence_led1 *= np.where(
@@ -964,7 +971,7 @@ def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> Si
         if config.use_second_led:
             confidence_led2 = np.where(mask_led2, confidence_led2, 0.0)
             neighbor_dropout_led2 = np.convolve(
-                ~mask_led2.astype(int), [0.5, 1.0, 0.5], mode="same"
+                (~mask_led2).astype(int), [0.5, 1.0, 0.5], mode="same"
             )
             confidence_led2 *= np.where(
                 mask_led2 & (neighbor_dropout_led2 > 0),
