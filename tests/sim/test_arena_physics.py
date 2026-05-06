@@ -530,3 +530,50 @@ def test_arena_no_tunneling_at_high_displacement_per_step():
         f"y out of bounds: range ({ys.min():.6f}, {ys.max():.6f}) for "
         f"arena_h={config.arena_h}"
     )
+
+
+def test_arena_bounds_hold_under_pathological_overshoot():
+    """Position must stay in bounds even if the bounded reflection loop overflows.
+
+    The bounded reflection loop is correct for typical 1-N bounce
+    physics, but a single timestep with displacement greatly exceeding
+    the arena (e.g. velocity=250 m/s on a 10 cm arena at fs_imu=2 Hz —
+    1250+ effective bounces) silently exited the loop with the position
+    still outside. Probe before fix: X_truth[:, 0] = [25.13, 0.066, ...]
+    on arena_w=0.1. The closed-form modulo-fold fallback now guarantees
+    the final position is in [0, arena] regardless of overshoot
+    magnitude.
+    """
+    config = RatIMUSimConfig(
+        duration_s=2.0,
+        fs_imu=2.0,
+        fs_cam=1.0,
+        arena_w=0.1,
+        arena_h=0.1,
+        m0=np.array([0.05, 0.05, 250.0, 0.0, 0.0]),
+        sigma_yaw_rate=0.0,
+        sigma_a_fwd=0.0,
+        sigma_a_lat=0.0,
+        gyro_noise_density=0.0,
+        accel_noise_density=0.0,
+        gyro_bias_rw_density=0.0,
+        accel_bias_rw_density=0.0,
+        cam_dropout_prob=0.0,
+        cam_sigma_m=0.0,
+        cam_jitter_s=0.0,
+        drag_fwd=0.0,
+        drag_lat=0.0,
+        vel_drag=0.0,
+        speed_clip=250.0,
+    )
+    sim = simulate_rat_imu(config=config, seed=0)
+    xs = sim["X_truth"][:, 0]
+    ys = sim["X_truth"][:, 1]
+    assert (xs.min() >= 0.0 - 1e-12) and (xs.max() <= config.arena_w + 1e-12), (
+        f"x out of bounds under pathological overshoot: range "
+        f"({xs.min():.6f}, {xs.max():.6f}) for arena_w={config.arena_w}"
+    )
+    assert (ys.min() >= 0.0 - 1e-12) and (ys.max() <= config.arena_h + 1e-12), (
+        f"y out of bounds under pathological overshoot: range "
+        f"({ys.min():.6f}, {ys.max():.6f}) for arena_h={config.arena_h}"
+    )

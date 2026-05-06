@@ -731,11 +731,23 @@ class IMUPanelArtist:
                 self.accel_x_truth_line.set_data([], [])
                 self.accel_y_truth_line.set_data([], [])
 
-            # Set x-axis limits based on actual data range
-            if len(t_raw) > 0:
+            # Set x-axis limits based on actual data range. Skip the
+            # set_xlim call when only one sample is in the window —
+            # matplotlib emits "Attempting to set identical low and
+            # high xlims" warnings on degenerate ranges, and the first
+            # rendered video frame routinely has exactly one IMU sample.
+            if len(t_raw) > 1:
                 self.ax_gyro.set_xlim(t_raw[0], t_raw[-1])
                 self.ax_accel_x.set_xlim(t_raw[0], t_raw[-1])
                 self.ax_accel_y.set_xlim(t_raw[0], t_raw[-1])
+            elif len(t_raw) == 1:
+                # Pad a tiny window so the axis stays meaningful but
+                # matplotlib doesn't warn about identical limits.
+                t0 = float(t_raw[0])
+                pad = 1e-3
+                self.ax_gyro.set_xlim(t0 - pad, t0 + pad)
+                self.ax_accel_x.set_xlim(t0 - pad, t0 + pad)
+                self.ax_accel_y.set_xlim(t0 - pad, t0 + pad)
         else:
             # Single sample mode (legacy): buffer interpolated points
             if imu_data is not None:

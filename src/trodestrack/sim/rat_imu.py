@@ -853,36 +853,48 @@ def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> Si
         vy = vy_new
 
         # --- 5) Wall reflections (inelastic) ---
-        # A single reflection only handles one wall crossing per step:
-        # if ``displacement > arena_w`` (e.g. small arena × high speed
-        # × low fs_imu) the reflected position can still be outside the
-        # arena, breaking the documented "positions stay in bounds"
-        # contract. Loop the reflection until ``px`` lies in
-        # ``[0, arena_w]``. Each iteration strictly reduces
-        # ``|px - center|``, so this terminates in
-        # ``ceil(|px_overshoot| / arena_w)`` steps. Cap iterations to
-        # guard against pathological NaN/Inf inputs (already validated
-        # at the public entry point but defensive against future
-        # callers).
-        max_reflections = 1000
+        # A single reflection only handles one wall crossing per step,
+        # so for ``displacement > arena`` (small arena × high speed ×
+        # low fs_imu) the reflected position can still be outside.
+        # Strategy: run a bounded loop that handles typical 1-N bounce
+        # physics correctly (each crossing flips and dampens velocity
+        # by 0.5×), then fall through to a closed-form modulo fold
+        # that guarantees the final position lies in the arena even
+        # when the loop's reasonable cap is exceeded. This preserves
+        # physical velocity damping in normal cases and the documented
+        # "positions stay in bounds" contract under arbitrary overshoot.
+        max_reflections = 1024
         for _ in range(max_reflections):
+            if 0.0 <= px <= config.arena_w:
+                break
             if px < 0.0:
                 px = -px
                 vx = -0.5 * vx
-            elif px > config.arena_w:
+            else:
                 px = 2 * config.arena_w - px
                 vx = -0.5 * vx
-            else:
-                break
+        else:
+            # Pathological overshoot — closed-form fold guarantees
+            # ``px`` ends in [0, arena_w] regardless of magnitude.
+            period_x = 2.0 * config.arena_w
+            r = px - period_x * np.floor(px / period_x)
+            px = period_x - r if r > config.arena_w else r
+            vx = 0.0  # multi-period overshoot → fully damped
+
         for _ in range(max_reflections):
+            if 0.0 <= py <= config.arena_h:
+                break
             if py < 0.0:
                 py = -py
                 vy = -0.5 * vy
-            elif py > config.arena_h:
+            else:
                 py = 2 * config.arena_h - py
                 vy = -0.5 * vy
-            else:
-                break
+        else:
+            period_y = 2.0 * config.arena_h
+            r = py - period_y * np.floor(py / period_y)
+            py = period_y - r if r > config.arena_h else r
+            vy = 0.0
 
         # Save truth
         x = np.array([px, py, vx, vy, theta])

@@ -306,3 +306,40 @@ def test_video_event_detection_iterates_all_camera_frames(tmp_path, caplog):
     n_swaps = int(swap_mask.sum())
     assert n_swaps == 1
     assert bool(swap_mask[target_idx])
+
+
+def test_imu_panel_does_not_warn_on_single_sample_window(tmp_path):
+    """Diagnostic-video render must not emit identical-xlim warnings.
+
+    The first rendered video frame routinely has exactly one IMU
+    sample in its time window, and ``set_xlim(t, t)`` makes matplotlib
+    warn ("Attempting to set identical low and high xlims..."). The
+    fix pads the window to a tiny non-zero range when only one sample
+    is present. Run with warnings-as-errors so the warning would fail
+    this test.
+    """
+    import warnings
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+
+    from trodestrack.sim.rat_imu import RatIMUSimConfig, simulate_rat_imu
+    from trodestrack.viz.video import create_diagnostic_video
+
+    cfg = RatIMUSimConfig(
+        duration_s=2.0,
+        fs_imu=200.0,
+        fs_cam=30.0,
+        cam_dropout_prob=0.0,
+        use_second_led=True,
+    )
+    sim = simulate_rat_imu(cfg, seed=0)
+
+    out_path = tmp_path / "imu_panel.mp4"
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "error",
+            message="Attempting to set identical low and high xlims",
+        )
+        create_diagnostic_video(sim, str(out_path), fps=5, speedup=10.0)
