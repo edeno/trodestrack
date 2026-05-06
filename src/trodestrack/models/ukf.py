@@ -53,10 +53,7 @@ from trodestrack.models.filter_common import (
 from trodestrack.models.filter_update import ukf_projected_update
 from trodestrack.models.process_noise import assemble_Q
 from trodestrack.models.sensors.camera_position import CameraPositionModel
-from trodestrack.models.sensors.heading_pseudo import (
-    HEADING_GATE_THRESHOLD,
-    HeadingPseudoModel,
-)
+from trodestrack.models.sensors.heading_pseudo import HeadingPseudoModel
 from trodestrack.models.state_layout import StateLayout, get_heading_index, get_layout
 
 # =============================================================================
@@ -661,83 +658,75 @@ def update_heading(
         return state_in, zero
 
     def do_update(state_in: UKFState) -> tuple[UKFState, jnp.ndarray]:
-        m, P = state_in.mean, state_in.cov
+        use_heading = heading_model.use_measurement(frame_idx)
 
-        # Get measurement covariance from model (already gates invalid)
-        R_mat = heading_model.meas_cov(frame_idx)  # (1, 1)
-        R_heading = R_mat[0, 0]
+        def apply_update(state_valid: UKFState) -> tuple[UKFState, jnp.ndarray]:
+            m, P = state_valid.mean, state_valid.cov
 
-        # 1D unscented heading update
-        n = len(m)
-        lamb = config.alpha**2 * (n + config.kappa) - n
-        w_mean, w_cov = compute_weights(n, config.alpha, config.beta, lamb)
+            # Get measurement covariance from model
+            R_mat = heading_model.meas_cov(frame_idx)  # (1, 1)
+            R_heading = R_mat[0, 0]
 
-        # Generate sigma points
-        sigmas = compute_sigma_points(m, P, n, lamb)
+            # 1D unscented heading update
+            n = len(m)
+            lamb = config.alpha**2 * (n + config.kappa) - n
+            w_mean, w_cov = compute_weights(n, config.alpha, config.beta, lamb)
 
-        # Transform sigma points through heading model
-        h_idx = get_heading_index(layout)
-        sigmas_heading = sigmas[:, h_idx]  # (2n+1,)
+            # Generate sigma points
+            sigmas = compute_sigma_points(m, P, n, lamb)
 
-        # Predicted heading using circular mean (not arithmetic mean!)
-        # For angles, we must use: atan2(Σ w_i sin(θ_i), Σ w_i cos(θ_i))
-        # Arithmetic mean fails when sigma points straddle 0°/360°
-        sin_weighted = w_mean @ jnp.sin(sigmas_heading)
-        cos_weighted = w_mean @ jnp.cos(sigmas_heading)
-        h_pred = jnp.arctan2(sin_weighted, cos_weighted)
+            # Transform sigma points through heading model
+            h_idx = get_heading_index(layout)
+            sigmas_heading = sigmas[:, h_idx]  # (2n+1,)
 
-        # Get innovation from model (already angle-wrapped)
-        innovation_vec = heading_model.innovation(frame_idx, jnp.array([h_pred]))
-        innov = innovation_vec[0]
+            # Predicted heading using circular mean (not arithmetic mean!)
+            # For angles, we must use: atan2(Σ w_i sin(θ_i), Σ w_i cos(θ_i))
+            # Arithmetic mean fails when sigma points straddle 0°/360°
+            sin_weighted = w_mean @ jnp.sin(sigmas_heading)
+            cos_weighted = w_mean @ jnp.cos(sigmas_heading)
+            h_pred = jnp.arctan2(sin_weighted, cos_weighted)
 
-        # Innovation covariance (1D)
-        # Wrap heading deviations to (-π, π] for correct angular variance.
-        # h_pred is the circular mean (atan2, always wrapped), but sigmas_heading
-        # may be on the opposite side of the ±π boundary. Without this wrap, near
-        # the wrap boundary the unwrapped deviations are ~2π instead of ~0 and
-        # S is inflated by ~(2π)², collapsing the Kalman gain toward zero.
-        # This mirrors the wrap applied in predict_step (see around line 362).
-        heading_deviations = wrap_angle(sigmas_heading - h_pred)
-        S = jnp.dot(w_cov, heading_deviations**2) + R_heading
+            # Get innovation from model (already angle-wrapped)
+            innovation_vec = heading_model.innovation(frame_idx, jnp.array([h_pred]))
+            innov = innovation_vec[0]
 
-        # Cross-covariance between state and heading measurement
-        state_deviations = sigmas - m  # (2n+1, n)
-        weighted_products = state_deviations * heading_deviations[:, None]  # (2n+1, n)
-        P_cross = w_cov @ weighted_products  # (n,)
+            # Innovation covariance (1D)
+            # Wrap heading deviations to (-π, π] for correct angular variance.
+            # h_pred is the circular mean (atan2, always wrapped), but sigmas_heading
+            # may be on the opposite side of the ±π boundary. Without this wrap, near
+            # the wrap boundary the unwrapped deviations are ~2π instead of ~0 and
+            # S is inflated by ~(2π)², collapsing the Kalman gain toward zero.
+            # This mirrors the wrap applied in predict_step (see around line 362).
+            heading_deviations = wrap_angle(sigmas_heading - h_pred)
+            S = jnp.dot(w_cov, heading_deviations**2) + R_heading
 
-        # Kalman gain (n,)
-        K = P_cross / S
+            # Cross-covariance between state and heading measurement
+            state_deviations = sigmas - m  # (2n+1, n)
+            weighted_products = state_deviations * heading_deviations[:, None]
+            P_cross = w_cov @ weighted_products  # (n,)
 
-        # Update mean
-        m_upd = m + K * innov
+            # Kalman gain (n,)
+            K = P_cross / S
 
-        # Wrap heading after update
-        m_upd = m_upd.at[h_idx].set(wrap_angle(m_upd[h_idx]))
+            # Update mean
+            m_upd = m + K * innov
 
-        # Update covariance using explicit Joseph form for the scalar heading
-        # measurement. The measurement Jacobian is H = e_{h_idx}^T (selects the
-        # heading component), so (I - K H) is the identity with K subtracted
-        # from the h_idx column. Joseph:
-        #     P⁺ = (I - K H) P (I - K H)^T + K R K^T
-        # is algebraically equivalent to the subtraction form ``P - K S K^T``
-        # for scalar S, but in finite precision it is strictly more robust --
-        # both right-hand terms are structurally PSD, so rounding cannot
-        # introduce negative eigenvalues even when the predicted heading
-        # variance is near R_heading.
-        n_state = P.shape[0]
-        # jnp.eye(n).at[:, h_idx].add(-K) places column h_idx = e_{h_idx} - K.
-        I_minus_KH = jnp.eye(n_state, dtype=P.dtype).at[:, h_idx].add(-K)
-        P_upd = I_minus_KH @ P @ I_minus_KH.T + jnp.outer(K, K) * R_heading
-        P_upd = symmetrize(P_upd)  # Absorb any residual float rounding asymmetry
+            # Wrap heading after update
+            m_upd = m_upd.at[h_idx].set(wrap_angle(m_upd[h_idx]))
 
-        # Log-likelihood
-        log_lik = -0.5 * (jnp.log(2 * jnp.pi) + jnp.log(S) + innov**2 / S)
+            # Update covariance using explicit Joseph form for the scalar heading
+            # measurement. The measurement Jacobian is H = e_h^T.
+            n_state = P.shape[0]
+            I_minus_KH = jnp.eye(n_state, dtype=P.dtype).at[:, h_idx].add(-K)
+            P_upd = I_minus_KH @ P @ I_minus_KH.T + jnp.outer(K, K) * R_heading
+            P_upd = symmetrize(P_upd)
 
-        # Zero out log-likelihood if R is huge (gated)
-        use_heading = R_heading < HEADING_GATE_THRESHOLD
-        log_lik = lax.select(use_heading, log_lik, jnp.array(0.0, dtype=log_lik.dtype))
+            # Log-likelihood
+            log_lik = -0.5 * (jnp.log(2 * jnp.pi) + jnp.log(S) + innov**2 / S)
 
-        return UKFState(m_upd, P_upd), log_lik
+            return UKFState(m_upd, P_upd), log_lik
+
+        return lax.cond(use_heading, apply_update, no_update, state_in)
 
     return lax.cond(observation_flag, do_update, no_update, state)
 

@@ -298,6 +298,37 @@ def test_heading_update_respects_camera_mask() -> None:
     )
 
 
+def test_invalid_heading_geometry_is_exact_noop_with_large_covariance() -> None:
+    """Invalid heading geometry must not update, even with a broad prior."""
+    z_led1 = jnp.array([0.0, 0.0])
+    z_led2 = jnp.array([jnp.nan, jnp.nan])
+    config = EKFConfig(
+        use_heading_measurement=True,
+        led_distance=0.04,
+        measurement_noise_heading=0.01**2,
+        state_mode="2d_full",
+    )
+    heading_model = make_heading_model(z_led1, z_led2, config)
+    state = EKFState(
+        mean=jnp.array([0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]),
+        cov=jnp.eye(8) * 1e9,
+    )
+
+    updated_state, log_lik = update_heading(
+        state,
+        heading_model,
+        frame_idx=0,
+        observation_is_valid=True,
+        layout=LAYOUT_2D_FULL,
+    )
+
+    np.testing.assert_array_equal(
+        np.asarray(updated_state.mean), np.asarray(state.mean)
+    )
+    np.testing.assert_array_equal(np.asarray(updated_state.cov), np.asarray(state.cov))
+    assert float(log_lik) == 0.0
+
+
 def test_heading_update_handles_unknown_led_distance() -> None:
     """Auto-detected (None) LED spacing should still allow heading updates."""
     state = EKFState(

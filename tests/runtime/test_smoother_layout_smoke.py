@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 from trodestrack.models.ekf import (
     EKF3DResult,
@@ -108,6 +109,45 @@ def test_rts_smoother_uses_filter_usable_vision_mask_for_all_nan_leds():
     )
 
 
+@pytest.mark.parametrize(
+    ("bad_mask", "pattern"),
+    [
+        (
+            np.array([1, 2, 0]),
+            "mask_cam must contain only 0 or 1",
+        ),
+        (
+            np.array([1.0, np.nan, 0.0]),
+            "mask_cam must be boolean or 0/1 integer",
+        ),
+    ],
+)
+def test_rts_smoother_rejects_invalid_mask_cam_values(bad_mask, pattern):
+    t_cam, t_imu, u_imu, z1, z2, mask = _tiny_synthetic_sequence()
+    ekf_config = EKFConfig(
+        state_mode="2d_full", led_distance=0.04, use_heading_measurement=False
+    )
+    filter_result = extended_kalman_filter(
+        ekf_config,
+        t_imu,
+        u_imu,
+        t_cam,
+        z1,
+        z2,
+        mask,
+    )
+
+    with pytest.raises(ValueError, match=pattern):
+        rts_smoother(
+            filter_result,
+            ekf_config,
+            t_imu,
+            u_imu,
+            t_cam,
+            mask_cam=bad_mask,
+        )
+
+
 def test_sigma_point_smoother_smoke_2d_cam_3d_imu_layout():
     t_cam, t_imu, U_imu, Z1, Z2, mask = _tiny_synthetic_sequence()
 
@@ -168,6 +208,45 @@ def test_sigma_point_smoother_uses_filter_usable_vision_mask_for_all_nan_leds():
         rtol=1e-6,
         atol=1e-8,
     )
+
+
+@pytest.mark.parametrize(
+    ("bad_mask", "pattern"),
+    [
+        (
+            np.array([1, 2, 0]),
+            "mask_cam must contain only 0 or 1",
+        ),
+        (
+            np.array([1.0, np.nan, 0.0]),
+            "mask_cam must be boolean or 0/1 integer",
+        ),
+    ],
+)
+def test_sigma_point_smoother_rejects_invalid_mask_cam_values(bad_mask, pattern):
+    t_cam, t_imu, u_imu, z1, z2, mask = _tiny_synthetic_sequence()
+    ukf_config = UKFConfig(
+        state_mode="2d_full", led_distance=0.04, use_heading_measurement=False
+    )
+    filter_result = unscented_kalman_filter(
+        ukf_config,
+        t_imu,
+        u_imu,
+        t_cam,
+        z1,
+        z2,
+        mask,
+    )
+
+    with pytest.raises(ValueError, match=pattern):
+        sigma_point_smoother(
+            filter_result,
+            ukf_config,
+            t_imu,
+            u_imu,
+            t_cam,
+            mask_cam=bad_mask,
+        )
 
 
 def test_ukf_layout_no_hardcoded_8d():

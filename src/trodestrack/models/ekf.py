@@ -77,10 +77,7 @@ from trodestrack.models.process_noise import assemble_Q
 from trodestrack.models.quaternion import rotate_vector_world_to_body
 from trodestrack.models.sensors.camera_position import CameraPositionModel
 from trodestrack.models.sensors.camera_position_3d import Camera3DPositionModel
-from trodestrack.models.sensors.heading_pseudo import (
-    HEADING_GATE_THRESHOLD,
-    HeadingPseudoModel,
-)
+from trodestrack.models.sensors.heading_pseudo import HeadingPseudoModel
 from trodestrack.models.state_layout import StateLayout, get_heading_index, get_layout
 
 # =============================================================================
@@ -735,8 +732,8 @@ def update_heading(
 
     Notes
     -----
-    Uses large-R gating via heading_model.meas_cov(): invalid observations
-    yield R=1e6 so K≈0, avoiding branching in JAX while preventing spurious updates.
+    Invalid heading geometry is skipped exactly. Large-R gating alone is not a
+    no-op when heading covariance is large.
     """
     observation_flag = jnp.asarray(observation_is_valid, dtype=bool)
 
@@ -744,55 +741,52 @@ def update_heading(
         return state_in, jnp.array(0.0, dtype=state_in.mean.dtype)
 
     def do_update(state_in: EKFState) -> tuple[EKFState, jnp.ndarray]:
-        m, P = state_in.mean, state_in.cov
+        use_heading = heading_model.use_measurement(frame_idx)
 
-        # Get heading prediction from model
-        h_pred_vec = heading_model.predict(m)  # (1,)
+        def apply_update(state_valid: EKFState) -> tuple[EKFState, jnp.ndarray]:
+            m, P = state_valid.mean, state_valid.cov
 
-        # Get innovation from model (already angle-wrapped)
-        innovation_vec = heading_model.innovation(frame_idx, h_pred_vec)  # (1,)
-        innov = innovation_vec[0]
+            # Get heading prediction from model
+            h_pred_vec = heading_model.predict(m)  # (1,)
 
-        # Get measurement covariance from model (already gates invalid)
-        R_mat = heading_model.meas_cov(frame_idx)  # (1, 1)
-        R_heading = R_mat[0, 0]
+            # Get innovation from model (already angle-wrapped)
+            innovation_vec = heading_model.innovation(frame_idx, h_pred_vec)  # (1,)
+            innov = innovation_vec[0]
 
-        # Get Jacobian from model
-        H = heading_model.jacobian(m)  # (1, n)
+            # Get measurement covariance from model
+            R_mat = heading_model.meas_cov(frame_idx)  # (1, 1)
 
-        # Innovation covariance (1x1 matrix)
-        S = H @ P @ H.T + R_mat
+            # Get Jacobian from model
+            H = heading_model.jacobian(m)  # (1, n)
 
-        # Kalman gain (n, 1)
-        K = psd_solve(S, H @ P).T
+            # Innovation covariance (1x1 matrix)
+            S = H @ P @ H.T + R_mat
 
-        # Mean update
-        m_upd = m + (K @ jnp.array([[innov]])).ravel()
+            # Kalman gain (n, 1)
+            K = psd_solve(S, H @ P).T
 
-        # Wrap scalar heading or normalize quaternion after update
-        if layout.has_heading_2d:
-            h_idx = get_heading_index(layout)
-            m_upd = m_upd.at[h_idx].set(wrap_angle(m_upd[h_idx]))
-        else:
-            m_upd = normalize_state_orientation(m_upd, layout)
+            # Mean update
+            m_upd = m + (K @ jnp.array([[innov]])).ravel()
 
-        # Covariance update using Joseph form
-        P_upd = joseph_update(P, K, H, R_mat)
+            # Wrap scalar heading or normalize quaternion after update
+            if layout.has_heading_2d:
+                h_idx = get_heading_index(layout)
+                m_upd = m_upd.at[h_idx].set(wrap_angle(m_upd[h_idx]))
+            else:
+                m_upd = normalize_state_orientation(m_upd, layout)
 
-        # Log-likelihood
-        # For gated observations (R=1e6), this will be near zero
-        S_scalar = S[0, 0]
-        log_lik = -0.5 * (jnp.log(2 * jnp.pi) + jnp.log(S_scalar) + innov**2 / S_scalar)
+            # Covariance update using Joseph form
+            P_upd = joseph_update(P, K, H, R_mat)
 
-        # Zero out log-likelihood if R is huge (gated)
-        use_heading = R_heading < HEADING_GATE_THRESHOLD
-        log_lik = lax.select(
-            use_heading,
-            log_lik,
-            jnp.array(0.0, dtype=log_lik.dtype),
-        )
+            # Log-likelihood
+            S_scalar = S[0, 0]
+            log_lik = -0.5 * (
+                jnp.log(2 * jnp.pi) + jnp.log(S_scalar) + innov**2 / S_scalar
+            )
 
-        return EKFState(m_upd, P_upd), log_lik
+            return EKFState(m_upd, P_upd), log_lik
+
+        return lax.cond(use_heading, apply_update, no_update, state_in)
 
     return lax.cond(observation_flag, do_update, no_update, state)
 

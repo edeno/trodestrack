@@ -8,9 +8,17 @@ Tests validate UKF feature parity with EKF heading measurement:
 - JAX JIT compatibility
 """
 
+import jax.numpy as jnp
 import numpy as np
 
-from trodestrack.models.ukf import UKFConfig, unscented_kalman_filter
+from trodestrack.models.sensors.heading_pseudo import HeadingPseudoModel
+from trodestrack.models.state_layout import LAYOUT_2D_FULL
+from trodestrack.models.ukf import (
+    UKFConfig,
+    UKFState,
+    unscented_kalman_filter,
+    update_heading,
+)
 from trodestrack.qa.metrics import compute_heading_rmse
 from trodestrack.sim.simple import SimpleSimConfig, simulate_circular
 
@@ -179,6 +187,41 @@ def test_ukf_single_led_disables_heading_automatically():
     # Filter should not diverge
     assert np.all(np.isfinite(result_filtered.filtered_means))
     assert np.all(np.isfinite(result_filtered.filtered_covariances))
+
+
+def test_ukf_invalid_heading_geometry_is_exact_noop_with_large_covariance():
+    """Invalid heading geometry must not update, even with a broad prior."""
+    config = UKFConfig(
+        use_heading_measurement=True,
+        led_distance=0.04,
+        measurement_noise_heading=0.01**2,
+        state_mode="2d_full",
+    )
+    heading_model = HeadingPseudoModel(
+        config=config,
+        layout=LAYOUT_2D_FULL,
+        z_led1_all=jnp.array([[0.0, 0.0]]),
+        z_led2_all=jnp.array([[jnp.nan, jnp.nan]]),
+    )
+    state = UKFState(
+        mean=jnp.array([0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]),
+        cov=jnp.eye(8) * 1e9,
+    )
+
+    updated_state, log_lik = update_heading(
+        state,
+        heading_model,
+        frame_idx=0,
+        observation_is_valid=True,
+        config=config,
+        layout=LAYOUT_2D_FULL,
+    )
+
+    np.testing.assert_array_equal(
+        np.asarray(updated_state.mean), np.asarray(state.mean)
+    )
+    np.testing.assert_array_equal(np.asarray(updated_state.cov), np.asarray(state.cov))
+    assert float(log_lik) == 0.0
 
 
 def test_ukf_heading_basic_functionality():

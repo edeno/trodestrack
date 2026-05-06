@@ -96,17 +96,59 @@ def _smoother_vision_mask(
     if usable_mask is None:
         if mask_cam is None:
             return np.ones(n_cam, dtype=bool), False
-        return np.asarray(mask_cam, dtype=bool), True
+        return _validate_smoother_mask(
+            mask_cam,
+            n_cam,
+            name="mask_cam",
+            func_name=func_name,
+        ), True
 
-    usable_arr = np.asarray(usable_mask, dtype=bool)
-    if usable_arr.shape != (n_cam,):
-        raise ValueError(
-            f"{func_name}: filter_result.usable_vision_mask must have shape "
-            f"({n_cam},), got {usable_arr.shape}."
-        )
+    usable_arr = _validate_smoother_mask(
+        usable_mask,
+        n_cam,
+        name="filter_result.usable_vision_mask",
+        func_name=func_name,
+    )
     if mask_cam is None:
         return usable_arr, True
-    return np.asarray(mask_cam, dtype=bool) & usable_arr, True
+    mask_arr = _validate_smoother_mask(
+        mask_cam,
+        n_cam,
+        name="mask_cam",
+        func_name=func_name,
+    )
+    return mask_arr & usable_arr, True
+
+
+def _validate_smoother_mask(
+    mask: np.ndarray,
+    n_cam: int,
+    *,
+    name: str,
+    func_name: str,
+) -> np.ndarray:
+    """Validate a smoother camera mask and return it as a boolean array."""
+    mask_arr = np.asarray(mask)
+    if mask_arr.shape != (n_cam,):
+        raise ValueError(
+            f"{func_name}: {name} must have shape ({n_cam},) to match "
+            f"t_cam / filter_result, got {mask_arr.shape}."
+        )
+    if mask_arr.dtype != np.bool_:
+        if not np.issubdtype(mask_arr.dtype, np.integer):
+            raise ValueError(
+                f"{func_name}: {name} must be boolean or 0/1 integer; "
+                f"got dtype {mask_arr.dtype!r}."
+            )
+        is_binary = np.isin(mask_arr, (0, 1))
+        if not np.all(is_binary):
+            bad = mask_arr[~is_binary]
+            raise ValueError(
+                f"{func_name}: {name} must contain only 0 or 1 (or be "
+                f"boolean); found {len(bad)} other value(s) "
+                f"(e.g. {bad[:5].tolist()})."
+            )
+    return mask_arr.astype(bool, copy=False)
 
 
 def _transition_mean_and_jacobian(

@@ -225,6 +225,13 @@ class HeadingPseudoModel:
 
         return jnp.array([[R_heading]])
 
+    def use_measurement(self, frame_idx: int) -> jnp.ndarray:
+        """Return whether the heading pseudo-measurement should be applied."""
+        z_led1 = self.z_led1_all[frame_idx]
+        z_led2 = self.z_led2_all[frame_idx]
+        _, _, use_heading = prepare_heading_measurement(z_led1, z_led2, self.config)
+        return use_heading
+
     def innovation(self, frame_idx: int, meas_pred: jnp.ndarray) -> jnp.ndarray:
         """Compute angle-wrapped innovation.
 
