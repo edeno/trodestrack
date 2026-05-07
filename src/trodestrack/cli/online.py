@@ -282,15 +282,18 @@ def run_online(args: argparse.Namespace) -> None:
     args : argparse.Namespace
         Parsed command-line arguments.
     """
-    print("=" * 80)
-    print("trodestrack online — Forward-only EKF (batch over full input arrays)")
-    print("=" * 80)
-
+    # Defer the banner until inputs are validated. Printing it
+    # unconditionally up front meant Pydantic / file-load failures
+    # appeared *under* a header advertising work that never started,
+    # which read like the run had begun.
     if args.config is not None:
         _run_online_from_config(args)
         return
 
     require_cli_inputs(args, _LEGACY_REQUIRED_ARGS, command="online")
+    print("=" * 80)
+    print("trodestrack online — Forward-only EKF (batch over full input arrays)")
+    print("=" * 80)
 
     # Load input data
     print("\nLoading input data...")

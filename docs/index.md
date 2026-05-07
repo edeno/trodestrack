@@ -23,8 +23,8 @@ TrodesTrack achieves production-ready accuracy:
 | Position RMSE | < 2 cm | < 2 cm |
 | Velocity RMSE | < 10 cm/s | < 10 cm/s |
 | Heading RMSE | < 7 deg | < 7 deg |
-| Throughput (offline) | ≥ 10× realtime | reference run on M-series Mac CPU ~38× realtime under block-until-ready timing (floor checked by `JAX_PLATFORMS=cpu pytest -m benchmark`, not on every PR) |
-| Latency (online, amortized mean) | ≤ 33 ms / frame | reference run on M-series Mac CPU ~0.41 ms / frame under block-until-ready timing (floor checked by `JAX_PLATFORMS=cpu pytest -m benchmark`, not on every PR) |
+| Throughput (offline) | ≥ 10× realtime | reference run on M-series Mac CPU ~38× realtime under block-until-ready timing (floor checked by `JAX_PLATFORMS=cpu pytest -m benchmark`, not on every PR; **scope: synthetic 2D `simulate_rat_imu` 30-min session with `state_mode="2d_full"` — does not cover the YAML real-data workflow or other layouts**) |
+| Latency (online, amortized mean) | ≤ 33 ms / frame | reference run on M-series Mac CPU ~0.41 ms / frame under block-until-ready timing (floor checked by `JAX_PLATFORMS=cpu pytest -m benchmark`, not on every PR; same scope caveat as above) |
 
 ## Quick Example
 

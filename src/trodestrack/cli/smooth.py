@@ -269,15 +269,16 @@ def run_smooth(args: argparse.Namespace) -> None:
     args : argparse.Namespace
         Parsed command-line arguments.
     """
-    print("=" * 80)
-    print("trodestrack smooth — Offline Smoothing")
-    print("=" * 80)
-
+    # Defer the banner until inputs are validated; see online.py for
+    # the rationale.
     if args.config is not None:
         _run_smooth_from_config(args)
         return
 
     require_cli_inputs(args, _LEGACY_REQUIRED_ARGS, command="smooth")
+    print("=" * 80)
+    print("trodestrack smooth — Offline Smoothing")
+    print("=" * 80)
 
     # Load input data
     print("\nLoading input data...")
@@ -501,6 +502,16 @@ def _run_smooth_from_config(args: argparse.Namespace) -> None:
         run.output_dir / "smoothed_covariances.txt",
         smoother_result.smoothed_covariances.reshape(n_cam, -1),
     )
+
+    # Augment the .npz bundle with smoother arrays so consumers get
+    # the smoothed state alongside the forward filter output without
+    # re-loading text files.
+    bundle_path = run.output_dir / "filter_outputs.npz"
+    existing = dict(np.load(bundle_path)) if bundle_path.exists() else {}
+    existing["smoothed_means"] = np.asarray(smoother_result.smoothed_means)
+    existing["smoothed_covariances"] = np.asarray(smoother_result.smoothed_covariances)
+    existing["smoother_marginal_loglik"] = np.asarray(smoother_result.marginal_loglik)
+    np.savez(bundle_path, **existing)
     with open(run.output_dir / "marginal_loglik.txt", "w") as f:
         f.write(f"{smoother_result.marginal_loglik:.6f}\n")
     write_config_metadata(

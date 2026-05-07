@@ -423,9 +423,23 @@ cfg = EKFConfig(
 **Purpose:** Reject measurements that are statistically inconsistent with state estimate.
 
 **When to use:**
-- LED reflections off walls
+
 - Occasional tracking errors (DLC artifacts)
 - Transient LED swaps or residual outliers after pre-filter LED identity correction
+- Sparse LED reflections off walls
+
+**Caveat — dense reflection artifacts:** Mahalanobis gating is an
+all-or-nothing reject (the rejected update returns the prior
+unchanged), so under heavy reflection-driven outliers it can do more
+harm than good. In a 30 s scenario with persistent swaps + frequent
+wall reflections (~516 reflection frames) and pre-filter identity
+correction applied, position RMSE was 0.194 m with gating off and
+0.375 m with gating on; non-reflection-frame mean error rose from
+0.017 m to 0.166 m because the gate also rejected legitimate updates
+near reflection bursts. For dense reflection artifacts, prefer
+upstream cleaning (DLC re-tracking or a dedicated reflection mask)
+over gating, or raise ``measurement_noise_pos`` instead of
+hard-rejecting.
 
 **Configuration:**
 

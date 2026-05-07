@@ -903,6 +903,17 @@ JAX_PLATFORMS=cpu uv run pytest -m "slow or benchmark" \
 - Offline RTS smoother throughput ≥ 10× realtime on CPU
 - Online EKF amortized mean latency ≤ 33 ms / frame
 
+**Scope caveat:** these floors cover the synthetic 2D
+``simulate_rat_imu`` 30-minute session with ``state_mode="2d_full"``
+(the simulator emits a 3-channel ``U_imu`` that matches the 8D
+layout). They do **not** cover the YAML real-data workflow
+(``trodestrack online --config session.yaml``), the user-facing
+default ``state_mode="2d_cam_3d_imu"`` (10D, needs a 6-channel IMU),
+or quaternion-orientation layouts. Real-data runs additionally pay
+the cost of ``run_real_data_safety_check`` (which fits a vision-only
+EKF for comparison) when ``outputs.run_safety_checks: true``,
+roughly doubling filter wall-clock for that path.
+
 ### Compare EKF vs UKF
 
 ```python

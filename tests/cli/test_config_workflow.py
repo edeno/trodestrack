@@ -258,6 +258,105 @@ def test_config_fused_safety_failure_is_friendly(
     assert (tmp_path / "out_unsafe" / "session_diagnostics.json").exists()
 
 
+def test_online_config_writes_camera_arrays_and_npz_bundle(tmp_path: Path) -> None:
+    """Config-driven online run must persist t_cam, LEDs, mask, and the npz bundle.
+
+    Programmatic consumers need the camera-frame side-data (timestamps,
+    post-correction LEDs, validity mask) alongside the filter output;
+    previously only ``filtered_means.txt`` and the flattened
+    covariance were written, forcing users to re-run the loader to
+    recover the inputs.
+    """
+
+    config_path = _write_prepared_config(tmp_path, command="online")
+
+    with patch("sys.argv", ["trodestrack", "online", "--config", str(config_path)]):
+        main()
+
+    output_dir = tmp_path / "out_online"
+    assert (output_dir / "t_cam.txt").exists()
+    assert (output_dir / "Z_cam_led1.txt").exists()
+    assert (output_dir / "Z_cam_led2.txt").exists()
+    assert (output_dir / "mask_cam.txt").exists()
+
+    bundle = np.load(output_dir / "filter_outputs.npz")
+    assert set(bundle.files) >= {
+        "t_cam",
+        "Z_cam_led1",
+        "Z_cam_led2",
+        "mask_cam",
+        "filtered_means",
+        "filtered_covariances",
+        "marginal_loglik",
+    }
+    assert bundle["filtered_means"].shape == (16, 5)
+
+
+def test_smooth_config_npz_bundle_includes_smoother(tmp_path: Path) -> None:
+    """``smooth --config`` must augment the npz bundle with smoother arrays."""
+
+    config_path = _write_prepared_config(tmp_path, command="smooth")
+
+    with patch("sys.argv", ["trodestrack", "smooth", "--config", str(config_path)]):
+        main()
+
+    output_dir = tmp_path / "out_smooth"
+    bundle = np.load(output_dir / "filter_outputs.npz")
+    assert set(bundle.files) >= {
+        "filtered_means",
+        "smoothed_means",
+        "smoothed_covariances",
+        "smoother_marginal_loglik",
+    }
+    assert bundle["smoothed_means"].shape == (16, 5)
+
+
+def test_config_safety_check_raise_writes_diagnostics(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``run_real_data_safety_check`` raising must still dump session_diagnostics.
+
+    The two ``raise ValueError`` sites in ``io/session.py`` (no
+    finite dual-LED frame; no finite fused/vision pair) used to
+    bubble out without writing diagnostics, leaving the user with
+    only the friendly stderr line and no JSON to inspect. The
+    not-passed branch already wrote diagnostics; this test pins
+    the symmetric raise path so a regression would be caught.
+    """
+
+    config_path = _write_arthur_config(tmp_path, safety_max_speed_mps=3.0)
+    output_dir = tmp_path / "out_unsafe"
+
+    # Force the safety check to raise by replacing the camera arrays
+    # with an all-NaN dual-LED stream after Arthur-style construction.
+    # The simplest way to trigger the second raise (line 166 of
+    # session.py) is to mock ``run_real_data_safety_check`` to raise
+    # directly; that's faithful to the contract being pinned and
+    # avoids depending on real-data corner-case data shapes.
+    from unittest.mock import MagicMock
+
+    from trodestrack.cli import config_workflow
+
+    real_check = config_workflow.run_real_data_safety_check
+    raised_message = (
+        "Safety check requires at least one finite fused/vision position pair."
+    )
+    mocked = MagicMock(side_effect=ValueError(raised_message))
+    config_workflow.run_real_data_safety_check = mocked
+    try:
+        with (
+            patch("sys.argv", ["trodestrack", "online", "--config", str(config_path)]),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            main()
+    finally:
+        config_workflow.run_real_data_safety_check = real_check
+
+    assert exc_info.value.code == 1
+    assert raised_message in capsys.readouterr().err
+    assert (output_dir / "session_diagnostics.json").exists()
+
+
 def test_config_bad_imu_calibration_fails_with_diagnostics(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

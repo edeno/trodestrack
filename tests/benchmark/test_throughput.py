@@ -101,7 +101,16 @@ def get_benchmark_ekf_config(**overrides: Any) -> EKFConfig:
     ``"2d_cam_3d_imu"`` (10D) needs a 6-channel IMU input that this
     simulator does not produce; throughput on that layout would
     require a different sim and may differ from what's measured here.
-    The README qualifies the headline numbers accordingly.
+
+    The headline floors checked by these tests therefore cover the
+    synthetic 2D ``simulate_rat_imu`` path only. The YAML real-data
+    workflow (``trodestrack online --config session.yaml``) is not
+    covered: it runs through additional preprocessing (parquet
+    loading, sample-and-hold removal, IMU calibration diagnostics,
+    LED identity correction) and an optional vision-only safety
+    check that roughly doubles filter wall-clock when enabled. The
+    README, ``docs/index.md``, and ``docs/TROUBLESHOOTING.md``
+    repeat this scope caveat next to the headline numbers.
     """
     defaults = dict(
         process_noise_pos=0.001,

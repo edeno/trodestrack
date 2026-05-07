@@ -34,9 +34,17 @@ class ConfigFilterRun:
 
 
 def prepare_config_filter_run(args: argparse.Namespace) -> ConfigFilterRun:
-    """Load YAML config, run EKF, and apply calibration/safety gates."""
+    """Load YAML config, run EKF, and apply calibration/safety gates.
+
+    The CLI banner is printed *after* ``load_session_config``
+    succeeds so Pydantic / column-missing / file-not-found errors
+    aren't framed by a header advertising a run that hasn't begun.
+    """
 
     config = load_session_config(args.config)
+    print("=" * 80)
+    print(f"trodestrack — config-driven run from {args.config}")
+    print("=" * 80)
     if args.output_dir is not None:
         config = config.model_copy(
             update={
@@ -72,7 +80,20 @@ def prepare_config_filter_run(args: argparse.Namespace) -> ConfigFilterRun:
         mask_cam=session.mask_cam,
         conf_cam=session.conf_cam,
     )
-    safety_report = run_real_data_safety_check(session, ekf_config, filter_result)
+    # ``run_real_data_safety_check`` can raise *before* returning a
+    # ``SafetyReport`` (e.g. no finite dual-LED frame, or no finite
+    # fused/vision position pair). The two ``raise ValueError`` sites
+    # in ``io/session.py`` produce informative messages but skip the
+    # diagnostics dump that the not-passed branch below performs, so
+    # the user is left with a one-line error and no
+    # ``session_diagnostics.json`` to inspect. Mirror the
+    # not-passed handling: write loader/calibration diagnostics
+    # (``safety_report=None`` since none was produced), then re-raise.
+    try:
+        safety_report = run_real_data_safety_check(session, ekf_config, filter_result)
+    except ValueError:
+        write_session_diagnostics(session, output_dir)
+        raise
     if not safety_report.passed:
         write_session_diagnostics(session, output_dir, safety_report)
         raise ValueError(safety_report.message)
@@ -114,7 +135,19 @@ def print_config_session_summary(
 
 
 def save_filter_outputs(run: ConfigFilterRun) -> None:
-    """Write forward-filter output files shared by online and smooth."""
+    """Write forward-filter output files shared by online and smooth.
+
+    Writes the legacy text-format files (``filtered_means.txt``,
+    ``filtered_covariances.txt``) plus the camera-frame side-data the
+    filter consumed (timestamps, post-correction LED arrays, mask,
+    optional confidence) so downstream code can reconstruct the
+    inputs alongside the outputs without re-running the loader.
+    Also bundles everything into ``filter_outputs.npz`` for easy
+    NumPy / pandas consumption — the text files alone require the
+    user to remember that ``filtered_covariances.txt`` is reshaped
+    ``(n_cam, n*n)`` and to thread the camera timestamps in from a
+    separate file.
+    """
 
     n_cam = len(run.session.t_cam)
     run.output_dir.mkdir(parents=True, exist_ok=True)
@@ -123,6 +156,28 @@ def save_filter_outputs(run: ConfigFilterRun) -> None:
         run.output_dir / "filtered_covariances.txt",
         run.filter_result.filtered_covariances.reshape(n_cam, -1),
     )
+
+    np.savetxt(run.output_dir / "t_cam.txt", run.session.t_cam)
+    np.savetxt(run.output_dir / "Z_cam_led1.txt", run.session.Z_cam_led1)
+    np.savetxt(run.output_dir / "Z_cam_led2.txt", run.session.Z_cam_led2)
+    np.savetxt(
+        run.output_dir / "mask_cam.txt", run.session.mask_cam.astype(int), fmt="%d"
+    )
+    if run.session.conf_cam is not None:
+        np.savetxt(run.output_dir / "conf_cam.txt", run.session.conf_cam)
+
+    bundle = {
+        "t_cam": run.session.t_cam,
+        "Z_cam_led1": run.session.Z_cam_led1,
+        "Z_cam_led2": run.session.Z_cam_led2,
+        "mask_cam": run.session.mask_cam,
+        "filtered_means": np.asarray(run.filter_result.filtered_means),
+        "filtered_covariances": np.asarray(run.filter_result.filtered_covariances),
+        "marginal_loglik": np.asarray(run.filter_result.marginal_loglik),
+    }
+    if run.session.conf_cam is not None:
+        bundle["conf_cam"] = run.session.conf_cam
+    np.savez(run.output_dir / "filter_outputs.npz", **bundle)
 
 
 def write_config_metadata(
