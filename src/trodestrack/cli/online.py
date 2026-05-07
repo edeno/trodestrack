@@ -243,11 +243,29 @@ that, drive `trodestrack.models.ekf.predict_step` /
 def run_online(args: argparse.Namespace) -> None:
     """Execute the online command.
 
+    Wraps :func:`_run_online_impl` so that a bad ``--process-noise-pos``
+    or any other config-time / filter-time ``ValueError`` exits with a
+    clear ``Error: ...`` message rather than dumping a Python
+    traceback. Mirrors the pattern used in
+    :func:`trodestrack.cli.report.run_report`.
+
     Parameters
     ----------
     args : argparse.Namespace
         Parsed command-line arguments.
     """
+    try:
+        _run_online_impl(args)
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _run_online_impl(args: argparse.Namespace) -> None:
+    """Run the online command body. See :func:`run_online`."""
     print("=" * 80)
     print("trodestrack online — Forward-only EKF (batch over full input arrays)")
     print("=" * 80)

@@ -230,11 +230,29 @@ producing lower-variance trajectories than forward filtering alone.
 def run_smooth(args: argparse.Namespace) -> None:
     """Execute the smooth command.
 
+    Wraps :func:`_run_smooth_impl` so that a bad ``--num-iter`` or any
+    other config-time / filter-time ``ValueError`` exits with a clear
+    ``Error: ...`` message rather than dumping a Python traceback.
+    Mirrors the pattern used in
+    :func:`trodestrack.cli.report.run_report`.
+
     Parameters
     ----------
     args : argparse.Namespace
         Parsed command-line arguments.
     """
+    try:
+        _run_smooth_impl(args)
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _run_smooth_impl(args: argparse.Namespace) -> None:
+    """Run the smooth command body. See :func:`run_smooth`."""
     print("=" * 80)
     print("trodestrack smooth — Offline Smoothing")
     print("=" * 80)
