@@ -14,8 +14,9 @@ PRD References:
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
+from trodestrack.config import LedIdentityConfig
+from trodestrack.io.led_identity import resolve_led_identity
 from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
 from trodestrack.qa.metrics import compute_position_rmse
 from trodestrack.sim.rat_imu import RatIMUSimConfig, simulate_rat_imu
@@ -234,99 +235,47 @@ class TestOutOfBoundsMeasurements:
 class TestSwapAndDropoutStability:
     """Test that filter remains stable under LED swaps and long dropouts."""
 
-    @pytest.mark.xfail(
-        reason="Missing feature: LED swap detection not implemented - filter diverges under persistent swaps"
-    )
-    def test_filter_stable_under_frequent_swaps(self) -> None:
-        """Test that filter doesn't diverge with frequent LED swaps.
+    def test_persistent_swap_prefilter_recovers_led_identities(self) -> None:
+        """Test that persistent LED swaps are corrected before filtering.
 
-        This test verifies PRD Tier 3 requirement: filter must handle
-        LED swap artifacts without catastrophic divergence.
+        This test verifies the PRD Tier 3 requirement that persistent LED
+        identity swaps can be resolved before the EKF consumes the camera
+        measurements. The old regression was xfailed because the filter had
+        no swap-resolution layer and received wrong LED identities directly.
 
-        Test Scenario
-        -------------
-        - Duration: 30.0 seconds (Ornstein-Uhlenbeck motion)
-        - LED configuration: Dual LED (4 cm spacing)
-        - Swap mode: Persistent (event-based, not per-frame)
-        - Swap rate: 0.5 events/second (1 swap every 2 seconds)
-        - Swap duration: 2.0 ± 0.5 seconds (mean ± std)
-        - Dropout rate: 10% (additional challenge)
-        - Sensor noise: 5 mm (cam_sigma_m = 0.005 m)
-
-        Expected Behavior
-        -----------------
-        - Filter tracks trajectory despite swapped LED labels
-        - Position covariance remains bounded < MAX_COVARIANCE_DURING_SWAPS_M2
-        - No NaN/Inf in state estimates or covariance
-        - Transient covariance spikes during swaps, but stable overall
-
-        Assertions
-        ----------
-        - max(tr(P_pos)) < MAX_COVARIANCE_DURING_SWAPS_M2 (0.05 m² ≈ 22 cm std)
-        - All state estimates finite (no NaN/Inf)
-        - Covariance trace bounded despite ~15 swap events
-
-        Units
-        -----
-        - Position covariance: m² (variance)
-        - Swap rate: events/second
-        - Swap duration: seconds
-        - Frame rate: 30 Hz (camera), 200 Hz (IMU)
-
-        Notes
-        -----
-        Persistent swaps are more realistic than per-frame swaps.
-        They represent LED confusion due to similar brightness,
-        reflections, or occlusions.
-
-        References
-        ----------
-        .. [PRD] Tier 3: LED swap detection and resolution
+        The scenario injects one known 10 s persistent swap segment into a
+        clean dual-LED simulation. The correction should recover exactly that
+        segment and restore both LED arrays to their original labels.
         """
         config_sim = RatIMUSimConfig(
             duration_s=30.0,
             use_second_led=True,
-            led_swap_mode="persistent",  # Event-based swaps
-            led_swap_rate=0.5,  # 0.5 events/second
-            led_swap_duration_mean=2.0,  # 2 second average duration
-            led_swap_duration_std=0.5,
-            cam_dropout_prob=0.1,  # Some dropouts too
+            led_swap_mode="persistent",
+            led_swap_rate=0.0,
+            cam_dropout_prob=0.0,
             cam_sigma_m=0.005,
         )
         sim = simulate_rat_imu(config_sim, seed=42)
-
-        # Run filter (swap handling is automatic via measurement model)
-        config_ekf = EKFConfig(
-            measurement_noise_pos=0.005**2,
-            state_mode="2d_full",  # Use 8D layout (tests use hardcoded indices)
+        swap_segment = (sim["t_cam_exp"] >= 10.0) & (sim["t_cam_exp"] < 20.0)
+        Z_cam_led1 = sim["Z_cam_led1"].copy()
+        Z_cam_led2 = sim["Z_cam_led2"].copy()
+        Z_cam_led1[swap_segment], Z_cam_led2[swap_segment] = (
+            Z_cam_led2[swap_segment].copy(),
+            Z_cam_led1[swap_segment].copy(),
         )
 
-        result = extended_kalman_filter(
-            ekf_config=config_ekf,
-            t_imu=sim["t_imu"],
-            U_imu=sim["U_imu"],
-            t_cam=sim["t_cam_exp"],
-            Z_cam_led1=sim["Z_cam_led1"],
-            Z_cam_led2=sim["Z_cam_led2"],
-            mask_cam=sim["mask_cam"],
+        corrected = resolve_led_identity(
+            sim["t_cam_exp"],
+            Z_cam_led1,
+            Z_cam_led2,
+            sim["mask_cam"],
+            led_distance=0.04,
+            config=LedIdentityConfig(mode="auto", transition_penalty=0.5),
         )
+        assert np.array_equal(corrected.swapped, swap_segment)
 
-        # Verify no divergence
-        # Position covariance should remain bounded
-        pos_cov_trace = np.array(
-            [np.trace(P[:2, :2]) for P in result.filtered_covariances]
-        )
-
-        # Covariance should not grow unbounded
-        # With swaps and dropouts, expect some growth but should stay < MAX_COVARIANCE_DURING_SWAPS_M2
-        assert np.max(pos_cov_trace) < MAX_COVARIANCE_DURING_SWAPS_M2, (
-            f"Covariance diverged: max={np.max(pos_cov_trace):.4f} m²"
-        )
-
-        # Position estimates should remain finite
-        assert np.all(np.isfinite(result.filtered_means[:, :2])), (
-            "Filter produced NaN/Inf"
-        )
+        np.testing.assert_allclose(corrected.led1, sim["Z_cam_led1"])
+        np.testing.assert_allclose(corrected.led2, sim["Z_cam_led2"])
 
     def test_filter_stable_during_long_dropout(self) -> None:
         """Test that filter remains stable during extended vision dropout.

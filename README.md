@@ -9,7 +9,7 @@ trodestrack combines video tracking (Trodes LEDs and/or DeepLabCut keypoints) wi
 - **Sensor Fusion**: Extended Kalman Filter (EKF) and Unscented Kalman Filter (UKF) for combining video (~30 Hz) and IMU (100 Hz) measurements
 - **3D IMU Support**: Full 6-axis IMU processing (3-axis gyro + 3-axis accel) with gravity compensation
 - **Online & Offline Processing**: Forward-only EKF and RTS smoothing — both run as batch operations over complete input arrays. The `trodestrack online` CLI is forward-only ("no future-frame dependence"), not a streaming / real-time ingest loop.
-- **Robust Handling**: Occlusions, reflections, and camera/sensor dropout. Transient LED swaps are mitigated by Mahalanobis gating on dual-LED measurements; persistent LED swaps are *not* automatically detected (tracked by the `test_filter_stable_under_frequent_swaps` xfail in [tests/filters/test_robustness.py](tests/filters/test_robustness.py)) and require pre-filter LED-identity correction.
+- **Robust Handling**: Occlusions, reflections, and camera/sensor dropout. Config-driven real-data runs can apply persistent LED identity correction before filtering and fail fast when IMU calibration or fused trajectories look implausible.
 - **JAX-Accelerated**: High-performance JIT-compiled JAX implementation. The throughput-floor benchmarks (≥10× realtime offline on CPU, ≤33 ms amortized mean per frame online on a 30-minute session) live in [tests/benchmark/test_throughput.py](tests/benchmark/test_throughput.py) and are not run on every PR — invoke them locally with `JAX_PLATFORMS=cpu uv run pytest -m benchmark` (the CPU pin is required; the benchmark errors on accelerator backends to keep the documented floors meaningful). Reference run on an M-series Mac CPU under the corrected (block-until-ready) timing: ~38× realtime / ~0.41 ms per frame; absolute throughput is hardware-dependent.
 - **Rich Simulation**: Comprehensive synthetic data generation for testing and validation
 - **Diagnostic Visualization**: Publication-quality video output for quality control
@@ -108,6 +108,36 @@ uv run python examples/08_qa_report_generation.py
 ```
 
 Creates a publication-quality PDF with the full set of accuracy metrics, NEES/NIS consistency checks, and time-series plots.
+
+### Real Data With a YAML Config
+
+For SpikeGadgets/Trodes-style real data, use a session YAML instead of long per-file CLI flags:
+
+```yaml
+inputs:
+  format: spikegadgets_trodes
+  imu_file: path/to/imu.parquet
+  position_file: path/to/position.parquet
+camera:
+  meters_per_pixel: 0.0022
+filter:
+  state_mode: 2d_cam_3d_imu
+outputs:
+  output_dir: runs/session_001
+led_identity:
+  mode: auto
+```
+
+Run forward filtering or offline smoothing:
+
+```bash
+uv run trodestrack online --config session.yaml
+uv run trodestrack smooth --config session.yaml
+```
+
+The config loader supports prepared text arrays and SpikeGadgets IMU parquet plus Trodes dual-LED parquet. Real-data IMU-fused runs write loader/calibration diagnostics and run a vision-only plausibility check before accepting fused output; this roughly doubles filter runtime when `outputs.run_safety_checks: true`.
+
+See [`examples/session_spikegadgets_trodes.yaml`](examples/session_spikegadgets_trodes.yaml) for a runnable template with the real-data safety and LED-identity options spelled out.
 
 ### Python API Examples
 

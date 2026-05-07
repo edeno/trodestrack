@@ -56,6 +56,39 @@ uv run python examples/08_qa_report_generation.py
 
 Creates a publication-quality PDF with all PRD metrics, NEES/NIS checks, and time series plots.
 
+## 6. Run Real Data From a YAML Config
+
+For SpikeGadgets/Trodes-style real data, put input paths and preprocessing settings in a session YAML:
+
+```yaml
+inputs:
+  format: spikegadgets_trodes
+  imu_file: path/to/imu.parquet
+  position_file: path/to/position.parquet
+camera:
+  meters_per_pixel: 0.0022
+filter:
+  state_mode: 2d_cam_3d_imu
+outputs:
+  output_dir: runs/session_001
+led_identity:
+  mode: auto
+```
+
+Then run either CLI path:
+
+```bash
+uv run trodestrack online --config session.yaml
+uv run trodestrack smooth --config session.yaml
+```
+
+Config-driven real-data runs write `session_diagnostics.json` plus IMU calibration reports when available. IMU-fused real-data runs also compute a vision-only safety baseline by default, so they may take about twice as long as a single filter pass. Use `filter.state_mode: vision_only` when calibration diagnostics fail or you want camera-only output.
+
+See `examples/session_spikegadgets_trodes.yaml` for a template with the common real-data options included.
+
+!!! note "Vision-only gating"
+    Config-driven `state_mode: vision_only` runs default Mahalanobis gating off so large but valid camera motion is not mistaken for an outlier. Set `filter.use_mahalanobis_gating: true` only when you have tuned process and measurement noise for your camera data.
+
 ## Python API Quick Reference
 
 ### Generate Synthetic Data

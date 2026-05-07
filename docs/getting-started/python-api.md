@@ -163,6 +163,44 @@ cfg = UKFConfig(
 
 ## Running Filters
 
+### YAML Session Loader
+
+For real data or reusable prepared-array runs, load a session config first and pass the prepared arrays to the EKF:
+
+```python
+from trodestrack.config import load_session_config
+from trodestrack.io import load_session, write_session_diagnostics
+from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
+
+session_config = load_session_config("session.yaml")
+session = load_session(session_config)
+cfg = EKFConfig(
+    **session_config.filter.to_ekf_kwargs(led_distance=session.led_distance)
+)
+result = extended_kalman_filter(
+    cfg,
+    session.t_imu,
+    session.U_imu,
+    session.t_cam,
+    session.Z_cam_led1,
+    session.Z_cam_led2,
+    session.mask_cam,
+    conf_cam=session.conf_cam,
+)
+write_session_diagnostics(session, session_config.outputs.output_dir)
+```
+
+`SessionConfig` supports `inputs.format: prepared_arrays` for existing text-array workflows and `inputs.format: spikegadgets_trodes` for SpikeGadgets IMU parquet plus Trodes dual-LED parquet. Real-data configs can remove sample-and-hold IMU repeats, convert raw SpikeGadgets integers to SI units, apply axis/sign maps and time offsets, run IMU calibration diagnostics, and pre-correct persistent LED swaps with:
+
+```yaml
+led_identity:
+  mode: auto
+```
+
+The CLI wrappers (`trodestrack online --config session.yaml` and `trodestrack smooth --config session.yaml`) also run the real-data safety check by default for IMU-fused SpikeGadgets/Trodes sessions. That check runs an extra vision-only EKF over the same session to compare trajectory envelope, speed, and log-likelihood, so expect roughly a second filter pass of runtime.
+
+For config-driven `state_mode: vision_only`, Mahalanobis gating defaults off unless you explicitly set `filter.use_mahalanobis_gating: true`. This avoids rejecting large but valid camera motion in camera-only real-data runs.
+
 ### Extended Kalman Filter
 
 ```python

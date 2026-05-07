@@ -1,0 +1,219 @@
+"""Pydantic schemas for YAML-driven trodestrack sessions."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Literal
+
+import yaml
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class InputsConfig(BaseModel):
+    """Input file locations and format selection."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    format: Literal["prepared_arrays", "spikegadgets_trodes"] = "prepared_arrays"
+
+    # Existing prepared-array workflow.
+    imu_timestamps: Path | None = None
+    imu_measurements: Path | None = None
+    camera_timestamps: Path | None = None
+    led1_positions: Path | None = None
+    led2_positions: Path | None = None
+    camera_mask: Path | None = None
+
+    # Real-data parquet workflow.
+    imu_file: Path | None = None
+    position_file: Path | None = None
+
+    @model_validator(mode="after")
+    def _validate_required_paths(self) -> InputsConfig:
+        if self.format == "prepared_arrays":
+            missing = [
+                name
+                for name in (
+                    "imu_timestamps",
+                    "imu_measurements",
+                    "camera_timestamps",
+                    "led1_positions",
+                )
+                if getattr(self, name) is None
+            ]
+        else:
+            missing = [
+                name
+                for name in ("imu_file", "position_file")
+                if getattr(self, name) is None
+            ]
+        if missing:
+            raise ValueError(
+                f"inputs.format={self.format!r} is missing required path(s): "
+                f"{', '.join(missing)}."
+            )
+        return self
+
+
+class IMUConfig(BaseModel):
+    """IMU preprocessing controls for real-data sessions."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["2d", "3d"] = "3d"
+    sample_hold_strategy: Literal["gyro_z_change", "any_axis_change", "none"] = (
+        "gyro_z_change"
+    )
+    time_offset_s: float = 0.0
+
+    gyro_scale_dps_per_lsb: float = 0.061
+    accel_scale_g_per_lsb: float = 0.000061
+    gravity_mps2: float = 9.80665
+
+    axis_map: dict[str, str] = Field(
+        default_factory=lambda: {
+            "gyro_x": "Headstage_GyroX",
+            "gyro_y": "Headstage_GyroY",
+            "gyro_z": "Headstage_GyroZ",
+            "accel_x": "Headstage_AccelX",
+            "accel_y": "Headstage_AccelY",
+            "accel_z": "Headstage_AccelZ",
+        }
+    )
+    axis_signs: dict[str, float] = Field(
+        default_factory=lambda: {
+            "gyro_x": 1.0,
+            "gyro_y": 1.0,
+            "gyro_z": 1.0,
+            "accel_x": 1.0,
+            "accel_y": 1.0,
+            "accel_z": 1.0,
+        }
+    )
+
+    run_calibration: bool = True
+    require_calibration_for_fusion: bool = True
+
+
+class CameraConfig(BaseModel):
+    """Camera/LED preprocessing controls for real-data sessions."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    meters_per_pixel: float = 0.0022
+    time_offset_s: float = 0.0
+    led1_x_column: str = "xloc"
+    led1_y_column: str = "yloc"
+    led2_x_column: str = "xloc2"
+    led2_y_column: str = "yloc2"
+    confidence_led1_column: str | None = None
+    confidence_led2_column: str | None = None
+
+
+class FilterConfig(BaseModel):
+    """Subset of EKFConfig exposed in YAML."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    state_mode: Literal["vision_only", "2d_full", "2d_cam_3d_imu"] = "2d_cam_3d_imu"
+    led_distance: float | None = None
+    use_heading_measurement: bool | None = None
+    process_noise_pos: float | None = None
+    process_noise_vel: float | None = None
+    process_noise_heading: float | None = None
+    process_noise_gyro_bias: float | None = None
+    process_noise_accel_bias: float | None = None
+    measurement_noise_pos: float | None = None
+    measurement_noise_heading: float | None = None
+    imu_gyro_noise_density: float | None = None
+    imu_accel_noise_density: float | None = None
+    damping_coeff: float | None = None
+    use_mahalanobis_gating: bool | None = None
+    enable_zupt: bool | None = None
+
+    def to_ekf_kwargs(self, *, led_distance: float | None = None) -> dict[str, object]:
+        """Return keyword arguments suitable for EKFConfig."""
+
+        data = self.model_dump(exclude_none=True)
+        if self.state_mode == "vision_only" and self.use_mahalanobis_gating is None:
+            data["use_mahalanobis_gating"] = False
+        data["led_distance"] = (
+            self.led_distance if self.led_distance is not None else led_distance
+        )
+        return data
+
+
+class OutputsConfig(BaseModel):
+    """Output directory and config-run validation controls."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    output_dir: Path = Path("trodestrack_run")
+    write_diagnostics: bool = True
+    run_safety_checks: bool = True
+    safety_envelope_multiplier: float = 3.0
+    safety_extra_range_m: float = 0.5
+    safety_max_speed_mps: float = 3.0
+
+
+class LedIdentityConfig(BaseModel):
+    """Persistent LED identity correction controls."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["none", "auto"] = "none"
+    transition_penalty: float = 2.0
+    gyro_weight: float = 0.0
+    max_speed_mps: float = 3.0
+
+
+class SessionConfig(BaseModel):
+    """Top-level YAML config for one trodestrack run."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    inputs: InputsConfig
+    imu: IMUConfig = Field(default_factory=IMUConfig)
+    camera: CameraConfig = Field(default_factory=CameraConfig)
+    filter: FilterConfig = Field(default_factory=FilterConfig)
+    outputs: OutputsConfig = Field(default_factory=OutputsConfig)
+    led_identity: LedIdentityConfig = Field(default_factory=LedIdentityConfig)
+
+
+def load_session_config(path: str | Path) -> SessionConfig:
+    """Load a YAML session config, resolving relative paths from the config file."""
+
+    config_path = Path(path)
+    with config_path.open("r") as f:
+        raw = yaml.safe_load(f)
+    if not isinstance(raw, dict):
+        raise ValueError(f"{config_path} must contain a YAML mapping.")
+    config = SessionConfig.model_validate(raw)
+    return _resolve_paths(config, base_dir=config_path.parent)
+
+
+def _resolve_paths(config: SessionConfig, *, base_dir: Path) -> SessionConfig:
+    def resolve(path: Path | None) -> Path | None:
+        if path is None or path.is_absolute():
+            return path
+        return base_dir / path
+
+    inputs = config.inputs.model_copy(
+        update={
+            name: resolve(getattr(config.inputs, name))
+            for name in (
+                "imu_timestamps",
+                "imu_measurements",
+                "camera_timestamps",
+                "led1_positions",
+                "led2_positions",
+                "camera_mask",
+                "imu_file",
+                "position_file",
+            )
+        }
+    )
+    outputs = config.outputs.model_copy(
+        update={"output_dir": resolve(config.outputs.output_dir)}
+    )
+    return config.model_copy(update={"inputs": inputs, "outputs": outputs})

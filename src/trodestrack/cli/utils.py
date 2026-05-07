@@ -199,3 +199,44 @@ def validate_finite_array(a: np.ndarray, name: str) -> None:
             file=sys.stderr,
         )
         sys.exit(1)
+
+
+def require_cli_inputs(args: object, names: tuple[str, ...], *, command: str) -> None:
+    """Require legacy per-file CLI args when ``--config`` is not used."""
+
+    missing = [name for name in names if getattr(args, name) is None]
+    if missing:
+        flags = ", ".join("--" + name.replace("_", "-") for name in missing)
+        print(
+            f"Error: trodestrack {command} requires either --config or all "
+            f"required input flags. Missing: {flags}.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
+def validate_camera_mask(mask_raw: np.ndarray, n_cam: int) -> np.ndarray:
+    """Validate a CLI camera mask and return a boolean array."""
+
+    if mask_raw.shape != (n_cam,):
+        print(
+            f"Error: Camera mask shape {mask_raw.shape} doesn't match (n_cam={n_cam},)",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if not np.all(np.isfinite(mask_raw)):
+        print(
+            "Error: --camera-mask contains non-finite values (NaN/inf); "
+            "expected only 0 or 1.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if not np.all(np.isin(mask_raw, (0, 1))):
+        bad = mask_raw[~np.isin(mask_raw, (0, 1))]
+        print(
+            f"Error: --camera-mask must contain only 0 or 1; found "
+            f"{len(bad)} other value(s) (e.g. {bad[:5].tolist()}).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return mask_raw.astype(bool)

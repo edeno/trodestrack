@@ -33,17 +33,32 @@ from pathlib import Path
 
 import numpy as np
 
+from trodestrack.cli.config_workflow import (
+    prepare_config_filter_run,
+    save_filter_outputs,
+    write_config_metadata,
+)
 from trodestrack.cli.utils import (
     friendly_cli_errors,
     load_data_file,
+    require_cli_inputs,
+    validate_camera_mask,
     validate_finite_array,
     validate_monotonic_timestamps,
 )
+from trodestrack.io import write_session_diagnostics
 from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
 from trodestrack.models.filter_common import FilterCoreConfig
 from trodestrack.runtime.offline import rts_smoother
 
 _FILTER_DEFAULTS = FilterCoreConfig()
+_LEGACY_REQUIRED_ARGS = (
+    "imu_timestamps",
+    "imu_measurements",
+    "camera_timestamps",
+    "led1_positions",
+    "output_dir",
+)
 
 
 def add_smooth_parser(subparsers: argparse._SubParsersAction) -> None:
@@ -74,30 +89,38 @@ producing lower-variance trajectories than forward filtering alone.
     # Required input arguments
     input_group = parser.add_argument_group("input files (required)")
     input_group.add_argument(
+        "--config",
+        type=Path,
+        required=False,
+        default=None,
+        help="YAML SessionConfig file. When provided, input files and output-dir may come from the config.",
+        metavar="FILE",
+    )
+    input_group.add_argument(
         "--imu-timestamps",
         type=Path,
-        required=True,
+        required=False,
         help="Path to IMU timestamps file (N_imu,) [seconds]",
         metavar="FILE",
     )
     input_group.add_argument(
         "--imu-measurements",
         type=Path,
-        required=True,
+        required=False,
         help="Path to IMU measurements file. Channel count depends on --state-mode: (N_imu, 3) [ω_z, f_x, f_y] for 2d_full / vision_only and the default 2d_cam_3d_imu (degenerate, vz idle); (N_imu, 4) [ω_z, f_x, f_y, f_z] for 2d_cam_3d_imu with 3D velocity. Units: rad/s and m/s². Quaternion-orientation layouts (6-channel) are not exposed by this CLI; use the Python API.",
         metavar="FILE",
     )
     input_group.add_argument(
         "--camera-timestamps",
         type=Path,
-        required=True,
+        required=False,
         help="Path to camera timestamps file (N_cam,) [seconds]",
         metavar="FILE",
     )
     input_group.add_argument(
         "--led1-positions",
         type=Path,
-        required=True,
+        required=False,
         help="Path to LED1 positions file (N_cam, 2) [x, y] in meters",
         metavar="FILE",
     )
@@ -123,7 +146,7 @@ producing lower-variance trajectories than forward filtering alone.
     output_group.add_argument(
         "--output-dir",
         type=Path,
-        required=True,
+        required=False,
         help="Directory to save filter and smoother outputs",
         metavar="DIR",
     )
@@ -247,6 +270,12 @@ def run_smooth(args: argparse.Namespace) -> None:
     print("trodestrack smooth — Offline Smoothing")
     print("=" * 80)
 
+    if args.config is not None:
+        _run_smooth_from_config(args)
+        return
+
+    require_cli_inputs(args, _LEGACY_REQUIRED_ARGS, command="smooth")
+
     # Load input data
     print("\nLoading input data...")
     t_imu = load_data_file(args.imu_timestamps, "IMU timestamps")
@@ -302,34 +331,9 @@ def run_smooth(args: argparse.Namespace) -> None:
 
     # Load optional camera mask
     if args.camera_mask is not None:
-        mask_raw = load_data_file(args.camera_mask, "Camera mask")
-        if mask_raw.shape != (n_cam,):
-            print(
-                f"Error: Camera mask shape {mask_raw.shape} doesn't match (n_cam={n_cam},)",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        # The CLI advertises --camera-mask as [0/1]. np.asarray(...).astype(bool)
-        # would silently coerce 2, -1, NaN, etc. into True and treat malformed
-        # rows as valid frames. Reject anything that isn't an exact 0 / 1 so a
-        # corrupted mask file fails loudly rather than inflating the
-        # valid-frame count.
-        if not np.all(np.isfinite(mask_raw)):
-            print(
-                "Error: --camera-mask contains non-finite values (NaN/inf); "
-                "expected only 0 or 1.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        if not np.all(np.isin(mask_raw, (0, 1))):
-            bad = mask_raw[~np.isin(mask_raw, (0, 1))]
-            print(
-                f"Error: --camera-mask must contain only 0 or 1; found "
-                f"{len(bad)} other value(s) (e.g. {bad[:5].tolist()}).",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        mask_cam = mask_raw.astype(bool)
+        mask_cam = validate_camera_mask(
+            load_data_file(args.camera_mask, "Camera mask"), n_cam
+        )
     else:
         mask_cam = np.ones(n_cam, dtype=bool)
 
@@ -470,3 +474,38 @@ def run_smooth(args: argparse.Namespace) -> None:
     print("  marginal_loglik.txt: Marginal log-likelihood (scalar)")
     print("  metadata.txt: Run configuration and metadata")
     print("\nSmoothing complete!")
+
+
+def _run_smooth_from_config(args: argparse.Namespace) -> None:
+    run = prepare_config_filter_run(args)
+
+    smoother_result = rts_smoother(
+        filter_result=run.filter_result,
+        ekf_config=run.ekf_config,
+        t_imu=run.session.t_imu,
+        U_imu=run.session.U_imu,
+        t_cam=run.session.t_cam,
+        num_iter=args.num_iter,
+        mask_cam=run.session.mask_cam,
+    )
+
+    save_filter_outputs(run)
+    n_cam = len(run.session.t_cam)
+    np.savetxt(run.output_dir / "smoothed_means.txt", smoother_result.smoothed_means)
+    np.savetxt(
+        run.output_dir / "smoothed_covariances.txt",
+        smoother_result.smoothed_covariances.reshape(n_cam, -1),
+    )
+    with open(run.output_dir / "marginal_loglik.txt", "w") as f:
+        f.write(f"{smoother_result.marginal_loglik:.6f}\n")
+    write_config_metadata(
+        run,
+        title="trodestrack smooth — Config-driven offline smoothing",
+        marginal_loglik=float(smoother_result.marginal_loglik),
+        state_dim=smoother_result.smoothed_means.shape[1],
+        smoother_num_iter=args.num_iter,
+    )
+    if run.config.outputs.write_diagnostics:
+        write_session_diagnostics(run.session, run.output_dir, run.safety_report)
+
+    print(f"\nSaved config-driven smooth outputs to {run.output_dir}/")

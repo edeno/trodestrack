@@ -1,0 +1,45 @@
+# Example YAML config for SpikeGadgets IMU parquet + Trodes dual-LED parquet.
+#
+# Run:
+#   uv run trodestrack online --config examples/session_spikegadgets_trodes.yaml
+#   uv run trodestrack smooth --config examples/session_spikegadgets_trodes.yaml
+#
+# Paths are resolved relative to this YAML file. Replace the inputs with your
+# own session files before running.
+
+inputs:
+  format: spikegadgets_trodes
+  imu_file: ../data/arthur20220324_imu_info.parquet
+  position_file: ../data/arthur20220324_position_info.parquet
+
+camera:
+  meters_per_pixel: 0.0022
+  led1_x_column: xloc
+  led1_y_column: yloc
+  led2_x_column: xloc2
+  led2_y_column: yloc2
+
+imu:
+  sample_hold_strategy: gyro_z_change
+  mode: 3d
+  run_calibration: true
+  require_calibration_for_fusion: true
+
+filter:
+  # Start with vision_only if IMU calibration fails; use 2d_cam_3d_imu only
+  # after the IMU calibration report and safety check pass.
+  state_mode: vision_only
+
+led_identity:
+  mode: auto
+  transition_penalty: 2.0
+  gyro_weight: 0.0
+  max_speed_mps: 3.0
+
+outputs:
+  output_dir: ../runs/arthur_session
+  write_diagnostics: true
+  run_safety_checks: true
+  safety_envelope_multiplier: 3.0
+  safety_extra_range_m: 0.5
+  safety_max_speed_mps: 3.0
