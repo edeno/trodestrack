@@ -223,7 +223,11 @@ def test_ekf_3d_core_jit_parity_and_timing() -> None:
     print(f"Warmed speedup vs eager: {eager_s / warmed_s:.1f}x")
 
     assert np.isfinite(float(warmed_result.marginal_loglik))
-    assert warmed_s < eager_s
+    # Wall-clock comparison is informational only — JIT vs eager speedup
+    # depends on backend (CPU/GPU/TPU), thermal state, and concurrent
+    # load. Asserting it as an invariant turned this benchmark into a
+    # flaky correctness test on hot or low-power runners. The ratio
+    # printed above is still useful for human inspection.
 
 
 def test_ekf_3d_core_jaxpr_shape_contract() -> None:

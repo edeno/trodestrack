@@ -87,6 +87,19 @@ def validate_monotonic_timestamps(t: np.ndarray, name: str) -> None:
             file=sys.stderr,
         )
         sys.exit(1)
+    # Require at least two samples — downstream code derives the sample
+    # period via ``np.diff(t)`` (mean used for rate reporting) and
+    # indexes ``t[-1] - t[0]`` for the session duration. A 0- or 1-sample
+    # stream silently produces ``NaN`` rates / raw IndexError instead of
+    # a clear CLI error.
+    if t.size < 2:
+        print(
+            f"Error: {name} must contain at least two samples; got "
+            f"size {t.size}. The filter derives the sample period from "
+            f"``np.diff(t)`` and the session duration from ``t[-1] - t[0]``.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     if not np.all(np.isfinite(t)):
         n_bad = int(np.sum(~np.isfinite(t)))
         print(
@@ -96,7 +109,7 @@ def validate_monotonic_timestamps(t: np.ndarray, name: str) -> None:
         )
         sys.exit(1)
     diffs = np.diff(t)
-    if t.size >= 2 and not np.all(diffs > 0):
+    if not np.all(diffs > 0):
         first_bad = int(np.argmax(diffs <= 0))
         print(
             f"Error: {name} must be strictly increasing; first non-increasing "

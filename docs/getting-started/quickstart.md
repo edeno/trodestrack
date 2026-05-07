@@ -126,7 +126,29 @@ filtered_cov = np.asarray(result.filtered_covariances)
 
 pos_idx = list(layout.pos_idx)
 vel_idx_2d = list(layout.vel_idx)[:2]  # X_truth has only vx, vy
-heading_col = int(layout.heading_idx)
+
+# Headings: scalar-2D-heading layouts (vision_only / 2d_full / 2d_cam_3d_imu /
+# 2d_cam_6dof_imu_orientation) expose heading as a scalar yaw angle and the
+# QA report's heading panels can plot ``filtered[:, heading_col]`` directly.
+# Tuple-heading layouts (``3d_euler``: 3-tuple Euler; ``3d_quat`` /
+# ``3d_cam_6dof_imu``: 4-tuple scalar-first quaternion) need an explicit
+# yaw extraction; see ``trodestrack.models.filter_common.state_yaw`` for
+# the reference implementation. ``layout.has_heading_2d`` distinguishes
+# the two cases.
+if layout.has_heading_2d:
+    # Scalar yaw — heading_idx may be a Python int or a 1-tuple.
+    heading_col = (
+        int(layout.heading_idx)
+        if isinstance(layout.heading_idx, int)
+        else int(layout.heading_idx[0])
+    )
+    headings_est_for_report = filtered[:, heading_col]
+else:
+    raise NotImplementedError(
+        f"This QA snippet plots scalar yaw; layout heading_idx="
+        f"{layout.heading_idx!r} (state_mode={cfg.state_mode}) returns a "
+        "tuple. Extract yaw via ``state_yaw`` per sample before plotting."
+    )
 
 # Position-only NEES (state_dim=2): expected mean ~ 2 for a consistent filter.
 nees = compute_nees(
@@ -142,7 +164,7 @@ generate_qa_report(
     velocities_true=X_truth_at_cam[:, 2:4],
     velocities_est=filtered[:, vel_idx_2d],
     headings_true=X_truth_at_cam[:, 4],
-    headings_est=filtered[:, heading_col],
+    headings_est=headings_est_for_report,
     nees=nees,
     state_dim=2,
 )

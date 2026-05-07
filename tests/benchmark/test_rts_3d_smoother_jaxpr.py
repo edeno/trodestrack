@@ -266,7 +266,8 @@ def test_rts_3d_smoother_jit_parity_and_timing() -> None:
     print(f"Warmed jitted smoother num_iter=2: {iter2_warmed_s:.4f} s")
     print(f"Warmed speedup vs eager: {eager_s / warmed_s:.1f}x")
 
-    assert warmed_s < eager_s
+    # Wall-clock comparison is informational only — see comment in
+    # tests/benchmark/test_ekf_3d_core_jit.py for the same rationale.
 
 
 def test_rts_3d_smoother_jaxpr_shape_contract() -> None:
