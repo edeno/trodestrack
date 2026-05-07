@@ -138,7 +138,7 @@ uv run trodestrack online --config session.yaml
 uv run trodestrack smooth --config session.yaml
 ```
 
-The config loader supports prepared text arrays and SpikeGadgets IMU parquet plus Trodes dual-LED parquet. Real-data IMU-fused runs write loader/calibration diagnostics and run a vision-only plausibility check before accepting fused output; this roughly doubles filter runtime when `outputs.run_safety_checks: true`. For tilted headstages, start with `2d_cam_6dof_imu_orientation` and leave accelerometer-driven translation disabled until the safety check passes.
+The config loader supports prepared text arrays and SpikeGadgets IMU parquet plus Trodes dual-LED parquet. Real-data IMU-fused runs write loader/calibration diagnostics and run a vision-only plausibility check before accepting fused output; this roughly doubles filter runtime when `outputs.run_safety_checks: true`. For tilted headstages, start with `2d_cam_6dof_imu_orientation` and leave accelerometer-driven translation disabled until the safety check passes. This validated default fuses 6-DOF IMU orientation with camera position; it does not claim accelerometer-driven position integration.
 
 See [`examples/session_spikegadgets_trodes.yaml`](examples/session_spikegadgets_trodes.yaml) for a runnable template with the real-data safety and LED-identity options spelled out.
 

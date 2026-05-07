@@ -208,7 +208,7 @@ filter:
   use_gravity_orientation_update: true
 ```
 
-Enable accelerometer-driven translation only after that fused configuration passes the real-data safety check.
+Enable accelerometer-driven translation only after that fused configuration passes the real-data safety check. The validated default fuses 6-DOF IMU orientation with camera position; it is not a claim that accelerometer-driven position integration is ready for tilted real headstages.
 
 For config-driven `state_mode: vision_only`, Mahalanobis gating defaults off unless you explicitly set `filter.use_mahalanobis_gating: true`. This avoids rejecting large but valid camera motion in camera-only real-data runs.
 
