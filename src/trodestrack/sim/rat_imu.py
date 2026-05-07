@@ -360,6 +360,25 @@ class RatIMUSimConfig:
             if not np.isfinite(value):
                 raise ValueError(f"{fname} must be a finite value; got {value!r}.")
 
+        # Strict-bool validation. Plain Python truthiness silently
+        # accepts non-bool values like the string ``"False"`` (which is
+        # truthy), the integer ``1``, or a list — and the simulator
+        # then branches on these via ``if self.use_second_led: ...``,
+        # producing finite LED2 observations / non-uniform confidences
+        # despite the user's apparent intent. CLI/YAML/env loaders are
+        # an obvious source of these bugs. Require ``bool`` exactly.
+        bool_fields = ("use_confidence", "use_second_led")
+        for fname in bool_fields:
+            value = getattr(self, fname)
+            if not isinstance(value, bool):
+                raise ValueError(
+                    f"{fname} must be a Python ``bool`` (True/False); "
+                    f"got {value!r} (type {type(value).__name__}). "
+                    f"If you're loading from YAML / env / CLI, parse "
+                    f"the string to a bool before constructing the "
+                    f"config."
+                )
+
         # Duration validation
         if self.duration_s <= 0:
             raise ValueError(

@@ -1339,6 +1339,29 @@ def test_camera_latency_and_jitter_must_be_non_negative():
     )
 
 
+def test_use_confidence_and_use_second_led_require_strict_bool():
+    """Boolean fields must reject non-bool truthy values.
+
+    Plain Python truthiness silently accepts strings like ``"False"``
+    (truthy), integers, and lists; the simulator then branches on
+    these via ``if self.use_second_led: ...`` and produces finite
+    LED2 observations / non-uniform confidences despite the user's
+    apparent intent. CLI / YAML / env loaders are an obvious source
+    of these bugs — require ``isinstance(value, bool)`` exactly.
+    """
+    # Clean True/False both work.
+    RatIMUSimConfig(duration_s=1.0, use_second_led=True, use_confidence=True)
+    RatIMUSimConfig(duration_s=1.0, use_second_led=False, use_confidence=False)
+
+    # Non-bool truthy / falsy values must raise — note ``"False"`` is
+    # the dangerous one because Python evaluates it as truthy.
+    for bad in ("False", "True", "yes", 1, 0, [1], [0]):
+        with pytest.raises(ValueError, match=r"use_second_led must be a Python"):
+            RatIMUSimConfig(duration_s=1.0, use_second_led=bad)
+        with pytest.raises(ValueError, match=r"use_confidence must be a Python"):
+            RatIMUSimConfig(duration_s=1.0, use_confidence=bad)
+
+
 def test_persistent_swap_with_single_led_warns():
     """Persistent-swap settings on a single-LED sim should emit a warning.
 

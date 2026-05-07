@@ -878,15 +878,29 @@ create_diagnostic_video(
 ### Run Integration Tests
 
 ```bash
-# Run PRD acceptance tests
+# Accuracy / consistency tests (RMSE, NEES, dropout drift)
 uv run pytest tests/integration/test_prd_session.py -v
 ```
 
-**Expected results:**
+**Expected results from the integration suite:**
 - Position RMSE ≤ 2 cm ✓
 - Velocity RMSE ≤ 10 cm/s ✓
 - Heading RMSE ≤ 7° ✓
-- Throughput ≥ 10× realtime ✓
+
+The throughput / latency floors are checked by a separate benchmark
+suite that's excluded from the default test run (because it's
+wall-clock-sensitive). Invoke them explicitly:
+
+```bash
+# Throughput-floor benchmarks (~30-min sim per test, CPU-only)
+JAX_PLATFORMS=cpu uv run pytest -m "slow or benchmark" \
+    tests/benchmark/test_throughput.py -v
+```
+
+**Expected floors from the benchmark suite:**
+
+- Offline RTS smoother throughput ≥ 10× realtime on CPU
+- Online EKF amortized mean latency ≤ 33 ms / frame
 
 ### Compare EKF vs UKF
 
