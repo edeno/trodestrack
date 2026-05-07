@@ -140,7 +140,7 @@ uv run python docs/presentation/code/build_presentation.py
 - IMU pre-integration between camera frames
 - Uncertainty evolution (covariance)
 - EKF vs UKF vs RTS smoothing
-- Robustness features (gating, transient LED-swap mitigation via dual-LED residuals, damping; persistent LED swaps NOT auto-detected — tracked by the `test_filter_stable_under_frequent_swaps` xfail)
+- Robustness features (gating, transient LED-swap mitigation via dual-LED residuals, pre-filter persistent LED identity correction, damping)
 - 9-panel diagnostic video
 
 ### Section 3: FEATURES & CAPABILITIES (Slides 19-25)

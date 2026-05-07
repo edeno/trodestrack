@@ -617,7 +617,7 @@ def build_section_2_how_it_works(builder):
             "Arena bounds: Soft constraint to stay within known region",
             "Damping: Exponential decay prevents velocity explosion during dropout",
         ],
-        notes="TrodesTrack includes multiple robustness mechanisms. Mahalanobis gating rejects outliers (e.g., reflections) beyond χ² threshold. Transient LED swaps are absorbed by gating on the dual-LED residual; persistent (sustained) front/back swaps are NOT auto-detected (tracked by the test_filter_stable_under_frequent_swaps xfail in tests/filters/test_robustness.py) and require pre-filter LED-identity correction. DLC confidence scales measurement noise (low confidence → high noise). Bias estimation adapts to IMU drift. Arena bounds provide soft constraints. Velocity damping (λ term) prevents unbounded growth during long dropouts.",
+        notes="TrodesTrack includes multiple robustness mechanisms. Mahalanobis gating rejects outliers (e.g., reflections) beyond χ² threshold. Transient LED swaps are absorbed by gating on the dual-LED residual; persistent (sustained) front/back swaps can be corrected before filtering with LED identity correction, while all-session global reversals require an initial-state prior. DLC confidence scales measurement noise (low confidence → high noise). Bias estimation adapts to IMU drift. Arena bounds provide soft constraints. Velocity damping (λ term) prevents unbounded growth during long dropouts.",
     )
 
     # Slide 18: The 9-Panel Diagnostic Video

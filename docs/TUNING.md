@@ -425,7 +425,7 @@ cfg = EKFConfig(
 **When to use:**
 - LED reflections off walls
 - Occasional tracking errors (DLC artifacts)
-- LED swaps not automatically resolved
+- Transient LED swaps or residual outliers after pre-filter LED identity correction
 
 **Configuration:**
 
@@ -578,7 +578,7 @@ cfg = EKFConfig(
 
 **Possible causes:**
 1. **Unmodeled dynamics** → Try UKF instead of EKF
-2. **LED swaps** → Enable heading measurement or manual swap correction
+2. **LED swaps** → Enable pre-filter LED identity correction or set an initial-state prior for global swaps
 3. **Time sync issues** → Check IMU/camera timestamp alignment
 4. **Sensor calibration** → Verify IMU units (see PRD Section 5)
 

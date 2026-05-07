@@ -364,16 +364,14 @@ cfg = EKFConfig(
 
 #### Root Cause
 
-The filter does **not** detect persistent LED swaps. Mahalanobis gating
-on the dual-LED residual absorbs single-frame swaps, but if the front/back
-identities stay swapped across frames the swapped pair becomes a
-self-consistent measurement and the filter accepts it as truth — heading
-flips 180°. This is tracked by the
-`test_filter_stable_under_frequent_swaps` xfail in
-`tests/filters/test_robustness.py`. Until LED-swap detection lands,
-correct identities upstream of the filter (e.g. choose the LED whose
-position is closer to the previous-frame estimate, or use color/shape
-features in the detector).
+The filter itself does **not** infer persistent LED identity swaps from its
+state. Mahalanobis gating on the dual-LED residual absorbs single-frame swaps,
+but if the front/back identities stay swapped across frames the swapped pair can
+become a self-consistent measurement and the filter accepts it as truth —
+heading flips 180°. Use config-driven pre-filter LED identity correction
+(`led_identity.mode: auto`) before running the EKF/UKF. If the whole session is
+globally reversed, set `led_identity.initial_state: original` or `swapped`;
+continuity alone cannot identify that global convention.
 
 #### Diagnostic Steps
 
