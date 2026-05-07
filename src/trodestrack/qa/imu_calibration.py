@@ -500,7 +500,10 @@ def lagged_linear_fit(
             "config-driven calibration path: IMU and camera time ranges "
             "don't overlap (check imu.time_offset_s and "
             "camera.time_offset_s); the IMU or camera input is mostly NaN; "
-            "or no candidate lag falls within the actual time-range overlap."
+            "no candidate lag falls within the actual time-range overlap; "
+            "or the source/target signal has too little variation (for yaw "
+            "calibration, check imu.axis_map['gyro_z'] and "
+            "imu.axis_signs['gyro_z'])."
         )
     return best_fit
 
@@ -619,6 +622,14 @@ def run_imu_calibration_diagnostics(
         speed_threshold=speed_threshold,
         gyro_threshold=gyro_threshold,
     )
+    if not np.any(stationary):
+        raise ValueError(
+            "No stationary samples available for IMU calibration diagnostics. "
+            "In the config-driven path, common causes are non-overlapping IMU "
+            "and camera time ranges (check imu.time_offset_s and "
+            "camera.time_offset_s), too-strict stationary thresholds, or a "
+            "session with no low-motion periods."
+        )
     gyro_bias = estimate_gyro_bias(gyro_z, stationary)
     gravity_body = estimate_accel_gravity_body(accel_xyz, stationary)
 

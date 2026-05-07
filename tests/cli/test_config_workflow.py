@@ -203,6 +203,57 @@ def test_config_output_dir_flag_overrides_yaml(tmp_path: Path) -> None:
     assert not (tmp_path / "out_override" / "filtered_means.txt").exists()
 
 
+def test_online_config_prepared_arrays_matches_legacy_flags(tmp_path: Path) -> None:
+    """Prepared-array config runs should match the equivalent legacy CLI flags."""
+
+    config_path = _write_prepared_config(tmp_path, command="online_parity")
+    input_dir = tmp_path / "input_online_parity"
+    legacy_dir = tmp_path / "out_online_legacy"
+
+    with patch("sys.argv", ["trodestrack", "online", "--config", str(config_path)]):
+        main()
+
+    with patch(
+        "sys.argv",
+        [
+            "trodestrack",
+            "online",
+            "--imu-timestamps",
+            str(input_dir / "t_imu.txt"),
+            "--imu-measurements",
+            str(input_dir / "U_imu.txt"),
+            "--camera-timestamps",
+            str(input_dir / "t_cam.txt"),
+            "--led1-positions",
+            str(input_dir / "led1.txt"),
+            "--led2-positions",
+            str(input_dir / "led2.txt"),
+            "--camera-mask",
+            str(input_dir / "mask.txt"),
+            "--state-mode",
+            "vision_only",
+            "--output-dir",
+            str(legacy_dir),
+        ],
+    ):
+        main()
+
+    config_dir = tmp_path / "out_online_parity"
+    np.testing.assert_allclose(
+        np.loadtxt(config_dir / "filtered_means.txt"),
+        np.loadtxt(legacy_dir / "filtered_means.txt"),
+    )
+    np.testing.assert_allclose(
+        np.loadtxt(config_dir / "filtered_covariances.txt"),
+        np.loadtxt(legacy_dir / "filtered_covariances.txt"),
+    )
+    np.testing.assert_allclose(
+        float((config_dir / "marginal_loglik.txt").read_text()),
+        float((legacy_dir / "marginal_loglik.txt").read_text()),
+        atol=1e-3,
+    )
+
+
 def test_smooth_config_writes_filter_and_smoother_outputs(tmp_path: Path) -> None:
     """``trodestrack smooth --config`` runs the smoother over config inputs."""
 
@@ -217,6 +268,59 @@ def test_smooth_config_writes_filter_and_smoother_outputs(tmp_path: Path) -> Non
     assert filtered.shape == (16, 5)
     assert smoothed.shape == (16, 5)
     assert (output_dir / "session_diagnostics.json").exists()
+
+
+def test_smooth_config_prepared_arrays_matches_legacy_flags(tmp_path: Path) -> None:
+    """Prepared-array smoothing should match the equivalent legacy CLI flags."""
+
+    config_path = _write_prepared_config(tmp_path, command="smooth_parity")
+    input_dir = tmp_path / "input_smooth_parity"
+    legacy_dir = tmp_path / "out_smooth_legacy"
+
+    with patch("sys.argv", ["trodestrack", "smooth", "--config", str(config_path)]):
+        main()
+
+    with patch(
+        "sys.argv",
+        [
+            "trodestrack",
+            "smooth",
+            "--imu-timestamps",
+            str(input_dir / "t_imu.txt"),
+            "--imu-measurements",
+            str(input_dir / "U_imu.txt"),
+            "--camera-timestamps",
+            str(input_dir / "t_cam.txt"),
+            "--led1-positions",
+            str(input_dir / "led1.txt"),
+            "--led2-positions",
+            str(input_dir / "led2.txt"),
+            "--camera-mask",
+            str(input_dir / "mask.txt"),
+            "--state-mode",
+            "vision_only",
+            "--output-dir",
+            str(legacy_dir),
+        ],
+    ):
+        main()
+
+    config_dir = tmp_path / "out_smooth_parity"
+    for name in (
+        "filtered_means.txt",
+        "filtered_covariances.txt",
+        "smoothed_means.txt",
+        "smoothed_covariances.txt",
+    ):
+        np.testing.assert_allclose(
+            np.loadtxt(config_dir / name),
+            np.loadtxt(legacy_dir / name),
+        )
+    np.testing.assert_allclose(
+        float((config_dir / "marginal_loglik.txt").read_text()),
+        float((legacy_dir / "marginal_loglik.txt").read_text()),
+        atol=1e-3,
+    )
 
 
 def test_spikegadgets_vision_only_config_skips_real_data_safety(

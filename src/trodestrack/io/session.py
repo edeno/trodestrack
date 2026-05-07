@@ -579,10 +579,7 @@ def _validate_calibration_for_fusion(
             f"({report.stationary_samples}); use state_mode: vision_only or "
             "provide a longer session with low-motion periods."
         )
-    if (
-        abs(report.yaw_rate_fit.correlation)
-        < config.imu.calibration_min_yaw_correlation
-    ):
+    if report.yaw_rate_fit.correlation < config.imu.calibration_min_yaw_correlation:
         raise ValueError(
             "gyro_z does not correlate with LED-derived yaw rate "
             f"(correlation={report.yaw_rate_fit.correlation:.3f}, "

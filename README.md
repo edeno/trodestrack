@@ -365,10 +365,11 @@ See [`examples/README.md`](examples/README.md) for the complete learning path. E
   - DeepLabCut keypoint format
   - SpikeGadgets raw IMU format
 - 🚧 **CLI Tools**
-  - YAML config loading for `trodestrack smooth` / `trodestrack online`
-    (today both commands take individual `--imu-timestamps`,
-    `--imu-measurements`, `--camera-timestamps`, `--led1-positions`, … flags;
-    a single `--config session.yaml` shorthand is planned)
+  - Additional real-data loaders beyond the current `--config` workflows
+    for prepared arrays and SpikeGadgets IMU parquet plus Trodes dual-LED
+    parquet. Both `trodestrack smooth --config session.yaml` and
+    `trodestrack online --config session.yaml` are available today; the
+    per-file flags remain supported for prepared arrays.
 
 ## Documentation
 

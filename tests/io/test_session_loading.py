@@ -896,6 +896,24 @@ def test_translation_calibration_rejects_weak_accel_axis_alignment() -> None:
         _validate_calibration_for_fusion(report, config)
 
 
+def test_yaw_calibration_rejects_negative_correlation_with_field_guidance() -> None:
+    """A flipped gyro_z sign should fail calibration, not pass by absolute value."""
+
+    report = _calibration_report(yaw_correlation=-0.9)
+    config = _calibration_config(state_mode="2d_cam_6dof_imu_orientation")
+
+    with pytest.raises(ValueError) as exc_info:
+        _validate_calibration_for_fusion(report, config)
+
+    message = str(exc_info.value)
+    assert "correlation=-0.900" in message
+    assert "imu.axis_map['gyro_z']" in message
+    assert "imu.axis_signs['gyro_z']" in message
+    assert "imu.time_offset_s" in message
+    assert "camera.time_offset_s" in message
+    assert "filter.state_mode: vision_only" in message
+
+
 def test_orientation_without_accel_translation_skips_translation_calibration() -> None:
     """Orientation fusion can pass when only translation-specific checks fail."""
 

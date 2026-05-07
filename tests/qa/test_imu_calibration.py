@@ -11,6 +11,7 @@ from trodestrack.qa.imu_calibration import (
     estimate_gyro_bias,
     estimate_stationary_mask,
     lagged_linear_fit,
+    run_imu_calibration_diagnostics,
     smooth_time_series,
 )
 
@@ -70,6 +71,31 @@ def test_estimate_stationary_mask_excludes_non_overlapping_camera_range() -> Non
     assert stationary.sum() == 0
 
 
+def test_calibration_no_stationary_samples_mentions_time_offsets() -> None:
+    """Config users need clock-field guidance when calibration has no overlap."""
+
+    t_cam = np.linspace(0.0, 1.0, 20)
+    t_imu = np.linspace(10.0, 11.0, 100)
+    led1 = np.column_stack([np.zeros_like(t_cam), np.zeros_like(t_cam)])
+    led2 = led1 + np.array([0.04, 0.0])
+    gyro_z = np.zeros_like(t_imu)
+    accel_xyz = np.tile([0.0, 0.0, 9.80665], (t_imu.size, 1))
+
+    with pytest.raises(ValueError) as exc_info:
+        run_imu_calibration_diagnostics(
+            t_imu=t_imu,
+            gyro_z=gyro_z,
+            accel_xyz=accel_xyz,
+            t_cam=t_cam,
+            led1=led1,
+            led2=led2,
+        )
+
+    message = str(exc_info.value)
+    assert "imu.time_offset_s" in message
+    assert "camera.time_offset_s" in message
+
+
 def test_lagged_linear_fit_excludes_samples_outside_source_range() -> None:
     """Target samples shifted outside the source span must not bias the fit.
 
@@ -125,6 +151,30 @@ def test_lagged_linear_fit_recovers_lag_scale_and_bias() -> None:
     assert fit.correlation > 0.99
     np.testing.assert_allclose(fit.slope, 1.7, rtol=1e-2)
     np.testing.assert_allclose(fit.intercept, 0.25, atol=1e-3)
+
+
+def test_lagged_linear_fit_no_valid_fit_mentions_config_fields() -> None:
+    """No-fit diagnostics should point config users at clock and gyro fields."""
+
+    t_source = np.linspace(0.0, 1.0, 20)
+    t_target = np.linspace(0.0, 1.0, 20)
+    source = np.zeros_like(t_source)
+    target = np.sin(t_target)
+
+    with pytest.raises(ValueError) as exc_info:
+        lagged_linear_fit(
+            t_source,
+            source,
+            t_target,
+            target,
+            candidate_lags_s=np.array([0.0]),
+        )
+
+    message = str(exc_info.value)
+    assert "imu.time_offset_s" in message
+    assert "camera.time_offset_s" in message
+    assert "imu.axis_map['gyro_z']" in message
+    assert "imu.axis_signs['gyro_z']" in message
 
 
 def test_accel_axis_sign_diagnostics_identify_swaps_and_signs() -> None:
