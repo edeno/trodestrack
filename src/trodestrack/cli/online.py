@@ -39,6 +39,7 @@ from pathlib import Path
 import numpy as np
 
 from trodestrack.cli.utils import (
+    friendly_cli_errors,
     load_data_file,
     validate_finite_array,
     validate_monotonic_timestamps,
@@ -240,32 +241,21 @@ that, drive `trodestrack.models.ekf.predict_step` /
     parser.set_defaults(func=run_online)
 
 
+@friendly_cli_errors
 def run_online(args: argparse.Namespace) -> None:
     """Execute the online command.
 
-    Wraps :func:`_run_online_impl` so that a bad ``--process-noise-pos``
-    or any other config-time / filter-time ``ValueError`` exits with a
-    clear ``Error: ...`` message rather than dumping a Python
-    traceback. Mirrors the pattern used in
-    :func:`trodestrack.cli.report.run_report`.
+    The :func:`friendly_cli_errors` decorator converts
+    ``FileNotFoundError`` / ``ValueError`` raised by downstream
+    library code (e.g. ``EKFConfig`` rejecting
+    ``--process-noise-pos -1``) into a clean ``Error: ...`` stderr
+    line, mirroring :func:`trodestrack.cli.report.run_report`.
 
     Parameters
     ----------
     args : argparse.Namespace
         Parsed command-line arguments.
     """
-    try:
-        _run_online_impl(args)
-    except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
-    except ValueError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
-
-
-def _run_online_impl(args: argparse.Namespace) -> None:
-    """Run the online command body. See :func:`run_online`."""
     print("=" * 80)
     print("trodestrack online — Forward-only EKF (batch over full input arrays)")
     print("=" * 80)

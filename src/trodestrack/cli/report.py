@@ -8,12 +8,12 @@ NEES/NIS series) and generates a comprehensive PDF report.
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
 
+from trodestrack.cli.utils import friendly_cli_errors
 from trodestrack.qa.report import generate_qa_report
 
 
@@ -238,70 +238,62 @@ def load_run_data(run_dir: Path) -> dict[str, NDArray | int]:
     return data
 
 
+@friendly_cli_errors
 def run_report_command(args: argparse.Namespace) -> None:
     """Execute the report command.
+
+    The :func:`friendly_cli_errors` decorator surfaces
+    ``FileNotFoundError`` / ``NotADirectoryError`` / ``ValueError``
+    from the loader and report-generation paths as ``Error: ...``
+    stderr lines.
 
     Parameters
     ----------
     args : argparse.Namespace
         Parsed command-line arguments.
     """
-    try:
-        # Load data from run directory
-        data = load_run_data(args.run)
+    # Load data from run directory
+    data = load_run_data(args.run)
 
-        # Prepare report arguments
-        report_args = {
-            "pdf_path": args.pdf,
-            "t": data["t"],
-            "positions_true": data["positions_true"],
-            "positions_est": data["positions_est"],
-            "velocities_true": data["velocities_true"],
-            "velocities_est": data["velocities_est"],
-            "headings_true": data["headings_true"],
-            "headings_est": data["headings_est"],
-            "nees": data["nees"],
-            "state_dim": data["state_dim"],
-        }
+    # Prepare report arguments
+    report_args = {
+        "pdf_path": args.pdf,
+        "t": data["t"],
+        "positions_true": data["positions_true"],
+        "positions_est": data["positions_est"],
+        "velocities_true": data["velocities_true"],
+        "velocities_est": data["velocities_est"],
+        "headings_true": data["headings_true"],
+        "headings_est": data["headings_est"],
+        "nees": data["nees"],
+        "state_dim": data["state_dim"],
+    }
 
-        # Add optional parameters if available. ``measurement_dim`` is
-        # required when NIS is present because chi-square consistency
-        # bounds (and "% in bounds") depend on it: position-only NIS is
-        # df=2, dual-LED NIS is df=4, and other layouts are possible.
-        # Silently defaulting to 4 produced a successful exit code with
-        # potentially-wrong bounds. Force the user to be explicit.
-        if "nis" in data:
-            report_args["nis"] = data["nis"]
-            if "measurement_dim" not in data:
-                raise ValueError(
-                    "nis.npy is present in the input directory but "
-                    "measurement_dim.txt is missing. The chi-square "
-                    "consistency bounds depend on the measurement "
-                    "dimensionality (df=2 for position-only, df=4 for "
-                    "dual-LED, etc.) and cannot be guessed from nis.npy. "
-                    "Add measurement_dim.txt with the correct integer "
-                    "(e.g. ``echo 4 > measurement_dim.txt``) or remove "
-                    "nis.npy from the input directory."
-                )
-            report_args["measurement_dim"] = data["measurement_dim"]
+    # Add optional parameters if available. ``measurement_dim`` is
+    # required when NIS is present because chi-square consistency
+    # bounds (and "% in bounds") depend on it: position-only NIS is
+    # df=2, dual-LED NIS is df=4, and other layouts are possible.
+    # Silently defaulting to 4 produced a successful exit code with
+    # potentially-wrong bounds. Force the user to be explicit.
+    if "nis" in data:
+        report_args["nis"] = data["nis"]
+        if "measurement_dim" not in data:
+            raise ValueError(
+                "nis.npy is present in the input directory but "
+                "measurement_dim.txt is missing. The chi-square "
+                "consistency bounds depend on the measurement "
+                "dimensionality (df=2 for position-only, df=4 for "
+                "dual-LED, etc.) and cannot be guessed from nis.npy. "
+                "Add measurement_dim.txt with the correct integer "
+                "(e.g. ``echo 4 > measurement_dim.txt``) or remove "
+                "nis.npy from the input directory."
+            )
+        report_args["measurement_dim"] = data["measurement_dim"]
 
-        if args.title is not None:
-            report_args["title"] = args.title
+    if args.title is not None:
+        report_args["title"] = args.title
 
-        # Generate report
-        generate_qa_report(**report_args)
+    # Generate report
+    generate_qa_report(**report_args)
 
-        print(f"Report generated successfully: {args.pdf}")
-
-    except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
-    except NotADirectoryError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
-    except ValueError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
-    except Exception as e:
-        print(f"Unexpected error: {e}", file=sys.stderr)
-        sys.exit(1)
+    print(f"Report generated successfully: {args.pdf}")

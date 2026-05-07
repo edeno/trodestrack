@@ -34,6 +34,7 @@ from pathlib import Path
 import numpy as np
 
 from trodestrack.cli.utils import (
+    friendly_cli_errors,
     load_data_file,
     validate_finite_array,
     validate_monotonic_timestamps,
@@ -227,13 +228,14 @@ producing lower-variance trajectories than forward filtering alone.
     parser.set_defaults(func=run_smooth)
 
 
+@friendly_cli_errors
 def run_smooth(args: argparse.Namespace) -> None:
     """Execute the smooth command.
 
-    Wraps :func:`_run_smooth_impl` so that a bad ``--num-iter`` or any
-    other config-time / filter-time ``ValueError`` exits with a clear
-    ``Error: ...`` message rather than dumping a Python traceback.
-    Mirrors the pattern used in
+    The :func:`friendly_cli_errors` decorator converts
+    ``FileNotFoundError`` / ``ValueError`` raised by downstream
+    library code (e.g. ``rts_smoother`` rejecting ``--num-iter 0``)
+    into a clean ``Error: ...`` stderr line, mirroring
     :func:`trodestrack.cli.report.run_report`.
 
     Parameters
@@ -241,18 +243,6 @@ def run_smooth(args: argparse.Namespace) -> None:
     args : argparse.Namespace
         Parsed command-line arguments.
     """
-    try:
-        _run_smooth_impl(args)
-    except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
-    except ValueError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
-
-
-def _run_smooth_impl(args: argparse.Namespace) -> None:
-    """Run the smooth command body. See :func:`run_smooth`."""
     print("=" * 80)
     print("trodestrack smooth — Offline Smoothing")
     print("=" * 80)

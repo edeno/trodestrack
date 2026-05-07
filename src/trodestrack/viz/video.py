@@ -221,19 +221,9 @@ def create_diagnostic_video(
                     "would otherwise read past the filter result."
                 )
 
-    # Validate fps / speedup at the public boundary so prepare_video_data
-    # below doesn't divide by zero, build a NaN-length np.arange, or
-    # silently emit a 0-frame video. Keep these strictly positive and
-    # finite — empty animations would render but contain nothing.
-    if not np.isfinite(fps) or fps <= 0:
-        raise ValueError(
-            f"fps must be a finite strictly-positive frame rate; got {fps!r}."
-        )
-    if not np.isfinite(speedup) or speedup <= 0:
-        raise ValueError(
-            f"speedup must be a finite strictly-positive playback multiplier; "
-            f"got {speedup!r}."
-        )
+    # ``fps`` / ``speedup`` are validated inside ``prepare_video_data``
+    # below; the rolling-window checks here use the post-validation fps,
+    # so duplicating the fps / speedup gate would be dead code.
 
     # Validate the rolling-window parameters too. The diagnostic-panel
     # artists size their deque buffers as ``int(window_s * fps)`` and a

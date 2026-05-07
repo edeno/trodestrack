@@ -2,10 +2,56 @@
 
 from __future__ import annotations
 
+import functools
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import TypeVar
 
 import numpy as np
+
+F = TypeVar("F", bound=Callable[..., None])
+
+
+def friendly_cli_errors(func: F) -> F:
+    """Convert library exceptions into ``Error: <msg>`` + ``sys.exit(1)``.
+
+    Wraps a CLI subcommand body so that ``FileNotFoundError`` /
+    ``NotADirectoryError`` / ``ValueError`` (and any other unexpected
+    ``Exception``) raised by downstream library code surface as a
+    clean stderr line rather than a Python traceback. The traceback
+    still appears for ``KeyboardInterrupt`` / ``SystemExit`` so users
+    can interrupt a long run normally and inline ``sys.exit(1)``
+    callers (e.g. shape checks in ``cli/utils.load_data_file``) keep
+    their own error path.
+
+    Notes
+    -----
+    Generic ``Exception`` is caught so unexpected failures (e.g. a
+    bug in a downstream module) still exit with a friendly
+    ``Unexpected error:`` line; the underlying issue is then
+    reproducible by re-running with ``PYTHONFAULTHANDLER=1`` or by
+    wrapping the call site with ``--debug`` if the CLI grows one.
+    """
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except FileNotFoundError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        except NotADirectoryError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        except Exception as e:
+            print(f"Unexpected error: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    return wrapper  # type: ignore[return-value]
 
 
 def load_data_file(
