@@ -39,6 +39,72 @@ def test_stationary_bias_and_gravity_estimates_recover_known_values() -> None:
     )
 
 
+def test_estimate_stationary_mask_excludes_non_overlapping_camera_range() -> None:
+    """IMU samples outside the camera time range must not count as stationary.
+
+    ``np.interp`` clamps to ``speed[0]`` / ``speed[-1]`` outside the
+    camera span, which silently extended the camera speed signal as
+    a constant past the actual recording. Probe: disjoint
+    camera 0..1 s and IMU 10..11 s used to give 101/101 stationary
+    samples — a non-overlapping calibration would have been
+    accepted as success. With endpoint NaN, every IMU sample falls
+    outside the camera span and the mask is empty.
+    """
+
+    t_cam = np.linspace(0.0, 1.0, 11)
+    t_imu = np.linspace(10.0, 11.0, 101)
+    led1 = np.column_stack([np.zeros_like(t_cam), np.zeros_like(t_cam)])
+    led2 = led1 + np.array([0.04, 0.0])
+    gyro_z = np.zeros_like(t_imu)
+
+    stationary = estimate_stationary_mask(
+        t_imu,
+        gyro_z,
+        t_cam=t_cam,
+        led1=led1,
+        led2=led2,
+        speed_threshold=1.0,
+        gyro_threshold=1.0,
+    )
+
+    assert stationary.sum() == 0
+
+
+def test_lagged_linear_fit_excludes_samples_outside_source_range() -> None:
+    """Target samples shifted outside the source span must not bias the fit.
+
+    With ``np.interp``'s default endpoint clamp, ``t_target + lag``
+    values past the source end were silently set to ``source[-1]``,
+    so a candidate lag could "fit" with a long tail of constant
+    extrapolation. Endpoint NaN now drops those samples and the
+    correlation reflects only the genuine overlap.
+    """
+
+    rng = np.random.default_rng(0)
+    t_source = np.linspace(0.0, 1.0, 101)
+    source = rng.standard_normal(t_source.size)
+    # Target span extends well past the source span; only the
+    # ``[0, 1]`` overlap should contribute to the fit.
+    t_target = np.linspace(0.0, 5.0, 501)
+    target = np.full_like(t_target, source[-1])
+    target[: t_source.size] = source
+
+    fit = lagged_linear_fit(
+        t_source,
+        source,
+        t_target,
+        target,
+        candidate_lags_s=np.array([0.0]),
+    )
+
+    # The clamping bug used to inflate correlation toward 1.0
+    # because ``source[-1]`` matched ``target[t_source.size:]`` by
+    # construction. With NaN clamping, the fit is restricted to the
+    # genuinely overlapping samples.
+    assert fit.n_samples == t_source.size
+    assert np.isfinite(fit.correlation)
+
+
 def test_lagged_linear_fit_recovers_lag_scale_and_bias() -> None:
     t_source = np.linspace(0.0, 20.0, 2_001)
     t_target = np.linspace(1.0, 19.0, 901)

@@ -345,7 +345,22 @@ def estimate_stationary_mask(
         midpoint = camera_midpoint(led1, led2)  # type: ignore[arg-type]
         velocity = finite_difference(t_cam, midpoint)  # type: ignore[arg-type]
         speed = np.linalg.norm(velocity, axis=1)
-        speed_at_imu = np.interp(t_imu_arr, np.asarray(t_cam, dtype=float), speed)
+        # ``np.interp`` clamps to ``speed[0]`` / ``speed[-1]`` outside the
+        # camera time range; for a session whose camera and IMU clocks
+        # don't overlap this turned every out-of-range IMU sample into
+        # the camera's first/last speed value, silently counting
+        # non-overlapping samples as "stationary" (probe: disjoint
+        # camera 0..1 s and IMU 10..11 s gave 101/101 stationary).
+        # ``left=NaN`` / ``right=NaN`` propagates through the
+        # ``np.isfinite`` filter below so out-of-range samples are
+        # explicitly excluded.
+        speed_at_imu = np.interp(
+            t_imu_arr,
+            np.asarray(t_cam, dtype=float),
+            speed,
+            left=np.nan,
+            right=np.nan,
+        )
         mask &= np.isfinite(speed_at_imu) & (speed_at_imu < speed_threshold)
 
     return mask
@@ -453,9 +468,21 @@ def lagged_linear_fit(
     # ``_linear_fit`` returns a NaN-filled ``LagFit`` when fewer than 3
     # finite samples remain. Initializing ``best_fit`` to that NaN result
     # would silently report a "no-data fit" as success.
+    # ``np.interp`` clamps to ``source[0]`` / ``source[-1]`` outside
+    # the source time range; combined with non-zero ``lag`` this
+    # silently extrapolated the source signal as a constant well
+    # past the actual sampled span. ``left=NaN`` / ``right=NaN``
+    # propagates through the ``isfinite(source_shifted)`` filter so
+    # out-of-overlap samples are excluded from the fit.
     best_fit: LagFit | None = None
     for lag in lags:
-        source_shifted = np.interp(t_target_arr + lag, t_source_arr, source_arr)
+        source_shifted = np.interp(
+            t_target_arr + lag,
+            t_source_arr,
+            source_arr,
+            left=np.nan,
+            right=np.nan,
+        )
         finite = valid & np.isfinite(source_shifted)
         fit = _linear_fit(source_shifted[finite], target_arr[finite], lag)
         score = _abs_correlation_score(fit)

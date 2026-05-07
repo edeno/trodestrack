@@ -279,7 +279,17 @@ def _load_spikegadgets_trodes(config: SessionConfig) -> PreparedSession:
     U_full = _convert_imu_to_si(imu_unique, config)
     U_filter = _project_imu_for_filter(U_full, config.filter.state_mode)
     led1, led2, conf_cam = _load_leds(pos_df, config)
-    mask = np.isfinite(led1).all(axis=1) & np.isfinite(led2).all(axis=1)
+    # ``mask_cam`` advertises "frame is usable" to the EKF, which
+    # supports partial single-LED updates (see
+    # ``test_ekf_partial_observations.py``). Requiring *both* LEDs
+    # here silently dropped frames the filter could have consumed —
+    # a real-data session with one LED occluded for a long stretch
+    # would skip the update entirely instead of running an LED1- or
+    # LED2-only update. Use OR; downstream consumers that need
+    # dual-LED validity (``resolve_led_identity``,
+    # ``_median_led_distance``, the camera-midpoint safety check)
+    # already gate independently with their own ``isfinite`` checks.
+    mask = np.isfinite(led1).all(axis=1) | np.isfinite(led2).all(axis=1)
     led_distance = config.filter.led_distance or _median_led_distance(led1, led2, mask)
 
     diagnostics: dict[str, object] = {

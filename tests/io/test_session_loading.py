@@ -422,6 +422,65 @@ led_identity:
     np.testing.assert_allclose(session.conf_cam[:, 2:4], 0.1)
 
 
+def test_arthur_loader_includes_single_led_frames_in_mask(tmp_path):
+    """``mask_cam`` must include single-LED frames so the EKF can use them.
+
+    The EKF supports LED1-only and LED2-only updates when
+    ``mask_cam`` is True (covered by
+    ``test_ekf_partial_observations.py``). The earlier loader
+    required *both* LEDs finite, silently dropping partial frames
+    before the filter even saw them. The fix is OR rather than
+    AND on the per-LED finite check.
+    """
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    n = 4
+    t_imu = np.linspace(0.0, 0.2, n)
+    pd.DataFrame(
+        {
+            "time": t_imu,
+            "Headstage_GyroX": np.zeros_like(t_imu),
+            "Headstage_GyroY": np.zeros_like(t_imu),
+            "Headstage_GyroZ": np.zeros_like(t_imu),
+            "Headstage_AccelX": np.zeros_like(t_imu),
+            "Headstage_AccelY": np.zeros_like(t_imu),
+            "Headstage_AccelZ": np.full_like(t_imu, 9.81),
+        }
+    ).to_parquet(data_dir / "imu.parquet")
+    # Frame 0: both LEDs finite. Frame 1: LED1 only. Frame 2: LED2
+    # only. Frame 3: neither (true dropout).
+    pd.DataFrame(
+        {
+            "time": np.linspace(0.0, 0.2, n),
+            "xloc": [1.0, 2.0, np.nan, np.nan],
+            "yloc": [1.0, 2.0, np.nan, np.nan],
+            "xloc2": [3.0, np.nan, 4.0, np.nan],
+            "yloc2": [1.0, np.nan, 2.0, np.nan],
+        }
+    ).to_parquet(data_dir / "position.parquet")
+    config_path = tmp_path / "session.yaml"
+    config_path.write_text(
+        """
+inputs:
+  format: spikegadgets_trodes
+  imu_file: data/imu.parquet
+  position_file: data/position.parquet
+imu:
+  run_calibration: false
+  sample_hold_strategy: none
+camera:
+  meters_per_pixel: 0.01
+filter:
+  state_mode: vision_only
+""".lstrip()
+    )
+
+    session = load_session(load_session_config(config_path))
+
+    np.testing.assert_array_equal(session.mask_cam, [True, True, True, False])
+
+
 def test_arthur_loader_reports_missing_confidence_column(tmp_path):
     """Configured confidence column missing from parquet → friendly ValueError.
 
