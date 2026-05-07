@@ -35,7 +35,10 @@ def resolve_led_identity(
     State 0 keeps the observed labels. State 1 swaps LED1/LED2. The transition
     cost favors temporal continuity of each physical LED, with optional gyro
     heading consistency. Missing/non-finite dual-LED frames are carried through
-    unchanged and do not force identity switches.
+    unchanged and do not force identity switches. ``config.initial_state`` can
+    anchor the first valid dual-LED frame when the whole session has a known
+    original/swapped label convention; without that prior, a global all-session
+    swap is unidentifiable from continuity alone.
     """
 
     led1_arr = _validate_led_array(led1, "led1")
@@ -99,7 +102,9 @@ def resolve_led_identity(
     costs = np.full((valid_indices.size, 2), np.inf)
     back = np.zeros((valid_indices.size, 2), dtype=np.int8)
     first_idx = int(valid_indices[0])
-    costs[0] = _observation_cost(assignments[first_idx], True, led_distance)
+    costs[0] = _observation_cost(
+        assignments[first_idx], True, led_distance
+    ) + _initial_state_cost(config.initial_state)
 
     for k in range(1, valid_indices.size):
         prev_idx = int(valid_indices[k - 1])
@@ -150,6 +155,7 @@ def resolve_led_identity(
             "n_swapped": int(swapped.sum()),
             "fraction_swapped": float(swapped.mean()) if swapped.size else 0.0,
             "led_distance_m": float(led_distance),
+            "initial_state": config.initial_state,
             "transition_penalty": float(config.transition_penalty),
             "gyro_weight": float(config.gyro_weight),
         },
@@ -171,6 +177,14 @@ def _observation_cost(
     spacing = np.linalg.norm(assignment[:, 1] - assignment[:, 0], axis=1)
     sigma = max(0.02, 0.25 * led_distance)
     return ((spacing - led_distance) / sigma) ** 2
+
+
+def _initial_state_cost(initial_state: str) -> np.ndarray:
+    if initial_state == "original":
+        return np.array([0.0, np.inf])
+    if initial_state == "swapped":
+        return np.array([np.inf, 0.0])
+    return np.zeros(2)
 
 
 def _transition_cost(

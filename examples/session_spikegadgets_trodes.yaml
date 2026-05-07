@@ -38,6 +38,9 @@ filter:
 
 led_identity:
   mode: auto
+  # Use original/swapped when you know the whole session starts with a specific
+  # LED identity; auto cannot infer a global all-session label reversal.
+  initial_state: auto
   transition_penalty: 2.0
   gyro_weight: 0.0
   max_speed_mps: 3.0

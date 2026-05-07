@@ -173,6 +173,7 @@ class LedIdentityConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     mode: Literal["none", "auto"] = "none"
+    initial_state: Literal["auto", "original", "swapped"] = "auto"
     transition_penalty: float = 2.0
     gyro_weight: float = 0.0
     max_speed_mps: float = 3.0

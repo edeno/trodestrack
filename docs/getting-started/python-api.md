@@ -195,7 +195,10 @@ write_session_diagnostics(session, session_config.outputs.output_dir)
 ```yaml
 led_identity:
   mode: auto
+  initial_state: auto
 ```
+
+Set `initial_state: original` or `swapped` when you know the first valid dual-LED frame's label convention. Leaving it at `auto` corrects continuity breaks but cannot infer a global all-session label reversal.
 
 The CLI wrappers (`trodestrack online --config session.yaml` and `trodestrack smooth --config session.yaml`) also run the real-data safety check by default for IMU-fused SpikeGadgets/Trodes sessions. That check runs an extra vision-only EKF over the same session to compare trajectory envelope, speed, and log-likelihood, so expect roughly a second filter pass of runtime.
 

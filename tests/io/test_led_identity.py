@@ -61,3 +61,40 @@ def test_auto_led_identity_carries_dropout_frames_unchanged():
     assert not corrected.swapped[5]
     assert np.isnan(corrected.led1[5]).all()
     assert np.isnan(corrected.led2[5]).all()
+
+
+def test_initial_swapped_prior_resolves_global_swap():
+    """A whole-session swap needs an explicit initial identity prior."""
+
+    n = 20
+    t_cam = np.arange(n, dtype=float) / 30.0
+    center = np.column_stack([0.01 * np.arange(n), np.zeros(n)])
+    led1_true = center - np.array([0.02, 0.0])
+    led2_true = center + np.array([0.02, 0.0])
+    mask = np.ones(n, dtype=bool)
+
+    ambiguous = resolve_led_identity(
+        t_cam,
+        led2_true,
+        led1_true,
+        mask,
+        led_distance=0.04,
+        config=LedIdentityConfig(mode="auto"),
+    )
+    assert not ambiguous.swapped.any()
+    np.testing.assert_allclose(ambiguous.led1, led2_true)
+    np.testing.assert_allclose(ambiguous.led2, led1_true)
+
+    corrected = resolve_led_identity(
+        t_cam,
+        led2_true,
+        led1_true,
+        mask,
+        led_distance=0.04,
+        config=LedIdentityConfig(mode="auto", initial_state="swapped"),
+    )
+
+    assert corrected.swapped.all()
+    assert corrected.diagnostics["initial_state"] == "swapped"
+    np.testing.assert_allclose(corrected.led1, led1_true)
+    np.testing.assert_allclose(corrected.led2, led2_true)

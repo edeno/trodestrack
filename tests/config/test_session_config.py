@@ -131,3 +131,25 @@ def test_orientation_fused_config_passes_ekf_kwargs():
     assert kwargs["enable_experimental_accel_translation"] is False
     assert kwargs["use_gravity_orientation_update"] is True
     assert kwargs["gravity_orientation_measurement_noise"] == 0.0025
+
+
+def test_led_identity_initial_state_config():
+    """Users can provide an initial LED identity prior for global swaps."""
+
+    config = SessionConfig.model_validate(
+        {
+            "inputs": {
+                "format": "prepared_arrays",
+                "imu_timestamps": "t_imu.txt",
+                "imu_measurements": "U_imu.txt",
+                "camera_timestamps": "t_cam.txt",
+                "led1_positions": "led1.txt",
+            },
+            "led_identity": {
+                "mode": "auto",
+                "initial_state": "swapped",
+            },
+        }
+    )
+
+    assert config.led_identity.initial_state == "swapped"
