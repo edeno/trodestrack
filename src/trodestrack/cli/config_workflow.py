@@ -36,15 +36,14 @@ class ConfigFilterRun:
 def prepare_config_filter_run(args: argparse.Namespace) -> ConfigFilterRun:
     """Load YAML config, run EKF, and apply calibration/safety gates.
 
-    The CLI banner is printed *after* ``load_session_config``
-    succeeds so Pydantic / column-missing / file-not-found errors
-    aren't framed by a header advertising a run that hasn't begun.
+    The CLI banner prints just before ``print_config_session_summary``
+    so every pre-EKF failure mode surfaces without a header framing
+    the error: YAML schema (Pydantic), missing input files, missing
+    parquet columns (``load_session``), and the IMU-calibration gate
+    all raise before the banner is printed.
     """
 
     config = load_session_config(args.config)
-    print("=" * 80)
-    print(f"trodestrack — config-driven run from {args.config}")
-    print("=" * 80)
     if args.output_dir is not None:
         config = config.model_copy(
             update={
@@ -68,6 +67,9 @@ def prepare_config_filter_run(args: argparse.Namespace) -> ConfigFilterRun:
     ekf_config = EKFConfig(
         **config.filter.to_ekf_kwargs(led_distance=session.led_distance)
     )
+    print("=" * 80)
+    print(f"trodestrack — config-driven run from {args.config}")
+    print("=" * 80)
     print_config_session_summary(config, session, ekf_config)
 
     filter_result = extended_kalman_filter(

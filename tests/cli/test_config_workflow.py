@@ -311,6 +311,52 @@ def test_smooth_config_npz_bundle_includes_smoother(tmp_path: Path) -> None:
     assert bundle["smoothed_means"].shape == (16, 5)
 
 
+def test_config_missing_input_file_does_not_print_banner(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A config whose YAML is valid but points at a missing input file
+    must surface the file error *without* the run-started banner.
+
+    The earlier deferral only moved the banner past
+    ``load_session_config``. ``load_session`` (which actually opens
+    the parquet/text files and reads parquet columns) ran *after*
+    the banner, so file-not-found and column-missing errors were
+    still framed under the header. Pin the contract: nothing
+    prefixed by ``trodestrack — config-driven run`` may appear in
+    captured output before the friendly stderr error fires.
+    """
+
+    # Valid YAML that points at a nonexistent IMU timestamps file.
+    config_path = tmp_path / "missing_inputs.yaml"
+    config_path.write_text(
+        """
+inputs:
+  format: prepared_arrays
+  imu_timestamps: nonexistent_t_imu.txt
+  imu_measurements: nonexistent_U_imu.txt
+  camera_timestamps: nonexistent_t_cam.txt
+  led1_positions: nonexistent_led1.txt
+filter:
+  state_mode: vision_only
+outputs:
+  output_dir: out
+""".lstrip()
+    )
+
+    with (
+        patch("sys.argv", ["trodestrack", "online", "--config", str(config_path)]),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err
+    assert "trodestrack — config-driven run" not in combined, (
+        f"Banner printed before input-file error; got:\n{combined!r}"
+    )
+
+
 def test_config_safety_check_raise_writes_diagnostics(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
