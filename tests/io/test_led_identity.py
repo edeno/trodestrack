@@ -82,6 +82,7 @@ def test_initial_swapped_prior_resolves_global_swap():
         config=LedIdentityConfig(mode="auto"),
     )
     assert not ambiguous.swapped.any()
+    assert ambiguous.diagnostics["global_identity_ambiguous"] is True
     np.testing.assert_allclose(ambiguous.led1, led2_true)
     np.testing.assert_allclose(ambiguous.led2, led1_true)
 
@@ -96,5 +97,6 @@ def test_initial_swapped_prior_resolves_global_swap():
 
     assert corrected.swapped.all()
     assert corrected.diagnostics["initial_state"] == "swapped"
+    assert corrected.diagnostics["global_identity_ambiguous"] is False
     np.testing.assert_allclose(corrected.led1, led1_true)
     np.testing.assert_allclose(corrected.led2, led2_true)

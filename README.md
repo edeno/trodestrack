@@ -346,7 +346,7 @@ See [`examples/README.md`](examples/README.md) for the complete learning path. E
     - Position RMSE ≤ 2 cm ✓
     - Velocity RMSE ≤ 10 cm/s ✓
     - Heading RMSE ≤ 7° ✓
-    - Throughput-floor benchmarks (≥10× realtime offline on CPU, ≤33 ms amortized mean per frame online on a 30-minute session) live in [tests/benchmark/test_throughput.py](tests/benchmark/test_throughput.py); they are not part of the default CI matrix. Reference run on an M-series Mac CPU under the corrected (block-until-ready) timing: ~38× realtime / ~0.41 ms per frame; absolute throughput is hardware-dependent.
+    - Throughput-floor benchmarks (≥10× realtime offline on CPU, ≤33 ms amortized mean per frame online on a 30-minute session) live in [tests/benchmark/test_throughput.py](tests/benchmark/test_throughput.py); they are not part of the default CI matrix. Reference run on an M-series Mac CPU under the corrected (block-until-ready) timing: ~38× realtime / ~0.41 ms per frame; absolute throughput is hardware-dependent. These floors cover the synthetic 2D benchmark path, not the YAML real-data workflow with calibration, LED identity correction, and the extra vision-only safety pass.
 - ✅ **3D IMU Support** (M5)
   - Full 6-axis IMU processing (gyro + accel)
   - Gravity-aware dynamics with 3D acceleration

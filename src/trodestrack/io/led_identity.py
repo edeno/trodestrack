@@ -156,6 +156,15 @@ def resolve_led_identity(
             "fraction_swapped": float(swapped.mean()) if swapped.size else 0.0,
             "led_distance_m": float(led_distance),
             "initial_state": config.initial_state,
+            "global_identity_ambiguous": config.initial_state == "auto",
+            "message": (
+                "initial_state='auto' resolves continuity breaks but cannot "
+                "determine a whole-session front/back label convention; set "
+                "initial_state to 'original' or 'swapped' when that convention "
+                "is known."
+                if config.initial_state == "auto"
+                else "initial_state prior applied."
+            ),
             "transition_penalty": float(config.transition_penalty),
             "gyro_weight": float(config.gyro_weight),
         },

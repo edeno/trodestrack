@@ -155,6 +155,27 @@ def test_led_identity_initial_state_config():
     assert config.led_identity.initial_state == "swapped"
 
 
+def test_led_identity_rejects_non_positive_speed():
+    """LED identity speed scale must not allow divide-by-zero transition costs."""
+
+    with pytest.raises(ValidationError, match="greater than 0"):
+        SessionConfig.model_validate(
+            {
+                "inputs": {
+                    "format": "prepared_arrays",
+                    "imu_timestamps": "t_imu.txt",
+                    "imu_measurements": "U_imu.txt",
+                    "camera_timestamps": "t_cam.txt",
+                    "led1_positions": "led1.txt",
+                },
+                "led_identity": {
+                    "mode": "auto",
+                    "max_speed_mps": 0.0,
+                },
+            }
+        )
+
+
 def test_imu_calibration_thresholds_are_configurable():
     """Real-data calibration gates should expose documented thresholds."""
 

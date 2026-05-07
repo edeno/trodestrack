@@ -372,6 +372,9 @@ heading flips 180°. Use config-driven pre-filter LED identity correction
 (`led_identity.mode: auto`) before running the EKF/UKF. If the whole session is
 globally reversed, set `led_identity.initial_state: original` or `swapped`;
 continuity alone cannot identify that global convention.
+Wall reflections can still create local identity mistakes even with pre-filter
+identity correction; keep Mahalanobis gating/outlier rejection enabled for those
+frames.
 
 #### Diagnostic Steps
 

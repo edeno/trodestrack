@@ -526,3 +526,75 @@ def test_orientation_with_accel_translation_uses_translation_calibration() -> No
 
     with pytest.raises(ValueError, match="weakly matches"):
         _validate_calibration_for_fusion(report, config)
+
+
+def test_imu_calibration_uses_corrected_led_identity(tmp_path, monkeypatch) -> None:
+    """Calibration diagnostics should inspect the same LED identities as filtering."""
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    imu_path = data_dir / "imu.parquet"
+    position_path = data_dir / "position.parquet"
+    t_imu = np.linspace(100.0, 100.1, 6)
+    pd.DataFrame(
+        {
+            "time": t_imu,
+            "Headstage_GyroX": np.arange(6),
+            "Headstage_GyroY": np.arange(10, 16),
+            "Headstage_GyroZ": np.arange(20, 26),
+            "Headstage_AccelX": np.arange(30, 36),
+            "Headstage_AccelY": np.arange(40, 46),
+            "Headstage_AccelZ": np.arange(50, 56),
+        }
+    ).to_parquet(imu_path)
+    t_cam = np.linspace(100.0, 100.1, 6)
+    center = np.column_stack([0.01 * np.arange(6), np.zeros(6)])
+    led1_true = center - np.array([0.02, 0.0])
+    led2_true = center + np.array([0.02, 0.0])
+    pd.DataFrame(
+        {
+            "time": t_cam,
+            # Store a whole-session global swap in the raw parquet columns.
+            "xloc": led2_true[:, 0],
+            "yloc": led2_true[:, 1],
+            "xloc2": led1_true[:, 0],
+            "yloc2": led1_true[:, 1],
+        }
+    ).to_parquet(position_path)
+    config_path = tmp_path / "session.yaml"
+    config_path.write_text(
+        """
+inputs:
+  format: spikegadgets_trodes
+  imu_file: data/imu.parquet
+  position_file: data/position.parquet
+camera:
+  meters_per_pixel: 1.0
+filter:
+  state_mode: 2d_cam_3d_imu
+led_identity:
+  mode: auto
+  initial_state: swapped
+outputs:
+  run_safety_checks: false
+""".lstrip()
+    )
+    captured: dict[str, np.ndarray] = {}
+
+    def fake_calibration(*, led1, led2, **kwargs):
+        captured["led1"] = np.asarray(led1).copy()
+        captured["led2"] = np.asarray(led2).copy()
+        return _calibration_report()
+
+    monkeypatch.setattr(
+        "trodestrack.io.session.run_imu_calibration_diagnostics",
+        fake_calibration,
+    )
+
+    session = load_session(load_session_config(config_path))
+
+    np.testing.assert_allclose(session.Z_cam_led1, led1_true)
+    np.testing.assert_allclose(session.Z_cam_led2, led2_true)
+    np.testing.assert_allclose(captured["led1"], led1_true)
+    np.testing.assert_allclose(captured["led2"], led2_true)
+    assert session.diagnostics["imu_calibration_led_identity_applied"] is True

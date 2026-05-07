@@ -99,6 +99,18 @@ def print_config_session_summary(
     print(f"  Camera frames: {len(session.t_cam)}")
     print(f"  Valid camera frames: {int(session.mask_cam.sum())}")
     print(f"  State mode: {ekf_config.state_mode}")
+    led_diag = session.diagnostics.get("led_identity")
+    if isinstance(led_diag, dict):
+        print(
+            "  LED identity: "
+            f"{led_diag.get('n_swapped', 0)} swapped frames "
+            f"(initial_state={led_diag.get('initial_state')})"
+        )
+        if led_diag.get("global_identity_ambiguous"):
+            print(
+                "  LED identity warning: initial_state='auto' cannot determine "
+                "a whole-session front/back label convention."
+            )
 
 
 def save_filter_outputs(run: ConfigFilterRun) -> None:
@@ -173,6 +185,19 @@ def write_config_metadata(
         if smoother_num_iter is not None:
             f.write("Smoother Configuration:\n")
             f.write(f"  IEKS iterations: {smoother_num_iter}\n\n")
+        led_diag = run.session.diagnostics.get("led_identity")
+        if isinstance(led_diag, dict):
+            f.write("LED Identity:\n")
+            f.write(f"  Mode: {led_diag.get('mode')}\n")
+            f.write(f"  Initial state: {led_diag.get('initial_state')}\n")
+            f.write(f"  Swapped frames: {led_diag.get('n_swapped')}\n")
+            f.write(f"  Fraction swapped: {led_diag.get('fraction_swapped')}\n")
+            if led_diag.get("global_identity_ambiguous"):
+                f.write(
+                    "  Warning: initial_state='auto' resolves continuity breaks "
+                    "but cannot determine a whole-session front/back convention.\n"
+                )
+            f.write("\n")
         f.write("Safety Check:\n")
         f.write(f"  Result: {run.safety_report.message}\n")
         f.write(f"  Max fused speed: {run.safety_report.max_fused_speed_mps}\n")

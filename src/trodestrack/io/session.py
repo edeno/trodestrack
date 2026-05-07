@@ -37,6 +37,7 @@ class PreparedSession:
     diagnostics: dict[str, object]
     config: SessionConfig
     gyro_z_for_led_identity: np.ndarray | None = None
+    U_imu_for_calibration: np.ndarray | None = None
 
     @property
     def source_format(self) -> str:
@@ -68,37 +69,8 @@ def load_session(config: SessionConfig) -> PreparedSession:
     else:
         session = _load_spikegadgets_trodes(config)
 
-    if config.led_identity.mode == "auto":
-        gyro_z = session.gyro_z_for_led_identity
-        if gyro_z is None and session.U_imu.ndim == 2 and session.U_imu.shape[1] >= 3:
-            gyro_z = session.U_imu[:, 0]
-        corrected = resolve_led_identity(
-            session.t_cam,
-            session.Z_cam_led1,
-            session.Z_cam_led2,
-            session.mask_cam,
-            led_distance=session.led_distance,
-            config=config.led_identity,
-            t_imu=session.t_imu,
-            gyro_z=gyro_z,
-        )
-        diagnostics = dict(session.diagnostics)
-        diagnostics["led_identity"] = corrected.diagnostics
-        diagnostics["led_identity_swapped"] = corrected.swapped
-        return PreparedSession(
-            t_imu=session.t_imu,
-            U_imu=session.U_imu,
-            t_cam=session.t_cam,
-            Z_cam_led1=corrected.led1,
-            Z_cam_led2=corrected.led2,
-            mask_cam=session.mask_cam,
-            conf_cam=session.conf_cam,
-            led_distance=session.led_distance,
-            diagnostics=diagnostics,
-            config=config,
-            gyro_z_for_led_identity=session.gyro_z_for_led_identity,
-        )
-    return session
+    session = _apply_led_identity_correction(session)
+    return _add_imu_calibration_diagnostics(session)
 
 
 def write_session_diagnostics(
@@ -318,21 +290,6 @@ def _load_spikegadgets_trodes(config: SessionConfig) -> PreparedSession:
         }
     }
 
-    if config.imu.run_calibration and U_full.shape[1] == 6:
-        try:
-            report = run_imu_calibration_diagnostics(
-                t_imu=t_imu,
-                gyro_z=U_full[:, 2],
-                accel_xyz=U_full[:, 3:6],
-                t_cam=t_cam,
-                led1=led1,
-                led2=led2,
-            )
-            diagnostics["imu_calibration"] = report
-            _validate_calibration_for_fusion(report, config)
-        except ValueError as e:
-            diagnostics["imu_calibration_error"] = str(e)
-
     return PreparedSession(
         t_imu=t_imu,
         U_imu=U_filter,
@@ -345,7 +302,68 @@ def _load_spikegadgets_trodes(config: SessionConfig) -> PreparedSession:
         diagnostics=diagnostics,
         config=config,
         gyro_z_for_led_identity=U_full[:, 2],
+        U_imu_for_calibration=U_full,
     )
+
+
+def _apply_led_identity_correction(session: PreparedSession) -> PreparedSession:
+    config = session.config
+    if config.led_identity.mode != "auto":
+        return session
+
+    gyro_z = session.gyro_z_for_led_identity
+    if gyro_z is None and session.U_imu.ndim == 2 and session.U_imu.shape[1] >= 3:
+        gyro_z = session.U_imu[:, 0]
+    corrected = resolve_led_identity(
+        session.t_cam,
+        session.Z_cam_led1,
+        session.Z_cam_led2,
+        session.mask_cam,
+        led_distance=session.led_distance,
+        config=config.led_identity,
+        t_imu=session.t_imu,
+        gyro_z=gyro_z,
+    )
+    diagnostics = dict(session.diagnostics)
+    diagnostics["led_identity"] = corrected.diagnostics
+    diagnostics["led_identity_swapped"] = corrected.swapped
+    return replace(
+        session,
+        Z_cam_led1=corrected.led1,
+        Z_cam_led2=corrected.led2,
+        diagnostics=diagnostics,
+    )
+
+
+def _add_imu_calibration_diagnostics(session: PreparedSession) -> PreparedSession:
+    config = session.config
+    U_full = session.U_imu_for_calibration
+    if (
+        session.source_format != "spikegadgets_trodes"
+        or not config.imu.run_calibration
+        or U_full is None
+        or U_full.shape[1] != 6
+    ):
+        return session
+
+    diagnostics = dict(session.diagnostics)
+    try:
+        report = run_imu_calibration_diagnostics(
+            t_imu=session.t_imu,
+            gyro_z=U_full[:, 2],
+            accel_xyz=U_full[:, 3:6],
+            t_cam=session.t_cam,
+            led1=session.Z_cam_led1,
+            led2=session.Z_cam_led2,
+        )
+        diagnostics["imu_calibration"] = report
+        diagnostics["imu_calibration_led_identity_applied"] = (
+            config.led_identity.mode == "auto"
+        )
+        _validate_calibration_for_fusion(report, config)
+    except ValueError as e:
+        diagnostics["imu_calibration_error"] = str(e)
+    return replace(session, diagnostics=diagnostics)
 
 
 def _remove_sample_hold(imu_df: pd.DataFrame, config: SessionConfig) -> pd.DataFrame:
