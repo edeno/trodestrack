@@ -153,3 +153,26 @@ def test_led_identity_initial_state_config():
     )
 
     assert config.led_identity.initial_state == "swapped"
+
+
+def test_imu_calibration_thresholds_are_configurable():
+    """Real-data calibration gates should expose documented thresholds."""
+
+    config = SessionConfig.model_validate(
+        {
+            "inputs": {
+                "format": "spikegadgets_trodes",
+                "imu_file": "imu.parquet",
+                "position_file": "position.parquet",
+            },
+            "imu": {
+                "calibration_min_yaw_correlation": 0.2,
+                "calibration_max_horizontal_gravity_mps2": 0.75,
+                "calibration_min_accel_axis_correlation_for_translation": 0.6,
+            },
+        }
+    )
+
+    assert config.imu.calibration_min_yaw_correlation == 0.2
+    assert config.imu.calibration_max_horizontal_gravity_mps2 == 0.75
+    assert config.imu.calibration_min_accel_axis_correlation_for_translation == 0.6

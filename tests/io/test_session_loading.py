@@ -14,7 +14,13 @@ from trodestrack.io import (
     write_session_diagnostics,
 )
 from trodestrack.io.led_identity import CorrectedLEDIdentity
+from trodestrack.io.session import _validate_calibration_for_fusion
 from trodestrack.models.ekf import EKFConfig, EKFResult
+from trodestrack.qa.imu_calibration import (
+    AxisSignDiagnostic,
+    ImuCalibrationReport,
+    LagFit,
+)
 
 
 def test_load_arthur_style_parquets_removes_sample_hold_and_projects_imu(tmp_path):
@@ -410,3 +416,113 @@ def test_safety_check_rejects_fused_drift_from_vision_baseline(monkeypatch):
     assert "vision-only baseline" in report.message
     assert report.max_vision_position_deviation_m == pytest.approx(0.2)
     assert report.p95_vision_position_deviation_m == pytest.approx(0.2)
+
+
+def _calibration_report(
+    *,
+    gravity_body: tuple[float, float, float] = (0.0, 0.0, 9.80665),
+    yaw_correlation: float = 0.9,
+    accel_correlation: float = 0.9,
+) -> ImuCalibrationReport:
+    return ImuCalibrationReport(
+        gyro_bias_z=0.0,
+        accel_gravity_body=np.asarray(gravity_body, dtype=float),
+        stationary_fraction=0.5,
+        stationary_samples=100,
+        yaw_rate_fit=LagFit(
+            lag_s=0.0,
+            correlation=yaw_correlation,
+            slope=1.0,
+            intercept=0.0,
+            r2=yaw_correlation**2,
+            n_samples=100,
+        ),
+        accel_axis_diagnostics=(
+            AxisSignDiagnostic(
+                target_axis="body_x",
+                imu_axis="x",
+                sign=1,
+                lag_s=0.0,
+                correlation=accel_correlation,
+                n_samples=100,
+            ),
+            AxisSignDiagnostic(
+                target_axis="body_y",
+                imu_axis="y",
+                sign=1,
+                lag_s=0.0,
+                correlation=accel_correlation,
+                n_samples=100,
+            ),
+        ),
+    )
+
+
+def _calibration_config(
+    *,
+    state_mode: str = "2d_full",
+    enable_experimental_accel_translation: bool | None = None,
+) -> SessionConfig:
+    filter_config: dict[str, object] = {"state_mode": state_mode}
+    if enable_experimental_accel_translation is not None:
+        filter_config["enable_experimental_accel_translation"] = (
+            enable_experimental_accel_translation
+        )
+    return SessionConfig.model_validate(
+        {
+            "inputs": {
+                "format": "spikegadgets_trodes",
+                "imu_file": "imu.parquet",
+                "position_file": "position.parquet",
+            },
+            "filter": filter_config,
+        }
+    )
+
+
+def test_translation_calibration_rejects_horizontal_gravity() -> None:
+    """Tilted stationary gravity should block accel-driven translation."""
+
+    report = _calibration_report(gravity_body=(1.5, 0.0, 9.6))
+    config = _calibration_config(state_mode="2d_cam_3d_imu")
+
+    with pytest.raises(ValueError, match="horizontal component"):
+        _validate_calibration_for_fusion(report, config)
+
+
+def test_translation_calibration_rejects_weak_accel_axis_alignment() -> None:
+    """Weak camera/IMU acceleration matches should block translation fusion."""
+
+    report = _calibration_report(accel_correlation=0.2)
+    config = _calibration_config(state_mode="2d_full")
+
+    with pytest.raises(ValueError, match="weakly matches"):
+        _validate_calibration_for_fusion(report, config)
+
+
+def test_orientation_without_accel_translation_skips_translation_calibration() -> None:
+    """Orientation fusion can pass when only translation-specific checks fail."""
+
+    report = _calibration_report(
+        gravity_body=(1.5, 0.0, 9.6),
+        accel_correlation=0.2,
+    )
+    config = _calibration_config(
+        state_mode="2d_cam_6dof_imu_orientation",
+        enable_experimental_accel_translation=False,
+    )
+
+    _validate_calibration_for_fusion(report, config)
+
+
+def test_orientation_with_accel_translation_uses_translation_calibration() -> None:
+    """Enabling experimental translation in orientation mode should be gated."""
+
+    report = _calibration_report(accel_correlation=0.2)
+    config = _calibration_config(
+        state_mode="2d_cam_6dof_imu_orientation",
+        enable_experimental_accel_translation=True,
+    )
+
+    with pytest.raises(ValueError, match="weakly matches"):
+        _validate_calibration_for_fusion(report, config)

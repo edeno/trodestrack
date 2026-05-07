@@ -14,6 +14,7 @@ from trodestrack.io import (
     SafetyReport,
     load_session,
     run_real_data_safety_check,
+    uses_imu_fusion,
     write_session_diagnostics,
 )
 from trodestrack.models.ekf import EKFConfig, EKFResult, extended_kalman_filter
@@ -51,7 +52,7 @@ def prepare_config_filter_run(args: argparse.Namespace) -> ConfigFilterRun:
     if (
         calibration_error is not None
         and config.imu.require_calibration_for_fusion
-        and config.filter.state_mode in {"2d_full", "2d_cam_3d_imu"}
+        and uses_imu_fusion(config)
     ):
         write_session_diagnostics(session, output_dir)
         raise ValueError(f"IMU calibration diagnostics failed: {calibration_error}")

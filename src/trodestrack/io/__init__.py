@@ -6,6 +6,7 @@ from trodestrack.io.session import (
     SafetyReport,
     load_session,
     run_real_data_safety_check,
+    uses_imu_fusion,
     write_session_diagnostics,
 )
 
@@ -16,5 +17,6 @@ __all__ = [
     "load_session",
     "resolve_led_identity",
     "run_real_data_safety_check",
+    "uses_imu_fusion",
     "write_session_diagnostics",
 ]

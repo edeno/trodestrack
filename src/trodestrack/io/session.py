@@ -499,11 +499,46 @@ def _validate_calibration_for_fusion(
             f"({report.stationary_samples}); use state_mode: vision_only or "
             "provide a longer session with low-motion periods."
         )
-    if abs(report.yaw_rate_fit.correlation) < 0.1:
+    if (
+        abs(report.yaw_rate_fit.correlation)
+        < config.imu.calibration_min_yaw_correlation
+    ):
         raise ValueError(
             "gyro_z does not correlate with LED-derived yaw rate "
             f"(correlation={report.yaw_rate_fit.correlation:.3f}); check axis "
             "mapping, sign, time offset, or use state_mode: vision_only."
+        )
+    if not _uses_accel_translation(config):
+        return
+
+    horizontal_gravity = float(np.linalg.norm(report.accel_gravity_body[:2]))
+    if horizontal_gravity > config.imu.calibration_max_horizontal_gravity_mps2:
+        raise ValueError(
+            "stationary accelerometer gravity has a large horizontal component "
+            f"({horizontal_gravity:.3f} m/s^2); accelerometer-driven translation "
+            "requires a calibrated headstage orientation. Use "
+            "state_mode: 2d_cam_6dof_imu_orientation with "
+            "enable_experimental_accel_translation: false, use "
+            "state_mode: vision_only, or fix IMU axis/gravity calibration."
+        )
+
+    accel_correlations = [
+        abs(diag.correlation)
+        for diag in report.accel_axis_diagnostics
+        if np.isfinite(diag.correlation)
+    ]
+    min_accel_correlation = min(accel_correlations, default=0.0)
+    if (
+        min_accel_correlation
+        < config.imu.calibration_min_accel_axis_correlation_for_translation
+    ):
+        raise ValueError(
+            "camera-derived acceleration weakly matches IMU accelerometer axes "
+            f"(minimum absolute correlation={min_accel_correlation:.3f}); "
+            "accelerometer-driven translation requires reliable axis/sign/time "
+            "alignment. Use state_mode: 2d_cam_6dof_imu_orientation with "
+            "enable_experimental_accel_translation: false, use "
+            "state_mode: vision_only, or fix IMU calibration."
         )
 
 
@@ -513,6 +548,21 @@ def _uses_imu(state_mode: str) -> bool:
         "2d_cam_3d_imu",
         "2d_cam_6dof_imu_orientation",
     }
+
+
+def uses_imu_fusion(config: SessionConfig) -> bool:
+    """Return whether a session config asks the filter to consume IMU data."""
+
+    return _uses_imu(config.filter.state_mode)
+
+
+def _uses_accel_translation(config: SessionConfig) -> bool:
+    if config.filter.state_mode in {"2d_full", "2d_cam_3d_imu"}:
+        return True
+    return (
+        config.filter.state_mode == "2d_cam_6dof_imu_orientation"
+        and config.filter.enable_experimental_accel_translation is True
+    )
 
 
 def _axis_names() -> tuple[str, ...]:

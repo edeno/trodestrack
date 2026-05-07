@@ -93,6 +93,9 @@ class IMUConfig(BaseModel):
 
     run_calibration: bool = True
     require_calibration_for_fusion: bool = True
+    calibration_min_yaw_correlation: float = 0.1
+    calibration_max_horizontal_gravity_mps2: float = 1.0
+    calibration_min_accel_axis_correlation_for_translation: float = 0.5
 
 
 class CameraConfig(BaseModel):

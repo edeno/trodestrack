@@ -27,6 +27,11 @@ imu:
   mode: 3d
   run_calibration: true
   require_calibration_for_fusion: true
+  calibration_min_yaw_correlation: 0.1
+  # Accel-driven translation is rejected when stationary gravity still has too
+  # much horizontal component or camera/IMU acceleration axes align poorly.
+  calibration_max_horizontal_gravity_mps2: 1.0
+  calibration_min_accel_axis_correlation_for_translation: 0.5
 
 filter:
   # Conservative real-data fused mode: use the 6-DOF IMU for orientation while
