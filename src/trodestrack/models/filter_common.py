@@ -182,6 +182,36 @@ class FilterCoreConfig:
         else. That silent fallback is easy to miss in tuning experiments, so we
         catch the mistake at config construction when gating is enabled.
         """
+        # Strict-bool validation. Plain Python truthiness silently
+        # accepts strings like ``"False"`` (truthy), integers, and
+        # lists. The simulator/filter then either silently takes the
+        # wrong branch (e.g. integer ``0`` looks like ``False``) or
+        # crashes deep in JAX with ``TypeError: unsupported operand
+        # type(s) for &: 'str' and 'jaxlib.xla_extension.ArrayImpl'``
+        # when a string flows into a JAX boolean op. CLI / YAML / env
+        # loaders are an obvious source — require ``bool`` exactly.
+        bool_fields = (
+            "use_mahalanobis_gating",
+            "use_heading_measurement",
+            "adaptive_heading_noise",
+            "adaptive_q_during_dropout",
+            "freeze_bias_during_blackout",
+            "reduce_imu_noise_during_blackout",
+            "enable_experimental_accel_translation",
+            "use_gravity_orientation_update",
+            "enable_zupt",
+        )
+        for fname in bool_fields:
+            value = getattr(self, fname)
+            if not isinstance(value, bool):
+                raise ValueError(
+                    f"{fname} must be a Python ``bool`` (True/False); "
+                    f"got {value!r} (type {type(value).__name__}). "
+                    f"If you're loading from YAML / env / CLI, parse "
+                    f"the string to a bool before constructing the "
+                    f"config."
+                )
+
         if self.use_mahalanobis_gating:
             prob = self.mahalanobis_threshold_prob
             supported = self._SUPPORTED_MAHALANOBIS_PROBS

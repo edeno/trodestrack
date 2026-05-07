@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 from trodestrack.models.ekf import EKFConfig, EKFState
 from trodestrack.models.filter_common import (
@@ -285,3 +286,42 @@ def test_gravity_compensate_returns_jax_array() -> None:
     accel_compensated = gravity_compensate(accel_world)
 
     assert isinstance(accel_compensated, jnp.ndarray)
+
+
+def test_filter_core_config_bool_fields_require_strict_bool() -> None:
+    """Bool toggles in FilterCoreConfig must reject non-bool values.
+
+    Plain truthiness silently accepts ``"False"`` (truthy), integers,
+    and lists. The values later flow into JAX boolean ops (``&`` /
+    ``lax.cond``) and either silently take the wrong branch or crash
+    deep in JAX with ``TypeError: unsupported operand type(s) for &:
+    'str' and 'jaxlib.xla_extension.ArrayImpl'``. CLI / YAML / env
+    loaders are an obvious source — require ``bool`` exactly.
+    """
+    bool_fields = (
+        "use_mahalanobis_gating",
+        "use_heading_measurement",
+        "adaptive_heading_noise",
+        "adaptive_q_during_dropout",
+        "freeze_bias_during_blackout",
+        "reduce_imu_noise_during_blackout",
+        "enable_experimental_accel_translation",
+        "use_gravity_orientation_update",
+        "enable_zupt",
+    )
+    for fname in bool_fields:
+        for bad in ("False", "True", 1, 0, [1]):
+            with pytest.raises(ValueError, match=rf"{fname} must be a Python"):
+                FilterCoreConfig(**{fname: bad})
+
+    # Subclasses inherit the gate.
+    with pytest.raises(ValueError, match=r"use_heading_measurement must be a Python"):
+        EKFConfig(use_heading_measurement="False")
+    with pytest.raises(ValueError, match=r"use_heading_measurement must be a Python"):
+        UKFConfig(use_heading_measurement="False")
+
+    # True / False still accepted on the parent and the subclasses.
+    FilterCoreConfig(use_heading_measurement=True)
+    FilterCoreConfig(use_heading_measurement=False)
+    EKFConfig(use_heading_measurement=True)
+    UKFConfig(use_heading_measurement=False)

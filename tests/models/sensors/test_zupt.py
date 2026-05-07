@@ -268,3 +268,28 @@ class TestZUPTModelNumericalStability:
             if "ConcretizationError" in str(type(e)):
                 pytest.fail(f"ZUPT implementation not JAX JIT compatible: {e}")
             raise
+
+
+def test_zupt_model_enable_zupt_requires_strict_bool() -> None:
+    """``enable_zupt`` must be a Python ``bool``.
+
+    ``"False"`` is truthy and would crash deep in
+    ``meas_cov_from_pred`` with ``TypeError: unsupported operand
+    type(s) for &: 'jaxlib.xla_extension.ArrayImpl' and 'str'``;
+    integer ``0`` / ``1`` would silently look like ``False`` /
+    ``True`` and bypass the documented bool contract.
+    """
+    layout = get_layout("2d_full")
+    common_kwargs = dict(
+        velocity_threshold=0.02,
+        measurement_noise=1e-4,
+        layout=layout,
+    )
+
+    # True / False still work.
+    ZUPTModel(enable_zupt=True, **common_kwargs)
+    ZUPTModel(enable_zupt=False, **common_kwargs)
+
+    for bad in ("False", "True", 0, 1, [1]):
+        with pytest.raises(ValueError, match=r"enable_zupt must be a Python"):
+            ZUPTModel(enable_zupt=bad, **common_kwargs)

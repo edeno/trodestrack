@@ -100,6 +100,17 @@ class ZUPTModel:
                 "velocity_threshold must be a finite non-negative speed "
                 f"(m/s); got {velocity_threshold!r}."
             )
+        # Strict-bool validation. ``enable_zupt`` later combines with a
+        # JAX predicate via ``&``; a string ``"False"`` (truthy) crashes
+        # ``meas_cov_from_pred`` with ``TypeError: unsupported operand
+        # type(s) for &: 'jaxlib.xla_extension.ArrayImpl' and 'str'``,
+        # while ``0`` / ``1`` silently look like ``False`` / ``True``
+        # without going through the documented bool contract.
+        if not isinstance(enable_zupt, bool):
+            raise ValueError(
+                f"enable_zupt must be a Python ``bool`` (True/False); "
+                f"got {enable_zupt!r} (type {type(enable_zupt).__name__})."
+            )
 
         self.enable_zupt = enable_zupt
         self.velocity_threshold = velocity_threshold
