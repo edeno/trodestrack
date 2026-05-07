@@ -137,6 +137,27 @@ class IMUConfig(BaseModel):
                     f"axis names ({', '.join(_CANONICAL_IMU_AXES)}); "
                     f"got {' and '.join(detail)}."
                 )
+
+        # ``axis_signs`` values are multiplied directly into IMU
+        # channels by ``_convert_imu_to_si``. The field name and
+        # documented intent restrict it to a sign flip (-1 or +1);
+        # arbitrary floats silently rescale or zero out a channel
+        # (probe: ``gyro_z: 0.0`` deletes yaw rate, ``accel_z: 2.0``
+        # doubles the apparent gravity). Use ``axis_map`` to point
+        # at a different column or scale upstream — not ``axis_signs``.
+        bad_signs = {
+            name: value
+            for name, value in self.axis_signs.items()
+            if value not in (-1.0, 1.0)
+        }
+        if bad_signs:
+            detail = ", ".join(f"{name}={value!r}" for name, value in bad_signs.items())
+            raise ValueError(
+                "imu.axis_signs values must be -1.0 or 1.0 (the field is a "
+                "sign flip, not a scale factor); use imu.gyro_scale_dps_per_lsb "
+                f"or imu.accel_scale_g_per_lsb for scale changes. Got {detail}."
+            )
+
         return self
 
 
@@ -158,6 +179,26 @@ class CameraConfig(BaseModel):
     led2_y_column: str = "yloc2"
     confidence_led1_column: str | None = None
     confidence_led2_column: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_confidence_columns(self) -> CameraConfig:
+        # ``_load_leds`` only builds ``conf_cam`` when both LED
+        # confidence columns are configured; setting just one used
+        # to silently drop the column with no warning, so a user
+        # who set ``confidence_led1_column: led1_likelihood`` got
+        # ``session.conf_cam = None`` and the EKF ran without any
+        # confidence weighting. Require both or neither so partial
+        # config fails loudly at schema time.
+        cols = (self.confidence_led1_column, self.confidence_led2_column)
+        if any(c is not None for c in cols) and not all(c is not None for c in cols):
+            raise ValueError(
+                "camera.confidence_led1_column and confidence_led2_column "
+                "must both be set or both be None; partial confidence "
+                "configuration is silently ignored by the loader. Got "
+                f"led1={self.confidence_led1_column!r}, "
+                f"led2={self.confidence_led2_column!r}."
+            )
+        return self
 
 
 class FilterConfig(BaseModel):

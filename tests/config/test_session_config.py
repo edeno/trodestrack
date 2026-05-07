@@ -257,6 +257,77 @@ def test_imu_axis_signs_must_have_six_canonical_keys():
         )
 
 
+def test_imu_axis_signs_values_must_be_sign_flips():
+    """``axis_signs`` is a sign flip; non -1/+1 values silently rescale.
+
+    Probe: ``gyro_z: 0.0`` zeroed out yaw rate,
+    ``accel_z: 2.0`` doubled apparent gravity, ``gyro_x: -0.5``
+    halved and flipped — all silently. ``axis_signs`` must restrict
+    values to -1.0 / 1.0; for scale changes the user has
+    ``gyro_scale_dps_per_lsb`` and ``accel_scale_g_per_lsb``.
+    """
+
+    full_signs = dict.fromkeys(
+        ("gyro_x", "gyro_y", "gyro_z", "accel_x", "accel_y", "accel_z"), 1.0
+    )
+    for axis, bad in [("gyro_z", 0.0), ("accel_z", 2.0), ("gyro_x", -0.5)]:
+        signs = dict(full_signs)
+        signs[axis] = bad
+        with pytest.raises(ValidationError, match=r"axis_signs values must be"):
+            SessionConfig.model_validate(
+                {
+                    "inputs": _PREPARED_INPUTS,
+                    "imu": {"axis_signs": signs},
+                }
+            )
+
+    # -1 / +1 still validate.
+    SessionConfig.model_validate(
+        {
+            "inputs": _PREPARED_INPUTS,
+            "imu": {"axis_signs": {**full_signs, "gyro_z": -1.0}},
+        }
+    )
+
+
+def test_camera_partial_confidence_columns_rejected():
+    """One confidence column without the other was silently ignored.
+
+    ``_load_leds`` only builds ``conf_cam`` when both columns are
+    configured. Probe: ``confidence_led1_column: led1_likelihood``
+    alone left ``session.conf_cam = None`` so the user-specified
+    column had no effect. The schema now requires both or neither.
+    """
+
+    for partial in (
+        {"confidence_led1_column": "led1_likelihood"},
+        {"confidence_led2_column": "led2_likelihood"},
+    ):
+        with pytest.raises(
+            ValidationError, match=r"confidence_led1_column.*confidence_led2_column"
+        ):
+            SessionConfig.model_validate(
+                {
+                    "inputs": _PREPARED_INPUTS,
+                    "camera": partial,
+                }
+            )
+
+    # Both set — validates.
+    SessionConfig.model_validate(
+        {
+            "inputs": _PREPARED_INPUTS,
+            "camera": {
+                "confidence_led1_column": "led1_likelihood",
+                "confidence_led2_column": "led2_likelihood",
+            },
+        }
+    )
+
+    # Both None (default) — also validates.
+    SessionConfig.model_validate({"inputs": _PREPARED_INPUTS})
+
+
 def test_camera_meters_per_pixel_must_be_positive():
     """``meters_per_pixel <= 0`` collapses or mirrors trajectory; reject."""
 
