@@ -222,10 +222,12 @@
 
 ### Slide 24: Performance Bar Chart
 - [ ] Create `code/generate_slide24_performance.py`
-- [ ] Create horizontal bar chart:
-  - CPU (5-min session): 316× realtime (0.95s)
-  - GPU (estimated): 1000×+ realtime (~0.3s)
-  - Realtime baseline: 1× (300s)
+- [ ] Create horizontal bar chart (use the same definitions as the README
+      and `tests/benchmark/test_throughput.py` to keep claims consistent):
+  - Realtime baseline: 1× (1800 s session)
+  - CPU floor (CI-tested): ≥10× realtime
+  - CPU reference (M-series, block-until-ready timing): ~44× realtime
+  - GPU figures should be measured before being shown; otherwise omit.
 - [ ] Color-code: green for fast, red for slow
 - [ ] Save as `visuals/slide24_performance.png`
 - [ ] **Estimated time**: 30 minutes
@@ -263,7 +265,10 @@
 ### Slide 34: JAX Speedup Comparison
 - [ ] Create `code/generate_slide34_jax_speedup.py`
 - [ ] Benchmark EKF with/without JIT compilation
-- [ ] Create bar chart: Python loop (1×), JAX no-JIT (10×), JAX JIT (300×)
+- [ ] Create bar chart with measured ratios (do NOT hard-code multipliers).
+      Compare Python loop, JAX without JIT, and JAX with JIT on the same
+      session length used by `tests/benchmark/test_throughput.py`. Annotate
+      each bar with the measured wall-clock time, not just the ratio.
 - [ ] Save as `visuals/slide34_jax_speedup.png`
 - [ ] **Estimated time**: 1 hour
 

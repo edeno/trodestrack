@@ -498,9 +498,9 @@ def build_section_1_problem(builder):
             "Algorithms: Extended Kalman Filter (EKF), Unscented Kalman Filter (UKF), RTS Smoother",
             "Outputs: Position, velocity, heading + uncertainty",
             "Key features: Bias estimation, outlier rejection, dropout tolerance",
-            "Built with JAX: Fast (300× realtime), GPU-ready",
+            "Built with JAX: ≥10× realtime CPU floor (CI-tested), GPU-ready",
         ],
-        notes="TrodesTrack is an open-source Python package. Today it consumes generic NumPy arrays (camera LED positions + IMU samples) — typical sources are Trodes LED CSV, DeepLabCut CSV, and SpikeGadgets IMU exports, but format-specific loaders are still on the roadmap. Implements EKF, UKF, and RTS smoothing with JAX (300× realtime on CPU). Outputs full state [x, y, vx, vy, θ, biases] with uncertainty estimates (covariance matrices).",
+        notes="TrodesTrack is an open-source Python package. Today it consumes generic NumPy arrays (camera LED positions + IMU samples) — typical sources are Trodes LED CSV, DeepLabCut CSV, and SpikeGadgets IMU exports, but format-specific loaders are still on the roadmap. Implements EKF, UKF, and RTS smoothing with JAX. Throughput floor (≥10× realtime offline on CPU) is enforced by tests/benchmark/test_throughput.py; the reference run on an M-series Mac CPU under block-until-ready timing was ~44× realtime / ~0.38 ms per frame. Outputs full state [x, y, vx, vy, θ, biases] with uncertainty estimates (covariance matrices).",
     )
 
     # Slide 8: Quick Preview - Before & After
@@ -696,14 +696,15 @@ def build_section_3_features(builder):
     builder.add_content_slide(
         title="Performance & Scalability",
         bullets=[
-            "CPU (single core): 300× realtime (5-min session in 1 second)",
-            "GPU (single card): 1000×+ realtime (30-min session in 2 seconds)",
+            "CPU floor (CI-tested): ≥10× realtime offline on a 30-min session",
+            "CPU reference (M-series Mac, block-until-ready): ~44× realtime / ~0.38 ms per frame",
+            "GPU support: same code, just change device (re-measure on your hardware before quoting)",
             "Memory efficient: O(n) scaling, ~100 MB for 30-min session",
             "Batch processing: Parallelize across sessions",
             "Forward-only EKF mean per-frame ≤33 ms over a 30-min session (amortized batch lax.scan; NOT per-frame streaming)",
             "JAX JIT compilation: First run slow, subsequent runs fast",
         ],
-        notes="TrodesTrack is highly optimized using JAX. CPU performance: 300× realtime on single core (M1 Mac / Intel Xeon). GPU acceleration: 1000×+ realtime on NVIDIA A100. Memory scales linearly O(n). Batch processing across sessions is embarrassingly parallel. The PRD's ≤33 ms-per-frame target is verified by tests/benchmark/test_throughput.py as the amortized mean (total / num_frames over a single 30-min batch lax.scan), which is necessary but not sufficient for tail / p99 per-frame latency — there is no streaming per-frame ingest harness today, so this is a throughput-style proxy for the forward-only 'online' CLI rather than a real-time guarantee. JAX JIT compilation adds ~10s overhead on first run, then subsequent runs are instant.",
+        notes="TrodesTrack is highly optimized using JAX. The throughput floor (≥10× realtime offline on CPU) is enforced by tests/benchmark/test_throughput.py with block-until-ready timing; the reference run on an M-series Mac CPU was ~44× realtime / ~0.38 ms per frame. Absolute throughput is hardware-dependent, so re-measure on your target backend before quoting numbers. The codebase has no thread/core pinning, so calling this 'single core' would be unsupported; describe it simply as 'CPU'. GPU acceleration is supported via JAX's standard device-placement story but no first-party GPU benchmark is shipped today. Memory scales linearly O(n). Batch processing across sessions is embarrassingly parallel. The PRD's ≤33 ms-per-frame target is verified by tests/benchmark/test_throughput.py as the amortized mean (total / num_frames over a single 30-min batch lax.scan), which is necessary but not sufficient for tail / p99 per-frame latency — there is no streaming per-frame ingest harness today, so this is a throughput-style proxy for the forward-only 'online' CLI rather than a real-time guarantee. JAX JIT compilation adds ~10s overhead on first run, then subsequent runs are instant.",
     )
 
     # Slide 25: Real Data Support
@@ -832,10 +833,10 @@ def build_section_5_advanced(builder):
             "jax.lax.scan: Efficient loop fusion for filtering",
             "Pure functions: No side effects, enables parallelization",
             "XLA compilation: First run slow (~10s), then instant",
-            "Speedup: 300× vs pure Python loops",
+            "Speedup vs pure Python: large but hardware-dependent — measure on your backend before quoting",
             "GPU: Same code runs on GPU via jax.device_put()",
         ],
-        notes="TrodesTrack is built on JAX (Google's NumPy successor). jax.lax.scan fuses loops for efficient filtering. Pure functional design enables JIT compilation and parallelization. XLA backend compiles Python to machine code (first run slow, subsequent runs instant). Result: 300× speedup vs pure Python. GPU support is trivial: same code, just change device. The JAX architecture is what makes the forward-only batch filter cheap to run end-to-end (mean per-frame ≤33 ms over a 30-min session on commodity CPU); it does NOT itself provide a streaming / per-frame ingest API — see slides 8-9 and the trodestrack online CLI docs.",
+        notes="TrodesTrack is built on JAX (Google's NumPy successor). jax.lax.scan fuses loops for efficient filtering. Pure functional design enables JIT compilation and parallelization. XLA backend compiles Python to machine code (first run slow, subsequent runs instant). The speedup vs pure Python loops is large but hardware-dependent and not pinned by any in-repo benchmark; quote a measured number from your own backend rather than a hard-coded multiplier. GPU support is trivial: same code, just change device. The JAX architecture is what makes the forward-only batch filter cheap to run end-to-end (mean per-frame ≤33 ms over a 30-min session on commodity CPU); it does NOT itself provide a streaming / per-frame ingest API — see slides 8-9 and the trodestrack online CLI docs.",
     )
 
     # Slide 35: Extending to 3D
@@ -882,7 +883,7 @@ def build_section_6_conclusion(builder):
             "🧮 Kalman filtering = optimal fusion framework",
             "⚙️ IMU bias estimation prevents unbounded drift",
             "📊 Accuracy: <2 cm RMSE, <3.5 m drift @ 5s",
-            "⚡ Performance: 300× realtime on CPU (JAX)",
+            "⚡ Performance: ≥10× realtime offline floor (CI-tested), ~44× on M-series Mac CPU",
             "",
             "🚀 Start with Example 01 → real data in ~3 hours",
             "📖 Full documentation + 9 progressive examples",
