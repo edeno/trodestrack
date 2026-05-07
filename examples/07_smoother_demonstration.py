@@ -157,16 +157,33 @@ def main() -> None:
         mask_cam=mask_with_dropout,  # Enable blackout-aware Q/R scaling
     )
 
-    # Compute dropout drift for both
+    # Interpolate truth to camera times — needed both for the dropout-
+    # drift metric (estimate vs truth) and for the RMSE / NEES summaries
+    # below.
+    t_truth = sim_data["t_imu"]
+    X_truth = sim_data["X_truth"]
+    t_cam = sim_data["t_cam_exp"]
+
+    pos_truth = np.column_stack(
+        [
+            np.interp(t_cam, t_truth, X_truth[:, 0]),
+            np.interp(t_cam, t_truth, X_truth[:, 1]),
+        ]
+    )
+    heading_truth = interp_angle(t_cam, t_truth, X_truth[:, 4])
+
+    # Compute dropout drift (tracking error growth vs camera-frame truth).
     drift_result_filter = compute_dropout_drift(
-        positions=filter_result.filtered_means[:, :2],
+        positions_est=filter_result.filtered_means[:, :2],
+        positions_true=pos_truth,
         valid_mask=mask_with_dropout,
         t=sim_data["t_cam_exp"],
         min_duration_s=4.5,
     )
 
     drift_result_smooth = compute_dropout_drift(
-        positions=smoother_result.smoothed_means[:, :2],
+        positions_est=smoother_result.smoothed_means[:, :2],
+        positions_true=pos_truth,
         valid_mask=mask_with_dropout,
         t=sim_data["t_cam_exp"],
         min_duration_s=4.5,
@@ -180,19 +197,6 @@ def main() -> None:
     print(f"  Smoothed: {drift_smooth_m:.4f} m")
     print(f"  Improvement: {drift_filter_m / drift_smooth_m:.2f}× reduction")
     print(f"  Theory (~0.50 m): {drift_smooth_m / 0.50:.2f}× observed/theory")
-
-    # Interpolate truth to camera times
-    t_truth = sim_data["t_imu"]
-    X_truth = sim_data["X_truth"]
-    t_cam = sim_data["t_cam_exp"]
-
-    pos_truth = np.column_stack(
-        [
-            np.interp(t_cam, t_truth, X_truth[:, 0]),
-            np.interp(t_cam, t_truth, X_truth[:, 1]),
-        ]
-    )
-    heading_truth = interp_angle(t_cam, t_truth, X_truth[:, 4])
 
     # Extract filter and smoother estimates
     pos_filter = np.array(filter_result.filtered_means[:, :2])

@@ -308,10 +308,14 @@ def main() -> None:
     X_ekf = np.array(ekf_result.filtered_means)
     X_ukf = np.array(ukf_result.filtered_means)
 
-    # EKF metrics
+    # EKF metrics — drift is tracking-error growth vs truth (camera-frame).
     ekf_pos_rmse = compute_position_rmse(X_truth_cam[:, :2] * 100, X_ekf[:, :2] * 100)
     ekf_drift_result = compute_dropout_drift(
-        positions=X_ekf[:, :2], valid_mask=mask_cam, t=t_cam, min_duration_s=0.1
+        positions_est=X_ekf[:, :2],
+        positions_true=X_truth_cam[:, :2],
+        valid_mask=mask_cam,
+        t=t_cam,
+        min_duration_s=0.1,
     )
     if ekf_drift_result["drift_m"] is None:
         ekf_drift_result["drift_m"] = 0.0
@@ -337,10 +341,14 @@ def main() -> None:
         "actual_dropout_rate": 1.0 - mask_cam.mean(),
     }
 
-    # UKF metrics
+    # UKF metrics — drift is tracking-error growth vs truth (camera-frame).
     ukf_pos_rmse = compute_position_rmse(X_truth_cam[:, :2] * 100, X_ukf[:, :2] * 100)
     ukf_drift_result = compute_dropout_drift(
-        positions=X_ukf[:, :2], valid_mask=mask_cam, t=t_cam, min_duration_s=0.1
+        positions_est=X_ukf[:, :2],
+        positions_true=X_truth_cam[:, :2],
+        valid_mask=mask_cam,
+        t=t_cam,
+        min_duration_s=0.1,
     )
     if ukf_drift_result["drift_m"] is None:
         ukf_drift_result["drift_m"] = 0.0
