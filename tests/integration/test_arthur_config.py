@@ -52,6 +52,8 @@ def test_bundled_arthur_example_runs_fused_orientation(tmp_path: Path) -> None:
     safety = diagnostics["safety_check"]
     assert safety["passed"] is True
     assert safety["max_fused_speed_mps"] < 3.0
+    assert safety["max_vision_position_deviation_m"] < 0.5
+    assert safety["p95_vision_position_deviation_m"] < 0.25
     assert safety["fused_range_m"][0] < safety["camera_range_m"][0] * 3.0 + 0.5
     assert safety["fused_range_m"][1] < safety["camera_range_m"][1] * 3.0 + 0.5
 

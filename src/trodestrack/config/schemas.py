@@ -165,6 +165,8 @@ class OutputsConfig(BaseModel):
     safety_envelope_multiplier: float = 3.0
     safety_extra_range_m: float = 0.5
     safety_max_speed_mps: float = 3.0
+    safety_max_position_deviation_m: float = 0.5
+    safety_p95_position_deviation_m: float = 0.25
 
 
 class LedIdentityConfig(BaseModel):

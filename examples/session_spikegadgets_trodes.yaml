@@ -52,3 +52,5 @@ outputs:
   safety_envelope_multiplier: 3.0
   safety_extra_range_m: 0.5
   safety_max_speed_mps: 3.0
+  safety_max_position_deviation_m: 0.5
+  safety_p95_position_deviation_m: 0.25

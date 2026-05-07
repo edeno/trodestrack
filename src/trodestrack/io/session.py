@@ -54,6 +54,8 @@ class SafetyReport:
     camera_range_m: tuple[float, float]
     fused_range_m: tuple[float, float]
     max_fused_speed_mps: float
+    max_vision_position_deviation_m: float
+    p95_vision_position_deviation_m: float
     vision_loglik: float
     fused_loglik: float
 
@@ -153,6 +155,8 @@ def run_real_data_safety_check(
             camera_range_m=(0.0, 0.0),
             fused_range_m=(0.0, 0.0),
             max_fused_speed_mps=0.0,
+            max_vision_position_deviation_m=0.0,
+            p95_vision_position_deviation_m=0.0,
             vision_loglik=float("nan"),
             fused_loglik=marginal_loglik,
         )
@@ -181,6 +185,20 @@ def run_real_data_safety_check(
         session.mask_cam,
         conf_cam=session.conf_cam,
     )
+    vision_layout = get_layout(vision_config.state_mode)
+    vision_pos = np.asarray(vision.filtered_means)[:, list(vision_layout.pos_idx)]
+    finite_deviation = (
+        valid & np.isfinite(pos).all(axis=1) & np.isfinite(vision_pos).all(axis=1)
+    )
+    if not np.any(finite_deviation):
+        raise ValueError(
+            "Safety check requires at least one finite fused/vision position pair."
+        )
+    position_deviation = np.linalg.norm(
+        pos[finite_deviation] - vision_pos[finite_deviation], axis=1
+    )
+    max_position_deviation = float(np.nanmax(position_deviation))
+    p95_position_deviation = float(np.nanpercentile(position_deviation, 95))
 
     dt = np.diff(session.t_cam)
     vel = np.diff(pos, axis=0) / np.maximum(dt[:, None], 1e-6)
@@ -191,13 +209,16 @@ def run_real_data_safety_check(
     passed = bool(
         np.all(np.asarray(fused_range) <= allowed)
         and max_speed <= config.safety_max_speed_mps
+        and max_position_deviation <= config.safety_max_position_deviation_m
+        and p95_position_deviation <= config.safety_p95_position_deviation_m
     )
     message = "passed"
     if not passed:
         message = (
             "IMU-fused trajectory is physically implausible relative to the "
-            "camera midpoint envelope. Use state_mode: vision_only or fix IMU "
-            "scale/axis/time-offset calibration before trusting fused output."
+            "camera midpoint envelope or vision-only baseline. Use "
+            "state_mode: vision_only or fix IMU scale/axis/time-offset "
+            "calibration before trusting fused output."
         )
     return SafetyReport(
         passed=passed,
@@ -205,6 +226,8 @@ def run_real_data_safety_check(
         camera_range_m=camera_range,
         fused_range_m=fused_range,
         max_fused_speed_mps=max_speed,
+        max_vision_position_deviation_m=max_position_deviation,
+        p95_vision_position_deviation_m=p95_position_deviation,
         vision_loglik=float(np.asarray(vision.marginal_loglik)),
         fused_loglik=float(np.asarray(filter_result.marginal_loglik)),
     )

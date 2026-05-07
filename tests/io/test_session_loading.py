@@ -6,9 +6,15 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from trodestrack.config import load_session_config
-from trodestrack.io import load_session, write_session_diagnostics
+from trodestrack.config import SessionConfig, load_session_config
+from trodestrack.io import (
+    PreparedSession,
+    load_session,
+    run_real_data_safety_check,
+    write_session_diagnostics,
+)
 from trodestrack.io.led_identity import CorrectedLEDIdentity
+from trodestrack.models.ekf import EKFConfig, EKFResult
 
 
 def test_load_arthur_style_parquets_removes_sample_hold_and_projects_imu(tmp_path):
@@ -330,3 +336,77 @@ led_identity:
     load_session(load_session_config(config_path))
 
     np.testing.assert_allclose(captured["gyro_z"], [1.0, 2.0, 3.0])
+
+
+def test_safety_check_rejects_fused_drift_from_vision_baseline(monkeypatch):
+    """A broad envelope alone should not hide fused-vs-vision drift."""
+
+    t_cam = np.linspace(0.0, 1.0, 11)
+    t_imu = np.linspace(0.0, 1.0, 21)
+    center = np.column_stack([0.05 * t_cam, np.zeros_like(t_cam)])
+    led1 = center - np.array([0.02, 0.0])
+    led2 = center + np.array([0.02, 0.0])
+    config = SessionConfig.model_validate(
+        {
+            "inputs": {
+                "format": "spikegadgets_trodes",
+                "imu_file": "imu.parquet",
+                "position_file": "position.parquet",
+            },
+            "outputs": {
+                "safety_max_position_deviation_m": 0.1,
+                "safety_p95_position_deviation_m": 0.1,
+                "safety_max_speed_mps": 3.0,
+            },
+        }
+    )
+    session = PreparedSession(
+        t_imu=t_imu,
+        U_imu=np.zeros((len(t_imu), 3)),
+        t_cam=t_cam,
+        Z_cam_led1=led1,
+        Z_cam_led2=led2,
+        mask_cam=np.ones(len(t_cam), dtype=bool),
+        conf_cam=None,
+        led_distance=0.04,
+        diagnostics={},
+        config=config,
+    )
+    fused_means = np.zeros((len(t_cam), 8))
+    fused_means[:, :2] = center + np.array([0.2, 0.0])
+    vision_means = np.zeros((len(t_cam), 5))
+    vision_means[:, :2] = center
+
+    filter_result = EKFResult(
+        filtered_means=fused_means,
+        filtered_covariances=np.repeat(np.eye(8)[None, :, :], len(t_cam), axis=0),
+        predicted_means=fused_means,
+        predicted_covariances=np.repeat(np.eye(8)[None, :, :], len(t_cam), axis=0),
+        marginal_loglik=-1.0,
+        estimated_led_distance=0.04,
+    )
+
+    def fake_vision_filter(*args, **kwargs):
+        return EKFResult(
+            filtered_means=vision_means,
+            filtered_covariances=np.repeat(np.eye(5)[None, :, :], len(t_cam), axis=0),
+            predicted_means=vision_means,
+            predicted_covariances=np.repeat(np.eye(5)[None, :, :], len(t_cam), axis=0),
+            marginal_loglik=-2.0,
+            estimated_led_distance=0.04,
+        )
+
+    monkeypatch.setattr(
+        "trodestrack.io.session.extended_kalman_filter", fake_vision_filter
+    )
+
+    report = run_real_data_safety_check(
+        session,
+        EKFConfig(state_mode="2d_full"),
+        filter_result,
+    )
+
+    assert not report.passed
+    assert "vision-only baseline" in report.message
+    assert report.max_vision_position_deviation_m == pytest.approx(0.2)
+    assert report.p95_vision_position_deviation_m == pytest.approx(0.2)

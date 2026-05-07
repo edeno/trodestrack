@@ -175,6 +175,14 @@ def write_config_metadata(
         f.write("Safety Check:\n")
         f.write(f"  Result: {run.safety_report.message}\n")
         f.write(f"  Max fused speed: {run.safety_report.max_fused_speed_mps}\n")
+        f.write(
+            "  Max vision-position deviation: "
+            f"{run.safety_report.max_vision_position_deviation_m}\n"
+        )
+        f.write(
+            "  P95 vision-position deviation: "
+            f"{run.safety_report.p95_vision_position_deviation_m}\n"
+        )
         f.write(f"  Vision log-likelihood: {run.safety_report.vision_loglik}\n")
         f.write(f"  Fused log-likelihood: {run.safety_report.fused_loglik}\n\n")
         f.write("Results:\n")
