@@ -262,6 +262,12 @@ class OutputsConfig(BaseModel):
     safety_max_speed_mps: float = Field(default=3.0, gt=0.0)
     safety_max_position_deviation_m: float = Field(default=0.5, gt=0.0)
     safety_p95_position_deviation_m: float = Field(default=0.25, gt=0.0)
+    # Minimum dual-LED frame count required to estimate the camera
+    # midpoint envelope. Sessions with fewer dual-LED frames cannot
+    # produce a meaningful camera-range bound for the
+    # ``safety_envelope_multiplier`` gate; fail fast rather than
+    # passing on a near-zero envelope.
+    safety_min_dual_led_frames: int = Field(default=20, ge=1)
 
 
 class LedIdentityConfig(BaseModel):

@@ -59,6 +59,8 @@ class SafetyReport:
     p95_vision_position_deviation_m: float
     vision_loglik: float
     fused_loglik: float
+    dual_led_frame_count: int = 0
+    deviation_frame_count: int = 0
 
 
 def load_session(config: SessionConfig) -> PreparedSession:
@@ -136,11 +138,26 @@ def run_real_data_safety_check(
     layout = get_layout(ekf_config.state_mode)
     means = np.asarray(filter_result.filtered_means)
     pos = means[:, list(layout.pos_idx)]
+
+    # Dual-LED frames are needed only to estimate the camera midpoint
+    # envelope (LED midpoint requires both LEDs). The fused-vs-vision
+    # deviation gate, by contrast, must consider every frame the EKF
+    # actually consumed — both EKFs see single-LED frames via the
+    # OR'd ``mask_cam``, so excluding them used to let "mostly
+    # single-LED" sessions silently bypass the deviation check while
+    # the fused trajectory drifted.
     cam_mid = 0.5 * (session.Z_cam_led1 + session.Z_cam_led2)
-    valid = session.mask_cam & np.isfinite(cam_mid).all(axis=1)
-    if not np.any(valid):
-        raise ValueError("Safety check requires at least one finite dual-LED frame.")
-    camera_range = tuple(float(x) for x in np.ptp(cam_mid[valid], axis=0))
+    dual_valid = session.mask_cam & np.isfinite(cam_mid).all(axis=1)
+    dual_led_frame_count = int(dual_valid.sum())
+    if dual_led_frame_count < config.safety_min_dual_led_frames:
+        raise ValueError(
+            "Safety check requires at least "
+            f"{config.safety_min_dual_led_frames} finite dual-LED frame(s) "
+            f"to estimate the camera envelope; got {dual_led_frame_count}. "
+            "Lower outputs.safety_min_dual_led_frames or use "
+            "state_mode: vision_only if dual-LED coverage is too sparse."
+        )
+    camera_range = tuple(float(x) for x in np.ptp(cam_mid[dual_valid], axis=0))
     fused_range = tuple(float(x) for x in np.ptp(pos, axis=0))
 
     vision_config = replace(
@@ -160,9 +177,12 @@ def run_real_data_safety_check(
     vision_layout = get_layout(vision_config.state_mode)
     vision_pos = np.asarray(vision.filtered_means)[:, list(vision_layout.pos_idx)]
     finite_deviation = (
-        valid & np.isfinite(pos).all(axis=1) & np.isfinite(vision_pos).all(axis=1)
+        session.mask_cam
+        & np.isfinite(pos).all(axis=1)
+        & np.isfinite(vision_pos).all(axis=1)
     )
-    if not np.any(finite_deviation):
+    deviation_frame_count = int(finite_deviation.sum())
+    if deviation_frame_count == 0:
         raise ValueError(
             "Safety check requires at least one finite fused/vision position pair."
         )
@@ -202,6 +222,8 @@ def run_real_data_safety_check(
         p95_vision_position_deviation_m=p95_position_deviation,
         vision_loglik=float(np.asarray(vision.marginal_loglik)),
         fused_loglik=float(np.asarray(filter_result.marginal_loglik)),
+        dual_led_frame_count=dual_led_frame_count,
+        deviation_frame_count=deviation_frame_count,
     )
 
 

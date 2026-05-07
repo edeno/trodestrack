@@ -580,6 +580,165 @@ filter:
         load_session(load_session_config(config_path))
 
 
+def test_safety_check_uses_all_frames_for_fused_vs_vision_deviation(monkeypatch):
+    """Single-LED frames must contribute to the deviation gate.
+
+    Probe: a session with one dual-LED frame and many single-LED
+    frames used to skip the fused-vs-vision deviation check on
+    every single-LED frame, so a fused trajectory that drifted
+    only on single-LED frames passed silently. The dual-LED
+    midpoint envelope still requires both LEDs (no midpoint
+    otherwise), but the deviation gate now uses every frame in
+    ``mask_cam`` where fused and vision positions are finite.
+    """
+
+    n = 25
+    t_cam = np.linspace(0.0, 1.0, n)
+    t_imu = np.linspace(0.0, 1.0, 2 * n - 1)
+    center = np.column_stack([0.05 * t_cam, np.zeros_like(t_cam)])
+    led1 = center - np.array([0.02, 0.0])
+    led2 = center + np.array([0.02, 0.0])
+    # Frames 1..n-1: only LED1 finite. Frame 0 keeps both for the
+    # camera envelope. The OR'd ``mask_cam`` keeps every frame
+    # usable, which is why the EKF — and the fixed safety check —
+    # still process them.
+    led2[1:] = np.nan
+    config = SessionConfig.model_validate(
+        {
+            "inputs": {
+                "format": "spikegadgets_trodes",
+                "imu_file": "imu.parquet",
+                "position_file": "position.parquet",
+            },
+            "outputs": {
+                "safety_max_position_deviation_m": 0.1,
+                "safety_p95_position_deviation_m": 0.1,
+                "safety_max_speed_mps": 3.0,
+                "safety_min_dual_led_frames": 1,
+            },
+        }
+    )
+    mask_cam = np.isfinite(led1).all(axis=1) | np.isfinite(led2).all(axis=1)
+    session = PreparedSession(
+        t_imu=t_imu,
+        U_imu=np.zeros((len(t_imu), 3)),
+        t_cam=t_cam,
+        Z_cam_led1=led1,
+        Z_cam_led2=led2,
+        mask_cam=mask_cam,
+        conf_cam=None,
+        led_distance=0.04,
+        diagnostics={},
+        config=config,
+    )
+
+    fused_means = np.zeros((n, 8))
+    fused_means[:, :2] = center
+    # Drift the fused trajectory by 0.5 m on every single-LED frame
+    # (frames 1..n-1). The dual-LED midpoint stays within bounds so
+    # the camera-envelope and speed gates pass; only the deviation
+    # gate can catch this.
+    fused_means[1:, 0] += 0.5
+    vision_means = np.zeros((n, 5))
+    vision_means[:, :2] = center
+
+    filter_result = EKFResult(
+        filtered_means=fused_means,
+        filtered_covariances=np.repeat(np.eye(8)[None, :, :], n, axis=0),
+        predicted_means=fused_means,
+        predicted_covariances=np.repeat(np.eye(8)[None, :, :], n, axis=0),
+        marginal_loglik=-1.0,
+        estimated_led_distance=0.04,
+    )
+
+    def fake_vision_filter(*args, **kwargs):
+        return EKFResult(
+            filtered_means=vision_means,
+            filtered_covariances=np.repeat(np.eye(5)[None, :, :], n, axis=0),
+            predicted_means=vision_means,
+            predicted_covariances=np.repeat(np.eye(5)[None, :, :], n, axis=0),
+            marginal_loglik=-2.0,
+            estimated_led_distance=0.04,
+        )
+
+    monkeypatch.setattr(
+        "trodestrack.io.session.extended_kalman_filter", fake_vision_filter
+    )
+
+    report = run_real_data_safety_check(
+        session,
+        EKFConfig(state_mode="2d_full"),
+        filter_result,
+    )
+
+    assert not report.passed, (
+        "Drift on single-LED frames must trip the deviation gate; "
+        f"reported max deviation was {report.max_vision_position_deviation_m}"
+    )
+    assert report.max_vision_position_deviation_m == pytest.approx(0.5)
+    # Diagnostic counts make the dual-LED coverage visible to users.
+    assert report.dual_led_frame_count == 1
+    assert report.deviation_frame_count == n
+
+
+def test_safety_check_requires_minimum_dual_led_frames(monkeypatch):
+    """Below the configured dual-LED minimum, the camera envelope is unreliable.
+
+    Default ``safety_min_dual_led_frames=20`` rejects sessions whose
+    dual-LED coverage is too sparse to produce a meaningful camera
+    envelope. The test forces a 5-dual-LED scenario and asserts
+    the loader-style ValueError fires before any pass/fail flag.
+    """
+
+    n = 25
+    t_cam = np.linspace(0.0, 1.0, n)
+    t_imu = np.linspace(0.0, 1.0, 2 * n - 1)
+    center = np.column_stack([0.05 * t_cam, np.zeros_like(t_cam)])
+    led1 = center - np.array([0.02, 0.0])
+    led2 = center + np.array([0.02, 0.0])
+    # Only 5 dual-LED frames; rest are LED1-only.
+    led2[5:] = np.nan
+    config = SessionConfig.model_validate(
+        {
+            "inputs": {
+                "format": "spikegadgets_trodes",
+                "imu_file": "imu.parquet",
+                "position_file": "position.parquet",
+            },
+            "outputs": {
+                # Default is 20; explicit here for the test contract.
+                "safety_min_dual_led_frames": 20,
+            },
+        }
+    )
+    mask_cam = np.isfinite(led1).all(axis=1) | np.isfinite(led2).all(axis=1)
+    session = PreparedSession(
+        t_imu=t_imu,
+        U_imu=np.zeros((len(t_imu), 3)),
+        t_cam=t_cam,
+        Z_cam_led1=led1,
+        Z_cam_led2=led2,
+        mask_cam=mask_cam,
+        conf_cam=None,
+        led_distance=0.04,
+        diagnostics={},
+        config=config,
+    )
+    filter_result = EKFResult(
+        filtered_means=np.zeros((n, 8)),
+        filtered_covariances=np.repeat(np.eye(8)[None, :, :], n, axis=0),
+        predicted_means=np.zeros((n, 8)),
+        predicted_covariances=np.repeat(np.eye(8)[None, :, :], n, axis=0),
+        marginal_loglik=-1.0,
+        estimated_led_distance=0.04,
+    )
+
+    with pytest.raises(ValueError, match=r"at least 20 finite dual-LED frame"):
+        run_real_data_safety_check(
+            session, EKFConfig(state_mode="2d_full"), filter_result
+        )
+
+
 def test_safety_check_rejects_fused_drift_from_vision_baseline(monkeypatch):
     """A broad envelope alone should not hide fused-vs-vision drift."""
 
@@ -599,6 +758,7 @@ def test_safety_check_rejects_fused_drift_from_vision_baseline(monkeypatch):
                 "safety_max_position_deviation_m": 0.1,
                 "safety_p95_position_deviation_m": 0.1,
                 "safety_max_speed_mps": 3.0,
+                "safety_min_dual_led_frames": 1,
             },
         }
     )

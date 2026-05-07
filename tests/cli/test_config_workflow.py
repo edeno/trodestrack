@@ -94,6 +94,7 @@ outputs:
   output_dir: {output_dir.name}
   run_safety_checks: true
   safety_max_speed_mps: {safety_max_speed_mps}
+  safety_min_dual_led_frames: 1
 """.lstrip()
     )
     return config_path
