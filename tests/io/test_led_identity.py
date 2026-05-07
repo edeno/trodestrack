@@ -63,6 +63,80 @@ def test_auto_led_identity_carries_dropout_frames_unchanged():
     assert np.isnan(corrected.led2[5]).all()
 
 
+def test_single_led_frames_inside_swapped_interval_are_relabeled():
+    """Single-LED frames must inherit the surrounding swap state.
+
+    Probe scenario: a global swap with ``initial_state='swapped'``,
+    where frame 2 is single-LED only. The previous implementation
+    only swapped frames where ``dual_valid`` was True, so the
+    single-LED middle frame stayed in ``corrected.led1`` instead
+    of moving to ``corrected.led2``. With state propagated to all
+    frames, the single-LED frame is correctly relabeled.
+    """
+
+    n = 5
+    t_cam = np.arange(n, dtype=float) / 30.0
+    center = np.column_stack([0.01 * np.arange(n), np.zeros(n)])
+    led1_true = center - np.array([0.02, 0.0])
+    led2_true = center + np.array([0.02, 0.0])
+
+    # Whole session is swapped relative to physical truth.
+    led1_obs = led2_true.copy()
+    led2_obs = led1_true.copy()
+    # Frame 2 has only LED1 visible (in swapped labels). Physically
+    # this single observation belongs at LED2.
+    led2_obs[2] = np.nan
+    mask = np.ones(n, dtype=bool)
+
+    corrected = resolve_led_identity(
+        t_cam,
+        led1_obs,
+        led2_obs,
+        mask,
+        led_distance=0.04,
+        config=LedIdentityConfig(mode="auto", initial_state="swapped"),
+    )
+
+    # Every frame should be flagged as swapped.
+    assert corrected.swapped.all()
+    # The single-LED frame's finite observation moves from led1 to led2.
+    assert np.isnan(corrected.led1[2]).all()
+    np.testing.assert_allclose(corrected.led2[2], led1_obs[2])
+    # Diagnostic count includes only dual-LED frames, not single-LED.
+    assert corrected.diagnostics["dual_led_frame_count"] == 4
+
+
+def test_no_dual_led_frames_emits_diagnostic_message():
+    """No-dual-LED sessions should record a clear ambiguity diagnostic.
+
+    The earlier early-return only emitted ``{'mode': 'auto',
+    'n_swapped': 0}``. Add ``dual_led_frame_count``,
+    ``global_identity_ambiguous``, and a message so callers can see
+    why correction did nothing.
+    """
+
+    n = 4
+    t_cam = np.arange(n, dtype=float) / 30.0
+    led1 = np.full((n, 2), np.nan)
+    led2 = np.full((n, 2), np.nan)
+    mask = np.ones(n, dtype=bool)
+
+    corrected = resolve_led_identity(
+        t_cam,
+        led1,
+        led2,
+        mask,
+        led_distance=0.04,
+        config=LedIdentityConfig(mode="auto"),
+    )
+
+    diag = corrected.diagnostics
+    assert diag["dual_led_frame_count"] == 0
+    assert diag["global_identity_ambiguous"] is True
+    assert "no dual-LED frames" in str(diag["message"])
+    assert not corrected.swapped.any()
+
+
 def test_initial_swapped_prior_resolves_global_swap():
     """A whole-session swap needs an explicit initial identity prior."""
 

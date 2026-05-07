@@ -493,10 +493,14 @@ def lagged_linear_fit(
 
     if best_fit is None:
         raise ValueError(
-            "No candidate lag produced a valid fit. Each tried lag had "
-            "fewer than 3 finite (source, target) pairs after applying "
-            "valid_target / interpolation, so no correlation could be "
-            "computed."
+            "No candidate lag produced a valid fit. Each tried lag in "
+            f"[{float(lags.min()):.3f}, {float(lags.max()):.3f}] s had fewer "
+            "than 3 finite (source, target) pairs after applying "
+            "``valid_target`` / interpolation. Common causes for this in the "
+            "config-driven calibration path: IMU and camera time ranges "
+            "don't overlap (check imu.time_offset_s and "
+            "camera.time_offset_s); the IMU or camera input is mostly NaN; "
+            "or no candidate lag falls within the actual time-range overlap."
         )
     return best_fit
 

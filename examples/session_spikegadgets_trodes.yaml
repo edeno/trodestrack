@@ -21,9 +21,12 @@ camera:
 
 imu:
   sample_hold_strategy: gyro_z_change
-  # Full-session calibration finds a small residual yaw lag on the bundled
-  # Arthur slice; leave at 0.0 for new sessions until diagnostics justify it.
-  time_offset_s: 0.01
+  # ``time_offset_s`` defaults to 0.0 (the schema default). For new
+  # sessions, leave this commented out and run calibration; only set
+  # an explicit lag once ``imu_calibration_report.txt`` shows a
+  # non-zero yaw-rate lag. The bundled Arthur slice happens to need
+  # ~10 ms of correction (uncomment to reproduce the calibrated run).
+  # time_offset_s: 0.01
   mode: 3d
   run_calibration: true
   require_calibration_for_fusion: true

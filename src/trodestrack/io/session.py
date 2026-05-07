@@ -585,8 +585,13 @@ def _validate_calibration_for_fusion(
     ):
         raise ValueError(
             "gyro_z does not correlate with LED-derived yaw rate "
-            f"(correlation={report.yaw_rate_fit.correlation:.3f}); check axis "
-            "mapping, sign, time offset, or use state_mode: vision_only."
+            f"(correlation={report.yaw_rate_fit.correlation:.3f}, "
+            f"min={config.imu.calibration_min_yaw_correlation}). Check that "
+            "imu.axis_map['gyro_z'] points at the column carrying yaw rate "
+            "(not pitch/roll), that imu.axis_signs['gyro_z'] matches the "
+            "physical mounting, that imu.time_offset_s and "
+            "camera.time_offset_s align IMU and camera clocks, or fall "
+            "back to filter.state_mode: vision_only."
         )
     if not _uses_accel_translation(config):
         return

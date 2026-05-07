@@ -96,7 +96,21 @@ def resolve_led_identity(
             led1=led1_arr.copy(),
             led2=led2_arr.copy(),
             swapped=np.zeros(t_arr.shape, dtype=bool),
-            diagnostics={"mode": "auto", "n_swapped": 0},
+            diagnostics={
+                "mode": "auto",
+                "n_swapped": 0,
+                "dual_led_frame_count": 0,
+                "fraction_swapped": 0.0,
+                "initial_state": config.initial_state,
+                "global_identity_ambiguous": True,
+                "message": (
+                    "LED identity correction did not run because the session "
+                    "has no dual-LED frames; auto mode requires at least one "
+                    "frame with both LEDs finite to estimate the swap pattern."
+                ),
+                "transition_penalty": float(config.transition_penalty),
+                "gyro_weight": float(config.gyro_weight),
+            },
         )
 
     costs = np.full((valid_indices.size, 2), np.inf)
@@ -139,11 +153,24 @@ def resolve_led_identity(
     for k in range(valid_indices.size - 1, 0, -1):
         valid_states[k - 1] = back[k, valid_states[k]]
 
-    states = np.zeros(n, dtype=np.int8)
-    states[valid_indices] = valid_states
-    swapped = (states == 1) & dual_valid
+    # Propagate the inferred state to *every* frame, not just the
+    # dual-valid ones. Single-LED frames inside a swapped interval
+    # carry the wrong physical-LED label too; gating swaps by
+    # ``dual_valid`` used to leave them mislabeled, so the EKF
+    # consumed a partial observation in the original (wrong)
+    # identity. Carry-forward the most recent dual-valid state, and
+    # for frames before the first dual-valid frame use that frame's
+    # resolved state (the DP already picked it given the
+    # ``initial_state`` prior).
+    positions = np.searchsorted(valid_indices, np.arange(n), side="right") - 1
+    positions = np.maximum(positions, 0)
+    states = valid_states[positions]
+    swapped = states == 1
     corrected1 = led1_arr.copy()
     corrected2 = led2_arr.copy()
+    # For single-LED swapped frames, the finite LED moves to the
+    # other slot and the NaN follows; ``led2_arr[swapped]`` carries
+    # the NaN naturally so no special-casing is needed.
     corrected1[swapped] = led2_arr[swapped]
     corrected2[swapped] = led1_arr[swapped]
     return CorrectedLEDIdentity(
@@ -154,6 +181,7 @@ def resolve_led_identity(
             "mode": "auto",
             "n_swapped": int(swapped.sum()),
             "fraction_swapped": float(swapped.mean()) if swapped.size else 0.0,
+            "dual_led_frame_count": int(valid_indices.size),
             "led_distance_m": float(led_distance),
             "initial_state": config.initial_state,
             "global_identity_ambiguous": config.initial_state == "auto",
