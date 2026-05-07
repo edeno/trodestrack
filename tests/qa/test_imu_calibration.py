@@ -1,6 +1,7 @@
 """Tests for offline IMU calibration diagnostics."""
 
 import numpy as np
+import pytest
 
 from trodestrack.qa.imu_calibration import (
     camera_body_acceleration,
@@ -141,3 +142,35 @@ def test_accel_axis_sign_diagnostics_use_one_to_one_axis_assignment() -> None:
     )
 
     assert diagnostics[0].imu_axis != diagnostics[1].imu_axis
+
+
+def test_imu_calibration_helpers_reject_corrupted_masks() -> None:
+    """``estimate_gyro_bias`` / ``estimate_accel_gravity_body`` must not silently
+    coerce NaN / non-{0,1} integer masks to True.
+
+    A bare ``np.asarray(mask).astype(bool)`` previously turned NaN
+    samples and integer values like 2 into ``True``, so a corrupted
+    ``stationary_mask`` would treat noisy outliers as stationary and
+    bias the gravity / gyro-bias estimate. Validate the dtype contract
+    explicitly first.
+    """
+    gyro = np.array([0.001, 0.002, 0.0015, 0.001], dtype=float)
+    accel = np.tile(np.array([0.0, 0.0, 9.81]), (4, 1))
+
+    # Clean bool / 0-1 int masks must continue to work.
+    estimate_gyro_bias(gyro, np.array([True, True, False, True]))
+    estimate_gyro_bias(gyro, np.array([1, 1, 0, 1], dtype=np.int32))
+    estimate_accel_gravity_body(accel, np.array([True, True, False, True]))
+
+    # Corrupted masks must raise ValueError instead of silently coercing.
+    bad_int = np.array([1, 1, 0, 2], dtype=np.int32)
+    with pytest.raises(ValueError, match=r"boolean or 0/1 integer"):
+        estimate_gyro_bias(gyro, bad_int)
+    with pytest.raises(ValueError, match=r"boolean or 0/1 integer"):
+        estimate_accel_gravity_body(accel, bad_int)
+
+    bad_nan = np.array([1.0, 1.0, 0.0, np.nan])
+    with pytest.raises(ValueError, match=r"boolean or 0/1 integer"):
+        estimate_gyro_bias(gyro, bad_nan)
+    with pytest.raises(ValueError, match=r"boolean or 0/1 integer"):
+        estimate_accel_gravity_body(accel, bad_nan)

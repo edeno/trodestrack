@@ -13,6 +13,8 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
+from trodestrack.qa.plots import validate_bool_mask_dtype
+
 
 @dataclass(frozen=True)
 class LagFit:
@@ -356,7 +358,13 @@ def estimate_gyro_bias(
     """Estimate yaw gyro bias from low-motion samples using a median."""
 
     gyro_arr = np.asarray(gyro_z, dtype=float)
-    mask_arr = np.asarray(stationary_mask, dtype=bool)
+    # ``np.asarray(..., dtype=bool)`` silently coerces NaN / non-{0,1}
+    # integer values to True, so a corrupted ``stationary_mask`` would
+    # treat noisy or outlier samples as stationary. Validate the dtype
+    # explicitly first.
+    mask_arr = validate_bool_mask_dtype(
+        np.asarray(stationary_mask), name="stationary_mask"
+    )
     # Reject shape mismatch up front. NumPy would otherwise raise a raw
     # broadcasting error from the `mask & isfinite(gyro)` line below.
     if gyro_arr.ndim != 1:
@@ -388,7 +396,9 @@ def estimate_accel_gravity_body(
         raise ValueError(
             f"accel_xyz must have shape (n_time, 3); got {accel_arr.shape}."
         )
-    mask_arr = np.asarray(stationary_mask, dtype=bool)
+    mask_arr = validate_bool_mask_dtype(
+        np.asarray(stationary_mask), name="stationary_mask"
+    )
     # Reject mask-vs-signal length mismatch up front. NumPy would
     # otherwise raise a raw broadcasting error from the AND below.
     if mask_arr.shape != (accel_arr.shape[0],):
@@ -723,13 +733,18 @@ def _interpolate_invalid_samples(
 ) -> NDArray[np.float64]:
     """Linearly interpolate invalid samples in a 1D or 2D time series."""
 
+    # Validate the optional ``valid_mask`` once so both the 1D and 2D
+    # branches use the same dtype gate. A bare ``np.asarray(..., dtype=
+    # bool)`` would silently coerce NaN / non-{0,1} integers to True.
+    valid_mask_clean = (
+        None
+        if valid_mask is None
+        else validate_bool_mask_dtype(np.asarray(valid_mask), name="valid_mask")
+    )
+
     if values.ndim == 1:
         finite = np.isfinite(values)
-        valid = (
-            finite
-            if valid_mask is None
-            else finite & np.asarray(valid_mask, dtype=bool)
-        )
+        valid = finite if valid_mask_clean is None else finite & valid_mask_clean
         if np.sum(valid) < 2:
             raise ValueError(
                 "At least two valid samples are required for interpolation."
@@ -739,9 +754,7 @@ def _interpolate_invalid_samples(
     if values.ndim == 2:
         finite_rows = np.isfinite(values).all(axis=1)
         valid_rows = (
-            finite_rows
-            if valid_mask is None
-            else finite_rows & np.asarray(valid_mask, dtype=bool)
+            finite_rows if valid_mask_clean is None else finite_rows & valid_mask_clean
         )
         if np.sum(valid_rows) < 2:
             raise ValueError(

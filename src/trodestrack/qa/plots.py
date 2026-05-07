@@ -39,6 +39,29 @@ def _validate_time_axis(
     return arr
 
 
+def validate_bool_mask_dtype(
+    mask: NDArray[np.generic],
+    name: str = "valid_mask",
+) -> NDArray[np.bool_]:
+    """Coerce ``mask`` to bool only after confirming it is bool-or-0/1.
+
+    A bare ``np.asarray(mask).astype(bool)`` silently turns ``NaN`` and any
+    nonzero integer (e.g. ``2``, ``-1``) into ``True``, so a corrupted
+    mask passes through every downstream "treat True as valid" branch.
+    Reject anything that isn't strictly ``np.bool_`` or an integer mask
+    whose values lie in ``{0, 1}``.
+    """
+
+    arr = np.asarray(mask)
+    if arr.dtype != np.bool_ and not (
+        np.issubdtype(arr.dtype, np.integer) and np.all(np.isin(arr, (0, 1)))
+    ):
+        raise ValueError(
+            f"{name} must be boolean or 0/1 integer; got dtype {arr.dtype!r}."
+        )
+    return arr.astype(bool)
+
+
 def _validate_optional_bool_mask(
     mask: NDArray[np.bool_] | None,
     expected_len: int,
@@ -51,13 +74,7 @@ def _validate_optional_bool_mask(
     arr = np.asarray(mask)
     if arr.shape != (expected_len,):
         raise ValueError(f"{name} must have shape ({expected_len},); got {arr.shape}.")
-    if arr.dtype != np.bool_ and not (
-        np.issubdtype(arr.dtype, np.integer) and np.all(np.isin(arr, (0, 1)))
-    ):
-        raise ValueError(
-            f"{name} must be boolean or 0/1 integer; got dtype {arr.dtype!r}."
-        )
-    return arr.astype(bool)
+    return validate_bool_mask_dtype(arr, name=name)
 
 
 def plot_residuals(
@@ -384,15 +401,27 @@ def plot_heading_error(
         PRD requirement: heading error ≤ 7.0 degrees
         Angle wrapping ensures errors are in [-π, π] range.
     """
-    if headings_true.shape != headings_est.shape:
+    # Mirror the validation contract used by ``plot_position_error`` /
+    # ``plot_velocity_error`` so bad inputs raise a clear ValueError
+    # instead of a raw matplotlib "x and y must have same first
+    # dimension" or NumPy "too many indices" deeper in the call.
+    t = _validate_time_axis(t, name="t")
+    ht = np.asarray(headings_true)
+    he = np.asarray(headings_est)
+    if ht.shape != he.shape:
+        raise ValueError(f"Shape mismatch: true {ht.shape} vs est {he.shape}")
+    if ht.ndim != 1:
         raise ValueError(
-            f"Shape mismatch: true {headings_true.shape} vs est {headings_est.shape}"
+            f"headings_true / headings_est must be 1-D (N,); got shape {ht.shape}."
         )
+    if ht.shape[0] != t.shape[0]:
+        raise ValueError(f"Shape mismatch: headings {ht.shape} vs time {t.shape}.")
+    valid_mask = _validate_optional_bool_mask(valid_mask, t.shape[0])
 
     apply_tufte_style()
 
     # Compute wrapped heading error (in [-π, π])
-    errors = headings_true - headings_est
+    errors = ht - he
     errors_wrapped = np.arctan2(np.sin(errors), np.cos(errors))
     errors_deg = np.rad2deg(np.abs(errors_wrapped))
 
@@ -803,7 +832,12 @@ def plot_heading_consistency_from_leds(
     m = np.asarray(filtered_means)
     led1 = np.asarray(Z_cam_led1)
     led2 = np.asarray(Z_cam_led2)
-    cam_mask = np.asarray(mask_cam).astype(bool)
+    # Reject NaN / non-{0,1} integer masks before they coerce silently
+    # into "valid" (``np.asarray([1, 0, 2, NaN]).astype(bool)`` is
+    # ``[True, False, True, True]`` — the 2 and the NaN both become
+    # True). The simulator and CLI emit clean bool masks; this gate
+    # protects loaded / saved masks from third-party tools.
+    cam_mask = validate_bool_mask_dtype(np.asarray(mask_cam), name="mask_cam")
 
     # Heading indices and vectors
     h_idx = get_heading_index(layout)
