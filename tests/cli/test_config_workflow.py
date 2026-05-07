@@ -114,6 +114,71 @@ def test_online_config_writes_filter_outputs(tmp_path: Path) -> None:
     assert not (output_dir / "smoothed_means.txt").exists()
 
 
+def _write_orientation_config(tmp_path: Path, *, command: str) -> tuple[Path, Path]:
+    input_dir = tmp_path / f"input_orientation_{command}"
+    output_dir = tmp_path / f"out_orientation_{command}"
+    input_dir.mkdir()
+    t_imu = np.linspace(0.0, 0.5, 51)
+    t_cam = np.linspace(0.0, 0.5, 16)
+    center = np.column_stack([0.02 * t_cam, np.zeros_like(t_cam)])
+    led1 = center - np.array([0.02, 0.0])
+    led2 = center + np.array([0.02, 0.0])
+    U_imu = np.zeros((len(t_imu), 6))
+    U_imu[:, 5] = 9.81
+    np.savetxt(input_dir / "t_imu.txt", t_imu)
+    np.savetxt(input_dir / "U_imu.txt", U_imu)
+    np.savetxt(input_dir / "t_cam.txt", t_cam)
+    np.savetxt(input_dir / "led1.txt", led1)
+    np.savetxt(input_dir / "led2.txt", led2)
+    np.savetxt(input_dir / "mask.txt", np.ones(len(t_cam)), fmt="%d")
+    config_path = tmp_path / f"orientation_{command}.yaml"
+    config_path.write_text(
+        f"""
+inputs:
+  format: prepared_arrays
+  imu_timestamps: {input_dir.name}/t_imu.txt
+  imu_measurements: {input_dir.name}/U_imu.txt
+  camera_timestamps: {input_dir.name}/t_cam.txt
+  led1_positions: {input_dir.name}/led1.txt
+  led2_positions: {input_dir.name}/led2.txt
+  camera_mask: {input_dir.name}/mask.txt
+filter:
+  state_mode: 2d_cam_6dof_imu_orientation
+  enable_experimental_accel_translation: false
+outputs:
+  output_dir: {output_dir.name}
+  run_safety_checks: true
+""".lstrip()
+    )
+    return config_path, output_dir
+
+
+def test_online_config_runs_orientation_fused_mode(tmp_path: Path) -> None:
+    """``online --config`` should wire 6-channel IMU into the orientation EKF."""
+
+    config_path, output_dir = _write_orientation_config(tmp_path, command="online")
+
+    with patch("sys.argv", ["trodestrack", "online", "--config", str(config_path)]):
+        main()
+
+    filtered = np.loadtxt(output_dir / "filtered_means.txt")
+    assert filtered.shape == (16, 14)
+
+
+def test_smooth_config_runs_orientation_fused_mode(tmp_path: Path) -> None:
+    """``smooth --config`` should run the orientation layout through RTS."""
+
+    config_path, output_dir = _write_orientation_config(tmp_path, command="smooth")
+
+    with patch("sys.argv", ["trodestrack", "smooth", "--config", str(config_path)]):
+        main()
+
+    filtered = np.loadtxt(output_dir / "filtered_means.txt")
+    smoothed = np.loadtxt(output_dir / "smoothed_means.txt")
+    assert filtered.shape == (16, 14)
+    assert smoothed.shape == (16, 14)
+
+
 def test_config_output_dir_flag_overrides_yaml(tmp_path: Path) -> None:
     """``--output-dir`` should override the YAML ``outputs.output_dir``."""
 

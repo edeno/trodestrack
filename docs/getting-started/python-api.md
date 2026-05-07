@@ -190,7 +190,7 @@ result = extended_kalman_filter(
 write_session_diagnostics(session, session_config.outputs.output_dir)
 ```
 
-`SessionConfig` supports `inputs.format: prepared_arrays` for existing text-array workflows and `inputs.format: spikegadgets_trodes` for SpikeGadgets IMU parquet plus Trodes dual-LED parquet. Real-data configs can remove sample-and-hold IMU repeats, convert raw SpikeGadgets integers to SI units, apply axis/sign maps and time offsets, run IMU calibration diagnostics, and pre-correct persistent LED swaps with:
+`SessionConfig` supports `inputs.format: prepared_arrays` for existing text-array workflows and `inputs.format: spikegadgets_trodes` for SpikeGadgets IMU parquet plus Trodes dual-LED parquet. Real-data configs can remove sample-and-hold IMU repeats, convert raw SpikeGadgets integers to SI units, apply axis/sign maps and time offsets, run IMU calibration diagnostics, expose the 6-DOF orientation fused mode, and pre-correct persistent LED swaps with:
 
 ```yaml
 led_identity:
@@ -198,6 +198,17 @@ led_identity:
 ```
 
 The CLI wrappers (`trodestrack online --config session.yaml` and `trodestrack smooth --config session.yaml`) also run the real-data safety check by default for IMU-fused SpikeGadgets/Trodes sessions. That check runs an extra vision-only EKF over the same session to compare trajectory envelope, speed, and log-likelihood, so expect roughly a second filter pass of runtime.
+
+For tilted headstages, start with:
+
+```yaml
+filter:
+  state_mode: 2d_cam_6dof_imu_orientation
+  enable_experimental_accel_translation: false
+  use_gravity_orientation_update: true
+```
+
+Enable accelerometer-driven translation only after that fused configuration passes the real-data safety check.
 
 For config-driven `state_mode: vision_only`, Mahalanobis gating defaults off unless you explicitly set `filter.use_mahalanobis_gating: true`. This avoids rejecting large but valid camera motion in camera-only real-data runs.
 

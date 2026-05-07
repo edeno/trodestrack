@@ -68,7 +68,10 @@ inputs:
 camera:
   meters_per_pixel: 0.0022
 filter:
-  state_mode: 2d_cam_3d_imu
+  state_mode: 2d_cam_6dof_imu_orientation
+  enable_experimental_accel_translation: false
+  use_gravity_orientation_update: true
+  use_mahalanobis_gating: false
 outputs:
   output_dir: runs/session_001
 led_identity:
@@ -82,7 +85,7 @@ uv run trodestrack online --config session.yaml
 uv run trodestrack smooth --config session.yaml
 ```
 
-Config-driven real-data runs write `session_diagnostics.json` plus IMU calibration reports when available. IMU-fused real-data runs also compute a vision-only safety baseline by default, so they may take about twice as long as a single filter pass. Use `filter.state_mode: vision_only` when calibration diagnostics fail or you want camera-only output.
+Config-driven real-data runs write `session_diagnostics.json` plus IMU calibration reports when available. IMU-fused real-data runs also compute a vision-only safety baseline by default, so they may take about twice as long as a single filter pass. For tilted headstages, prefer `2d_cam_6dof_imu_orientation` with `enable_experimental_accel_translation: false` until accelerometer-driven translation has passed the safety check; use `filter.state_mode: vision_only` only as a baseline or fallback.
 
 See `examples/session_spikegadgets_trodes.yaml` for a template with the common real-data options included.
 

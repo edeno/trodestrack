@@ -154,7 +154,16 @@ def write_config_metadata(
         f.write(
             f"  IMU accel noise density: {run.ekf_config.imu_accel_noise_density}\n"
         )
+        f.write(f"  IMU gravity body: {run.ekf_config.imu_gravity_body}\n")
         f.write(f"  Damping coefficient: {run.ekf_config.damping_coeff}\n")
+        f.write(
+            "  Experimental accel translation: "
+            f"{run.ekf_config.enable_experimental_accel_translation}\n"
+        )
+        f.write(
+            "  Gravity orientation update: "
+            f"{run.ekf_config.use_gravity_orientation_update}\n"
+        )
         f.write(
             f"  Use heading measurement: {run.ekf_config.use_heading_measurement}\n"
         )

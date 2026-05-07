@@ -107,7 +107,7 @@ producing lower-variance trajectories than forward filtering alone.
         "--imu-measurements",
         type=Path,
         required=False,
-        help="Path to IMU measurements file. Channel count depends on --state-mode: (N_imu, 3) [ω_z, f_x, f_y] for 2d_full / vision_only and the default 2d_cam_3d_imu (degenerate, vz idle); (N_imu, 4) [ω_z, f_x, f_y, f_z] for 2d_cam_3d_imu with 3D velocity. Units: rad/s and m/s². Quaternion-orientation layouts (6-channel) are not exposed by this CLI; use the Python API.",
+        help="Path to IMU measurements file. Channel count depends on --state-mode: (N_imu, 3) [ω_z, f_x, f_y] for 2d_full / vision_only and the default 2d_cam_3d_imu (degenerate, vz idle); (N_imu, 4) [ω_z, f_x, f_y, f_z] for 2d_cam_3d_imu with 3D velocity; (N_imu, 6) [ω_x, ω_y, ω_z, f_x, f_y, f_z] for 2d_cam_6dof_imu_orientation. Units: rad/s and m/s².",
         metavar="FILE",
     )
     input_group.add_argument(
@@ -220,16 +220,19 @@ producing lower-variance trajectories than forward filtering alone.
         "--state-mode",
         type=str,
         default=None,
-        choices=("2d_full", "vision_only", "2d_cam_3d_imu"),
+        choices=(
+            "2d_full",
+            "vision_only",
+            "2d_cam_3d_imu",
+            "2d_cam_6dof_imu_orientation",
+        ),
         help=(
             f"State layout (default: {_FILTER_DEFAULTS.state_mode}). "
-            "Quaternion-orientation layouts are not exposed by this CLI yet "
-            "— `2d_cam_6dof_imu_orientation` is a 2D-camera + 6-channel-IMU "
-            "layout supported by `extended_kalman_filter` but requires a "
-            "6-channel IMU input the CLI does not yet wire up; "
+            "`2d_cam_6dof_imu_orientation` requires a 6-channel IMU input "
+            "[gyro_x, gyro_y, gyro_z, accel_x, accel_y, accel_z]; "
             "`3d_cam_6dof_imu` requires the experimental "
             "`extended_kalman_filter_3d` entry point. Use the Python API "
-            "for either."
+            "for that 3D-camera mode."
         ),
     )
 
@@ -294,16 +297,18 @@ def run_smooth(args: argparse.Namespace) -> None:
     n_imu = len(t_imu)
     n_cam = len(t_cam)
 
-    # Validate IMU data shape. The CLI exposes 2D / vision-only / 2d_cam_3d_imu
-    # layouts only, so 3 or 4 channels. Layout-specific compatibility (e.g.
-    # 4-channel only valid for 2d_cam_3d_imu) is enforced by the filter's
-    # validate_imu_input_shape downstream.
-    if U_imu.ndim != 2 or U_imu.shape[0] != n_imu or U_imu.shape[1] not in (3, 4):
+    # Validate general IMU data shape. Layout-specific compatibility (e.g.
+    # 4-channel only valid for 2d_cam_3d_imu, 6-channel only valid for
+    # quaternion orientation) is enforced by validate_imu_input_shape
+    # downstream.
+    if U_imu.ndim != 2 or U_imu.shape[0] != n_imu or U_imu.shape[1] not in (3, 4, 6):
         print(
             f"Error: IMU measurements shape {U_imu.shape} must be "
-            f"(n_imu={n_imu}, 3 | 4). Use 3 channels [ω_z, f_x, f_y] for "
-            "any --state-mode, or 4 channels [ω_z, f_x, f_y, f_z] only "
-            "with --state-mode 2d_cam_3d_imu.",
+            f"(n_imu={n_imu}, 3 | 4 | 6). Use 3 channels [ω_z, f_x, f_y], "
+            "4 channels [ω_z, f_x, f_y, f_z] with --state-mode "
+            "2d_cam_3d_imu, or 6 channels "
+            "[ω_x, ω_y, ω_z, f_x, f_y, f_z] with --state-mode "
+            "2d_cam_6dof_imu_orientation.",
             file=sys.stderr,
         )
         sys.exit(1)

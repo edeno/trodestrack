@@ -36,6 +36,7 @@ class PreparedSession:
     led_distance: float | None
     diagnostics: dict[str, object]
     config: SessionConfig
+    gyro_z_for_led_identity: np.ndarray | None = None
 
     @property
     def source_format(self) -> str:
@@ -66,7 +67,9 @@ def load_session(config: SessionConfig) -> PreparedSession:
         session = _load_spikegadgets_trodes(config)
 
     if config.led_identity.mode == "auto":
-        gyro_z = session.U_imu[:, 0] if session.U_imu.shape[1] >= 3 else None
+        gyro_z = session.gyro_z_for_led_identity
+        if gyro_z is None and session.U_imu.ndim == 2 and session.U_imu.shape[1] >= 3:
+            gyro_z = session.U_imu[:, 0]
         corrected = resolve_led_identity(
             session.t_cam,
             session.Z_cam_led1,
@@ -91,6 +94,7 @@ def load_session(config: SessionConfig) -> PreparedSession:
             led_distance=session.led_distance,
             diagnostics=diagnostics,
             config=config,
+            gyro_z_for_led_identity=session.gyro_z_for_led_identity,
         )
     return session
 
@@ -229,9 +233,10 @@ def _load_prepared_arrays(config: SessionConfig) -> PreparedSession:
     led_distance = config.filter.led_distance or _median_led_distance(led1, led2, mask)
     _validate_time_vector(t_imu, "IMU timestamps")
     _validate_time_vector(t_cam, "camera timestamps")
+    U_arr = np.asarray(U_imu, dtype=float)
     return PreparedSession(
         t_imu=np.asarray(t_imu, dtype=float),
-        U_imu=np.asarray(U_imu, dtype=float),
+        U_imu=U_arr,
         t_cam=np.asarray(t_cam, dtype=float),
         Z_cam_led1=np.asarray(led1, dtype=float),
         Z_cam_led2=np.asarray(led2, dtype=float),
@@ -240,6 +245,7 @@ def _load_prepared_arrays(config: SessionConfig) -> PreparedSession:
         led_distance=led_distance,
         diagnostics={"loader": {"format": "prepared_arrays"}},
         config=config,
+        gyro_z_for_led_identity=_gyro_z_for_led_identity(U_arr),
     )
 
 
@@ -315,6 +321,7 @@ def _load_spikegadgets_trodes(config: SessionConfig) -> PreparedSession:
         led_distance=led_distance,
         diagnostics=diagnostics,
         config=config,
+        gyro_z_for_led_identity=U_full[:, 2],
     )
 
 
@@ -397,14 +404,32 @@ def _project_imu_for_filter(U_full: np.ndarray, state_mode: str) -> np.ndarray:
     if state_mode == "vision_only":
         return np.zeros((U_full.shape[0], 3))
     if U_full.shape[1] == 3:
+        if state_mode == "2d_cam_6dof_imu_orientation":
+            raise ValueError(
+                "state_mode='2d_cam_6dof_imu_orientation' requires 6-channel "
+                "IMU input [gyro_x, gyro_y, gyro_z, accel_x, accel_y, accel_z]; "
+                "set imu.mode: 3d or provide prepared 6-channel arrays."
+            )
         if state_mode == "2d_cam_3d_imu":
             return U_full
         return U_full
     if U_full.shape[1] != 6:
         raise ValueError(f"Unsupported IMU shape {U_full.shape}.")
+    if state_mode == "2d_cam_6dof_imu_orientation":
+        return U_full
     if state_mode == "2d_cam_3d_imu":
         return U_full[:, [2, 3, 4, 5]]
     return U_full[:, [2, 3, 4]]
+
+
+def _gyro_z_for_led_identity(U_imu: np.ndarray) -> np.ndarray | None:
+    if U_imu.ndim != 2:
+        return None
+    if U_imu.shape[1] == 6:
+        return U_imu[:, 2]
+    if U_imu.shape[1] >= 3:
+        return U_imu[:, 0]
+    return None
 
 
 def _load_leds(
@@ -460,7 +485,11 @@ def _validate_calibration_for_fusion(
 
 
 def _uses_imu(state_mode: str) -> bool:
-    return state_mode in {"2d_full", "2d_cam_3d_imu"}
+    return state_mode in {
+        "2d_full",
+        "2d_cam_3d_imu",
+        "2d_cam_6dof_imu_orientation",
+    }
 
 
 def _axis_names() -> tuple[str, ...]:

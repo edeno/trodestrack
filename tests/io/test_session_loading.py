@@ -8,6 +8,7 @@ import pytest
 
 from trodestrack.config import load_session_config
 from trodestrack.io import load_session, write_session_diagnostics
+from trodestrack.io.led_identity import CorrectedLEDIdentity
 
 
 def test_load_arthur_style_parquets_removes_sample_hold_and_projects_imu(tmp_path):
@@ -64,6 +65,57 @@ outputs:
     assert session.mask_cam.tolist() == [True, True, True]
     assert session.led_distance == pytest.approx(0.04)
     assert session.diagnostics["loader"]["sample_hold_strategy"] == "gyro_z_change"
+
+
+def test_orientation_mode_keeps_six_channel_imu(tmp_path):
+    """Config-driven 6-DOF orientation mode should receive full IMU samples."""
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    imu_path = data_dir / "imu.parquet"
+    position_path = data_dir / "position.parquet"
+    pd.DataFrame(
+        {
+            "time": [100.0, 100.005, 100.010, 100.015, 100.020],
+            "Headstage_GyroX": [1, 1, 2, 2, 3],
+            "Headstage_GyroY": [4, 4, 5, 5, 6],
+            "Headstage_GyroZ": [0, 0, 10, 10, 20],
+            "Headstage_AccelX": [100, 100, 110, 110, 120],
+            "Headstage_AccelY": [200, 200, 210, 210, 220],
+            "Headstage_AccelZ": [300, 300, 310, 310, 320],
+        }
+    ).to_parquet(imu_path)
+    pd.DataFrame(
+        {
+            "time": [100.0, 100.033, 100.066],
+            "xloc": [10.0, 11.0, 12.0],
+            "yloc": [20.0, 20.0, 20.0],
+            "xloc2": [14.0, 15.0, 16.0],
+            "yloc2": [20.0, 20.0, 20.0],
+        }
+    ).to_parquet(position_path)
+    config_path = tmp_path / "session.yaml"
+    config_path.write_text(
+        """
+inputs:
+  format: spikegadgets_trodes
+  imu_file: data/imu.parquet
+  position_file: data/position.parquet
+imu:
+  run_calibration: false
+camera:
+  meters_per_pixel: 0.01
+filter:
+  state_mode: 2d_cam_6dof_imu_orientation
+outputs:
+  run_safety_checks: false
+""".lstrip()
+    )
+
+    session = load_session(load_session_config(config_path))
+
+    assert session.U_imu.shape == (3, 6)
+    np.testing.assert_allclose(session.gyro_z_for_led_identity, session.U_imu[:, 2])
 
 
 def test_prepared_arrays_session_loads_and_writes_diagnostics(tmp_path):
@@ -138,3 +190,143 @@ imu:
 
     with pytest.raises(ValueError, match="yloc2"):
         load_session(load_session_config(config_path))
+
+
+def test_vision_only_led_identity_uses_real_gyro_signal(tmp_path, monkeypatch):
+    """Gyro-weighted LED identity must not see zeroed vision-only filter inputs."""
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    imu_path = data_dir / "imu.parquet"
+    position_path = data_dir / "position.parquet"
+    pd.DataFrame(
+        {
+            "time": [100.0, 100.005, 100.010, 100.015, 100.020],
+            "Headstage_GyroX": [0, 0, 0, 0, 0],
+            "Headstage_GyroY": [0, 0, 0, 0, 0],
+            "Headstage_GyroZ": [0, 0, 10, 10, 20],
+            "Headstage_AccelX": [0, 0, 0, 0, 0],
+            "Headstage_AccelY": [0, 0, 0, 0, 0],
+            "Headstage_AccelZ": [0, 0, 0, 0, 0],
+        }
+    ).to_parquet(imu_path)
+    pd.DataFrame(
+        {
+            "time": [100.0, 100.033, 100.066],
+            "xloc": [10.0, 11.0, 12.0],
+            "yloc": [20.0, 20.0, 20.0],
+            "xloc2": [14.0, 15.0, 16.0],
+            "yloc2": [20.0, 20.0, 20.0],
+        }
+    ).to_parquet(position_path)
+    config_path = tmp_path / "session.yaml"
+    config_path.write_text(
+        """
+inputs:
+  format: spikegadgets_trodes
+  imu_file: data/imu.parquet
+  position_file: data/position.parquet
+imu:
+  run_calibration: false
+filter:
+  state_mode: vision_only
+led_identity:
+  mode: auto
+  gyro_weight: 1.0
+outputs:
+  run_safety_checks: false
+""".lstrip()
+    )
+    captured: dict[str, np.ndarray | None] = {}
+
+    def capture_resolver(
+        t_cam,
+        led1,
+        led2,
+        mask_cam,
+        *,
+        led_distance,
+        config,
+        t_imu=None,
+        gyro_z=None,
+    ):
+        captured["gyro_z"] = None if gyro_z is None else np.asarray(gyro_z).copy()
+        return CorrectedLEDIdentity(
+            led1=np.asarray(led1),
+            led2=np.asarray(led2),
+            swapped=np.zeros_like(t_cam, dtype=bool),
+            diagnostics={"mode": "auto", "n_swapped": 0},
+        )
+
+    monkeypatch.setattr("trodestrack.io.session.resolve_led_identity", capture_resolver)
+
+    session = load_session(load_session_config(config_path))
+
+    assert np.all(session.U_imu == 0.0)
+    assert captured["gyro_z"] is not None
+    np.testing.assert_allclose(
+        captured["gyro_z"],
+        np.array([0.0, 10.0, 20.0]) * 0.061 * np.pi / 180.0,
+    )
+
+
+def test_prepared_six_channel_led_identity_uses_yaw_gyro(tmp_path, monkeypatch):
+    """Prepared 6-channel arrays store yaw gyro in column 2."""
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    np.savetxt(input_dir / "t_imu.txt", [0.0, 0.01, 0.02])
+    np.savetxt(
+        input_dir / "U_imu.txt",
+        [
+            [100.0, 200.0, 1.0, 0.0, 0.0, 9.81],
+            [101.0, 201.0, 2.0, 0.0, 0.0, 9.81],
+            [102.0, 202.0, 3.0, 0.0, 0.0, 9.81],
+        ],
+    )
+    np.savetxt(input_dir / "t_cam.txt", [0.0, 0.033])
+    np.savetxt(input_dir / "led1.txt", [[0.0, 0.0], [0.01, 0.0]])
+    np.savetxt(input_dir / "led2.txt", [[0.04, 0.0], [0.05, 0.0]])
+    config_path = tmp_path / "session.yaml"
+    config_path.write_text(
+        """
+inputs:
+  format: prepared_arrays
+  imu_timestamps: input/t_imu.txt
+  imu_measurements: input/U_imu.txt
+  camera_timestamps: input/t_cam.txt
+  led1_positions: input/led1.txt
+  led2_positions: input/led2.txt
+filter:
+  state_mode: 2d_cam_6dof_imu_orientation
+led_identity:
+  mode: auto
+  gyro_weight: 1.0
+""".lstrip()
+    )
+    captured: dict[str, np.ndarray | None] = {}
+
+    def capture_resolver(
+        t_cam,
+        led1,
+        led2,
+        mask_cam,
+        *,
+        led_distance,
+        config,
+        t_imu=None,
+        gyro_z=None,
+    ):
+        captured["gyro_z"] = None if gyro_z is None else np.asarray(gyro_z).copy()
+        return CorrectedLEDIdentity(
+            led1=np.asarray(led1),
+            led2=np.asarray(led2),
+            swapped=np.zeros_like(t_cam, dtype=bool),
+            diagnostics={"mode": "auto", "n_swapped": 0},
+        )
+
+    monkeypatch.setattr("trodestrack.io.session.resolve_led_identity", capture_resolver)
+
+    load_session(load_session_config(config_path))
+
+    np.testing.assert_allclose(captured["gyro_z"], [1.0, 2.0, 3.0])

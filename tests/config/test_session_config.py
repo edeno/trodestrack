@@ -101,3 +101,33 @@ def test_vision_only_config_respects_explicit_mahalanobis_gating():
     )
 
     assert config.filter.to_ekf_kwargs()["use_mahalanobis_gating"] is True
+
+
+def test_orientation_fused_config_passes_ekf_kwargs():
+    """YAML configs should expose the 6-DOF orientation fused path."""
+
+    config = SessionConfig.model_validate(
+        {
+            "inputs": {
+                "format": "prepared_arrays",
+                "imu_timestamps": "t_imu.txt",
+                "imu_measurements": "U_imu.txt",
+                "camera_timestamps": "t_cam.txt",
+                "led1_positions": "led1.txt",
+            },
+            "filter": {
+                "state_mode": "2d_cam_6dof_imu_orientation",
+                "imu_gravity_body": [0.0, 0.0, 9.80665],
+                "enable_experimental_accel_translation": False,
+                "use_gravity_orientation_update": True,
+                "gravity_orientation_measurement_noise": 0.0025,
+            },
+        }
+    )
+
+    kwargs = config.filter.to_ekf_kwargs()
+    assert kwargs["state_mode"] == "2d_cam_6dof_imu_orientation"
+    assert kwargs["imu_gravity_body"] == (0.0, 0.0, 9.80665)
+    assert kwargs["enable_experimental_accel_translation"] is False
+    assert kwargs["use_gravity_orientation_update"] is True
+    assert kwargs["gravity_orientation_measurement_noise"] == 0.0025

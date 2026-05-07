@@ -115,7 +115,12 @@ class FilterConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    state_mode: Literal["vision_only", "2d_full", "2d_cam_3d_imu"] = "2d_cam_3d_imu"
+    state_mode: Literal[
+        "vision_only",
+        "2d_full",
+        "2d_cam_3d_imu",
+        "2d_cam_6dof_imu_orientation",
+    ] = "2d_cam_3d_imu"
     led_distance: float | None = None
     use_heading_measurement: bool | None = None
     process_noise_pos: float | None = None
@@ -127,8 +132,14 @@ class FilterConfig(BaseModel):
     measurement_noise_heading: float | None = None
     imu_gyro_noise_density: float | None = None
     imu_accel_noise_density: float | None = None
+    imu_gravity_body: tuple[float, float, float] | None = None
     damping_coeff: float | None = None
     use_mahalanobis_gating: bool | None = None
+    enable_experimental_accel_translation: bool | None = None
+    use_gravity_orientation_update: bool | None = None
+    gravity_orientation_measurement_noise: float | None = None
+    gravity_accel_magnitude_tolerance_m_s2: float | None = None
+    gravity_gyro_norm_threshold_rad_s: float | None = None
     enable_zupt: bool | None = None
 
     def to_ekf_kwargs(self, *, led_distance: float | None = None) -> dict[str, object]:

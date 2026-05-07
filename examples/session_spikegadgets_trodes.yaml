@@ -21,14 +21,20 @@ camera:
 
 imu:
   sample_hold_strategy: gyro_z_change
+  # Full-session calibration finds a small residual yaw lag on the bundled
+  # Arthur slice; leave at 0.0 for new sessions until diagnostics justify it.
+  time_offset_s: 0.01
   mode: 3d
   run_calibration: true
   require_calibration_for_fusion: true
 
 filter:
-  # Start with vision_only if IMU calibration fails; use 2d_cam_3d_imu only
-  # after the IMU calibration report and safety check pass.
-  state_mode: vision_only
+  # Conservative real-data fused mode: use the 6-DOF IMU for orientation while
+  # keeping accelerometer-driven translation disabled unless validated.
+  state_mode: 2d_cam_6dof_imu_orientation
+  enable_experimental_accel_translation: false
+  use_gravity_orientation_update: true
+  use_mahalanobis_gating: false
 
 led_identity:
   mode: auto
