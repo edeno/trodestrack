@@ -13,6 +13,7 @@ import numpy as np
 from jax import Array
 from matplotlib.axes import Axes
 from matplotlib.collections import LineCollection
+from matplotlib.colors import to_rgb
 from matplotlib.lines import Line2D
 from matplotlib.patches import Circle, FancyArrowPatch
 from matplotlib.text import Text
@@ -377,6 +378,11 @@ class TrailArtist:
         self.trail_frames = int(trail_length_s * fps)
         self.positions: deque[list[float]] = deque(maxlen=self.trail_frames)
         self.color = color
+        # Resolve once so update() can build per-segment RGBA arrays
+        # without re-parsing the spec on every frame; ignoring this
+        # previously hard-coded the fade gradient to blue regardless
+        # of the requested ``color``.
+        self._color_rgb = to_rgb(color)
 
         # LineCollection for efficient multi-segment rendering
         self.lines = LineCollection([], linewidths=1.5, colors=color, zorder=4)
@@ -406,10 +412,11 @@ class TrailArtist:
                 for i in range(len(self.positions) - 1)
             ]
 
-            # Fade alpha from 0 (oldest) to 0.6 (newest) using RGBA per segment
-            # COLORS["blue"] = "#2166AC" → RGB (0.133, 0.4, 0.675)
+            # Fade alpha from 0 (oldest) to 0.6 (newest) using RGBA per
+            # segment built from the configured trail color.
+            r, g, b = self._color_rgb
             alphas = np.linspace(0.0, 0.6, len(segments))
-            colors = [(0.133, 0.4, 0.675, a) for a in alphas]
+            colors = [(r, g, b, a) for a in alphas]
 
             self.lines.set_segments(segments)
             self.lines.set_colors(colors)
@@ -1102,14 +1109,30 @@ class FilterArtist:
             self.uncertainty_ellipse.height = 0.0
             return [self.pred_marker, self.uncertainty_ellipse]
 
-        # Update marker position
-        self.pred_marker.set_data([x_pred], [y_pred])
-
         # Compute covariance ellipse (95% confidence for 2D: χ²(2, 0.05) = 5.991)
         P_pos = P_np
         eigenvalues, eigenvectors = np.linalg.eigh(P_pos)
 
-        # Ensure eigenvalues are positive (numerical stability)
+        # A valid position covariance is symmetric positive
+        # semidefinite, so any negative eigenvalue (beyond a tiny
+        # numerical floor) means the filter has produced a non-PSD
+        # covariance. Silently clipping it to zero used to render a
+        # degenerate ellipse on top of the marker, masking the
+        # divergence. Treat it the same as a non-finite covariance:
+        # clear the overlay so the failure is visible.
+        psd_floor = -1e-9 * max(np.max(np.abs(eigenvalues)), 1.0)
+        if np.any(eigenvalues < psd_floor):
+            self.pred_marker.set_data([], [])
+            self.uncertainty_ellipse.width = 0.0
+            self.uncertainty_ellipse.height = 0.0
+            return [self.pred_marker, self.uncertainty_ellipse]
+
+        # Update marker position
+        self.pred_marker.set_data([x_pred], [y_pred])
+
+        # Clamp tiny negative eigenvalues from floating-point roundoff
+        # before sqrt; the PSD check above already rejected real
+        # negatives.
         eigenvalues = np.clip(eigenvalues, 0.0, None)
 
         # Orientation angle from first eigenvector
