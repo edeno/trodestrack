@@ -10,7 +10,7 @@ trodestrack combines video tracking (Trodes LEDs and/or DeepLabCut keypoints) wi
 - **3D IMU Support**: Full 6-axis IMU processing (3-axis gyro + 3-axis accel) with gravity compensation
 - **Online & Offline Processing**: Forward-only EKF and RTS smoothing — both run as batch operations over complete input arrays. The `trodestrack online` CLI is forward-only ("no future-frame dependence"), not a streaming / real-time ingest loop.
 - **Robust Handling**: Occlusions, reflections, and camera/sensor dropout. Transient LED swaps are mitigated by Mahalanobis gating on dual-LED measurements; persistent LED swaps are *not* automatically detected (tracked by the `test_filter_stable_under_frequent_swaps` xfail in [tests/filters/test_robustness.py](tests/filters/test_robustness.py)) and require pre-filter LED-identity correction.
-- **JAX-Accelerated**: High-performance JIT-compiled JAX implementation. The throughput-floor benchmarks (≥10× realtime offline on CPU, ≤33 ms amortized mean per frame online on a 30-minute session) live in [tests/benchmark/test_throughput.py](tests/benchmark/test_throughput.py) and are not run on every PR — invoke them locally with `uv run pytest -m benchmark`. Reference run on an M-series Mac CPU under the corrected (block-until-ready) timing: ~38× realtime / ~0.41 ms per frame; absolute throughput is hardware-dependent.
+- **JAX-Accelerated**: High-performance JIT-compiled JAX implementation. The throughput-floor benchmarks (≥10× realtime offline on CPU, ≤33 ms amortized mean per frame online on a 30-minute session) live in [tests/benchmark/test_throughput.py](tests/benchmark/test_throughput.py) and are not run on every PR — invoke them locally with `JAX_PLATFORMS=cpu uv run pytest -m benchmark` (the CPU pin is required; the benchmark errors on accelerator backends to keep the documented floors meaningful). Reference run on an M-series Mac CPU under the corrected (block-until-ready) timing: ~38× realtime / ~0.41 ms per frame; absolute throughput is hardware-dependent.
 - **Rich Simulation**: Comprehensive synthetic data generation for testing and validation
 - **Diagnostic Visualization**: Publication-quality video output for quality control
 
@@ -322,7 +322,7 @@ See [`examples/README.md`](examples/README.md) for the complete learning path. E
   - JIT-compiled UKF (mirrors EKF pattern)
   - Vectorized operations (sigma points, bias freeze)
   - Host-side preprocessing for efficiency
-  - On the 30-minute throughput benchmark, reference run on an M-series Mac CPU under the corrected (block-until-ready) timing: ~38× realtime / ~0.41 ms per frame. Floor checks (≥10× realtime offline, ≤33 ms amortized mean per frame online) live in [tests/benchmark/test_throughput.py](tests/benchmark/test_throughput.py); run them locally with `uv run pytest -m benchmark`
+  - On the 30-minute throughput benchmark, reference run on an M-series Mac CPU under the corrected (block-until-ready) timing: ~38× realtime / ~0.41 ms per frame. Floor checks (≥10× realtime offline, ≤33 ms amortized mean per frame online) live in [tests/benchmark/test_throughput.py](tests/benchmark/test_throughput.py); run them locally with `JAX_PLATFORMS=cpu uv run pytest -m benchmark` (the CPU pin is required to satisfy the in-test backend assertion).
 
 ### In Progress 🚧
 

@@ -59,6 +59,33 @@ def prepare_video_data(
     - Heading: unwrap → interp → rewrap
     - Camera events (dropouts, swaps): nearest-neighbor
     """
+    # Validate fps / speedup at the public boundary. Direct callers
+    # (``create_diagnostic_video`` already gates these, but
+    # ``prepare_video_data`` is exported and used independently) would
+    # otherwise hit ``ZeroDivisionError`` from ``speedup / fps`` for
+    # ``fps=0`` and a raw ``TypeError`` for string inputs from the same
+    # division. Mirror the gate in ``create_diagnostic_video`` so direct
+    # use raises a clear ``ValueError`` instead.
+    if isinstance(fps, bool) or not isinstance(fps, int | float):
+        raise ValueError(
+            f"fps must be a finite strictly-positive frame rate; got "
+            f"{fps!r} (type {type(fps).__name__})."
+        )
+    if isinstance(speedup, bool) or not isinstance(speedup, int | float):
+        raise ValueError(
+            f"speedup must be a finite strictly-positive playback "
+            f"multiplier; got {speedup!r} (type {type(speedup).__name__})."
+        )
+    if not np.isfinite(fps) or fps <= 0:
+        raise ValueError(
+            f"fps must be a finite strictly-positive frame rate; got {fps!r}."
+        )
+    if not np.isfinite(speedup) or speedup <= 0:
+        raise ValueError(
+            f"speedup must be a finite strictly-positive playback "
+            f"multiplier; got {speedup!r}."
+        )
+
     # Determine video timeline using arange (not linspace) to avoid off-by-one
     # linspace includes endpoint, giving n_frames-1 intervals → wrong fps
     t_start = 0.0

@@ -482,6 +482,38 @@ class RatIMUSimConfig:
                 f"Example: led_swap_rate=0.5 (0.5 swaps per second)"
             )
 
+        # Mode-specific LED swap parameter mismatch. The runtime branches
+        # only consult ``led_swap_prob`` in per_frame mode and only
+        # ``led_swap_rate`` in persistent mode; the inactive field is
+        # silently ignored. A user who set ``led_swap_mode='persistent',
+        # led_swap_prob=1.0, led_swap_rate=0.0`` would expect heavy
+        # swapping and get zero swaps with no diagnostic. Warn when the
+        # inactive parameter has been set to a non-default value (the
+        # signal that the user deliberately set it). Defaults:
+        # ``led_swap_prob=0.0`` and ``led_swap_rate=0.5``.
+        if self.led_swap_mode == "persistent" and self.led_swap_prob > 0:
+            warnings.warn(
+                f"led_swap_prob={self.led_swap_prob} is set but "
+                f"led_swap_mode='persistent'; led_swap_prob only applies "
+                f"in 'per_frame' mode and will be ignored. To control "
+                f"swap frequency in persistent mode set led_swap_rate "
+                f"(current: {self.led_swap_rate}); to use per-frame "
+                f"swapping set led_swap_mode='per_frame'.",
+                UserWarning,
+                stacklevel=2,
+            )
+        if self.led_swap_mode == "per_frame" and self.led_swap_rate != 0.5:
+            warnings.warn(
+                f"led_swap_rate={self.led_swap_rate} is set but "
+                f"led_swap_mode='per_frame'; led_swap_rate only applies "
+                f"in 'persistent' mode and will be ignored. To control "
+                f"swap frequency in per_frame mode set led_swap_prob "
+                f"(current: {self.led_swap_prob}); to use persistent "
+                f"swapping set led_swap_mode='persistent'.",
+                UserWarning,
+                stacklevel=2,
+            )
+
         if self.led_swap_duration_mean <= 0:
             raise ValueError(
                 f"led_swap_duration_mean must be positive, got {self.led_swap_duration_mean}.\n"
@@ -570,8 +602,23 @@ class RatIMUSimConfig:
                 f"Got drag_fwd={self.drag_fwd}, drag_lat={self.drag_lat}"
             )
 
-        # Validate drag coefficients are non-negative and finite (NaN
-        # passes the bare <0 comparison and propagates through dynamics).
+        # Validate drag coefficients are real numeric scalars before
+        # running np.isfinite / ``< 0``. Strings (``"0.1"``) raise a raw
+        # ``TypeError`` from ``np.isfinite`` and lists / arrays
+        # (``[0.1]``) raise a raw ``TypeError`` from ``<``; the rest of
+        # the config gates these via ``finite_scalar_fields`` up front,
+        # but ``drag_fwd`` / ``drag_lat`` are skipped there because
+        # ``None`` is a valid sentinel until ``vel_drag`` fills it in.
+        # Bool is rejected (it would cast to 0/1 but no caller means
+        # ``True 1/s`` of drag).
+        for fname in ("drag_fwd", "drag_lat"):
+            value = getattr(self, fname)
+            if isinstance(value, bool) or not isinstance(value, int | float):
+                raise ValueError(
+                    f"{fname} must be a finite non-negative scalar drag "
+                    f"coefficient (1/s); got {value!r} "
+                    f"(type {type(value).__name__})."
+                )
         if not np.isfinite(self.drag_fwd) or not np.isfinite(self.drag_lat):
             raise ValueError(
                 "drag_fwd and drag_lat must be finite values; got "

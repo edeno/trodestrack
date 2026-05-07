@@ -130,6 +130,79 @@ def test_config_warns_swap_without_second_led() -> None:
         RatIMUSimConfig(led_swap_prob=0.1, use_second_led=False)
 
 
+def test_config_warns_when_inactive_swap_param_is_set() -> None:
+    """Mode-specific LED swap parameters must not be silently ignored.
+
+    The runtime branches only consult ``led_swap_prob`` in per_frame
+    mode and ``led_swap_rate`` in persistent mode; the inactive
+    parameter is unused. The reported probe — ``led_swap_mode=
+    'persistent', led_swap_prob=1.0, led_swap_rate=0.0`` — produced
+    zero swaps with no warning, which masks swap-heavy simulator
+    test setups that accidentally set the wrong field.
+    """
+    # Persistent mode + non-default led_swap_prob → warn.
+    with pytest.warns(UserWarning, match="led_swap_prob=1.0.*persistent"):
+        RatIMUSimConfig(
+            led_swap_mode="persistent",
+            led_swap_prob=1.0,
+            led_swap_rate=0.0,
+            use_second_led=True,
+        )
+
+    # per_frame mode + non-default led_swap_rate → warn.
+    with pytest.warns(UserWarning, match="led_swap_rate=2.0.*per_frame"):
+        RatIMUSimConfig(
+            led_swap_mode="per_frame",
+            led_swap_prob=0.05,
+            led_swap_rate=2.0,
+            use_second_led=True,
+        )
+
+
+def test_config_does_not_warn_on_default_led_swap_params() -> None:
+    """The default config (per_frame, prob=0, rate=0.5) must not warn.
+
+    ``led_swap_rate=0.5`` is the documented default and is silently
+    ignored in the default ``per_frame`` mode. Warning on the
+    default would create noise on every basic ``RatIMUSimConfig()``.
+    """
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        # Defaults: led_swap_mode='per_frame', led_swap_prob=0.0,
+        # led_swap_rate=0.5. Use minimum-viable IMU rate to skip
+        # the unrelated low-rate warning.
+        RatIMUSimConfig(fs_imu=200.0, fs_cam=30.0)
+
+
+def test_config_drag_strict_type_validation() -> None:
+    """drag_fwd / drag_lat must reject non-numeric inputs cleanly.
+
+    The probe — ``drag_fwd="0.1"`` raised a raw ``TypeError`` from
+    ``np.isfinite``, and ``drag_fwd=[0.1]`` raised a raw ``TypeError``
+    from ``< 0``. The other numeric-scalar fields go through the
+    up-front ``finite_scalar_fields`` gate; ``drag_fwd`` /
+    ``drag_lat`` skip it because ``None`` is a valid sentinel until
+    ``vel_drag`` fills it in.
+    """
+    bad_values: list[object] = ["0.1", [0.1], (0.1,), True]
+    for bad in bad_values:
+        with pytest.raises(
+            ValueError, match=r"drag_fwd must be a finite non-negative scalar"
+        ):
+            RatIMUSimConfig(drag_fwd=bad, drag_lat=0.3)  # type: ignore[arg-type]
+        with pytest.raises(
+            ValueError, match=r"drag_lat must be a finite non-negative scalar"
+        ):
+            RatIMUSimConfig(drag_fwd=0.3, drag_lat=bad)  # type: ignore[arg-type]
+
+    # Numeric drag still works.
+    cfg = RatIMUSimConfig(drag_fwd=0.4, drag_lat=1.2)
+    assert cfg.drag_fwd == 0.4
+    assert cfg.drag_lat == 1.2
+
+
 def test_make_default_config_accepts_overrides() -> None:
     """Test that make_default_config allows overrides."""
     cfg = make_default_config(duration_s=120.0, fs_imu=1000.0, use_second_led=True)
