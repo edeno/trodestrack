@@ -423,7 +423,8 @@ def test_prd_dropout_drift_5s():
 
     # Compute dropout drift using PRD helper (in meters)
     drift_result = compute_dropout_drift(
-        positions=result["pos_est"],  # Positions in meters
+        positions_est=result["pos_est"],  # Positions in meters
+        positions_true=result["pos_truth"],
         valid_mask=mask_with_dropout,
         t=sim_data["t_cam_exp"],
         min_duration_s=4.5,  # Look for >=4.5s dropouts
@@ -550,16 +551,32 @@ def test_prd_dropout_drift_5s_smoothed():
         mask_cam=mask_with_dropout,  # Enable blackout-aware Q/R scaling
     )
 
-    # Compute dropout drift for filtered and smoothed estimates
+    # Interpolate IMU-rate truth onto the camera-frame grid so the
+    # tracking-error metric (estimate vs truth) is on a shared timeline.
+    pos_truth_cam = np.column_stack(
+        [
+            np.interp(
+                sim_data["t_cam_exp"], sim_data["t_imu"], sim_data["X_truth"][:, 0]
+            ),
+            np.interp(
+                sim_data["t_cam_exp"], sim_data["t_imu"], sim_data["X_truth"][:, 1]
+            ),
+        ]
+    )
+
+    # Compute dropout drift (tracking error growth) for filtered and
+    # smoothed estimates against camera-frame truth.
     drift_result_filter = compute_dropout_drift(
-        positions=filter_result.filtered_means[:, :2],
+        positions_est=filter_result.filtered_means[:, :2],
+        positions_true=pos_truth_cam,
         valid_mask=mask_with_dropout,
         t=sim_data["t_cam_exp"],
         min_duration_s=4.5,
     )
 
     drift_result_smooth = compute_dropout_drift(
-        positions=smoother_result.smoothed_means[:, :2],
+        positions_est=smoother_result.smoothed_means[:, :2],
+        positions_true=pos_truth_cam,
         valid_mask=mask_with_dropout,
         t=sim_data["t_cam_exp"],
         min_duration_s=4.5,

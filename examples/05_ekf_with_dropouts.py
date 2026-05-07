@@ -115,9 +115,10 @@ def analyze_dropout_performance(
     # Overall RMSE
     pos_rmse_cm = compute_position_rmse(X_truth_cam[:, :2] * 100, X_est[:, :2] * 100)
 
-    # Dropout drift analysis
+    # Dropout drift analysis (tracking error growth vs camera-frame truth)
     drift_result = compute_dropout_drift(
-        positions=X_est[:, :2],
+        positions_est=X_est[:, :2],
+        positions_true=X_truth_cam[:, :2],
         valid_mask=mask_cam,
         t=t_cam,
         min_duration_s=0.1,  # Analyze gaps >= 0.1s (lower threshold for light dropouts)

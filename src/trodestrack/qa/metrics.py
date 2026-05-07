@@ -846,24 +846,33 @@ def within_envelope(
 
 
 def compute_dropout_drift(
-    positions: NDArray[np.float64],
+    positions_est: NDArray[np.float64],
+    positions_true: NDArray[np.float64],
     valid_mask: NDArray[np.bool_],
     t: NDArray[np.float64],
     min_duration_s: float = 5.0,
 ) -> dict[str, float | None]:
-    """Position drift during first contiguous dropout block.
+    """Tracking-error growth during the first qualifying dropout block.
 
-    Measures how far the filter drifts during camera occlusion, which is a
-    critical PRD requirement: drift should be ≤3.5 m after 5s dropout
-    on production hardware (consumer-grade IMU, 95th percentile bound).
-    In simulation the filter achieves ~11 cm; see ``test_ekf_long_dropout_drift``.
+    The PRD requirement is that *IMU-only tracking error* should not grow
+    beyond a bound during a camera dropout (≤3.5 m after 5 s on consumer
+    hardware). The previous implementation took only the estimate and
+    returned ``||pos_est[end] - pos_est[start]||`` — endpoint
+    *displacement* of the estimate, not tracking error. A perfect
+    estimator on a moving animal then reported nonzero "drift" purely
+    from animal motion, while a frozen-but-wrong estimator reported zero
+    "drift" even when its tracking error stayed huge. Compare estimate
+    against truth instead so the metric measures what it claims.
 
     Parameters
     ----------
-    positions : NDArray[np.float64]
-        Estimated positions (N, 2) in meters.
+    positions_est : NDArray[np.float64]
+        Filter-estimated positions (N, 2) in meters.
+    positions_true : NDArray[np.float64]
+        Ground-truth positions (N, 2) in meters, sampled on the same
+        timeline as ``positions_est`` and ``t``.
     valid_mask : NDArray[np.bool_]
-        Camera validity mask (N,), False indicates dropout.
+        Camera validity mask (N,); False indicates dropout.
     t : NDArray[np.float64]
         Timestamps (N,) in seconds.
     min_duration_s : float, default 5.0
@@ -872,50 +881,65 @@ def compute_dropout_drift(
     Returns
     -------
     dict[str, float | None]
-        Dict with keys: 'drift_m', 'duration_s', 'start_idx', 'end_idx'.
+        Dict with keys:
+
+        * ``drift_m``: tracking-error growth = ``||err(end)|| -
+          ||err(start)||`` (m). Positive when error grew during the
+          dropout; negative is possible if the dropout started in a
+          high-error state and the IMU happened to point back toward
+          truth, but typically ``≥ 0``.
+        * ``end_error_m``: tracking error at the last in-block sample
+          (``||pos_est[end_idx - 1] - pos_true[end_idx - 1]||``). PRD
+          checks usually compare this against the absolute bound.
+        * ``start_error_m``: tracking error at the first in-block
+          sample (``||pos_est[start_idx] - pos_true[start_idx]||``).
+        * ``duration_s``, ``start_idx``, ``end_idx`` (unchanged).
 
     Example:
-        >>> # Simulate 10s trajectory with 5s dropout at t=3-8s
+        >>> # 10 s trajectory; 5 s dropout from t=3-8 s. Animal moves
+        >>> # at 0.1 m/s. A *perfect* estimator should report ~0 drift,
+        >>> # despite the animal having moved 0.5 m during the dropout.
         >>> t = np.linspace(0, 10, 100)
-        >>> positions = np.column_stack(
-        ...     [t * 0.1, np.zeros_like(t)]
-        ... )  # Moving at 0.1 m/s
-        >>> valid_mask = (t < 3.0) | (t >= 8.0)  # Dropout from 3-8s
-        >>> result = compute_dropout_drift(positions, valid_mask, t, min_duration_s=4.0)
-        >>> # Drift should be ~0.5 m (5s * 0.1 m/s)
-        >>> 0.4 < result["drift_m"] < 0.6
+        >>> truth = np.column_stack([t * 0.1, np.zeros_like(t)])
+        >>> est = truth.copy()  # perfect tracking
+        >>> mask = (t < 3.0) | (t >= 8.0)
+        >>> result = compute_dropout_drift(est, truth, mask, t, min_duration_s=4.0)
+        >>> abs(result["drift_m"]) < 1e-9
         True
-        >>> np.isclose(result["duration_s"], 5.0, atol=0.1)
+        >>> abs(result["end_error_m"]) < 1e-9
         True
 
     Notes:
-        PRD Acceptance Criteria (§4.2, updated):
-        - After 5s camera dropout, IMU-only drift should be ≤3.5 m
-          (production hardware bound; simulation achieves ≤15 cm)
-        - Previous 0.15-0.20 m requirements were at physical limits of
-          consumer-grade IMUs (~3 cm/s drift rate)
+        PRD Acceptance Criteria (§4.2):
+        - After 5 s camera dropout, IMU-only drift should be ≤3.5 m
+          on consumer-grade IMUs (95th percentile bound). In
+          simulation the filter typically tracks to a few cm of truth.
 
-        This function identifies the FIRST contiguous dropout block that
-        exceeds min_duration_s and measures drift from block start to end.
+        This function identifies the FIRST contiguous dropout block
+        whose duration exceeds ``min_duration_s`` and reports the
+        tracking-error metrics on that block.
     """
     valid_mask_arr = np.asarray(valid_mask)
-    # Reject non-1D masks. ``(N, 1)`` (a common shape coming out of
-    # column-vector loading or one-hot conversion) silently passed the
-    # ``shape[0]`` check, then ``np.diff(..., axis=-1)`` operated along
-    # the wrong axis and the function returned "no qualifying dropout"
-    # for what was actually a real dropout — masking a PRD-relevant
-    # drift failure. Mirror the stricter contract used by the plotting
-    # layer (``qa.plots._validate_optional_bool_mask``) here.
+    pos_est = np.asarray(positions_est)
+    pos_true = np.asarray(positions_true)
+    # Reject non-1D masks. ``(N, 1)`` (a common shape from column-
+    # vector loading or one-hot conversion) silently bypassed the
+    # dropout detection.
     if valid_mask_arr.ndim != 1:
         raise ValueError(
             f"valid_mask must be 1-D (N,); got shape {valid_mask_arr.shape}."
         )
-    if (
-        positions.shape[0] != valid_mask_arr.shape[0]
-        or positions.shape[0] != t.shape[0]
-    ):
+    if pos_est.shape != pos_true.shape:
         raise ValueError(
-            f"Shape mismatch: positions {positions.shape}, mask {valid_mask_arr.shape}, time {t.shape}"
+            "positions_est and positions_true must have the same shape; "
+            f"got {pos_est.shape} vs {pos_true.shape}."
+        )
+    if pos_est.ndim != 2 or pos_est.shape[1] != 2:
+        raise ValueError(f"positions must have shape (N, 2); got {pos_est.shape}.")
+    if pos_est.shape[0] != valid_mask_arr.shape[0] or pos_est.shape[0] != t.shape[0]:
+        raise ValueError(
+            f"Shape mismatch: positions {pos_est.shape}, "
+            f"mask {valid_mask_arr.shape}, time {t.shape}"
         )
 
     # Find contiguous dropout blocks
@@ -951,13 +975,16 @@ def compute_dropout_drift(
             duration = 0.0
 
         if duration >= min_duration_s:
-            # Measure drift from start to end (last in-block sample).
-            pos_start = positions[start_idx]
-            pos_end = positions[end_idx - 1]
-            drift = np.linalg.norm(pos_end - pos_start)
-
+            # Tracking error at start and end of the dropout (estimate vs
+            # truth norms), and the *growth* over the block.
+            err_start = float(np.linalg.norm(pos_est[start_idx] - pos_true[start_idx]))
+            err_end = float(
+                np.linalg.norm(pos_est[end_idx - 1] - pos_true[end_idx - 1])
+            )
             return {
-                "drift_m": float(drift),
+                "drift_m": err_end - err_start,
+                "end_error_m": err_end,
+                "start_error_m": err_start,
                 "duration_s": duration,
                 "start_idx": int(start_idx),
                 "end_idx": int(end_idx),
@@ -966,6 +993,8 @@ def compute_dropout_drift(
     # No qualifying dropout found
     return {
         "drift_m": None,
+        "end_error_m": None,
+        "start_error_m": None,
         "duration_s": None,
         "start_idx": None,
         "end_idx": None,
