@@ -106,6 +106,64 @@ def test_single_led_frames_inside_swapped_interval_are_relabeled():
     assert corrected.diagnostics["dual_led_frame_count"] == 4
 
 
+def test_swap_boundary_during_single_led_dropout_uses_position_evidence():
+    """A swap that starts during a single-LED dropout must be detected.
+
+    Probe scenario: dual_valid=[T,T,F,F,T,T] with the swap actually
+    starting at frame 2 (the first single-LED frame). The earlier
+    pure-carry-forward extension always assigned the leading
+    single-LED frames the previous dual-LED state, so the swap
+    boundary moved silently to the next dual-LED anchor — feeding
+    mislabeled single-LED partial observations into the EKF.
+
+    Each gap frame's finite observation should now be compared to
+    the interpolated physical-LED1 / physical-LED2 trajectories
+    under the prev and next anchor states; the closer interpretation
+    wins. With LED-spacing 0.04 m and the swap at frame 2, the
+    observed LED1 in frames 2-3 is far from physical LED1's
+    expected path under "state stays 0" but lies on physical LED2's
+    path, so the corrector flips frames 2-3 to state 1.
+    """
+
+    n = 6
+    t_cam = np.arange(n, dtype=float) / 30.0
+    # Center moves linearly along x so each physical LED has a
+    # smooth track. Spacing is 0.04 m along x.
+    center = np.column_stack([0.01 * np.arange(n), np.zeros(n)])
+    led1_phys = center - np.array([0.02, 0.0])
+    led2_phys = center + np.array([0.02, 0.0])
+
+    # Build observed labels: swap starts at frame 2.
+    led1_obs = led1_phys.copy()
+    led2_obs = led2_phys.copy()
+    led1_obs[2:], led2_obs[2:] = led2_phys[2:].copy(), led1_phys[2:].copy()
+    # Frames 2-3 are single-LED only (only the observed-LED1 slot).
+    led2_obs[2:4] = np.nan
+
+    mask = np.ones(n, dtype=bool)
+
+    corrected = resolve_led_identity(
+        t_cam,
+        led1_obs,
+        led2_obs,
+        mask,
+        led_distance=0.04,
+        config=LedIdentityConfig(
+            mode="auto",
+            initial_state="original",
+            transition_penalty=0.5,
+        ),
+    )
+
+    expected = np.array([False, False, True, True, True, True])
+    np.testing.assert_array_equal(corrected.swapped, expected)
+    # Frames 2-3 should now have the observed (single-LED) value
+    # routed to the LED2 slot (since state=1 swaps the labels);
+    # corrected.led1[2:4] should be NaN.
+    assert np.isnan(corrected.led1[2:4]).all()
+    np.testing.assert_allclose(corrected.led2[2:4], led1_obs[2:4])
+
+
 def test_no_dual_led_frames_emits_diagnostic_message():
     """No-dual-LED sessions should record a clear ambiguity diagnostic.
 

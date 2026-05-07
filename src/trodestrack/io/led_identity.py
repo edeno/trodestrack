@@ -154,17 +154,23 @@ def resolve_led_identity(
         valid_states[k - 1] = back[k, valid_states[k]]
 
     # Propagate the inferred state to *every* frame, not just the
-    # dual-valid ones. Single-LED frames inside a swapped interval
-    # carry the wrong physical-LED label too; gating swaps by
-    # ``dual_valid`` used to leave them mislabeled, so the EKF
-    # consumed a partial observation in the original (wrong)
-    # identity. Carry-forward the most recent dual-valid state, and
-    # for frames before the first dual-valid frame use that frame's
-    # resolved state (the DP already picked it given the
-    # ``initial_state`` prior).
-    positions = np.searchsorted(valid_indices, np.arange(n), side="right") - 1
-    positions = np.maximum(positions, 0)
-    states = valid_states[positions]
+    # dual-valid ones. The DP only resolves states at dual-LED
+    # anchors; single-LED gap frames inherit the surrounding
+    # interval's state. Pure carry-forward gets every uniform-state
+    # gap right but mishandles the case where the swap actually
+    # happens *during* a single-LED dropout: the leading single-LED
+    # frames keep the previous (now-wrong) state until the next
+    # dual-LED anchor. Use the single-LED finite observation as
+    # evidence to assign each gap frame to whichever neighbor's
+    # state best explains its position.
+    states = _propagate_swap_states(
+        valid_indices=valid_indices,
+        valid_states=valid_states,
+        n=n,
+        t_arr=t_arr,
+        led1_arr=led1_arr,
+        led2_arr=led2_arr,
+    )
     swapped = states == 1
     corrected1 = led1_arr.copy()
     corrected2 = led2_arr.copy()
@@ -197,6 +203,89 @@ def resolve_led_identity(
             "gyro_weight": float(config.gyro_weight),
         },
     )
+
+
+def _propagate_swap_states(
+    *,
+    valid_indices: np.ndarray,
+    valid_states: np.ndarray,
+    n: int,
+    t_arr: np.ndarray,
+    led1_arr: np.ndarray,
+    led2_arr: np.ndarray,
+) -> np.ndarray:
+    """Assign a swap state to every frame, including non-dual ones.
+
+    Pure carry-forward of the most recent dual-LED state handles
+    the common case but mislabels single-LED frames in a gap
+    where the swap actually starts during the dropout. For such
+    mixed-state gaps, use the finite single-LED observation to
+    pick whichever neighbor's interpretation places the
+    observation closer to the corresponding interpolated physical
+    LED. Pure-dropout gap frames fall back to carry-forward.
+    """
+
+    # Default: each frame inherits the most recent dual-LED state
+    # (and the first dual-LED state for frames before it).
+    positions = np.searchsorted(valid_indices, np.arange(n), side="right") - 1
+    positions = np.maximum(positions, 0)
+    states = valid_states[positions].astype(np.int8, copy=True)
+
+    for k in range(valid_indices.size - 1):
+        prev_idx = int(valid_indices[k])
+        next_idx = int(valid_indices[k + 1])
+        if next_idx - prev_idx <= 1:
+            continue
+        prev_state = int(valid_states[k])
+        next_state = int(valid_states[k + 1])
+        if prev_state == next_state:
+            continue
+
+        # Anchor positions in the *physical* LED frame after applying
+        # each anchor's resolved state. Under state=0, the observed
+        # ``led1_arr`` slot already carries physical LED1; under
+        # state=1, the slots are swapped, so physical LED1 is
+        # ``led2_arr``.
+        prev_phys_led1 = led1_arr[prev_idx] if prev_state == 0 else led2_arr[prev_idx]
+        prev_phys_led2 = led2_arr[prev_idx] if prev_state == 0 else led1_arr[prev_idx]
+        next_phys_led1 = led1_arr[next_idx] if next_state == 0 else led2_arr[next_idx]
+        next_phys_led2 = led2_arr[next_idx] if next_state == 0 else led1_arr[next_idx]
+
+        denom = float(t_arr[next_idx] - t_arr[prev_idx])
+        for i in range(prev_idx + 1, next_idx):
+            led1_finite = bool(np.all(np.isfinite(led1_arr[i])))
+            led2_finite = bool(np.all(np.isfinite(led2_arr[i])))
+            if led1_finite:
+                obs = led1_arr[i]
+                # In observed labels, ``obs`` is in slot 1. Under
+                # state=0 (no swap), slot 1 == physical LED1; under
+                # state=1, slot 1 == physical LED2.
+                obs_phys_at_state0 = "led1"
+            elif led2_finite:
+                obs = led2_arr[i]
+                obs_phys_at_state0 = "led2"
+            else:
+                # Pure dropout — keep the carry-forward state.
+                continue
+
+            alpha = (float(t_arr[i] - t_arr[prev_idx]) / denom) if denom > 0 else 0.5
+            interp_phys_led1 = prev_phys_led1 + alpha * (
+                next_phys_led1 - prev_phys_led1
+            )
+            interp_phys_led2 = prev_phys_led2 + alpha * (
+                next_phys_led2 - prev_phys_led2
+            )
+
+            if obs_phys_at_state0 == "led1":
+                d_state_0 = float(np.linalg.norm(obs - interp_phys_led1))
+                d_state_1 = float(np.linalg.norm(obs - interp_phys_led2))
+            else:
+                d_state_0 = float(np.linalg.norm(obs - interp_phys_led2))
+                d_state_1 = float(np.linalg.norm(obs - interp_phys_led1))
+
+            states[i] = np.int8(0 if d_state_0 <= d_state_1 else 1)
+
+    return states
 
 
 def _validate_led_array(a: np.ndarray, name: str) -> np.ndarray:
