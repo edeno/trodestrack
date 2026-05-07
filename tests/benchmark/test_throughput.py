@@ -82,16 +82,26 @@ BENCHMARK_SESSION_DURATION_S = 1800.0  # 30 minutes
 # =============================================================================
 
 
-def get_production_ekf_config(**overrides: Any) -> EKFConfig:
-    """Get production EKF configuration for benchmarking.
+def get_benchmark_ekf_config(**overrides: Any) -> EKFConfig:
+    """EKF configuration for the throughput benchmark.
 
-    Returns configuration matching production settings with adaptive dropout handling.
+    Sets sensor / dynamics fields (process noise, measurement noise,
+    IMU noise densities, damping, LED spacing, heading measurement) to
+    values matching the simulator below. **Internal toggles**
+    (``adaptive_q_during_dropout``, ``freeze_bias_during_blackout``,
+    ``reduce_imu_noise_during_blackout`` and the dropout-Q multipliers)
+    are NOT overridden — the benchmark therefore exercises the same
+    dropout-adaptive path users get from ``EKFConfig()`` defaults
+    (``adaptive_q_during_dropout=True`` etc).
 
-    Args:
-        **overrides: Optional parameter overrides
-
-    Returns:
-        EKFConfig with production settings
+    The ``state_mode`` is forced to ``"2d_full"`` (8D) because
+    ``simulate_rat_imu`` emits a 3-channel ``U_imu`` ``(yaw_rate,
+    accel_x, accel_y)`` that matches the 8D layout's
+    ``(b_gz, b_ax, b_ay)`` bias slot. The user-facing default
+    ``"2d_cam_3d_imu"`` (10D) needs a 6-channel IMU input that this
+    simulator does not produce; throughput on that layout would
+    require a different sim and may differ from what's measured here.
+    The README qualifies the headline numbers accordingly.
     """
     defaults = dict(
         process_noise_pos=0.001,
@@ -105,14 +115,18 @@ def get_production_ekf_config(**overrides: Any) -> EKFConfig:
         damping_coeff=0.4,
         led_distance=0.04,
         use_heading_measurement=True,
-        adaptive_q_during_dropout=False,
-        dropout_q_pos_multiplier=10.0,
-        dropout_q_vel_multiplier=10.0,
-        dropout_q_bias_multiplier=0.1,
-        state_mode="2d_full",  # Use 8D layout (tests use hardcoded indices)
+        # Forced because the simulator only emits 3-channel U_imu —
+        # see the docstring above. All other fields below this line
+        # would override production defaults and are intentionally
+        # NOT set so the benchmark mirrors what users actually run.
+        state_mode="2d_full",
     )
     defaults.update(overrides)
     return EKFConfig(**defaults)
+
+
+# Backward-compatible alias for any external callers / scripts.
+get_production_ekf_config = get_benchmark_ekf_config
 
 
 # =============================================================================

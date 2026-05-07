@@ -264,16 +264,26 @@ def run_report_command(args: argparse.Namespace) -> None:
             "state_dim": data["state_dim"],
         }
 
-        # Add optional parameters if available
+        # Add optional parameters if available. ``measurement_dim`` is
+        # required when NIS is present because chi-square consistency
+        # bounds (and "% in bounds") depend on it: position-only NIS is
+        # df=2, dual-LED NIS is df=4, and other layouts are possible.
+        # Silently defaulting to 4 produced a successful exit code with
+        # potentially-wrong bounds. Force the user to be explicit.
         if "nis" in data:
             report_args["nis"] = data["nis"]
             if "measurement_dim" not in data:
-                print(
-                    "Warning: nis.npy found but measurement_dim.txt missing, "
-                    "defaulting to measurement_dim=4",
-                    file=sys.stderr,
+                raise ValueError(
+                    "nis.npy is present in the input directory but "
+                    "measurement_dim.txt is missing. The chi-square "
+                    "consistency bounds depend on the measurement "
+                    "dimensionality (df=2 for position-only, df=4 for "
+                    "dual-LED, etc.) and cannot be guessed from nis.npy. "
+                    "Add measurement_dim.txt with the correct integer "
+                    "(e.g. ``echo 4 > measurement_dim.txt``) or remove "
+                    "nis.npy from the input directory."
                 )
-            report_args["measurement_dim"] = data.get("measurement_dim", 4)
+            report_args["measurement_dim"] = data["measurement_dim"]
 
         if args.title is not None:
             report_args["title"] = args.title

@@ -226,7 +226,7 @@
       and `tests/benchmark/test_throughput.py` to keep claims consistent):
   - Realtime baseline: 1× (1800 s session)
   - CPU floor (CI-tested): ≥10× realtime
-  - CPU reference (M-series, block-until-ready timing): ~44× realtime
+  - CPU reference (M-series, block-until-ready timing): ~38× realtime
   - GPU figures should be measured before being shown; otherwise omit.
 - [ ] Color-code: green for fast, red for slow
 - [ ] Save as `visuals/slide24_performance.png`

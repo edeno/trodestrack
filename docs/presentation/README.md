@@ -148,7 +148,7 @@ uv run python docs/presentation/code/build_presentation.py
 - Quality assurance metrics (NEES, RMSE)
 - Automated QA reports
 - Flexible state tracking modes
-- Performance: ≥10× realtime offline floor (CI-tested), ~44× on M-series Mac CPU under block-until-ready timing
+- Performance: ≥10× realtime offline floor (CI-tested), ~38× on M-series Mac CPU under block-until-ready timing
 - Real-data ingestion **today**: generic NumPy arrays (timestamps + LED
   positions + IMU samples). Native loaders for Trodes LED CSV,
   DeepLabCut CSV, and SpikeGadgets MDA/REC are on the roadmap, not
@@ -197,7 +197,7 @@ All visuals cite PRD metrics:
 - Heading error target: ≤7°
 - Dropout drift target: ≤3.5 m @ 5s
 - NEES target: ≈8 for 8D state (≈5 for measurable DOF)
-- Throughput: ≥10× realtime offline floor on CPU (CI-tested by `tests/benchmark/test_throughput.py`); reference run on M-series Mac CPU under block-until-ready timing is ~44× realtime / ~0.38 ms per frame.
+- Throughput: ≥10× realtime offline floor on CPU (CI-tested by `tests/benchmark/test_throughput.py`); reference run on M-series Mac CPU under block-until-ready timing is ~38× realtime / ~0.41 ms per frame.
 
 ## 🛠️ Development Time
 
