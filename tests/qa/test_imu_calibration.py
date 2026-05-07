@@ -11,6 +11,7 @@ from trodestrack.qa.imu_calibration import (
     estimate_gyro_bias,
     estimate_stationary_mask,
     lagged_linear_fit,
+    smooth_time_series,
 )
 
 
@@ -174,3 +175,85 @@ def test_imu_calibration_helpers_reject_corrupted_masks() -> None:
         estimate_gyro_bias(gyro, bad_nan)
     with pytest.raises(ValueError, match=r"boolean or 0/1 integer"):
         estimate_accel_gravity_body(accel, bad_nan)
+
+
+def test_lagged_linear_fit_rejects_corrupted_valid_target() -> None:
+    """``lagged_linear_fit`` must enforce the same dtype contract as the
+    other masked diagnostics in this module.
+
+    ``np.asarray(valid_target, dtype=bool)`` would silently coerce
+    NaN / non-{0,1} integers to True and bias the fit.
+    """
+    t = np.linspace(0.0, 1.0, 5)
+    src = np.zeros(5)
+    target = np.zeros(5)
+    lags = np.array([0.0])
+    bad_int = np.array([1, 1, 2, 1, 1], dtype=np.int32)
+    bad_nan = np.array([1.0, 1.0, np.nan, 1.0, 1.0])
+
+    with pytest.raises(ValueError, match=r"valid_target must be boolean or 0/1"):
+        lagged_linear_fit(t, src, t, target, lags, valid_target=bad_int)
+    with pytest.raises(ValueError, match=r"valid_target must be boolean or 0/1"):
+        lagged_linear_fit(t, src, t, target, lags, valid_target=bad_nan)
+    # Wrong shape also rejected.
+    with pytest.raises(ValueError, match=r"valid_target must have shape"):
+        lagged_linear_fit(
+            t, src, t, target, lags, valid_target=np.ones((5, 1), dtype=bool)
+        )
+
+
+def test_diagnose_accel_axis_signs_rejects_corrupted_valid_camera() -> None:
+    """``diagnose_accel_axis_signs`` must apply the same contract to
+    ``valid_camera``.
+    """
+    t_imu = np.linspace(0.0, 1.0, 5)
+    accel = np.zeros((5, 3))
+    t_cam = t_imu.copy()
+    cam = np.zeros((5, 2))
+    lags = np.array([0.0])
+
+    bad_int = np.array([1, 1, 2, 1, 1], dtype=np.int32)
+    bad_nan = np.array([1.0, 1.0, np.nan, 1.0, 1.0])
+
+    with pytest.raises(ValueError, match=r"valid_camera must be boolean or 0/1"):
+        diagnose_accel_axis_signs(
+            t_imu, accel, t_cam, cam, candidate_lags_s=lags, valid_camera=bad_int
+        )
+    with pytest.raises(ValueError, match=r"valid_camera must be boolean or 0/1"):
+        diagnose_accel_axis_signs(
+            t_imu, accel, t_cam, cam, candidate_lags_s=lags, valid_camera=bad_nan
+        )
+    # Wrong shape also rejected.
+    with pytest.raises(ValueError, match=r"valid_camera must have shape"):
+        diagnose_accel_axis_signs(
+            t_imu,
+            accel,
+            t_cam,
+            cam,
+            candidate_lags_s=lags,
+            valid_camera=np.ones((5, 1), dtype=bool),
+        )
+
+
+def test_smooth_time_series_rejects_wrong_shape_mask() -> None:
+    """``smooth_time_series`` must reject ``valid_mask`` shapes that don't
+    match ``values`` instead of letting NumPy raise raw IndexError /
+    broadcast errors.
+    """
+    t = np.linspace(0.0, 1.0, 5)
+    values = np.zeros(5)
+
+    # (N, 1) column-vector mask: previously raised ``IndexError: too
+    # many indices for array``; now must surface the contract error.
+    with pytest.raises(ValueError, match=r"valid_mask must have shape"):
+        smooth_time_series(
+            t, values, sigma_s=0.1, valid_mask=np.ones((5, 1), dtype=bool)
+        )
+
+    # Wrong-length mask: previously raised a raw NumPy broadcast error.
+    with pytest.raises(ValueError, match=r"valid_mask must have shape"):
+        smooth_time_series(t, values, sigma_s=0.1, valid_mask=np.ones(4, dtype=bool))
+
+    # Clean (n_time,) bool / 0-1-int still works.
+    smooth_time_series(t, values, sigma_s=0.1, valid_mask=np.ones(5, dtype=bool))
+    smooth_time_series(t, values, sigma_s=0.1, valid_mask=np.ones(5, dtype=np.int32))

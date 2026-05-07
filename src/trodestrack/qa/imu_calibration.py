@@ -435,7 +435,18 @@ def lagged_linear_fit(
     if valid_target is None:
         valid = np.ones_like(target_arr, dtype=bool)
     else:
-        valid = np.asarray(valid_target, dtype=bool).copy()
+        # Reject NaN / non-{0,1} integer masks before they coerce
+        # silently to True. ``np.asarray(..., dtype=bool)`` on
+        # ``[1, 1, 2, 1]`` or ``[1, NaN, 1]`` would treat 2 / NaN as
+        # valid samples and bias the fit; mirror the gate used by
+        # ``estimate_gyro_bias`` / ``estimate_accel_gravity_body``.
+        valid_target_arr = np.asarray(valid_target)
+        if valid_target_arr.shape != target_arr.shape:
+            raise ValueError(
+                f"valid_target must have shape {target_arr.shape}; got "
+                f"{valid_target_arr.shape}."
+            )
+        valid = validate_bool_mask_dtype(valid_target_arr, name="valid_target").copy()
     valid &= np.isfinite(target_arr)
 
     # Only accept a candidate when the fit produced a finite correlation —
@@ -490,9 +501,19 @@ def diagnose_accel_axis_signs(
     if valid_camera is None:
         valid = np.isfinite(camera_arr).all(axis=1)
     else:
-        valid = np.asarray(valid_camera, dtype=bool) & np.isfinite(camera_arr).all(
-            axis=1
-        )
+        # Same dtype contract as the other masked diagnostics in this
+        # module — ``np.asarray(..., dtype=bool)`` on ``[1, 1, 2, 1]``
+        # / ``[1, NaN, 1]`` would coerce 2 / NaN to True and bias the
+        # axis-sign fit.
+        valid_camera_arr = np.asarray(valid_camera)
+        if valid_camera_arr.shape != (camera_arr.shape[0],):
+            raise ValueError(
+                "valid_camera must have shape (n_cam,)="
+                f"({camera_arr.shape[0]},); got {valid_camera_arr.shape}."
+            )
+        valid = validate_bool_mask_dtype(
+            valid_camera_arr, name="valid_camera"
+        ) & np.isfinite(camera_arr).all(axis=1)
 
     labels = ("x", "y", "z")
     candidates: list[list[AxisSignDiagnostic]] = []
@@ -734,13 +755,20 @@ def _interpolate_invalid_samples(
     """Linearly interpolate invalid samples in a 1D or 2D time series."""
 
     # Validate the optional ``valid_mask`` once so both the 1D and 2D
-    # branches use the same dtype gate. A bare ``np.asarray(..., dtype=
-    # bool)`` would silently coerce NaN / non-{0,1} integers to True.
-    valid_mask_clean = (
-        None
-        if valid_mask is None
-        else validate_bool_mask_dtype(np.asarray(valid_mask), name="valid_mask")
-    )
+    # branches use the same dtype + shape gate. The dtype check rejects
+    # NaN / non-{0,1} integer masks; the shape check rejects ``(N, 1)``
+    # column-vector masks (raw ``IndexError`` from ``values[mask]``) and
+    # length-mismatched masks (raw NumPy broadcast errors).
+    if valid_mask is None:
+        valid_mask_clean = None
+    else:
+        mask_arr = np.asarray(valid_mask)
+        if mask_arr.shape != (values.shape[0],):
+            raise ValueError(
+                f"valid_mask must have shape (n_time,)=({values.shape[0]},) "
+                f"matching ``values``; got {mask_arr.shape}."
+            )
+        valid_mask_clean = validate_bool_mask_dtype(mask_arr, name="valid_mask")
 
     if values.ndim == 1:
         finite = np.isfinite(values)
