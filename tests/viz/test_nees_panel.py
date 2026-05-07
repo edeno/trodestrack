@@ -153,3 +153,57 @@ def test_filter_artist_hides_overlay_on_non_finite_state():
         assert artist.uncertainty_ellipse.width > 0.0
     finally:
         plt.close(fig)
+
+
+def test_filter_panels_quiet_on_first_sample_xlim():
+    """Per-step filter panels must not warn on identical xlim for the
+    first rendered sample.
+
+    Each rolling-buffer panel sees exactly one sample on its first
+    update, and previously called ``set_xlim(t, t)`` directly, which
+    triggers matplotlib's "Attempting to set identical low and high
+    xlims" warning. The shared ``_set_scrolling_xlim`` helper pads the
+    range ±1 ms in that degenerate case. Run with warnings-as-errors
+    so any reintroduction would fail the test.
+    """
+    import warnings
+
+    from trodestrack.viz.components import (
+        BiasEstimatePanelArtist,
+        NEESPanelArtist,
+        ResidualPanelArtist,
+        StateErrorPanelArtist,
+    )
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "error", message="Attempting to set identical low and high xlims"
+        )
+
+        fig, ax = plt.subplots()
+        try:
+            ResidualPanelArtist(ax, window_s=2.0, fps=10).update(0.0, 0.5, 0.6)
+        finally:
+            plt.close(fig)
+
+        fig, (ax1, ax2) = plt.subplots(1, 2)
+        try:
+            StateErrorPanelArtist(ax1, ax2, window_s=2.0, fps=10).update(
+                0.0, 0.0, 0.0, 0.0
+            )
+        finally:
+            plt.close(fig)
+
+        fig, ax = plt.subplots()
+        try:
+            BiasEstimatePanelArtist(ax, window_s=2.0, fps=10).update(
+                0.0, 0.001, -0.01, 0.005
+            )
+        finally:
+            plt.close(fig)
+
+        fig, ax = plt.subplots()
+        try:
+            NEESPanelArtist(ax, window_s=2.0, fps=10, state_dim=2).update(0.0, 1.5)
+        finally:
+            plt.close(fig)

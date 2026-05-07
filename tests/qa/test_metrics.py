@@ -107,6 +107,67 @@ def test_position_rmse_one_d_input():
         compute_position_rmse(true_pos, est_pos)
 
 
+def test_position_rmse_rejects_corrupted_masks():
+    """``compute_position_rmse`` must apply the same dtype/dim contract as
+    the dropout-drift / plot helpers.
+
+    Previously it ran ``valid &= valid_mask`` straight, so an integer
+    mask with a stray ``2`` silently coerced (numpy int AND of ``2``
+    with True is True), a float mask raised a raw NumPy TypeError, and
+    a ``(N, 1)`` bool mask raised a broadcast error rather than a clear
+    ValueError.
+    """
+    true_pos = np.zeros((4, 2))
+    est_pos = np.array([[0.05, 0.0]] * 4)
+
+    # Bool / 0-1 int still work.
+    compute_position_rmse(
+        true_pos, est_pos, valid_mask=np.array([True, True, True, False])
+    )
+    compute_position_rmse(
+        true_pos, est_pos, valid_mask=np.array([1, 1, 1, 0], dtype=np.int32)
+    )
+
+    with pytest.raises(ValueError, match=r"boolean or 0/1 integer"):
+        compute_position_rmse(
+            true_pos, est_pos, valid_mask=np.array([1, 1, 2, 1], dtype=np.int32)
+        )
+    with pytest.raises(ValueError, match=r"boolean or 0/1 integer"):
+        compute_position_rmse(
+            true_pos, est_pos, valid_mask=np.array([1.0, 1.0, 1.0, 0.0])
+        )
+    with pytest.raises(ValueError, match=r"valid_mask must be 1-D"):
+        compute_position_rmse(
+            true_pos,
+            est_pos,
+            valid_mask=np.array([[True], [True], [True], [True]]),
+        )
+
+
+def test_velocity_rmse_rejects_corrupted_masks():
+    """Same contract as ``compute_position_rmse``: bool or 0/1 int 1-D only."""
+    true_vel = np.zeros((4, 2))
+    est_vel = np.array([[0.01, 0.0]] * 4)
+
+    compute_velocity_rmse(
+        true_vel, est_vel, valid_mask=np.array([True, True, False, True])
+    )
+    with pytest.raises(ValueError, match=r"boolean or 0/1 integer"):
+        compute_velocity_rmse(
+            true_vel, est_vel, valid_mask=np.array([1, 2, 1, 1], dtype=np.int32)
+        )
+    with pytest.raises(ValueError, match=r"boolean or 0/1 integer"):
+        compute_velocity_rmse(
+            true_vel, est_vel, valid_mask=np.array([1.0, 1.0, 1.0, 1.0])
+        )
+    with pytest.raises(ValueError, match=r"valid_mask must be 1-D"):
+        compute_velocity_rmse(
+            true_vel,
+            est_vel,
+            valid_mask=np.array([[True], [True], [True], [True]]),
+        )
+
+
 def test_position_rmse_no_valid_samples():
     """All invalid samples should raise ValueError."""
     true_pos = np.array([[0.0, 0.0], [1.0, 1.0]])

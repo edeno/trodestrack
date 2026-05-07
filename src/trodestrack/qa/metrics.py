@@ -112,7 +112,17 @@ def compute_position_rmse(
             raise ValueError(
                 f"Mask shape {valid_mask.shape} incompatible with positions {positions_true.shape}"
             )
-        valid &= valid_mask
+        # Reject non-bool / non-0-or-1-integer / non-1D masks before the
+        # ``valid &= valid_mask`` AND. A float ``0.0/1.0`` mask raises a
+        # raw NumPy TypeError; a stray integer ``2`` silently coerces
+        # to True; a ``(N, 1)`` bool mask broadcasts incorrectly. Mirror
+        # the gate already used by ``compute_dropout_drift`` /
+        # ``qa.plots`` / ``qa.imu_calibration``.
+        if valid_mask.ndim != 1:
+            raise ValueError(
+                f"valid_mask must be 1-D (N,); got shape {valid_mask.shape}."
+            )
+        valid &= validate_bool_mask_dtype(valid_mask, name="valid_mask")
 
     if not np.any(valid):
         raise ValueError("No valid samples remaining after masking and NaN filtering")
@@ -176,7 +186,13 @@ def compute_velocity_rmse(
             raise ValueError(
                 f"Mask shape {valid_mask.shape} incompatible with velocities {velocities_true.shape}"
             )
-        valid &= valid_mask
+        # Same dtype + 1-D contract as compute_position_rmse — see comment
+        # there for why the bare ``valid &= valid_mask`` is unsafe.
+        if valid_mask.ndim != 1:
+            raise ValueError(
+                f"valid_mask must be 1-D (N,); got shape {valid_mask.shape}."
+            )
+        valid &= validate_bool_mask_dtype(valid_mask, name="valid_mask")
 
     if not np.any(valid):
         raise ValueError("No valid samples remaining after masking and NaN filtering")

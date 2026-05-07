@@ -21,6 +21,24 @@ from matplotlib.transforms import Affine2D
 from trodestrack.viz.styles import COLORS
 
 
+def _set_scrolling_xlim(ax: Axes, time_array: np.ndarray) -> None:
+    """Apply a scrolling xlim that doesn't trigger matplotlib's
+    "Attempting to set identical low and high xlims" warning when only
+    one rolling-buffer sample is present (a routine condition on the
+    first rendered frame of every per-step diagnostic panel). Pad ±1 ms
+    around the single sample so the axis stays meaningful.
+    """
+    if len(time_array) == 0:
+        return
+    t0 = float(time_array[0])
+    t1 = float(time_array[-1])
+    if t1 > t0:
+        ax.set_xlim(t0, t1)
+    else:
+        pad = 1e-3
+        ax.set_xlim(t0 - pad, t0 + pad)
+
+
 class RatArtist:
     """Visualize rat body, orientation, and velocity.
 
@@ -731,23 +749,13 @@ class IMUPanelArtist:
                 self.accel_x_truth_line.set_data([], [])
                 self.accel_y_truth_line.set_data([], [])
 
-            # Set x-axis limits based on actual data range. Skip the
-            # set_xlim call when only one sample is in the window —
-            # matplotlib emits "Attempting to set identical low and
-            # high xlims" warnings on degenerate ranges, and the first
-            # rendered video frame routinely has exactly one IMU sample.
-            if len(t_raw) > 1:
-                self.ax_gyro.set_xlim(t_raw[0], t_raw[-1])
-                self.ax_accel_x.set_xlim(t_raw[0], t_raw[-1])
-                self.ax_accel_y.set_xlim(t_raw[0], t_raw[-1])
-            elif len(t_raw) == 1:
-                # Pad a tiny window so the axis stays meaningful but
-                # matplotlib doesn't warn about identical limits.
-                t0 = float(t_raw[0])
-                pad = 1e-3
-                self.ax_gyro.set_xlim(t0 - pad, t0 + pad)
-                self.ax_accel_x.set_xlim(t0 - pad, t0 + pad)
-                self.ax_accel_y.set_xlim(t0 - pad, t0 + pad)
+            # Set x-axis limits via shared helper that pads ±1 ms when
+            # only one sample is in the window (avoids matplotlib's
+            # "identical xlim" warning on the first rendered frame).
+            t_raw_arr = np.asarray(t_raw)
+            _set_scrolling_xlim(self.ax_gyro, t_raw_arr)
+            _set_scrolling_xlim(self.ax_accel_x, t_raw_arr)
+            _set_scrolling_xlim(self.ax_accel_y, t_raw_arr)
         else:
             # Single sample mode (legacy): buffer interpolated points
             if imu_data is not None:
@@ -1200,8 +1208,10 @@ class ResidualPanelArtist:
             self.line_led1.set_data(time_array, np.array(self.resid_led1_buffer))
             self.line_led2.set_data(time_array, np.array(self.resid_led2_buffer))
 
-            # Auto-scale x-axis to show scrolling window
-            self.ax.set_xlim(time_array[0], time_array[-1])
+            # Auto-scale x-axis to show scrolling window (helper pads
+            # ±1 ms when only one sample is in the buffer to avoid the
+            # matplotlib "identical xlim" warning).
+            _set_scrolling_xlim(self.ax, time_array)
 
             # Auto-scale y-axis based on recent data (with some margin).
             # Use ``np.isfinite`` (not ``not np.isnan``): a diverged filter
@@ -1327,7 +1337,7 @@ class StateErrorPanelArtist:
             time_array = np.array(self.time_buffer_vel)
             self.line_vx.set_data(time_array, np.array(self.error_vx_buffer))
             self.line_vy.set_data(time_array, np.array(self.error_vy_buffer))
-            self.ax_vel.set_xlim(time_array[0], time_array[-1])
+            _set_scrolling_xlim(self.ax_vel, time_array)
 
         # Update heading error
         self.time_buffer_heading.append(t)
@@ -1336,7 +1346,7 @@ class StateErrorPanelArtist:
         if len(self.time_buffer_heading) > 0:
             time_array = np.array(self.time_buffer_heading)
             self.line_heading.set_data(time_array, np.array(self.error_heading_buffer))
-            self.ax_heading.set_xlim(time_array[0], time_array[-1])
+            _set_scrolling_xlim(self.ax_heading, time_array)
 
         return [self.line_vx, self.line_vy, self.line_heading]
 
@@ -1434,8 +1444,8 @@ class BiasEstimatePanelArtist:
             self.line_ax.set_data(time_array, np.array(self.accel_bias_x_buffer))
             self.line_ay.set_data(time_array, np.array(self.accel_bias_y_buffer))
 
-            # Auto-scale x-axis
-            self.ax.set_xlim(time_array[0], time_array[-1])
+            # Auto-scale x-axis (single-sample-safe).
+            _set_scrolling_xlim(self.ax, time_array)
 
             # Auto-scale y-axis based on data range. Filter out non-finite
             # samples — a diverged filter can emit ±Inf bias estimates and
@@ -1571,8 +1581,8 @@ class NEESPanelArtist:
             else:
                 self.line_nees.set_data([], [])
 
-            # Auto-scale x-axis
-            self.ax.set_xlim(time_array[0], time_array[-1])
+            # Auto-scale x-axis (single-sample-safe).
+            _set_scrolling_xlim(self.ax, time_array)
 
             # Auto-scale y-axis based on data (but keep bounds visible)
             valid_nees = nees_array[valid_mask]
