@@ -701,6 +701,33 @@ def test_dropout_drift_shape_mismatch():
         compute_dropout_drift(positions, mask, t)
 
 
+def test_dropout_drift_rejects_non_1d_mask():
+    """``valid_mask`` must be 1D (N,); column / row vectors must be rejected.
+
+    Previously the function only checked ``shape[0]`` and then ran
+    ``np.diff(..., axis=-1)`` over the mask. A column-vector mask
+    (a common shape coming out of column-vector loaders or one-hot
+    conversions) silently bypassed the dropout detection and returned
+    "no qualifying dropout" for what was actually a real dropout —
+    masking a PRD-relevant drift failure.
+    """
+    t = np.linspace(0, 10, 100)
+    positions = np.column_stack([t * 0.1, np.zeros_like(t)])
+    mask_1d = (t < 3.0) | (t >= 8.0)  # 5 s dropout
+
+    # Sanity: 1D path still detects the dropout.
+    result_1d = compute_dropout_drift(positions, mask_1d, t, min_duration_s=4.0)
+    assert result_1d["duration_s"] is not None
+
+    # Column-vector mask: must reject, not silently return None.
+    with pytest.raises(ValueError, match=r"valid_mask must be 1-D"):
+        compute_dropout_drift(positions, mask_1d.reshape(-1, 1), t, min_duration_s=4.0)
+
+    # Row-vector mask: same rejection.
+    with pytest.raises(ValueError, match=r"valid_mask must be 1-D"):
+        compute_dropout_drift(positions, mask_1d.reshape(1, -1), t, min_duration_s=4.0)
+
+
 # =============================================================================
 # Integration Tests
 # =============================================================================

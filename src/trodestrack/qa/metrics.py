@@ -898,13 +898,28 @@ def compute_dropout_drift(
         This function identifies the FIRST contiguous dropout block that
         exceeds min_duration_s and measures drift from block start to end.
     """
-    if positions.shape[0] != valid_mask.shape[0] or positions.shape[0] != t.shape[0]:
+    valid_mask_arr = np.asarray(valid_mask)
+    # Reject non-1D masks. ``(N, 1)`` (a common shape coming out of
+    # column-vector loading or one-hot conversion) silently passed the
+    # ``shape[0]`` check, then ``np.diff(..., axis=-1)`` operated along
+    # the wrong axis and the function returned "no qualifying dropout"
+    # for what was actually a real dropout — masking a PRD-relevant
+    # drift failure. Mirror the stricter contract used by the plotting
+    # layer (``qa.plots._validate_optional_bool_mask``) here.
+    if valid_mask_arr.ndim != 1:
         raise ValueError(
-            f"Shape mismatch: positions {positions.shape}, mask {valid_mask.shape}, time {t.shape}"
+            f"valid_mask must be 1-D (N,); got shape {valid_mask_arr.shape}."
+        )
+    if (
+        positions.shape[0] != valid_mask_arr.shape[0]
+        or positions.shape[0] != t.shape[0]
+    ):
+        raise ValueError(
+            f"Shape mismatch: positions {positions.shape}, mask {valid_mask_arr.shape}, time {t.shape}"
         )
 
     # Find contiguous dropout blocks
-    dropout = ~valid_mask
+    dropout = ~valid_mask_arr
     diff = np.diff(dropout.astype(int), prepend=0, append=0)
     starts = np.where(diff == 1)[0]  # Dropout begins (first invalid sample)
     ends = np.where(diff == -1)[0]  # Dropout ends (first valid sample after, exclusive)
