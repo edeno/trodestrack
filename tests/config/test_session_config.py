@@ -197,3 +197,118 @@ def test_imu_calibration_thresholds_are_configurable():
     assert config.imu.calibration_min_yaw_correlation == 0.2
     assert config.imu.calibration_max_horizontal_gravity_mps2 == 0.75
     assert config.imu.calibration_min_accel_axis_correlation_for_translation == 0.6
+
+
+_PREPARED_INPUTS = {
+    "format": "prepared_arrays",
+    "imu_timestamps": "t_imu.txt",
+    "imu_measurements": "U_imu.txt",
+    "camera_timestamps": "t_cam.txt",
+    "led1_positions": "led1.txt",
+}
+
+
+def test_imu_axis_map_must_have_six_canonical_keys():
+    """``axis_map`` partial / extra keys raise at schema time, not deep in loader.
+
+    The loader indexes ``axis_map`` with the six canonical names
+    directly; a partial map (e.g. only ``gyro_z``) used to surface
+    as ``Unexpected error: 'gyro_x'`` from a raw KeyError. The
+    schema-level model_validator now rejects partial / extra maps
+    with a clean Pydantic message.
+    """
+
+    with pytest.raises(ValidationError, match=r"axis_map.*missing keys"):
+        SessionConfig.model_validate(
+            {
+                "inputs": _PREPARED_INPUTS,
+                "imu": {"axis_map": {"gyro_z": "Headstage_GyroZ"}},
+            }
+        )
+
+    with pytest.raises(ValidationError, match=r"axis_map.*unknown keys"):
+        SessionConfig.model_validate(
+            {
+                "inputs": _PREPARED_INPUTS,
+                "imu": {
+                    "axis_map": {
+                        "gyro_x": "GyroX",
+                        "gyro_y": "GyroY",
+                        "gyro_z": "GyroZ",
+                        "accel_x": "AccelX",
+                        "accel_y": "AccelY",
+                        "accel_z": "AccelZ",
+                        "extra_axis": "Extra",
+                    }
+                },
+            }
+        )
+
+
+def test_imu_axis_signs_must_have_six_canonical_keys():
+    """Partial ``axis_signs`` silently defaulted to +1 via .get; reject up front."""
+
+    with pytest.raises(ValidationError, match=r"axis_signs.*missing keys"):
+        SessionConfig.model_validate(
+            {
+                "inputs": _PREPARED_INPUTS,
+                "imu": {"axis_signs": {"gyro_x": -1.0}},
+            }
+        )
+
+
+def test_camera_meters_per_pixel_must_be_positive():
+    """``meters_per_pixel <= 0`` collapses or mirrors trajectory; reject."""
+
+    for bad in (0.0, -0.0022):
+        with pytest.raises(ValidationError, match=r"meters_per_pixel"):
+            SessionConfig.model_validate(
+                {
+                    "inputs": _PREPARED_INPUTS,
+                    "camera": {"meters_per_pixel": bad},
+                }
+            )
+
+
+def test_imu_sensor_scales_must_be_positive():
+    """Negative gyro/accel scales silently mirror; reject at schema time."""
+
+    for field, bad in [
+        ("gyro_scale_dps_per_lsb", -0.061),
+        ("accel_scale_g_per_lsb", -0.000061),
+        ("gravity_mps2", -9.81),
+        ("gyro_scale_dps_per_lsb", 0.0),
+    ]:
+        with pytest.raises(ValidationError, match=field):
+            SessionConfig.model_validate(
+                {
+                    "inputs": _PREPARED_INPUTS,
+                    "imu": {field: bad},
+                }
+            )
+
+
+def test_outputs_safety_thresholds_must_be_positive():
+    """Non-positive safety thresholds make the gate meaningless or unusable."""
+
+    for field, bad in [
+        ("safety_envelope_multiplier", 0.0),
+        ("safety_envelope_multiplier", -1.0),
+        ("safety_max_speed_mps", -1.0),
+        ("safety_max_position_deviation_m", 0.0),
+        ("safety_p95_position_deviation_m", -0.1),
+        ("safety_extra_range_m", -0.5),  # only ge=0 is allowed
+    ]:
+        with pytest.raises(ValidationError, match=field):
+            SessionConfig.model_validate(
+                {
+                    "inputs": _PREPARED_INPUTS,
+                    "outputs": {field: bad},
+                }
+            )
+
+    # ``safety_extra_range_m`` allows zero (extra-range disabled is
+    # legitimate); confirm the boundary still validates.
+    SessionConfig.model_validate(
+        {"inputs": _PREPARED_INPUTS, "outputs": {"safety_extra_range_m": 0.0}}
+    )

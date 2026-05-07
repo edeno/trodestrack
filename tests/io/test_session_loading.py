@@ -344,6 +344,142 @@ led_identity:
     np.testing.assert_allclose(captured["gyro_z"], [1.0, 2.0, 3.0])
 
 
+def test_led_identity_correction_swaps_conf_cam_columns(tmp_path, monkeypatch):
+    """LED identity correction must also swap per-LED confidence rows.
+
+    ``conf_cam`` is laid out as ``[c1, c1, c2, c2]`` (per-LED
+    confidence replicated across x/y). When ``resolve_led_identity``
+    swaps LED1/LED2 for a frame, the EKF needs the confidence
+    halves to follow or it ends up trusting the wrong physical LED.
+    Probe scenario: a known global swap with low LED1 confidence
+    (0.1) and high LED2 confidence (0.9) — after correction the
+    physically-LED1 row should carry 0.9 in cols 0/1 and 0.1 in
+    cols 2/3.
+    """
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    n = 5
+    t_imu = np.linspace(0.0, 0.3, n)
+    pd.DataFrame(
+        {
+            "time": t_imu,
+            "Headstage_GyroX": np.zeros_like(t_imu),
+            "Headstage_GyroY": np.zeros_like(t_imu),
+            "Headstage_GyroZ": np.zeros_like(t_imu),
+            "Headstage_AccelX": np.zeros_like(t_imu),
+            "Headstage_AccelY": np.zeros_like(t_imu),
+            "Headstage_AccelZ": np.full_like(t_imu, 9.81),
+        }
+    ).to_parquet(data_dir / "imu.parquet")
+
+    t_cam = np.linspace(0.0, 0.3, n)
+    # Observed labels are swapped relative to physical truth; the
+    # auto resolver flips every frame after we set
+    # ``initial_state="swapped"``.
+    pd.DataFrame(
+        {
+            "time": t_cam,
+            "xloc": [4.0, 5.0, 6.0, 7.0, 8.0],
+            "yloc": [0.0, 0.0, 0.0, 0.0, 0.0],
+            "xloc2": [0.0, 1.0, 2.0, 3.0, 4.0],
+            "yloc2": [0.0, 0.0, 0.0, 0.0, 0.0],
+            "led1_likelihood": [0.1] * n,
+            "led2_likelihood": [0.9] * n,
+        }
+    ).to_parquet(data_dir / "position.parquet")
+
+    config_path = tmp_path / "session.yaml"
+    config_path.write_text(
+        """
+inputs:
+  format: spikegadgets_trodes
+  imu_file: data/imu.parquet
+  position_file: data/position.parquet
+imu:
+  run_calibration: false
+  sample_hold_strategy: none
+camera:
+  meters_per_pixel: 0.01
+  confidence_led1_column: led1_likelihood
+  confidence_led2_column: led2_likelihood
+filter:
+  state_mode: vision_only
+led_identity:
+  mode: auto
+  initial_state: swapped
+""".lstrip()
+    )
+
+    session = load_session(load_session_config(config_path))
+
+    assert session.diagnostics["led_identity_swapped"].all()
+    assert session.conf_cam is not None
+    # Every row had its LED1/LED2 confidence swapped, so cols 0/1
+    # now carry the (originally LED2) high confidence and cols 2/3
+    # carry the (originally LED1) low confidence.
+    np.testing.assert_allclose(session.conf_cam[:, 0:2], 0.9)
+    np.testing.assert_allclose(session.conf_cam[:, 2:4], 0.1)
+
+
+def test_arthur_loader_reports_missing_confidence_column(tmp_path):
+    """Configured confidence column missing from parquet → friendly ValueError.
+
+    A ``confidence_led1_column`` / ``confidence_led2_column`` set in
+    the YAML used to surface as ``Unexpected error: 'likelihood'``
+    from a raw KeyError in ``_load_leds`` after the loader had
+    already consumed compute. Pulling the column names into the
+    up-front ``_require_columns`` call routes them through the
+    shared validator (clean ValueError mentioning the source file).
+    """
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    n = 4
+    t_imu = np.linspace(0.0, 0.2, n)
+    pd.DataFrame(
+        {
+            "time": t_imu,
+            "Headstage_GyroX": np.zeros_like(t_imu),
+            "Headstage_GyroY": np.zeros_like(t_imu),
+            "Headstage_GyroZ": np.zeros_like(t_imu),
+            "Headstage_AccelX": np.zeros_like(t_imu),
+            "Headstage_AccelY": np.zeros_like(t_imu),
+            "Headstage_AccelZ": np.full_like(t_imu, 9.81),
+        }
+    ).to_parquet(data_dir / "imu.parquet")
+    pd.DataFrame(
+        {
+            "time": np.linspace(0.0, 0.2, n),
+            "xloc": np.zeros(n),
+            "yloc": np.zeros(n),
+            "xloc2": np.ones(n),
+            "yloc2": np.zeros(n),
+            # Note: ``led1_likelihood`` is intentionally absent.
+        }
+    ).to_parquet(data_dir / "position.parquet")
+    config_path = tmp_path / "session.yaml"
+    config_path.write_text(
+        """
+inputs:
+  format: spikegadgets_trodes
+  imu_file: data/imu.parquet
+  position_file: data/position.parquet
+imu:
+  run_calibration: false
+camera:
+  meters_per_pixel: 0.01
+  confidence_led1_column: led1_likelihood
+  confidence_led2_column: led2_likelihood
+filter:
+  state_mode: vision_only
+""".lstrip()
+    )
+
+    with pytest.raises(ValueError, match=r"missing required column.*led1_likelihood"):
+        load_session(load_session_config(config_path))
+
+
 def test_safety_check_rejects_fused_drift_from_vision_baseline(monkeypatch):
     """A broad envelope alone should not hide fused-vs-vision drift."""
 

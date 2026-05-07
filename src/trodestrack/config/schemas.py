@@ -55,6 +55,16 @@ class InputsConfig(BaseModel):
         return self
 
 
+_CANONICAL_IMU_AXES = (
+    "gyro_x",
+    "gyro_y",
+    "gyro_z",
+    "accel_x",
+    "accel_y",
+    "accel_z",
+)
+
+
 class IMUConfig(BaseModel):
     """IMU preprocessing controls for real-data sessions."""
 
@@ -66,9 +76,13 @@ class IMUConfig(BaseModel):
     )
     time_offset_s: float = 0.0
 
-    gyro_scale_dps_per_lsb: float = 0.061
-    accel_scale_g_per_lsb: float = 0.000061
-    gravity_mps2: float = 9.80665
+    # Sensor scales must be strictly positive. Negative scale would
+    # silently mirror the trajectory while ``axis_signs`` still
+    # appears to read +1; the documented way to flip an axis is
+    # ``axis_signs``.
+    gyro_scale_dps_per_lsb: float = Field(default=0.061, gt=0.0)
+    accel_scale_g_per_lsb: float = Field(default=0.000061, gt=0.0)
+    gravity_mps2: float = Field(default=9.80665, gt=0.0)
 
     axis_map: dict[str, str] = Field(
         default_factory=lambda: {
@@ -97,13 +111,46 @@ class IMUConfig(BaseModel):
     calibration_max_horizontal_gravity_mps2: float = 1.0
     calibration_min_accel_axis_correlation_for_translation: float = 0.5
 
+    @model_validator(mode="after")
+    def _validate_axis_keys(self) -> IMUConfig:
+        # ``_convert_imu_to_si`` indexes ``axis_map`` with the
+        # canonical six keys directly; a partial map (e.g. only
+        # ``gyro_z``) used to fail deep in the loader with a raw
+        # ``KeyError: 'gyro_x'`` and surface as ``Unexpected
+        # error`` via the friendly_cli_errors decorator. Reject at
+        # schema time so the user gets a clean Pydantic message.
+        # ``axis_signs`` is queried with ``.get(name, 1.0)`` so a
+        # partial map there silently defaults to +1 — also reject so
+        # users are explicit about every axis.
+        for field_name in ("axis_map", "axis_signs"):
+            mapping = getattr(self, field_name)
+            missing = [name for name in _CANONICAL_IMU_AXES if name not in mapping]
+            extra = [name for name in mapping if name not in _CANONICAL_IMU_AXES]
+            if missing or extra:
+                detail = []
+                if missing:
+                    detail.append(f"missing keys: {', '.join(missing)}")
+                if extra:
+                    detail.append(f"unknown keys: {', '.join(extra)}")
+                raise ValueError(
+                    f"imu.{field_name} must contain exactly the six canonical "
+                    f"axis names ({', '.join(_CANONICAL_IMU_AXES)}); "
+                    f"got {' and '.join(detail)}."
+                )
+        return self
+
 
 class CameraConfig(BaseModel):
     """Camera/LED preprocessing controls for real-data sessions."""
 
     model_config = ConfigDict(extra="forbid")
 
-    meters_per_pixel: float = 0.0022
+    # ``meters_per_pixel`` scales LED pixel coordinates into world
+    # meters. Zero collapses every frame onto the origin and
+    # negative values silently mirror the trajectory while
+    # preserving positive LED spacing — both produce plausible-
+    # looking but wrong fused output.
+    meters_per_pixel: float = Field(default=0.0022, gt=0.0)
     time_offset_s: float = 0.0
     led1_x_column: str = "xloc"
     led1_y_column: str = "yloc"
@@ -165,11 +212,15 @@ class OutputsConfig(BaseModel):
     output_dir: Path = Path("trodestrack_run")
     write_diagnostics: bool = True
     run_safety_checks: bool = True
-    safety_envelope_multiplier: float = 3.0
-    safety_extra_range_m: float = 0.5
-    safety_max_speed_mps: float = 3.0
-    safety_max_position_deviation_m: float = 0.5
-    safety_p95_position_deviation_m: float = 0.25
+    # Safety thresholds gate physically implausible fused output.
+    # Non-positive thresholds either accept anything (rendering the
+    # check meaningless) or reject everything (blocking valid runs);
+    # both indicate a config bug.
+    safety_envelope_multiplier: float = Field(default=3.0, gt=0.0)
+    safety_extra_range_m: float = Field(default=0.5, ge=0.0)
+    safety_max_speed_mps: float = Field(default=3.0, gt=0.0)
+    safety_max_position_deviation_m: float = Field(default=0.5, gt=0.0)
+    safety_p95_position_deviation_m: float = Field(default=0.25, gt=0.0)
 
 
 class LedIdentityConfig(BaseModel):

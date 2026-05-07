@@ -251,16 +251,21 @@ def _load_spikegadgets_trodes(config: SessionConfig) -> PreparedSession:
     pos_df = pd.read_parquet(inputs.position_file)
     imu_df = pd.read_parquet(inputs.imu_file)
     _require_columns(imu_df, config.imu.axis_map.values(), source=str(inputs.imu_file))
-    _require_columns(
-        pos_df,
-        (
-            config.camera.led1_x_column,
-            config.camera.led1_y_column,
-            config.camera.led2_x_column,
-            config.camera.led2_y_column,
-        ),
-        source=str(inputs.position_file),
-    )
+    pos_columns: list[str] = [
+        config.camera.led1_x_column,
+        config.camera.led1_y_column,
+        config.camera.led2_x_column,
+        config.camera.led2_y_column,
+    ]
+    # Include configured confidence columns up-front so a missing
+    # ``likelihood`` (or whatever the user named it) fails loudly via
+    # the shared validator instead of surfacing as
+    # ``Unexpected error: 'likelihood'`` from ``_load_leds`` later.
+    if config.camera.confidence_led1_column is not None:
+        pos_columns.append(config.camera.confidence_led1_column)
+    if config.camera.confidence_led2_column is not None:
+        pos_columns.append(config.camera.confidence_led2_column)
+    _require_columns(pos_df, pos_columns, source=str(inputs.position_file))
 
     imu_unique = _remove_sample_hold(imu_df, config)
     t_imu_unix = _index_or_time_column(imu_unique)
@@ -324,6 +329,24 @@ def _apply_led_identity_correction(session: PreparedSession) -> PreparedSession:
         t_imu=session.t_imu,
         gyro_z=gyro_z,
     )
+
+    # When the identity correction swaps LED1 and LED2, the per-LED
+    # confidence weights have to follow or the EKF ends up trusting
+    # the wrong physical LED. ``conf_cam`` is laid out as
+    # ``[c1, c1, c2, c2]`` (per-LED confidence replicated across the
+    # x / y measurement components); for swapped frames, the two
+    # halves must trade places. Without this swap a known global
+    # swap left ``conf_cam[0] = [0.1, 0.1, 0.9, 0.9]`` even though
+    # the physically-LED1 measurement was the high-confidence one.
+    corrected_conf_cam = session.conf_cam
+    if corrected_conf_cam is not None and np.any(corrected.swapped):
+        corrected_conf_cam = corrected_conf_cam.copy()
+        rows = corrected.swapped
+        led1_block = corrected_conf_cam[rows, 0:2].copy()
+        led2_block = corrected_conf_cam[rows, 2:4].copy()
+        corrected_conf_cam[rows, 0:2] = led2_block
+        corrected_conf_cam[rows, 2:4] = led1_block
+
     diagnostics = dict(session.diagnostics)
     diagnostics["led_identity"] = corrected.diagnostics
     diagnostics["led_identity_swapped"] = corrected.swapped
@@ -331,6 +354,7 @@ def _apply_led_identity_correction(session: PreparedSession) -> PreparedSession:
         session,
         Z_cam_led1=corrected.led1,
         Z_cam_led2=corrected.led2,
+        conf_cam=corrected_conf_cam,
         diagnostics=diagnostics,
     )
 
