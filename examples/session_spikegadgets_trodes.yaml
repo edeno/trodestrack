@@ -60,3 +60,6 @@ outputs:
   safety_max_speed_mps: 3.0
   safety_max_position_deviation_m: 0.5
   safety_p95_position_deviation_m: 0.25
+  # Minimum dual-LED frames needed to estimate the camera midpoint envelope.
+  # Single-LED frames still contribute to fused-vs-vision deviation checks.
+  safety_min_dual_led_frames: 20
