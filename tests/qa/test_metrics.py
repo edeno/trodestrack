@@ -748,6 +748,39 @@ def test_dropout_drift_truth_estimate_shape_mismatch():
         compute_dropout_drift(est, truth, mask, t)
 
 
+def test_dropout_drift_rejects_non_bool_or_01_integer_mask():
+    """Reject masks whose dtype isn't bool or 0/1 integer.
+
+    An integer mask containing a stray ``2`` previously survived all
+    earlier checks; ``~valid_mask_arr`` then produced ``-3`` (bitwise
+    invert), making the entire array "truthy" and silently hiding the
+    dropout. A float ``0.0/1.0`` mask raised a raw NumPy
+    ``TypeError`` from ``~``. Mirror the contract used by
+    ``qa.plots._validate_optional_bool_mask`` and
+    ``qa.imu_calibration``.
+    """
+    t = np.linspace(0, 10, 100)
+    truth = np.column_stack([t * 0.1, np.zeros_like(t)])
+    est = truth.copy()
+    mask_bool = (t < 3.0) | (t >= 8.0)
+
+    # Sanity: clean bool / 0-1 int masks still work.
+    compute_dropout_drift(est, truth, mask_bool, t, min_duration_s=4.0)
+    compute_dropout_drift(est, truth, mask_bool.astype(np.int32), t, min_duration_s=4.0)
+
+    # Integer mask with a stray 2: must reject.
+    mask_with_2 = mask_bool.astype(np.int32).copy()
+    mask_with_2[np.where(~mask_bool)[0][0]] = 2
+    with pytest.raises(ValueError, match=r"boolean or 0/1 integer"):
+        compute_dropout_drift(est, truth, mask_with_2, t, min_duration_s=4.0)
+
+    # Float mask: must raise the contract error, not a raw TypeError.
+    with pytest.raises(ValueError, match=r"boolean or 0/1 integer"):
+        compute_dropout_drift(
+            est, truth, mask_bool.astype(float), t, min_duration_s=4.0
+        )
+
+
 def test_dropout_drift_rejects_non_1d_mask():
     """``valid_mask`` must be 1D (N,); column / row vectors must be rejected.
 

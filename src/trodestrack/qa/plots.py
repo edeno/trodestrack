@@ -20,7 +20,7 @@ from matplotlib.patches import Ellipse
 from numpy.typing import NDArray
 
 from trodestrack.models.state_layout import StateLayout, get_heading_index
-from trodestrack.qa.metrics import chi2_bounds
+from trodestrack.qa.metrics import chi2_bounds, validate_bool_mask_dtype
 from trodestrack.viz.styles import COLORS, apply_tufte_style
 
 
@@ -37,29 +37,6 @@ def _validate_time_axis(
     if arr.ndim != 1:
         raise ValueError(f"{name} must be 1D (N,) in seconds; got shape {arr.shape}.")
     return arr
-
-
-def validate_bool_mask_dtype(
-    mask: NDArray[np.generic],
-    name: str = "valid_mask",
-) -> NDArray[np.bool_]:
-    """Coerce ``mask`` to bool only after confirming it is bool-or-0/1.
-
-    A bare ``np.asarray(mask).astype(bool)`` silently turns ``NaN`` and any
-    nonzero integer (e.g. ``2``, ``-1``) into ``True``, so a corrupted
-    mask passes through every downstream "treat True as valid" branch.
-    Reject anything that isn't strictly ``np.bool_`` or an integer mask
-    whose values lie in ``{0, 1}``.
-    """
-
-    arr = np.asarray(mask)
-    if arr.dtype != np.bool_ and not (
-        np.issubdtype(arr.dtype, np.integer) and np.all(np.isin(arr, (0, 1)))
-    ):
-        raise ValueError(
-            f"{name} must be boolean or 0/1 integer; got dtype {arr.dtype!r}."
-        )
-    return arr.astype(bool)
 
 
 def _validate_optional_bool_mask(

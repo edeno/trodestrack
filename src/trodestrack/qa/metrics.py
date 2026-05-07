@@ -26,6 +26,35 @@ if TYPE_CHECKING:
 from trodestrack.models.state_layout import get_heading_index
 
 
+def validate_bool_mask_dtype(
+    mask: NDArray[np.generic],
+    name: str = "valid_mask",
+) -> NDArray[np.bool_]:
+    """Coerce ``mask`` to bool only after confirming it is bool-or-0/1.
+
+    A bare ``np.asarray(mask).astype(bool)`` silently turns ``NaN`` and any
+    nonzero integer (e.g. ``2``, ``-1``) into ``True``, so a corrupted
+    mask passes through every downstream "treat True as valid" branch.
+    Reject anything that isn't strictly ``np.bool_`` or an integer mask
+    whose values lie in ``{0, 1}``.
+
+    Lives in ``qa.metrics`` rather than ``qa.plots`` because
+    ``qa.plots`` already imports from ``qa.metrics`` (for ``chi2_bounds``);
+    keeping this helper here lets ``qa.metrics``,
+    ``qa.imu_calibration`` and ``qa.plots`` all reuse the same gate
+    without a circular import.
+    """
+
+    arr = np.asarray(mask)
+    if arr.dtype != np.bool_ and not (
+        np.issubdtype(arr.dtype, np.integer) and np.all(np.isin(arr, (0, 1)))
+    ):
+        raise ValueError(
+            f"{name} must be boolean or 0/1 integer; got dtype {arr.dtype!r}."
+        )
+    return arr.astype(bool)
+
+
 def compute_position_rmse(
     positions_true: NDArray[np.float64],
     positions_est: NDArray[np.float64],
@@ -919,16 +948,27 @@ def compute_dropout_drift(
         whose duration exceeds ``min_duration_s`` and reports the
         tracking-error metrics on that block.
     """
-    valid_mask_arr = np.asarray(valid_mask)
+    raw_mask_arr = np.asarray(valid_mask)
     pos_est = np.asarray(positions_est)
     pos_true = np.asarray(positions_true)
     # Reject non-1D masks. ``(N, 1)`` (a common shape from column-
     # vector loading or one-hot conversion) silently bypassed the
     # dropout detection.
-    if valid_mask_arr.ndim != 1:
+    if raw_mask_arr.ndim != 1:
         raise ValueError(
-            f"valid_mask must be 1-D (N,); got shape {valid_mask_arr.shape}."
+            f"valid_mask must be 1-D (N,); got shape {raw_mask_arr.shape}."
         )
+    # Reject non-bool / non-0-or-1-integer masks. Without this gate
+    # an integer mask containing ``2`` would survive the ``ndim``
+    # check, then ``~valid_mask_arr`` (bitwise invert on integers)
+    # produces ``-3`` which is "truthy" — the resulting "dropout"
+    # mask hides real dropouts and the function silently returns all
+    # ``None`` fields. A float ``0.0/1.0`` mask raises a raw
+    # ``TypeError`` from ``~`` instead of the documented contract
+    # error. Mirror the gate already used by ``qa.plots`` and
+    # ``qa.imu_calibration`` so PRD dropout checks can't be hidden by
+    # a corrupted mask.
+    valid_mask_arr = validate_bool_mask_dtype(raw_mask_arr, name="valid_mask")
     if pos_est.shape != pos_true.shape:
         raise ValueError(
             "positions_est and positions_true must have the same shape; "

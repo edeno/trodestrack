@@ -13,7 +13,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from trodestrack.qa.plots import validate_bool_mask_dtype
+from trodestrack.qa.metrics import validate_bool_mask_dtype
 
 
 @dataclass(frozen=True)
