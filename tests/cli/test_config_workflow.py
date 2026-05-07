@@ -357,6 +357,79 @@ outputs:
     )
 
 
+def test_config_missing_parquet_column_does_not_print_banner(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A spikegadgets_trodes config whose parquet is missing a required
+    column must surface the column error *without* the run-started banner.
+
+    The earlier banner placement also covered ``load_session_config``
+    only, which left ``_require_columns`` (run inside
+    ``_load_spikegadgets_trodes``) firing *under* the header. The
+    bug originally encompassed both prepared-array file errors and
+    parquet-column errors; the prior regression test only pinned
+    the file case. This test pins the column case explicitly.
+    """
+
+    data_dir = tmp_path / "missing_column_input"
+    data_dir.mkdir()
+    t_imu = np.linspace(0.0, 0.5, 51)
+    t_cam = np.linspace(0.0, 0.5, 16)
+    # Drop the ``Headstage_AccelZ`` column the IMU loader requires.
+    pd.DataFrame(
+        {
+            "time": t_imu,
+            "Headstage_GyroX": np.zeros_like(t_imu),
+            "Headstage_GyroY": np.zeros_like(t_imu),
+            "Headstage_GyroZ": np.zeros_like(t_imu),
+            "Headstage_AccelX": np.zeros_like(t_imu),
+            "Headstage_AccelY": np.zeros_like(t_imu),
+        }
+    ).to_parquet(data_dir / "imu.parquet")
+    pd.DataFrame(
+        {
+            "time": t_cam,
+            "xloc": np.zeros_like(t_cam),
+            "yloc": np.zeros_like(t_cam),
+            "xloc2": np.zeros_like(t_cam),
+            "yloc2": np.zeros_like(t_cam),
+        }
+    ).to_parquet(data_dir / "position.parquet")
+    config_path = tmp_path / "missing_column.yaml"
+    config_path.write_text(
+        f"""
+inputs:
+  format: spikegadgets_trodes
+  imu_file: {data_dir.name}/imu.parquet
+  position_file: {data_dir.name}/position.parquet
+imu:
+  run_calibration: false
+camera:
+  meters_per_pixel: 0.01
+filter:
+  state_mode: 2d_full
+outputs:
+  output_dir: out
+""".lstrip()
+    )
+
+    with (
+        patch("sys.argv", ["trodestrack", "online", "--config", str(config_path)]),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err
+    assert "Headstage_AccelZ" in combined, (
+        f"Expected the missing-column error to mention the column; got:\n{combined!r}"
+    )
+    assert "trodestrack — config-driven run" not in combined, (
+        f"Banner printed before parquet column error; got:\n{combined!r}"
+    )
+
+
 def test_config_safety_check_raise_writes_diagnostics(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
