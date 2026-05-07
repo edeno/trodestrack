@@ -422,6 +422,47 @@ led_identity:
     np.testing.assert_allclose(session.conf_cam[:, 2:4], 0.1)
 
 
+def test_prepared_arrays_mask_cam_includes_single_led_frames(tmp_path):
+    """Prepared-array fallback mask must include single-LED frames.
+
+    When ``camera_mask`` is omitted but ``led2_positions`` is
+    provided, the loader's default mask used to be
+    ``finite(led1)`` only, which silently dropped LED2-only frames
+    even though the EKF supports single-LED updates. The fallback
+    must now match the SpikeGadgets path: a frame is usable when
+    either LED is finite. (When ``led2_positions`` is absent
+    entirely, ``led2`` is all-NaN and the OR collapses back to
+    ``finite(led1)`` as before.)
+    """
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    np.savetxt(input_dir / "t_imu.txt", [0.0, 0.05, 0.10, 0.15])
+    np.savetxt(input_dir / "U_imu.txt", np.zeros((4, 3)))
+    np.savetxt(input_dir / "t_cam.txt", [0.0, 0.033, 0.066])
+    # Frame 0: both LEDs finite. Frame 1: LED1 only. Frame 2: LED2 only.
+    np.savetxt(input_dir / "led1.txt", [[0.0, 0.0], [0.01, 0.0], [np.nan, np.nan]])
+    np.savetxt(input_dir / "led2.txt", [[0.04, 0.0], [np.nan, np.nan], [0.05, 0.0]])
+    config_path = tmp_path / "session.yaml"
+    config_path.write_text(
+        """
+inputs:
+  format: prepared_arrays
+  imu_timestamps: input/t_imu.txt
+  imu_measurements: input/U_imu.txt
+  camera_timestamps: input/t_cam.txt
+  led1_positions: input/led1.txt
+  led2_positions: input/led2.txt
+filter:
+  state_mode: vision_only
+""".lstrip()
+    )
+
+    session = load_session(load_session_config(config_path))
+
+    np.testing.assert_array_equal(session.mask_cam, [True, True, True])
+
+
 def test_arthur_loader_includes_single_led_frames_in_mask(tmp_path):
     """``mask_cam`` must include single-LED frames so the EKF can use them.
 

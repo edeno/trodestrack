@@ -220,11 +220,17 @@ def _load_prepared_arrays(config: SessionConfig) -> PreparedSession:
         if inputs.led2_positions is not None
         else np.full((len(t_cam), 2), np.nan)
     )
-    mask = (
-        np.loadtxt(inputs.camera_mask).astype(bool)
-        if inputs.camera_mask is not None
-        else np.isfinite(led1).all(axis=1)
-    )
+    if inputs.camera_mask is not None:
+        mask = np.loadtxt(inputs.camera_mask).astype(bool)
+    else:
+        # Match the SpikeGadgets path: a frame is usable when *either*
+        # LED is finite, since the EKF supports single-LED updates.
+        # Falling back to ``finite(led1)`` alone silently dropped
+        # LED2-only frames whenever ``camera_mask`` was omitted, even
+        # though ``led2_positions`` was provided. When LED2 isn't
+        # configured at all, ``led2`` is all-NaN and the OR collapses
+        # back to ``finite(led1)`` as before.
+        mask = np.isfinite(led1).all(axis=1) | np.isfinite(led2).all(axis=1)
     led_distance = config.filter.led_distance or _median_led_distance(led1, led2, mask)
     _validate_time_vector(t_imu, "IMU timestamps")
     _validate_time_vector(t_cam, "camera timestamps")
