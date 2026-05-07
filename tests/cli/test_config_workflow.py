@@ -238,6 +238,8 @@ def test_spikegadgets_vision_only_config_skips_real_data_safety(
     assert (output_dir / "filtered_means.txt").exists()
     metadata = (output_dir / "metadata.txt").read_text()
     assert "disabled" in metadata
+    assert "Dual-LED frames: 0" in metadata
+    assert "Deviation frames: 0" in metadata
     assert "Mahalanobis gating: False" in metadata
 
 

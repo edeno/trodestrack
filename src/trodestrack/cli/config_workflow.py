@@ -257,6 +257,8 @@ def write_config_metadata(
             f.write("\n")
         f.write("Safety Check:\n")
         f.write(f"  Result: {run.safety_report.message}\n")
+        f.write(f"  Dual-LED frames: {run.safety_report.dual_led_frame_count}\n")
+        f.write(f"  Deviation frames: {run.safety_report.deviation_frame_count}\n")
         f.write(f"  Max fused speed: {run.safety_report.max_fused_speed_mps}\n")
         f.write(
             "  Max vision-position deviation: "
