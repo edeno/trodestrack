@@ -221,7 +221,7 @@ class EventLocationSource:
     """
     source_id: int
     anchor: np.ndarray         # (2,) world meters
-    R: np.ndarray              # (2, 2) world-frame covariance, PSD
+    covariance: np.ndarray     # (2, 2) world-frame measurement covariance, PSD
     label: str | None = None
     source_type: str = "unknown"   # for diagnostics only
 
@@ -299,11 +299,11 @@ class ZoneTriggerSpec(BaseModel):
 
     def to_event_source(self) -> EventLocationSource:
         anchor = np.array(self.center)
-        R = (self.sigma_m ** 2) * np.eye(2)
+        covariance = (self.sigma_m ** 2) * np.eye(2)
         return EventLocationSource(
             source_id=self.id,
             anchor=anchor,
-            R=R,
+            covariance=covariance,
             label=self.label,
             source_type="zone",
         )
@@ -322,11 +322,11 @@ class RFIDReaderSpec(BaseModel):
     def to_event_source(self) -> EventLocationSource:
         anchor = np.array(self.center)
         sigma = self.effective_radius_m / np.sqrt(2.0)
-        R = (sigma ** 2) * np.eye(2)
+        covariance = (sigma ** 2) * np.eye(2)
         return EventLocationSource(
             source_id=self.id,
             anchor=anchor,
-            R=R,
+            covariance=covariance,
             label=self.label,
             source_type="rfid",
         )
