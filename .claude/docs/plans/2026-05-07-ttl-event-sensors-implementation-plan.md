@@ -158,9 +158,15 @@ equivalence to a line-only update.
   `MAX_EVENTS_PER_FRAME` (default 8) with sentinel `-1`. Because every
   event contributes exactly two rows, the stacked update is built at
   fixed shape `(2 · MAX_EVENTS_PER_FRAME, n_state)`. Padded sentinel
-  rows get a large `R` so the Kalman gain treats them as no-ops; the
-  event log-likelihood is explicitly masked so sentinel rows contribute
-  exactly zero, preserving empty-events parity.
+  rows are gated three ways: their `H` rows are zero, their innovation
+  rows are zero, and their `R` block is identity. The zero `H` is what
+  drives the Kalman gain on those rows to exactly zero; the well-
+  conditioned identity `R` keeps `psd_solve`'s relative diagonal boost
+  stable when the valid-event `R` blocks are tiny (a single large-`R`
+  block in the same matrix would inflate the boost and corrupt the
+  valid update). The event log-likelihood is also explicitly masked
+  over valid rows, so the "events config present but no events" case
+  is bitwise identical to the no-events-config case.
 - **Trodes DIO is the canonical source.** Hardware sync is assumed;
   no separate clock-alignment step.
 - **Layout-aware indexing.** `layout.pos_idx[:2]` for all current
@@ -233,8 +239,11 @@ class EventLocationModel:
 
 `source_indices` is a 1D array of compact source indices (or `-1`
 sentinel) active in the current camera frame. Padded sentinel rows
-get a large `R` so the Kalman update treats them as no-ops, and their
-log-likelihood contribution is masked to zero.
+are gated by zero `H` rows, zero innovation rows, and an identity
+`R` block — the zero `H` is what drives the Kalman gain on those
+rows to exactly zero. Their log-likelihood contribution is also
+masked to zero. (See the Design Principles entry on padding for why
+identity-`R` is preferred over a large-`R` "soft gate".)
 
 ### Schema additions — `src/trodestrack/config/schemas.py`
 
@@ -463,8 +472,12 @@ green.
   / innovation`.
 - Stacked-event update: K simultaneous events fold into one padded
   `(2 · MAX_EVENTS_PER_FRAME, n_state)` block update.
-- Padded-sentinel handling: compact index `-1` rows get large `R` and
-  are masked out of the innovation log-likelihood.
+- Padded-sentinel handling: compact index `-1` rows get zero `H`,
+  zero innovation, identity `R`, and are masked out of the innovation
+  log-likelihood. (Originally specified as "large `R`"; switched to
+  zero `H` plus identity `R` because the large-`R` block inflates
+  ``psd_solve``'s relative diagonal boost when valid `R` is small,
+  corrupting the valid update.)
 - Unit tests:
   - Predict on / off the anchor for every source type.
   - Stacked H shape: two rows per event for K events;
@@ -484,12 +497,23 @@ limit tests green to numerical tolerance.
 
 ### Milestone 3 — Sim extension and synthetic scenario tests
 
-- `RatIMUSimConfig.ttl_event_geometry` emits synthetic beam /
-  zone / RFID events.
+- Synthetic event generator. Implemented as a standalone helper
+  ``trodestrack.sim.ttl_events.events_from_trajectory(t, xy, beams=,
+  zone_triggers=, rfid_readers=)`` that walks a sampled trajectory and
+  emits beam crossings (sign-flip detector with half-open boundary),
+  zone-trigger entries (disc activation), and RFID detections.
+  Originally scoped as a ``RatIMUSimConfig.ttl_event_geometry`` field;
+  the standalone helper kept the simulator API surface unchanged and
+  is sufficient for scenario tests. Threading the geometry through
+  ``RatIMUSimConfig`` is a deferred follow-up if the YAML simulator
+  needs first-class events.
 - Property: events monotonic; source IDs valid; pad-limit honored.
 - Scenario per source type (separate tests):
-  - Beam grid (4×4) reduces position RMSE during 5s camera
-    dropout vs no-event baseline.
+  - Beam set along the trajectory reduces position RMSE during a
+    multi-second camera dropout vs no-event baseline. Implemented as
+    a 1D 5-beam set spanning a 2 s dropout window; the original
+    4×4 / 5 s benchmark is a stronger drift test that requires a
+    longer simulated session and is left as a follow-up.
   - Zone trigger snaps position to feeder location within σ_zone.
   - RFID detection collapses position uncertainty to the reader's
     effective radius.
