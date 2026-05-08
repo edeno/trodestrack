@@ -111,13 +111,15 @@ def load_ttl_events(
         )
 
     raw_time = df["time"].to_numpy()
-    if not np.issubdtype(raw_time.dtype, np.number) or np.issubdtype(
-        raw_time.dtype, np.bool_
+    if not (
+        np.issubdtype(raw_time.dtype, np.integer)
+        or np.issubdtype(raw_time.dtype, np.floating)
     ):
         raise ValueError(
-            f"{events_file} time column must be a numeric (integer or "
-            f"float) dtype; got dtype={raw_time.dtype!r}. The documented "
-            "schema is ``time (s, float)``."
+            f"{events_file} time column must be a real integer or float "
+            f"dtype; got dtype={raw_time.dtype!r}. The documented schema "
+            "is ``time (s, float)``. Bool, complex, object, and string "
+            "dtypes are rejected to avoid silent coercion."
         )
     t_evt = raw_time.astype(float, copy=False)
     edge_str = df["edge"].to_numpy()

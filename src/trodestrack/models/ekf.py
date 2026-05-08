@@ -409,16 +409,19 @@ _NO_EVENT_PAD_WIDTH: int = 1
 def _coerce_event_floats(arr, *, name: str) -> np.ndarray:
     """Coerce a public-API event float array to ``float64``.
 
-    Rejects bool, object, string, datetime, and other non-numeric dtypes
+    Rejects bool, complex, object, string, datetime, and other dtypes
     that would silently coerce through ``np.asarray(..., dtype=float)``
-    (probe: bool ``True`` → ``1.0``, string ``"0.5"`` → ``0.5``).
+    (probe: bool ``True`` → ``1.0``, string ``"0.5"`` → ``0.5``,
+    complex ``1+2j`` → ``1.0`` with imaginary part discarded).
     """
     raw = np.asarray(arr)
-    if not np.issubdtype(raw.dtype, np.number) or np.issubdtype(raw.dtype, np.bool_):
+    if not (
+        np.issubdtype(raw.dtype, np.integer) or np.issubdtype(raw.dtype, np.floating)
+    ):
         raise ValueError(
-            f"{name} must be a numeric (integer or float) array; got "
-            f"dtype={raw.dtype!r}. Bool, object, and string dtypes are "
-            "rejected to avoid silent coercion."
+            f"{name} must be a real integer or float array; got "
+            f"dtype={raw.dtype!r}. Bool, complex, object, and string "
+            "dtypes are rejected to avoid silent coercion."
         )
     return raw.astype(float, copy=False)
 

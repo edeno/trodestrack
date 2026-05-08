@@ -302,7 +302,7 @@ def test_load_ttl_events_rejects_string_time(tmp_path):
             "edge": ["fall"],
         }
     ).to_parquet(events_path)
-    with pytest.raises(ValueError, match="time column must be a numeric"):
+    with pytest.raises(ValueError, match="time column must be a real"):
         load_ttl_events(events_path)
 
 
@@ -315,7 +315,7 @@ def test_load_ttl_events_rejects_bool_time(tmp_path):
             "edge": ["fall"],
         }
     ).to_parquet(events_path)
-    with pytest.raises(ValueError, match="time column must be a numeric"):
+    with pytest.raises(ValueError, match="time column must be a real"):
         load_ttl_events(events_path)
 
 

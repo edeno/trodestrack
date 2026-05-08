@@ -211,6 +211,27 @@ class TestEventChannelValidation:
         with pytest.raises(ValueError, match="signed int64 range"):
             _run_with_events(sim_data, ekf_config, anchors, covariances, indices)
 
+    def test_complex_anchors_rejected(self, sim_data):
+        """Complex dtype passes np.number but discards imaginary part on float cast."""
+        ekf_config = _make_ekf_config()
+        n_cam = sim_data["t_cam_exp"].shape[0]
+        complex_anchors = np.array([[0.5 + 1j, 0.5]], dtype=complex)
+        covariances = np.array([[[0.01, 0.0], [0.0, 0.01]]], dtype=float)
+        indices = np.full((n_cam, 1), -1, dtype=np.int32)
+        with pytest.raises(ValueError, match="event_source_anchors must be"):
+            _run_with_events(
+                sim_data, ekf_config, complex_anchors, covariances, indices
+            )
+
+    def test_complex_covariances_rejected(self, sim_data):
+        ekf_config = _make_ekf_config()
+        n_cam = sim_data["t_cam_exp"].shape[0]
+        anchors = np.array([[0.5, 0.5]], dtype=float)
+        complex_cov = np.array([[[0.01 + 1j, 0.0], [0.0, 0.01]]], dtype=complex)
+        indices = np.full((n_cam, 1), -1, dtype=np.int32)
+        with pytest.raises(ValueError, match="event_source_covariances must be"):
+            _run_with_events(sim_data, ekf_config, anchors, complex_cov, indices)
+
     def test_string_anchors_rejected(self, sim_data):
         ekf_config = _make_ekf_config()
         n_cam = sim_data["t_cam_exp"].shape[0]
