@@ -536,7 +536,7 @@ IMU noise accumulates during stationary periods → small velocity estimates →
 ```python
 cfg = EKFConfig(
     enable_zupt=True,                      # Detect stationary periods
-    zupt_velocity_threshold=0.05,          # Trigger if |v| < 5 cm/s
+    zupt_velocity_threshold=0.05,          # Trigger if camera speed < 5 cm/s
     zupt_measurement_noise=0.01**2         # Trust v=0 with 1 cm/s noise
 )
 ```

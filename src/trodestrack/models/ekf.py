@@ -54,10 +54,13 @@ from trodestrack.models.filter_common import (
     FilterCoreConfig,
     FilterState,
     build_quaternion_transition_jacobian,
+    camera_stationary_zupt_gate_2d,
+    camera_stationary_zupt_gate_3d,
     chi2_threshold,
     compute_imu_index_arrays,
     dynamics_function,
     estimate_led_spacing,
+    imu_stationary_zupt_gate,
     initialize_state,
     joseph_update,
     normalize_state_orientation,
@@ -65,6 +68,7 @@ from trodestrack.models.filter_common import (
     state_yaw,
     symmetrize,
     update_zupt,
+    update_zupt_visual_context,
     validate_camera_3d_input_shapes,
     validate_camera_input_shapes,
     validate_imu_input_shape,
@@ -232,7 +236,13 @@ def _extended_kalman_filter_impl(
 
     def filter_step(carry, t_idx):
         """Single filtering step at camera frame t_idx."""
-        state_prev, log_lik_accum, has_seen_vision_prev = carry
+        (
+            state_prev,
+            log_lik_accum,
+            has_seen_vision_prev,
+            stationary_context_prev,
+            stationary_context_age_prev,
+        ) = carry
         both_leds, only_led1, only_led2, _ = camera_model.subspace(t_idx)
         frame_has_led = mask_cam_jax[t_idx] & (both_leds | only_led1 | only_led2)
 
@@ -284,10 +294,36 @@ def _extended_kalman_filter_impl(
         )
 
         has_seen_vision_next = has_seen_vision_prev | frame_has_led
+        zupt_imu_indices = imu_index_arrays[t_idx]
+        zupt_imu_samples = U_imu_jax[jnp.maximum(zupt_imu_indices, 0)]
+        zupt_imu_valid = zupt_imu_indices >= 0
+        imu_stationary = imu_stationary_zupt_gate(
+            zupt_imu_samples,
+            zupt_imu_valid,
+            config_for_filter,
+            layout,
+        )
+        visual_speed_valid, visual_stationary = camera_stationary_zupt_gate_2d(
+            t_cam_jax,
+            Z_cam_led1_jax,
+            Z_cam_led2_jax,
+            mask_cam_jax,
+            t_idx,
+            config_for_filter,
+        )
+        stationary_context_next, stationary_context_age_next = (
+            update_zupt_visual_context(
+                visual_speed_valid,
+                visual_stationary,
+                stationary_context_prev,
+                stationary_context_age_prev,
+                config_for_filter,
+            )
+        )
         state_filt, log_lik_zupt = update_zupt(
             state_after_heading,
             config_for_filter,
-            active=has_seen_vision_next,
+            active=has_seen_vision_next & imu_stationary & stationary_context_next,
         )
 
         log_lik_k = log_lik_pos + log_lik_heading + log_lik_zupt
@@ -300,16 +336,26 @@ def _extended_kalman_filter_impl(
             "usable_vision": frame_has_led,
         }
 
-        carry_next = (state_filt, log_lik_accum + log_lik_k, has_seen_vision_next)
+        carry_next = (
+            state_filt,
+            log_lik_accum + log_lik_k,
+            has_seen_vision_next,
+            stationary_context_next,
+            stationary_context_age_next,
+        )
         return carry_next, outputs
 
     carry_init = (
         initial_state,
         jnp.asarray(0.0, dtype=initial_state.mean.dtype),
         jnp.asarray(initial_zupt_context, dtype=bool),
+        jnp.asarray(False, dtype=bool),
+        jnp.asarray(
+            config_for_filter.zupt_visual_context_hold_frames + 1, dtype=jnp.int32
+        ),
     )
 
-    (_, log_lik_total, _), outputs = lax.scan(
+    (_, log_lik_total, _, _, _), outputs = lax.scan(
         filter_step, carry_init, jnp.arange(n_cam)
     )
 
@@ -1139,7 +1185,13 @@ def _extended_kalman_filter_3d_core(
     )
 
     def filter_step(carry, t_idx):
-        state_prev, marginal_loglik_prev, has_seen_vision_prev = carry
+        (
+            state_prev,
+            marginal_loglik_prev,
+            has_seen_vision_prev,
+            stationary_context_prev,
+            stationary_context_age_prev,
+        ) = carry
         has_vision = jnp.any(camera_model.valid_coordinates(t_idx))
         has_seen_vision_next = has_seen_vision_prev | has_vision
 
@@ -1190,10 +1242,41 @@ def _extended_kalman_filter_3d_core(
             config_for_filter,
             chi2_thresholds,
         )
+        zupt_imu_indices = imu_index_arrays[t_idx]
+        zupt_imu_samples = U_imu_jax[jnp.maximum(zupt_imu_indices, 0)]
+        zupt_imu_valid = zupt_imu_indices >= 0
+        imu_stationary = imu_stationary_zupt_gate(
+            zupt_imu_samples,
+            zupt_imu_valid,
+            config_for_filter,
+            layout,
+        )
+        zupt_camera_lookback = jnp.asarray(
+            config_for_filter.zupt_camera_stationary_window_frames,
+            dtype=t_idx.dtype,
+        )
+        prev_idx = jnp.maximum(t_idx - zupt_camera_lookback, 0)
+        visual_speed_valid, visual_stationary = camera_stationary_zupt_gate_3d(
+            t_cam_jax,
+            Z_cam_leds_jax,
+            camera_model.valid_coordinates(t_idx),
+            camera_model.valid_coordinates(prev_idx),
+            t_idx,
+            config_for_filter,
+        )
+        stationary_context_next, stationary_context_age_next = (
+            update_zupt_visual_context(
+                visual_speed_valid,
+                visual_stationary,
+                stationary_context_prev,
+                stationary_context_age_prev,
+                config_for_filter,
+            )
+        )
         state_filt, log_lik_zupt = update_zupt(
             state_cam,
             config_for_filter,
-            active=has_seen_vision_next,
+            active=has_seen_vision_next & imu_stationary & stationary_context_next,
         )
         marginal_loglik = marginal_loglik_prev + log_lik_camera + log_lik_zupt
         outputs = (
@@ -1203,14 +1286,25 @@ def _extended_kalman_filter_3d_core(
             predicted_covariance,
             has_vision,
         )
-        return (state_filt, marginal_loglik, has_seen_vision_next), outputs
+        return (
+            state_filt,
+            marginal_loglik,
+            has_seen_vision_next,
+            stationary_context_next,
+            stationary_context_age_next,
+        ), outputs
 
-    (final_state, marginal_loglik, _), scan_outputs = lax.scan(
+    (final_state, marginal_loglik, _, _, _), scan_outputs = lax.scan(
         filter_step,
         (
             initial_state,
             jnp.asarray(0.0, dtype=initial_state.mean.dtype),
             jnp.asarray(initial_zupt_context, dtype=bool),
+            jnp.asarray(False, dtype=bool),
+            jnp.asarray(
+                config_for_filter.zupt_visual_context_hold_frames + 1,
+                dtype=jnp.int32,
+            ),
         ),
         jnp.arange(t_cam_jax.shape[0], dtype=jnp.int32),
     )

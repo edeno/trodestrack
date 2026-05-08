@@ -392,7 +392,7 @@ cfg = EKFConfig(
 ```python
 cfg = EKFConfig(
     enable_zupt=True,                      # Enable ZUPT
-    zupt_velocity_threshold=0.05,          # Trigger if |v| < 5 cm/s
+    zupt_velocity_threshold=0.05,          # Trigger if camera speed < 5 cm/s
     zupt_measurement_noise=0.01**2         # Trust velocity=0 with 1 cm/s noise
 )
 ```
@@ -550,7 +550,7 @@ cfg = EKFConfig(
 
     # --- Zero-Velocity Update (ZUPT) ---
     enable_zupt=True,                      # Enable stationary detection
-    zupt_velocity_threshold=0.02,          # Trigger if |v| < 2 cm/s
+    zupt_velocity_threshold=0.02,          # Trigger if camera speed < 2 cm/s
     zupt_measurement_noise=0.01**2,        # ZUPT measurement noise (m²/s²)
 
     # --- Advanced ---

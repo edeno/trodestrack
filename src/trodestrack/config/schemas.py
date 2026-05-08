@@ -232,6 +232,12 @@ class FilterConfig(BaseModel):
     gravity_accel_magnitude_tolerance_m_s2: float | None = None
     gravity_gyro_norm_threshold_rad_s: float | None = None
     enable_zupt: bool | None = None
+    zupt_velocity_threshold: float | None = None
+    zupt_measurement_noise: float | None = None
+    zupt_gyro_threshold_rad_s: float | None = None
+    zupt_accel_threshold_m_s2: float | None = None
+    zupt_camera_stationary_window_frames: int | None = None
+    zupt_visual_context_hold_frames: int | None = None
 
     def to_ekf_kwargs(self, *, led_distance: float | None = None) -> dict[str, object]:
         """Return keyword arguments suitable for EKFConfig."""

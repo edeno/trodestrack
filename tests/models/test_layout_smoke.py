@@ -949,11 +949,10 @@ def test_ekf_3d_zupt_updates_velocity_when_enabled() -> None:
     mean = mean.at[jnp.array(layout.heading_idx)].set(jnp.array([1.0, 0.0, 0.0, 0.0]))
     mean = mean.at[jnp.array(layout.vel_idx)].set(jnp.array([0.01, -0.01, 0.005]))
     cov = jnp.eye(layout.n) * 0.1
-    t_cam = np.array([0.0], dtype=np.float32)
-    t_imu = np.array([0.0, 0.01], dtype=np.float32)
-    U_imu = np.zeros((2, 6), dtype=np.float32)
+    t_cam = np.linspace(0.0, 0.5, 12, dtype=np.float32)
+    t_imu = np.linspace(0.0, 0.5, 101, dtype=np.float32)
+    U_imu = np.zeros((len(t_imu), 6), dtype=np.float32)
     U_imu[:, 5] = 9.81
-    z_leds = np.full((1, 3, 3), np.nan, dtype=np.float32)
     led_offsets = np.array(
         [
             [-0.03, 0.0, 0.0],
@@ -962,6 +961,7 @@ def test_ekf_3d_zupt_updates_velocity_when_enabled() -> None:
         ],
         dtype=np.float32,
     )
+    z_leds = np.repeat(led_offsets[None, :, :], len(t_cam), axis=0)
 
     result = extended_kalman_filter_3d(
         EKFConfig(

@@ -156,6 +156,27 @@ def test_orientation_fused_config_passes_ekf_kwargs():
     assert kwargs["gravity_orientation_measurement_noise"] == 0.0025
 
 
+def test_zupt_visual_context_hold_frames_passes_ekf_kwargs():
+    """YAML configs expose bounded ZUPT visual-context carry."""
+
+    config = SessionConfig.model_validate(
+        {
+            "inputs": {
+                "format": "prepared_arrays",
+                "imu_timestamps": "t_imu.txt",
+                "imu_measurements": "U_imu.txt",
+                "camera_timestamps": "t_cam.txt",
+                "led1_positions": "led1.txt",
+            },
+            "filter": {
+                "zupt_visual_context_hold_frames": 0,
+            },
+        }
+    )
+
+    assert config.filter.to_ekf_kwargs()["zupt_visual_context_hold_frames"] == 0
+
+
 def test_led_identity_initial_state_config():
     """Users can provide an initial LED identity prior for global swaps."""
 

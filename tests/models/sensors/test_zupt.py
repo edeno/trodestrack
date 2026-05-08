@@ -20,7 +20,6 @@ class TestZUPTModelProtocol:
         layout = get_layout("2d_full")
         model = ZUPTModel(
             enable_zupt=True,
-            velocity_threshold=0.05,
             measurement_noise=0.01**2,
             layout=layout,
         )
@@ -31,7 +30,6 @@ class TestZUPTModelProtocol:
         layout = get_layout("2d_full")
         model = ZUPTModel(
             enable_zupt=True,
-            velocity_threshold=0.05,
             measurement_noise=0.01**2,
             layout=layout,
         )
@@ -46,7 +44,6 @@ class TestZUPTModelPrediction:
         layout = get_layout("2d_full")
         model = ZUPTModel(
             enable_zupt=True,
-            velocity_threshold=0.05,
             measurement_noise=0.01**2,
             layout=layout,
         )
@@ -63,7 +60,6 @@ class TestZUPTModelPrediction:
         layout = get_layout("vision_only")
         model = ZUPTModel(
             enable_zupt=True,
-            velocity_threshold=0.05,
             measurement_noise=0.01**2,
             layout=layout,
         )
@@ -84,7 +80,6 @@ class TestZUPTModelJacobian:
         layout = get_layout("2d_full")
         model = ZUPTModel(
             enable_zupt=True,
-            velocity_threshold=0.05,
             measurement_noise=0.01**2,
             layout=layout,
         )
@@ -106,12 +101,11 @@ class TestZUPTModelJacobian:
 class TestZUPTModelMeasurementCovariance:
     """Test ZUPT measurement covariance (R matrix with gating logic)."""
 
-    def test_meas_cov_small_when_stationary(self):
-        """meas_cov() should return small R when velocity < threshold."""
+    def test_meas_cov_small_when_enabled(self):
+        """meas_cov_from_pred() should return small R when ZUPT is enabled."""
         layout = get_layout("2d_full")
         model = ZUPTModel(
             enable_zupt=True,
-            velocity_threshold=0.05,
             measurement_noise=0.01**2,
             layout=layout,
         )
@@ -125,12 +119,11 @@ class TestZUPTModelMeasurementCovariance:
         # Should be diagonal with small noise
         assert jnp.allclose(R, jnp.diag(jnp.array([0.01**2, 0.01**2])), atol=1e-6)
 
-    def test_meas_cov_large_when_moving(self):
-        """meas_cov() should return large R when velocity > threshold."""
+    def test_meas_cov_small_for_high_velocity_when_enabled(self):
+        """The model measures zero velocity; stationarity is caller-gated."""
         layout = get_layout("2d_full")
         model = ZUPTModel(
             enable_zupt=True,
-            velocity_threshold=0.05,
             measurement_noise=0.01**2,
             layout=layout,
         )
@@ -141,15 +134,13 @@ class TestZUPTModelMeasurementCovariance:
         R = model.meas_cov_from_pred(meas_pred)
 
         assert R.shape == (2, 2)
-        # Should be diagonal with large noise (gated out)
-        assert jnp.allclose(R, jnp.diag(jnp.array([1e6, 1e6])))
+        assert jnp.allclose(R, jnp.diag(jnp.array([0.01**2, 0.01**2])), atol=1e-6)
 
     def test_meas_cov_large_when_disabled(self):
         """meas_cov() should return large R when ZUPT is disabled."""
         layout = get_layout("2d_full")
         model = ZUPTModel(
             enable_zupt=False,  # Disabled
-            velocity_threshold=0.05,
             measurement_noise=0.01**2,
             layout=layout,
         )
@@ -171,7 +162,6 @@ class TestZUPTModelInnovation:
         layout = get_layout("2d_full")
         model = ZUPTModel(
             enable_zupt=True,
-            velocity_threshold=0.05,
             measurement_noise=0.01**2,
             layout=layout,
         )
@@ -194,7 +184,6 @@ class TestZUPTModelSubspace:
         layout = get_layout("2d_full")
         model = ZUPTModel(
             enable_zupt=True,
-            velocity_threshold=0.05,
             measurement_noise=0.01**2,
             layout=layout,
         )
@@ -214,13 +203,12 @@ class TestZUPTModelSubspace:
 class TestZUPTModelNumericalStability:
     """Test ZUPT numerical stability and edge cases."""
 
-    def test_velocity_threshold_edge_case(self):
-        """ZUPT should handle velocity exactly at threshold correctly."""
+    def test_meas_cov_stays_finite_for_threshold_edge_velocity(self):
+        """State velocity does not gate the measurement model directly."""
         layout = get_layout("2d_full")
         threshold = 0.05
         model = ZUPTModel(
             enable_zupt=True,
-            velocity_threshold=threshold,
             measurement_noise=0.01**2,
             layout=layout,
         )
@@ -235,8 +223,7 @@ class TestZUPTModelNumericalStability:
 
         # Should not crash or produce NaN
         assert jnp.all(jnp.isfinite(R))
-        # Should be gated out (velocity >= threshold)
-        assert jnp.allclose(R, jnp.diag(jnp.array([1e6, 1e6])))
+        assert jnp.allclose(R, jnp.diag(jnp.array([0.01**2, 0.01**2])), atol=1e-6)
 
     def test_jax_jit_compatible(self):
         """ZUPT implementation should be JAX JIT compatible."""
@@ -245,7 +232,6 @@ class TestZUPTModelNumericalStability:
         layout = get_layout("2d_full")
         model = ZUPTModel(
             enable_zupt=True,
-            velocity_threshold=0.05,
             measurement_noise=0.01**2,
             layout=layout,
         )
@@ -281,7 +267,6 @@ def test_zupt_model_enable_zupt_requires_strict_bool() -> None:
     """
     layout = get_layout("2d_full")
     common_kwargs = dict(
-        velocity_threshold=0.02,
         measurement_noise=1e-4,
         layout=layout,
     )

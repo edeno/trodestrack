@@ -106,11 +106,20 @@ class FilterCoreConfig:
         Maximum gyro norm for accepting gravity-direction updates.
 
     enable_zupt : bool
-        Enable zero-velocity pseudo-measurements when nearly stationary.
+        Enable zero-velocity pseudo-measurements when measured stationarity gates pass.
     zupt_velocity_threshold : float
-        Speed threshold (m/s) below which ZUPT applies.
+        Camera-derived speed threshold (m/s) below which ZUPT may apply.
     zupt_measurement_noise : float
         ZUPT measurement noise variance ((m/s)^2).
+    zupt_gyro_threshold_rad_s : float
+        IMU gyro norm threshold for stationary detection.
+    zupt_accel_threshold_m_s2 : float
+        IMU accelerometer mean magnitude residual threshold for stationary detection.
+    zupt_camera_stationary_window_frames : int
+        Camera-frame lookback window used for visual stationarity detection.
+    zupt_visual_context_hold_frames : int
+        Maximum number of camera frames to carry the last stationary visual
+        decision through LED dropout.
 
     state_mode : str
         State layout key, e.g. "2d_full" (8D), "vision_only" (5D), or
@@ -157,6 +166,10 @@ class FilterCoreConfig:
     enable_zupt: bool = True
     zupt_velocity_threshold: float = 0.02  # m/s
     zupt_measurement_noise: float = 0.01**2
+    zupt_gyro_threshold_rad_s: float = 0.02
+    zupt_accel_threshold_m_s2: float = 1.5
+    zupt_camera_stationary_window_frames: int = 10
+    zupt_visual_context_hold_frames: int = 10
 
     # State layout mode (controls state dimension and index mapping)
     # Supported for 2D paths: "2d_full" (8D), "vision_only" (5D),
@@ -281,6 +294,38 @@ class FilterCoreConfig:
             raise ValueError(
                 "zupt_velocity_threshold must be a finite non-negative speed "
                 f"in m/s; got {self.zupt_velocity_threshold!r}."
+            )
+        if (
+            not np.isfinite(self.zupt_gyro_threshold_rad_s)
+            or self.zupt_gyro_threshold_rad_s < 0
+        ):
+            raise ValueError(
+                "zupt_gyro_threshold_rad_s must be a finite non-negative angular "
+                f"speed in rad/s; got {self.zupt_gyro_threshold_rad_s!r}."
+            )
+        if (
+            not np.isfinite(self.zupt_accel_threshold_m_s2)
+            or self.zupt_accel_threshold_m_s2 < 0
+        ):
+            raise ValueError(
+                "zupt_accel_threshold_m_s2 must be a finite non-negative "
+                f"acceleration in m/s²; got {self.zupt_accel_threshold_m_s2!r}."
+            )
+        if (
+            not isinstance(self.zupt_camera_stationary_window_frames, int)
+            or self.zupt_camera_stationary_window_frames < 1
+        ):
+            raise ValueError(
+                "zupt_camera_stationary_window_frames must be a positive integer; "
+                f"got {self.zupt_camera_stationary_window_frames!r}."
+            )
+        if (
+            not isinstance(self.zupt_visual_context_hold_frames, int)
+            or self.zupt_visual_context_hold_frames < 0
+        ):
+            raise ValueError(
+                "zupt_visual_context_hold_frames must be a non-negative integer; "
+                f"got {self.zupt_visual_context_hold_frames!r}."
             )
 
         # Process- and measurement-noise fields are variances or spectral
@@ -1952,9 +1997,9 @@ def update_zupt(
     config : FilterCoreConfig
         ZUPT parameters in config.
     active : bool | jnp.ndarray, optional
-        Additional caller-side gate. Use this to disable ZUPT until the filter
-        has a meaningful velocity context, without mutating static config
-        inside JIT-compiled scans.
+        Caller-side stationarity gate. Filters should pass measured
+        stationarity evidence here (IMU quietness plus camera speed/context),
+        not a predicate derived from the velocity state being updated.
 
     Returns
     -------
@@ -1997,7 +2042,6 @@ def update_zupt(
     # Create ZUPT model (fully pure, no mutable state)
     zupt_model = ZUPTModel(
         enable_zupt=config.enable_zupt,
-        velocity_threshold=config.zupt_velocity_threshold,
         measurement_noise=config.zupt_measurement_noise,
         layout=layout,
         dtype=mean.dtype,
@@ -2005,14 +2049,16 @@ def update_zupt(
 
     # Extract measurement components (all pure functions, JIT-safe)
     meas_pred = zupt_model.predict(mean)
-    speed = jnp.linalg.norm(meas_pred)
-    is_active = (
-        jnp.asarray(active, dtype=bool) & jnp.asarray(config.enable_zupt, dtype=bool)
-    ) & (speed < jnp.asarray(config.zupt_velocity_threshold, dtype=mean.dtype))
+    is_active = jnp.asarray(active, dtype=bool) & jnp.asarray(
+        config.enable_zupt, dtype=bool
+    )
 
     def do_update(_: None) -> tuple[FilterState, jnp.ndarray]:
         H = zupt_model.jacobian(mean)
-        R = zupt_model.meas_cov_from_pred(meas_pred)  # Pure: derive R from velocity
+        R = jnp.eye(zupt_model.meas_dim, dtype=mean.dtype) * jnp.asarray(
+            config.zupt_measurement_noise,
+            dtype=mean.dtype,
+        )
         innovation = zupt_model.innovation(frame_idx=0, meas_pred=meas_pred)
 
         # Standard Kalman update
@@ -2033,6 +2079,178 @@ def update_zupt(
         return state, jnp.asarray(0.0, dtype=mean.dtype)
 
     return lax.cond(is_active, do_update, no_update, operand=None)
+
+
+def imu_stationary_zupt_gate(
+    imu_samples: jnp.ndarray,
+    valid_samples: jnp.ndarray,
+    config: FilterCoreConfig,
+    layout: StateLayout,
+) -> jnp.ndarray:
+    """Return True when IMU samples in a camera interval look stationary.
+
+    The detector uses measured IMU quietness, not the filter's current velocity
+    estimate. For 2D IMU inputs, the accelerometer gate expects horizontal
+    acceleration near zero. For 3D/6-DOF inputs, it expects specific-force
+    magnitude near gravity.
+    """
+
+    valid = jnp.asarray(valid_samples, dtype=bool)
+    sample_count = jnp.sum(valid.astype(imu_samples.dtype))
+    has_samples = sample_count > 0
+    denom = jnp.maximum(sample_count, jnp.asarray(1.0, dtype=imu_samples.dtype))
+    mean_sample = jnp.sum(jnp.where(valid[:, None], imu_samples, 0.0), axis=0) / denom
+
+    if layout.has_quaternion_orientation:
+        gyro = mean_sample[:3]
+        accel = mean_sample[3:6]
+        expected_accel_norm = jnp.linalg.norm(
+            jnp.asarray(config.imu_gravity_body, dtype=imu_samples.dtype)
+        )
+    else:
+        gyro = mean_sample[:1]
+        if imu_samples.shape[1] >= 4 and len(layout.vel_idx) >= 3:
+            accel = mean_sample[1:4]
+            expected_accel_norm = jnp.linalg.norm(
+                jnp.asarray(config.imu_gravity_body, dtype=imu_samples.dtype)
+            )
+        else:
+            accel = mean_sample[1:3]
+            expected_accel_norm = jnp.asarray(0.0, dtype=imu_samples.dtype)
+
+    gyro_norm = jnp.linalg.norm(gyro)
+    accel_norm_error = jnp.abs(jnp.linalg.norm(accel) - expected_accel_norm)
+    gyro_ok = gyro_norm <= jnp.asarray(
+        config.zupt_gyro_threshold_rad_s,
+        dtype=imu_samples.dtype,
+    )
+    accel_ok = accel_norm_error <= jnp.asarray(
+        config.zupt_accel_threshold_m_s2,
+        dtype=imu_samples.dtype,
+    )
+    return has_samples & gyro_ok & accel_ok
+
+
+def camera_stationary_zupt_gate_2d(
+    t_cam: jnp.ndarray,
+    z_led1: jnp.ndarray,
+    z_led2: jnp.ndarray,
+    mask_cam: jnp.ndarray,
+    frame_idx: jnp.ndarray,
+    config: FilterCoreConfig,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Return ``(has_visual_speed, speed_is_stationary)`` for 2D camera frames."""
+
+    lookback = jnp.asarray(
+        config.zupt_camera_stationary_window_frames,
+        dtype=frame_idx.dtype,
+    )
+    prev_idx = jnp.maximum(frame_idx - lookback, 0)
+    has_prev = frame_idx >= lookback
+
+    def camera_point(idx: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+        led1 = z_led1[idx]
+        led2 = z_led2[idx]
+        led1_valid = jnp.isfinite(led1).all()
+        led2_valid = jnp.isfinite(led2).all()
+        count = led1_valid.astype(led1.dtype) + led2_valid.astype(led1.dtype)
+        point = (
+            jnp.where(led1_valid, led1, jnp.zeros_like(led1))
+            + jnp.where(led2_valid, led2, jnp.zeros_like(led2))
+        ) / jnp.maximum(count, jnp.asarray(1.0, dtype=led1.dtype))
+        valid = mask_cam[idx] & (count > 0)
+        return point, valid
+
+    current_point, current_valid = camera_point(frame_idx)
+    previous_point, previous_valid = camera_point(prev_idx)
+    dt = jnp.maximum(
+        t_cam[frame_idx] - t_cam[prev_idx],
+        jnp.asarray(1e-6, dtype=t_cam.dtype),
+    )
+    speed = jnp.linalg.norm(current_point - previous_point) / dt
+    has_visual_speed = has_prev & current_valid & previous_valid
+    speed_is_stationary = speed <= jnp.asarray(
+        config.zupt_velocity_threshold,
+        dtype=speed.dtype,
+    )
+    return has_visual_speed, speed_is_stationary
+
+
+def camera_stationary_zupt_gate_3d(
+    t_cam: jnp.ndarray,
+    z_leds: jnp.ndarray,
+    valid_coords: jnp.ndarray,
+    prev_valid_coords: jnp.ndarray,
+    frame_idx: jnp.ndarray,
+    config: FilterCoreConfig,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Return ``(has_visual_speed, speed_is_stationary)`` for 3D camera frames."""
+
+    lookback = jnp.asarray(
+        config.zupt_camera_stationary_window_frames,
+        dtype=frame_idx.dtype,
+    )
+    prev_idx = jnp.maximum(frame_idx - lookback, 0)
+    has_prev = frame_idx >= lookback
+    n_leds = z_leds.shape[1]
+    valid_current = valid_coords.reshape((n_leds, 3)).all(axis=1)
+    valid_previous = prev_valid_coords.reshape((n_leds, 3)).all(axis=1)
+
+    def centroid(
+        frame: jnp.ndarray,
+        valid_leds: jnp.ndarray,
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+        count = jnp.sum(valid_leds.astype(frame.dtype))
+        point = jnp.sum(
+            jnp.where(valid_leds[:, None], frame, 0.0), axis=0
+        ) / jnp.maximum(count, jnp.asarray(1.0, dtype=frame.dtype))
+        return point, count > 0
+
+    current_point, current_valid = centroid(z_leds[frame_idx], valid_current)
+    previous_point, previous_valid = centroid(z_leds[prev_idx], valid_previous)
+    dt = jnp.maximum(
+        t_cam[frame_idx] - t_cam[prev_idx],
+        jnp.asarray(1e-6, dtype=t_cam.dtype),
+    )
+    speed = jnp.linalg.norm(current_point - previous_point) / dt
+    has_visual_speed = has_prev & current_valid & previous_valid
+    speed_is_stationary = speed <= jnp.asarray(
+        config.zupt_velocity_threshold,
+        dtype=speed.dtype,
+    )
+    return has_visual_speed, speed_is_stationary
+
+
+def update_zupt_visual_context(
+    visual_speed_valid: jnp.ndarray,
+    visual_stationary: jnp.ndarray,
+    stationary_context_prev: jnp.ndarray,
+    stationary_context_age_prev: jnp.ndarray,
+    config: FilterCoreConfig,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Update visual stationary context with bounded dropout carry-forward."""
+
+    missing_visual_age = stationary_context_age_prev + jnp.asarray(
+        1,
+        dtype=stationary_context_age_prev.dtype,
+    )
+    zupt_visual_hold_frames = jnp.asarray(
+        config.zupt_visual_context_hold_frames,
+        dtype=stationary_context_age_prev.dtype,
+    )
+    return lax.cond(
+        visual_speed_valid,
+        lambda _: (
+            jnp.asarray(visual_stationary, dtype=bool),
+            jnp.asarray(0, dtype=stationary_context_age_prev.dtype),
+        ),
+        lambda _: (
+            jnp.asarray(stationary_context_prev, dtype=bool)
+            & (missing_visual_age <= zupt_visual_hold_frames),
+            missing_visual_age,
+        ),
+        operand=None,
+    )
 
 
 def confidence_to_R_diagonal(
