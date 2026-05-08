@@ -15,10 +15,10 @@ sources under one ingest and EKF update path.
 ## Goals
 
 - **One measurement model, three user-facing source types.**
-  `EventLocationModel` consumes `(anchor, R)` pairs; the user picks
-  between `BeamSpec` (computes line normal / offset from
-  emitter+receiver geometry), `ZoneTriggerSpec` (anchor + isotropic σ), and
-  `RFIDReaderSpec` (anchor + effective radius). All share the same
+  `EventLocationModel` consumes resolved point or line geometry; the
+  user picks between `BeamSpec` (computes line normal / offset from
+  emitter+receiver geometry), `ZoneTriggerSpec` (anchor + isotropic σ),
+  and `RFIDReaderSpec` (anchor + effective radius). All share the same
   ingest pipeline and the same EKF wiring.
 - **Shared TTL parquet ingest** from Trodes DIO. Hardware sync is
   free because Trodes DIO timestamps live on the IMU/camera clock.
@@ -26,8 +26,12 @@ sources under one ingest and EKF update path.
   reset perpendicular position error to mm-scale on every crossing;
   zone triggers and RFID readers provide absolute 2D fixes when
   the rat is near them.
-- **Match the existing `MeasurementModel` protocol** so the EKF
-  step body folds these in identically to LED/heading/ZUPT.
+- **Use the same Kalman-update math as the existing sensor wrappers**
+  through a dedicated `update_event_location` helper. The current
+  `MeasurementModel` protocol is frame-indexed with fixed `meas_dim`;
+  TTL events need per-frame variable source IDs and mixed 1D/2D rows,
+  so this plan intentionally uses a custom wrapper rather than claiming
+  protocol conformance.
 
 ## Non-Goals
 
@@ -125,10 +129,12 @@ state projection before the update, not at the fixed midpoint.
 
 ## Design Principles
 
-- **Single measurement model.** `EventLocationModel.predict /
+- **Single event update model.** `EventLocationModel.predict /
   jacobian / meas_cov / innovation` operates on resolved point or line
-  event sources regardless of source type. JIT trace is one shape;
-  debugging is one place.
+  event sources regardless of source type. It is consumed by
+  `update_event_location`, not by the existing fixed-`meas_dim`
+  `MeasurementModel` protocol. JIT trace is one shape; debugging is
+  one place.
 - **Per-source-type spec dataclasses for ergonomics.** Users
   write `BeamSpec(id, emitter, receiver, sigma_perp_m)`,
   `ZoneTriggerSpec(id, center, sigma_m)`,
@@ -245,7 +251,14 @@ class ZoneTriggerSpec(BaseModel):
     def to_event_source(self) -> EventLocationSource:
         anchor = np.array(self.center)
         R = (self.sigma_m ** 2) * np.eye(2)
-        return EventLocationSource(self.id, anchor, R, self.label, "zone")
+        return EventLocationSource(
+            source_id=self.id,
+            kind="point",
+            anchor=anchor,
+            R=R,
+            label=self.label,
+            source_type="zone",
+        )
 
 
 class RFIDReaderSpec(BaseModel):
@@ -262,7 +275,14 @@ class RFIDReaderSpec(BaseModel):
         anchor = np.array(self.center)
         sigma = self.effective_radius_m / np.sqrt(2.0)
         R = (sigma ** 2) * np.eye(2)
-        return EventLocationSource(self.id, anchor, R, self.label, "rfid")
+        return EventLocationSource(
+            source_id=self.id,
+            kind="point",
+            anchor=anchor,
+            R=R,
+            label=self.label,
+            source_type="rfid",
+        )
 
 
 class TTLEventsConfig(BaseModel):
@@ -365,9 +385,8 @@ when the trajectory crosses any configured beam, enters any zone
 - Schema validation: unique IDs across all source types; valid
   edges; pad-limit enforced at load time.
 - Tests for parquet → per-frame indices; schema unique-id
-  enforcement; per-spec `to_event_source()` math (correct anchor
-  and R for each type, including beam-break anisotropic
-  eigenvector orientation).
+  enforcement; per-spec `to_event_source()` math (point-source anchor
+  and R; beam-source normal, offset, `sigma_perp_m`, and active edge).
 
 **Exit criteria:** all three Spec classes can produce
 `EventLocationSource` objects from YAML; `tests/io/test_ttl_events.py`
@@ -382,7 +401,8 @@ green.
 - Padded-sentinel handling: `source_id == -1` rows get large `R` and
   are masked out of the innovation log-likelihood.
 - Unit tests:
-  - Predict on / off the anchor.
+  - Predict point sources on / off the anchor and beam sources on /
+    off the line.
   - Stacked H shape with one row for beam lines and two rows for point
     sources.
   - Padded sentinels produce no posterior change.
@@ -392,8 +412,8 @@ green.
     numerical tolerance.
   - JIT-compatibility smoke.
 
-**Exit criteria:** model is callable in isolation; beam-break
-parity test green to numerical tolerance.
+**Exit criteria:** model is callable in isolation; beam-break geometry
+test green to numerical tolerance.
 
 ### Milestone 3 — Sim extension and synthetic scenario tests
 

@@ -206,20 +206,44 @@ prepared-array / spikegadgets configs unchanged.
 
 ### Loader changes — `src/trodestrack/io/loaders/pixel_to_meters.py`
 
+Resolve the active camera calibration once at load time, then pass the
+resolved values to conversion helpers. This keeps the default scalar
+from conflicting with a configured homography:
+
+```python
+@dataclass(frozen=True)
+class ResolvedCameraCalibration:
+    meters_per_pixel: float | None
+    homography: Homography | None
+
+
+def resolve_camera_calibration(
+    camera: CameraConfig,
+    *,
+    raw_camera_config: Mapping[str, object],
+) -> ResolvedCameraCalibration:
+    """Return exactly one active pixel-to-world calibration."""
+```
+
+`resolve_camera_calibration` implements the raw-YAML explicitness rule
+above: if `homography_file` is configured and the raw YAML did not set
+`meters_per_pixel`, return `(None, homography)` even though the Pydantic
+model still carries the scalar default. If both keys are explicit, raise
+the mutual-exclusion error before any loader converts pixels.
+
 ```python
 def pixel_to_meters_xy(
     pixels: np.ndarray,
     *,
-    meters_per_pixel: float | None,
-    homography: Homography | None,
+    calibration: ResolvedCameraCalibration,
 ) -> np.ndarray:
-    if (meters_per_pixel is None) == (homography is None):
+    if (calibration.meters_per_pixel is None) == (calibration.homography is None):
         raise ValueError(
             "Provide exactly one of meters_per_pixel or homography."
         )
-    if meters_per_pixel is not None:
-        return pixels * meters_per_pixel
-    return homography.apply_to_pixels(pixels)
+    if calibration.meters_per_pixel is not None:
+        return pixels * calibration.meters_per_pixel
+    return calibration.homography.apply_to_pixels(pixels)
 ```
 
 ### Diagnostic — `src/trodestrack/qa/`
@@ -253,8 +277,8 @@ callable in isolation.
 ### Milestone 2 — Loader wiring
 
 - `Homography.from_yaml` integrated into the loader path.
-- Schema mutual-exclusion validator.
-- Update `pixel_to_meters_xy` to accept `Homography` objects.
+- Raw-YAML mutual-exclusion check plus `resolve_camera_calibration`.
+- Update `pixel_to_meters_xy` to accept a resolved camera calibration.
 - Scenario test: a `spikegadgets_trodes` session with a
   homography file produces sane filter output (no NaN/Inf,
   position RMSE within tolerance against a hand-converted

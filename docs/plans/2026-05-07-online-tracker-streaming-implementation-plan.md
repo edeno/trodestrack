@@ -305,9 +305,11 @@ script runs end-to-end and produces a result that matches
    prediction at an arbitrary time without a camera frame? PRD
    doesn't require it but it'd be cheap.
 4. What's the right behavior when `push_camera(t)` is called with
-   no IMU samples buffered? Options: raise, or use the last
-   known IMU sample with a documented warning. Default: raise,
-   to surface upstream pipeline bugs.
+   no IMU samples buffered? Default is state-mode dependent:
+   allow it for `vision_only` because no IMU integration is needed;
+   for IMU-fused modes, raise a clear `ValueError` unless the
+   implementation explicitly documents and tests a no-IMU prediction
+   path. Do not silently reuse the last IMU sample.
 
 ## Estimated Effort
 

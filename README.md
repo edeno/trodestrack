@@ -383,7 +383,7 @@ See [`examples/README.md`](examples/README.md) for the complete learning path. E
 ### Developer Documentation
 
 - [Development Guide (CLAUDE.md)](CLAUDE.md) - Commands and architecture
-- [Implementation plans](docs/plans/) - Active milestone plans (e.g., the tilt-orientation / 3D camera plan)
+- [Implementation plans](docs/plans/) - Active milestone plans and superseded-plan notes
 
 ## Development
 

@@ -202,13 +202,16 @@ elif config.inputs.format == "dlc_keypoints":
 def pixel_to_meters_xy(
     pixels: np.ndarray,
     *,
-    camera: CameraConfig,
+    calibration: ResolvedCameraCalibration,
 ) -> np.ndarray:
     """Apply scalar OR homography. Exactly one must be set."""
 ```
 
-Validates mutual exclusion at call time; raises a clean
-`ValueError` if both or neither are provided.
+The homography plan owns `resolve_camera_calibration(camera,
+raw_camera_config=...)`. Call that once per loader, then pass the
+resolved calibration to `pixel_to_meters_xy`. Do not pass raw
+`CameraConfig` directly, because `CameraConfig.meters_per_pixel`
+retains the scalar default even when the user configured a homography.
 
 ### Trodes loader internals
 
@@ -221,8 +224,9 @@ def _load_trodes_native(config: SessionConfig) -> PreparedSession:
     # Optional: align cam clock via inputs.camera_sync_file
     if inputs.camera_sync_file is not None:
         t_cam = _apply_trodes_camera_sync(t_cam, inputs.camera_sync_file)
-    led1 = pixel_to_meters_xy(led1_px, camera=config.camera)
-    led2 = pixel_to_meters_xy(led2_px, camera=config.camera)
+    calibration = resolve_camera_calibration(config.camera, raw_camera_config=...)
+    led1 = pixel_to_meters_xy(led1_px, calibration=calibration)
+    led2 = pixel_to_meters_xy(led2_px, calibration=calibration)
     # ... reuse the rest of _load_spikegadgets_trodes flow:
     #     IMU SI conversion, sample-and-hold removal, time alignment,
     #     mask construction, calibration diagnostics, safety check.
@@ -252,8 +256,9 @@ def _load_dlc_keypoints(config: SessionConfig) -> PreparedSession:
     # Frame times: explicit timestamps file wins; otherwise use fps_cam.
     t_cam = _load_dlc_frame_times(inputs)
     # Pixel→meters.
-    led1 = pixel_to_meters_xy(led1_px, camera=config.camera)
-    led2 = pixel_to_meters_xy(led2_px, camera=config.camera)
+    calibration = resolve_camera_calibration(config.camera, raw_camera_config=...)
+    led1 = pixel_to_meters_xy(led1_px, calibration=calibration)
+    led2 = pixel_to_meters_xy(led2_px, calibration=calibration)
     # ... time alignment + IMU + safety check.
     return PreparedSession(...)
 ```
@@ -295,9 +300,12 @@ configured explicitly.
 - `_load_dlc_keypoints` + `_extract_dlc_bodypart` (handles the
   multi-index column lookup).
 - Schema additions for `inputs.format == "dlc_keypoints"`.
-- Sample fixture: a hand-built DLC `.h5` from a synthetic
-  `simulate_rat_imu` session (sim → fake DLC h5).
-- Unit + scenario tests.
+- Mandatory sample fixture: a hand-built DLC `.csv` from a synthetic
+  `simulate_rat_imu` session (sim → fake DLC CSV). Optional `.h5`
+  fixture/test is skipped unless `tables` is installed, because HDF5
+  support depends on PyTables.
+- Unit + scenario tests, including a friendly missing-`tables` error
+  for `.h5` input when the optional dependency is absent.
 
 **Exit criteria:** `tests/io/test_dlc_keypoints_loader.py` green;
 likelihood-gating round-trip.
@@ -336,6 +344,7 @@ runnable with sample fixtures.
 | Trodes loader NaN preservation | helper | dropout markers preserved |
 | DLC loader bodypart selection | `_extract_dlc_bodypart` | unknown bodypart → clean `KeyError` upgraded to `ValueError` |
 | DLC loader likelihood gating | helper | frames below `min_likelihood` produce NaN positions |
+| DLC `.h5` optional dependency | helper | `.h5` input without `tables` raises friendly install message; skipped when fixture dep is absent |
 | End-to-end Trodes scenario | EKF | no NaN/Inf in filter output |
 | End-to-end DLC scenario | EKF | no NaN/Inf in filter output |
 | Schema strictness | config | unknown fields per format → `ValidationError` |
@@ -404,7 +413,8 @@ runnable with sample fixtures.
 
 - ~600 LOC source + ~400 LOC tests + ~150 lines docs.
 - 1–2 weeks per format (Trodes and DLC are roughly equal-sized).
-- One new optional runtime dep (Trodes-python-tools, lazy
-  import).
+- Two optional runtime deps, both lazy-imported:
+  `trodes-python-tools` for `trodes_native` and `tables` for DLC
+  `.h5`. DLC `.csv` support has no new dependency.
 - Depends on the `geom/` plan for first-class homography support;
   scalar `meters_per_pixel` is enough to ship without it.
