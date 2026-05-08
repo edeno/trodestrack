@@ -23,6 +23,7 @@ Coordinate Frames:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from dataclasses import fields as dataclass_fields
 
 import numpy as np
 
@@ -39,6 +40,42 @@ from .utils import (
 # -----------------------------------------------------------------------------
 # Gravity & IMU-specific utilities (not in utils.py)
 # -----------------------------------------------------------------------------
+
+
+def _make_strictly_increasing_within_bounds(
+    times: np.ndarray,
+    *,
+    lower: float,
+    upper: float,
+    min_step: float,
+) -> np.ndarray:
+    """Separate sorted timestamps while keeping them inside fixed bounds."""
+    out = np.clip(np.asarray(times, dtype=float), lower, upper).copy()
+    if out.size <= 1:
+        return out
+
+    span = upper - lower
+    if span <= 0:
+        raise ValueError("timestamp bounds must have positive span")
+
+    step = min(float(min_step), span / (out.size - 1))
+    if step <= 0:
+        step = span / (out.size - 1)
+
+    for idx in range(1, out.size):
+        out[idx] = max(out[idx], out[idx - 1] + step)
+
+    if out[-1] > upper:
+        out[-1] = upper
+        for idx in range(out.size - 2, -1, -1):
+            out[idx] = min(out[idx], out[idx + 1] - step)
+
+    if out[0] < lower:
+        out[0] = lower
+        for idx in range(1, out.size):
+            out[idx] = max(out[idx], out[idx - 1] + step)
+
+    return out
 
 
 def compute_gravity_in_tilted_frame(
@@ -277,6 +314,71 @@ class RatIMUSimConfig:
         """Validate configuration parameters."""
         import warnings
 
+        # Reject non-finite scalar parameters up front. The downstream
+        # checks use bare comparisons like ``<= 0`` / ``< 0`` which NaN
+        # silently passes (NaN compares False to both), and the simulator
+        # then emits non-finite IMU and/or truth arrays. Listing the
+        # numeric fields explicitly so a future field addition trips
+        # AttributeError rather than silently dropping out of the gate.
+        finite_scalar_fields = (
+            "duration_s",
+            "fs_imu",
+            "fs_cam",
+            "arena_w",
+            "arena_h",
+            "cam_dropout_prob",
+            "cam_dropout_correlation",
+            "cam_jitter_s",
+            "cam_latency_s",
+            "led_swap_prob",
+            "led_swap_rate",
+            "led_swap_duration_mean",
+            "led_swap_duration_std",
+            "led_wall_reflection_prob",
+            "led_wall_reflection_distance",
+            "confidence_base",
+            "confidence_dropout_decay",
+            "speed_clip",
+            "gravity",
+            "imu_tilt_roll_deg",
+            "imu_tilt_pitch_deg",
+            "cam_sigma_m",
+            "gyro_noise_density",
+            "accel_noise_density",
+            "gyro_bias_rw_density",
+            "accel_bias_rw_density",
+            "tau_yaw_rate",
+            "tau_a_fwd",
+            "tau_a_lat",
+            "sigma_yaw_rate",
+            "sigma_a_fwd",
+            "sigma_a_lat",
+            "vel_drag",
+        )
+        for fname in finite_scalar_fields:
+            value = getattr(self, fname)
+            if not np.isfinite(value):
+                raise ValueError(f"{fname} must be a finite value; got {value!r}.")
+
+        # Strict-bool validation. Plain Python truthiness silently
+        # accepts non-bool values like the string ``"False"`` (which is
+        # truthy), the integer ``1``, or a list — and the simulator
+        # then branches on these via ``if self.use_second_led: ...``,
+        # producing finite LED2 observations / non-uniform confidences
+        # despite the user's apparent intent. CLI/YAML/env loaders are
+        # an obvious source of these bugs. Require ``bool`` exactly.
+        bool_fields = ("use_confidence", "use_second_led")
+        for fname in bool_fields:
+            value = getattr(self, fname)
+            if not isinstance(value, bool):
+                raise ValueError(
+                    f"{fname} must be a Python ``bool`` (True/False); "
+                    f"got {value!r} (type {type(value).__name__}). "
+                    f"If you're loading from YAML / env / CLI, parse "
+                    f"the string to a bool before constructing the "
+                    f"config."
+                )
+
         # Duration validation
         if self.duration_s <= 0:
             raise ValueError(
@@ -304,6 +406,41 @@ class RatIMUSimConfig:
                 f"Consider fs_imu >= 100.0 Hz.",
                 UserWarning,
                 stacklevel=2,
+            )
+
+        # Minimum-sample-count gate. ``simulate_rat_imu`` rounds
+        # ``duration_s * fs_*`` to integer sample counts; very short
+        # positive durations therefore produce zero or one sample per
+        # stream and crash mid-simulation (e.g. ``IndexError`` on
+        # ``Z_cam_led1[0]`` or ``zero-size reduction`` on ``min(t_imu)``).
+        # Require at least 2 samples for both IMU and camera streams so
+        # downstream ``np.diff`` / boundary indexing is well-defined.
+        T_imu = int(np.round(self.duration_s * self.fs_imu))
+        T_cam = int(np.round(self.duration_s * self.fs_cam))
+        if T_imu < 2 or T_cam < 2:
+            raise ValueError(
+                f"duration_s={self.duration_s}s at fs_imu={self.fs_imu} Hz, "
+                f"fs_cam={self.fs_cam} Hz produces only T_imu={T_imu}, "
+                f"T_cam={T_cam} samples; need at least 2 of each. "
+                f"Increase duration_s or sampling rates."
+            )
+
+        # Camera-timestamp model validation. cam_latency_s is the
+        # *exposure → arrival* latency, so a negative value would mean
+        # observations arrive before they're exposed. cam_jitter_s is a
+        # timestamp jitter standard deviation and a negative std is
+        # meaningless. Validating finiteness alone (above) lets both
+        # silently propagate into ``t_cam_obs = t_cam_exp + cam_latency_s``
+        # and ``rng.standard_normal(T_cam) * cam_jitter_s``.
+        if self.cam_latency_s < 0:
+            raise ValueError(
+                f"cam_latency_s must be non-negative (it's an exposure → "
+                f"arrival latency); got {self.cam_latency_s}."
+            )
+        if self.cam_jitter_s < 0:
+            raise ValueError(
+                f"cam_jitter_s must be non-negative (it's a timestamp jitter "
+                f"standard deviation); got {self.cam_jitter_s}."
             )
 
         # Arena validation
@@ -343,6 +480,38 @@ class RatIMUSimConfig:
             raise ValueError(
                 f"led_swap_rate must be non-negative, got {self.led_swap_rate}.\n"
                 f"Example: led_swap_rate=0.5 (0.5 swaps per second)"
+            )
+
+        # Mode-specific LED swap parameter mismatch. The runtime branches
+        # only consult ``led_swap_prob`` in per_frame mode and only
+        # ``led_swap_rate`` in persistent mode; the inactive field is
+        # silently ignored. A user who set ``led_swap_mode='persistent',
+        # led_swap_prob=1.0, led_swap_rate=0.0`` would expect heavy
+        # swapping and get zero swaps with no diagnostic. Warn when the
+        # inactive parameter has been set to a non-default value (the
+        # signal that the user deliberately set it). Defaults:
+        # ``led_swap_prob=0.0`` and ``led_swap_rate=0.5``.
+        if self.led_swap_mode == "persistent" and self.led_swap_prob > 0:
+            warnings.warn(
+                f"led_swap_prob={self.led_swap_prob} is set but "
+                f"led_swap_mode='persistent'; led_swap_prob only applies "
+                f"in 'per_frame' mode and will be ignored. To control "
+                f"swap frequency in persistent mode set led_swap_rate "
+                f"(current: {self.led_swap_rate}); to use per-frame "
+                f"swapping set led_swap_mode='per_frame'.",
+                UserWarning,
+                stacklevel=2,
+            )
+        if self.led_swap_mode == "per_frame" and self.led_swap_rate != 0.5:
+            warnings.warn(
+                f"led_swap_rate={self.led_swap_rate} is set but "
+                f"led_swap_mode='per_frame'; led_swap_rate only applies "
+                f"in 'persistent' mode and will be ignored. To control "
+                f"swap frequency in per_frame mode set led_swap_prob "
+                f"(current: {self.led_swap_prob}); to use persistent "
+                f"swapping set led_swap_mode='persistent'.",
+                UserWarning,
+                stacklevel=2,
             )
 
         if self.led_swap_duration_mean <= 0:
@@ -433,7 +602,28 @@ class RatIMUSimConfig:
                 f"Got drag_fwd={self.drag_fwd}, drag_lat={self.drag_lat}"
             )
 
-        # Validate drag coefficients are non-negative
+        # Validate drag coefficients are real numeric scalars before
+        # running np.isfinite / ``< 0``. Strings (``"0.1"``) raise a raw
+        # ``TypeError`` from ``np.isfinite`` and lists / arrays
+        # (``[0.1]``) raise a raw ``TypeError`` from ``<``; the rest of
+        # the config gates these via ``finite_scalar_fields`` up front,
+        # but ``drag_fwd`` / ``drag_lat`` are skipped there because
+        # ``None`` is a valid sentinel until ``vel_drag`` fills it in.
+        # Bool is rejected (it would cast to 0/1 but no caller means
+        # ``True 1/s`` of drag).
+        for fname in ("drag_fwd", "drag_lat"):
+            value = getattr(self, fname)
+            if isinstance(value, bool) or not isinstance(value, int | float):
+                raise ValueError(
+                    f"{fname} must be a finite non-negative scalar drag "
+                    f"coefficient (1/s); got {value!r} "
+                    f"(type {type(value).__name__})."
+                )
+        if not np.isfinite(self.drag_fwd) or not np.isfinite(self.drag_lat):
+            raise ValueError(
+                "drag_fwd and drag_lat must be finite values; got "
+                f"drag_fwd={self.drag_fwd!r}, drag_lat={self.drag_lat!r}."
+            )
         if self.drag_fwd < 0:
             raise ValueError(
                 f"Forward drag coefficient must be non-negative, got {self.drag_fwd} 1/s.\n"
@@ -446,6 +636,36 @@ class RatIMUSimConfig:
                 f"Example: drag_lat=1.2 (high lateral sliding drag)"
             )
 
+        # LED offset shape / finiteness validation. Offsets are documented
+        # as body-frame [x, y] arrays; the simulator later indexes ``[0]``
+        # / ``[1]`` and folds them into camera observations, so a scalar
+        # offset raises a raw IndexError mid-simulation and a NaN offset
+        # silently propagates non-finite world-frame LED positions.
+        for fname in ("led1_offset_body", "led2_offset_body"):
+            raw = getattr(self, fname)
+            # Inspect the un-forced dtype first: ``np.asarray(["0", "0"])``
+            # (or any string list) becomes ``dtype.kind == 'U'`` and would
+            # later raise a raw NumPy TypeError from ``np.isfinite``;
+            # ``np.asarray(raw, dtype=float)`` would silently coerce
+            # numeric-looking strings to floats. Reject string / object
+            # inputs explicitly so callers get a clear ValueError.
+            inspected = np.asarray(raw)
+            if inspected.dtype.kind not in ("i", "u", "f", "b"):
+                raise ValueError(
+                    f"{fname} must contain numeric values; got {raw!r} "
+                    f"(non-numeric dtype {inspected.dtype})."
+                )
+            value = inspected.astype(float, copy=False)
+            if value.ndim != 1 or value.shape[0] != 2:
+                raise ValueError(
+                    f"{fname} must be a body-frame [x, y] array of shape (2,); "
+                    f"got shape {value.shape}."
+                )
+            if not np.all(np.isfinite(value)):
+                raise ValueError(
+                    f"{fname} must contain only finite values; got {value!r}."
+                )
+
         # LED configuration validation
         if not self.use_second_led and self.led_swap_prob > 0:
             warnings.warn(
@@ -454,8 +674,38 @@ class RatIMUSimConfig:
                 UserWarning,
                 stacklevel=2,
             )
+        if (
+            not self.use_second_led
+            and self.led_swap_mode == "persistent"
+            and self.led_swap_rate > 0
+        ):
+            warnings.warn(
+                f"led_swap_mode='persistent' with led_swap_rate="
+                f"{self.led_swap_rate} but use_second_led=False. Persistent "
+                f"swaps require two LEDs. Set use_second_led=True or "
+                f"led_swap_rate=0.0 (or led_swap_mode='per_frame').",
+                UserWarning,
+                stacklevel=2,
+            )
 
-        # Initial state validation
+        # Initial state validation. Coerce to a numeric float ndarray
+        # first so:
+        #   * list / tuple inputs (a natural way to spell ``m0=[0.5, 0.5,
+        #     0, 0, 0]``) raise the documented ``ValueError`` instead of
+        #     a raw ``AttributeError: 'list' object has no attribute
+        #     'shape'``;
+        #   * non-numeric inputs (e.g. ``m0=["0", "0", ...]``) raise a
+        #     clear ``ValueError`` instead of a raw NumPy TypeError from
+        #     ``np.isfinite`` later.
+        for fname in ("m0", "P0"):
+            raw = getattr(self, fname)
+            inspected = np.asarray(raw)
+            if inspected.dtype.kind not in ("i", "u", "f", "b"):
+                raise ValueError(
+                    f"{fname} must contain numeric values; got {raw!r} "
+                    f"(non-numeric dtype {inspected.dtype})."
+                )
+            setattr(self, fname, inspected.astype(float, copy=False))
         if self.m0.shape != (5,):
             raise ValueError(
                 f"Initial state m0 must have shape (5,), got {self.m0.shape}.\n"
@@ -465,6 +715,35 @@ class RatIMUSimConfig:
         if self.P0.shape != (5, 5):
             raise ValueError(
                 f"Initial covariance P0 must have shape (5, 5), got {self.P0.shape}"
+            )
+
+        # Initial-state content validation. The simulator samples the
+        # truth trajectory from m0 and P0 — non-finite m0 produces NaN
+        # truth, and a non-PSD P0 raises a raw LinAlgError from
+        # np.random.multivariate_normal mid-simulation. Catch the actual
+        # contract violation here.
+        if not np.all(np.isfinite(self.m0)):
+            raise ValueError(f"m0 must contain finite values; got {self.m0!r}.")
+        if not np.all(np.isfinite(self.P0)):
+            raise ValueError(
+                f"P0 must contain finite values; got non-finite entries in {self.P0!r}."
+            )
+        # Symmetric-PSD check. ``np.linalg.cholesky`` would only accept
+        # strictly *positive-definite* matrices, contradicting the
+        # documented contract and rejecting useful edge cases like
+        # ``P0 == 0`` for a deterministic initial state. Use ``eigvalsh``
+        # (which works for PSD) and tolerate small negative eigenvalues
+        # from floating-point noise.
+        if not np.allclose(self.P0, self.P0.T, atol=1e-10):
+            raise ValueError(
+                "P0 must be symmetric (P0 == P0.T); got an asymmetric matrix."
+            )
+        eigvals = np.linalg.eigvalsh(self.P0)
+        psd_tol = 1e-10
+        if eigvals.min() < -psd_tol:
+            raise ValueError(
+                "P0 must be a positive semi-definite covariance matrix; got "
+                f"minimum eigenvalue {eigvals.min():.3e} (tolerance {psd_tol:.0e})."
             )
 
 
@@ -510,8 +789,20 @@ def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> Si
     t_imu = np.arange(T_imu) * dt_imu
     t_cam_clean = np.arange(T_cam) * dt_cam
 
-    # Initialize truth state
-    L0 = np.linalg.cholesky(config.P0)
+    # Initialize truth state. Prefer Cholesky for the strictly
+    # positive-definite case so existing seeded tests stay bit-compatible
+    # (Cholesky and an eigendecomposition give different but equally
+    # valid square roots, and either choice produces a different sample
+    # for a fixed RNG state). Fall back to an eigendecomposition-based
+    # square root only for PSD-but-not-PD covariances (including
+    # ``P0 == 0`` for a deterministic initial state), where Cholesky
+    # would fail.
+    try:
+        L0 = np.linalg.cholesky(config.P0)
+    except np.linalg.LinAlgError:
+        eigvals_p0, eigvecs_p0 = np.linalg.eigh(config.P0)
+        eigvals_p0 = np.clip(eigvals_p0, 0.0, None)
+        L0 = eigvecs_p0 * np.sqrt(eigvals_p0)
     x = config.m0 + L0 @ rng.standard_normal(5)
     x[4] = wrap_angle(x[4])  # wrap θ
 
@@ -531,6 +822,7 @@ def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> Si
     yaw_rate_truth = np.zeros(T_imu)
     accel_world_truth = np.zeros((T_imu, 2))
     accel_body_truth = np.zeros((T_imu, 2))
+    specific_force_truth = np.zeros((T_imu, 2))
 
     # IMU noise parameters
     std_gyro = density_to_sample_std(config.gyro_noise_density, dt_imu)
@@ -627,19 +919,48 @@ def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> Si
         vy = vy_new
 
         # --- 5) Wall reflections (inelastic) ---
-        if px < 0.0:
-            px = -px
-            vx = -0.5 * vx
-        elif px > config.arena_w:
-            px = 2 * config.arena_w - px
-            vx = -0.5 * vx
+        # A single reflection only handles one wall crossing per step,
+        # so for ``displacement > arena`` (small arena × high speed ×
+        # low fs_imu) the reflected position can still be outside.
+        # Strategy: run a bounded loop that handles typical 1-N bounce
+        # physics correctly (each crossing flips and dampens velocity
+        # by 0.5×), then fall through to a closed-form modulo fold
+        # that guarantees the final position lies in the arena even
+        # when the loop's reasonable cap is exceeded. This preserves
+        # physical velocity damping in normal cases and the documented
+        # "positions stay in bounds" contract under arbitrary overshoot.
+        max_reflections = 1024
+        for _ in range(max_reflections):
+            if 0.0 <= px <= config.arena_w:
+                break
+            if px < 0.0:
+                px = -px
+                vx = -0.5 * vx
+            else:
+                px = 2 * config.arena_w - px
+                vx = -0.5 * vx
+        else:
+            # Pathological overshoot — closed-form fold guarantees
+            # ``px`` ends in [0, arena_w] regardless of magnitude.
+            period_x = 2.0 * config.arena_w
+            r = px - period_x * np.floor(px / period_x)
+            px = period_x - r if r > config.arena_w else r
+            vx = 0.0  # multi-period overshoot → fully damped
 
-        if py < 0.0:
-            py = -py
-            vy = -0.5 * vy
-        elif py > config.arena_h:
-            py = 2 * config.arena_h - py
-            vy = -0.5 * vy
+        for _ in range(max_reflections):
+            if 0.0 <= py <= config.arena_h:
+                break
+            if py < 0.0:
+                py = -py
+                vy = -0.5 * vy
+            else:
+                py = 2 * config.arena_h - py
+                vy = -0.5 * vy
+        else:
+            period_y = 2.0 * config.arena_h
+            r = py - period_y * np.floor(py / period_y)
+            py = period_y - r if r > config.arena_h else r
+            vy = 0.0
 
         # Save truth
         x = np.array([px, py, vx, vy, theta])
@@ -672,6 +993,14 @@ def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> Si
         specific_force_x = ax_body - g_body_x
         specific_force_y = ay_body - g_body_y
 
+        # Stash the noiseless specific force so diagnostic overlays can
+        # compare measured U_imu (noisy specific force) against the
+        # quantity it actually represents. ``accel_body_truth`` is the
+        # *inertial* acceleration and differs by the rotated gravity
+        # term — using it as an overlay misreads the IMU panel as
+        # showing a tilt-induced bias.
+        specific_force_truth[t] = [specific_force_x, specific_force_y]
+
         # Add bias and white noise to specific force
         gyro_meas = yaw_rate + b_gyro + std_gyro * rng.standard_normal()
         accel_x_meas = specific_force_x + b_accel_x + std_accel * rng.standard_normal()
@@ -680,16 +1009,44 @@ def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> Si
         U_imu[t] = np.array([gyro_meas, accel_x_meas, accel_y_meas])
 
     # --- 8) Camera observations ---
-    # Apply timestamp jitter and latency
-    # Exposure time: when light hits sensor (jittered from nominal)
-    # Arrival time: when data is available (exposure + latency)
-    # Note: No clipping to preserve Gaussian jitter; np.interp handles extrapolation
+    # Apply timestamp jitter and latency.
+    #   Exposure time: when light hits sensor (jittered from nominal)
+    #   Arrival time:  when data is available (exposure + latency)
+    # We then:
+    #   1) Clip `t_cam_exp` to the IMU support range so np.interp does not
+    #      extrapolate.
+    #   2) Compute `t_cam_obs` from the *clipped* exposure so the documented
+    #      contract `t_cam_obs[i] - t_cam_exp[i] == cam_latency_s` holds at
+    #      the clipping boundaries.
+    #   3) Sort by exposure time so downstream code that assumes strictly
+    #      increasing camera timestamps holds. The EKF
+    #      builds (t_cam[i-1], t_cam[i]] IMU intervals via
+    #      compute_imu_index_arrays; a non-monotonic step empties an
+    #      interval, while a tied step is rejected by validate_timestamps.
+    #      np.searchsorted in the diagnostic-video loader also requires a
+    #      sorted t_cam_exp. We sort jittered timestamps (rather than
+    #      forbidding cross-frame jitter outright) and bring the matching
+    #      `t_cam_obs` along; this preserves jitter realism without
+    #      reordering jittered samples relative to anything that depends
+    #      on the original frame index later, because all camera-indexed
+    #      arrays (LED positions, masks, confidence) are derived from the
+    #      sorted `t_cam_exp` below.
     jitter = config.cam_jitter_s * rng.standard_normal(T_cam)
-    t_cam_exp = t_cam_clean + jitter
+    t_cam_exp = np.clip(t_cam_clean + jitter, t_imu[0], t_imu[-1])
+    cam_sort_order = np.argsort(t_cam_exp, kind="stable")
+    t_cam_exp = t_cam_exp[cam_sort_order]
+    positive_time_steps = [
+        np.min(np.diff(t_imu)),
+        np.min(np.diff(t_cam_clean)) if T_cam > 1 else np.min(np.diff(t_imu)),
+    ]
+    min_timestamp_step = min(positive_time_steps) * 1e-6
+    t_cam_exp = _make_strictly_increasing_within_bounds(
+        t_cam_exp,
+        lower=float(t_imu[0]),
+        upper=float(t_imu[-1]),
+        min_step=float(min_timestamp_step),
+    )
     t_cam_obs = t_cam_exp + config.cam_latency_s
-
-    # Clamp exposure times to IMU range (prevent extrapolation errors)
-    t_cam_exp = np.clip(t_cam_exp, t_imu[0], t_imu[-1])
 
     # Interpolate truth at EXPOSURE time (what pixels actually measure)
     px_interp = np.interp(t_cam_exp, t_imu, X_truth[:, 0])
@@ -759,10 +1116,17 @@ def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> Si
         # Use convolution to detect neighboring dropouts: [0.5, 1.0, 0.5] kernel
         # If any neighbor is a dropout, the convolution will be non-zero
 
-        # LED1: Zero out dropouts, then apply neighbor decay
+        # LED1: Zero out dropouts, then apply neighbor decay.
+        # Operator precedence trap: ``~mask_led1.astype(int)`` parses as
+        # ``~(mask_led1.astype(int))`` and bitwise-negates the int values
+        # (True→1→-2, False→0→-1) instead of producing a 0/1 dropout
+        # indicator. The convolution then yields strictly-negative
+        # values, so ``> 0`` was never satisfied and confidence_dropout_
+        # decay was silently a no-op for adjacent visible frames. Force
+        # boolean negation first, then cast.
         confidence_led1 = np.where(mask_led1, confidence_led1, 0.0)
         neighbor_dropout_led1 = np.convolve(
-            ~mask_led1.astype(int), [0.5, 1.0, 0.5], mode="same"
+            (~mask_led1).astype(int), [0.5, 1.0, 0.5], mode="same"
         )
         # Decay confidence where neighbors are dropouts (but current is valid)
         confidence_led1 *= np.where(
@@ -775,7 +1139,7 @@ def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> Si
         if config.use_second_led:
             confidence_led2 = np.where(mask_led2, confidence_led2, 0.0)
             neighbor_dropout_led2 = np.convolve(
-                ~mask_led2.astype(int), [0.5, 1.0, 0.5], mode="same"
+                (~mask_led2).astype(int), [0.5, 1.0, 0.5], mode="same"
             )
             confidence_led2 *= np.where(
                 mask_led2 & (neighbor_dropout_led2 > 0),
@@ -847,14 +1211,18 @@ def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> Si
         candidate_indices = np.where(reflection_candidates)[0]
 
         if len(candidate_indices) > 0:
-            # Randomly select frames to apply reflection based on probability
-            n_reflections = int(
-                np.round(len(candidate_indices) * config.led_wall_reflection_prob)
-            )
-            if n_reflections > 0:
-                reflection_indices = rng.choice(
-                    candidate_indices, size=n_reflections, replace=False
-                )
+            # Per-frame Bernoulli sampling. Using
+            # ``round(n_candidates * p)`` produced a deterministic fixed
+            # count: small ``p × n`` rounded to 0 disabled the effect
+            # entirely on short/sparse runs (e.g. 0.25 × 2 → 0 reflections
+            # for every seed), and the exact-count selection eliminated
+            # the binomial variance the docstring promises ("per visible
+            # frame"). True per-frame probability via ``rng.random < p``.
+            draws = rng.random(len(candidate_indices))
+            reflection_indices = candidate_indices[
+                draws < config.led_wall_reflection_prob
+            ]
+            if len(reflection_indices) > 0:
                 led_reflection_applied[reflection_indices] = True
 
                 # Apply reflection for each selected frame
@@ -903,15 +1271,17 @@ def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> Si
         both_visible = mask_led1 & mask_led2
 
         if config.led_swap_mode == "per_frame":
-            # Legacy per-frame swaps: each frame independently with probability led_swap_prob
+            # Per-frame Bernoulli swap (matches the documented
+            # "each frame independently with probability led_swap_prob").
+            # ``round(n_candidates * p)`` produced a deterministic fixed
+            # count and stripped the binomial variance — small ``p × n``
+            # rounded to 0 silently disabled swaps on short/sparse runs.
             if config.led_swap_prob > 0:
                 swap_candidates = np.where(both_visible)[0]
                 if len(swap_candidates) > 0:
-                    n_swaps = int(np.round(len(swap_candidates) * config.led_swap_prob))
-                    if n_swaps > 0:
-                        swap_indices = rng.choice(
-                            swap_candidates, size=n_swaps, replace=False
-                        )
+                    draws = rng.random(len(swap_candidates))
+                    swap_indices = swap_candidates[draws < config.led_swap_prob]
+                    if len(swap_indices) > 0:
                         swap_applied[swap_indices] = True
 
         elif config.led_swap_mode == "persistent":
@@ -973,6 +1343,7 @@ def simulate_rat_imu(config: RatIMUSimConfig | None = None, seed: int = 0) -> Si
         "yaw_rate_truth": yaw_rate_truth,
         "accel_world_truth": accel_world_truth,
         "accel_body_truth": accel_body_truth,
+        "specific_force_truth": specific_force_truth,
         # IMU
         "U_imu": U_imu,
         "bias_gyro": bias_gyro,
@@ -1019,10 +1390,16 @@ def make_default_config(**kwargs) -> RatIMUSimConfig:
     Example:
         >>> config = make_default_config(duration_s=120.0, use_second_led=True)
     """
-    config = RatIMUSimConfig()
-    for key, value in kwargs.items():
-        if hasattr(config, key):
-            setattr(config, key, value)
-        else:
-            raise ValueError(f"Unknown config parameter: {key}")
-    return config
+    # Construct directly with the overrides so RatIMUSimConfig.__post_init__
+    # runs against the final field values. Using post-construction setattr
+    # would silently bypass every validation block (verified: the previous
+    # implementation accepted duration_s=-1.0, fs_imu=0.0, and
+    # sigma_yaw_rate=NaN, all of which now raise at construction).
+    defaults = RatIMUSimConfig()
+    valid_field_names = {f.name for f in dataclass_fields(defaults)}
+    unknown = sorted(set(kwargs) - valid_field_names)
+    if unknown:
+        raise ValueError(f"Unknown config parameter(s): {unknown!r}")
+    base = {f.name: getattr(defaults, f.name) for f in dataclass_fields(defaults)}
+    base.update(kwargs)
+    return RatIMUSimConfig(**base)

@@ -13,11 +13,6 @@ Test Coverage
 - Confidence scaling grid to verify measurement noise handling
 - Numerical parity with baseline: means ≤1e-7, cov diag ≤1e-6
 - NIS and log-likelihood consistency
-
-References
-----------
-- incremental_refactor_plan.md: PR2 - Generic Projected Update Primitives
-- TASKS.md: Milestone M2 acceptance criteria
 """
 
 import jax.numpy as jnp

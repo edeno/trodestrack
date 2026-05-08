@@ -15,8 +15,9 @@ Tests ensure:
 
 Note:
     These tests use mock dynamics that work with arbitrary dimensions.
-    The actual dynamics_function in ekf.py is hardcoded to 8D (separate issue).
-    This test validates that the SMOOTHER INFRASTRUCTURE is dimension-agnostic.
+    The mock dynamics below deliberately accepts the same keyword surface as the
+    runtime dynamics function while keeping arbitrary state dimensions. This
+    test validates that the SMOOTHER INFRASTRUCTURE is dimension-agnostic.
 
 PRD Reference:
     - Section 15: Extensibility (3D Roadmap)
@@ -46,6 +47,7 @@ def mock_dynamics_function(
     damping: float,
     layout=None,
     gravity_body=None,
+    enable_experimental_accel_translation: bool = False,
 ) -> jnp.ndarray:
     """Mock dynamics that work with any state dimension.
 
@@ -240,37 +242,38 @@ def test_build_Q_rate_works_with_ukf_config():
 
 @patch("trodestrack.runtime.offline.dynamics_function", mock_dynamics_function)
 def test_rts_smoother_derives_state_dimension_from_data():
-    """Test that RTS smoother derives state dimension from filtered_means shape.
+    """RTS smoother infrastructure handles 10D (2d_cam_3d_imu) without hardcoding 8.
 
-    This is the core requirement: no hardcoded dimensions anywhere.
+    The smoother is dimension-generic, but the public-API guard requires
+    ``filter_result.filtered_means.shape[1]`` to match
+    ``ekf_config.state_mode``'s layout. Use a registered mode whose
+    layout dim is not the legacy 8D so we still cover the
+    "no hardcoded 8" contract.
     """
     n_cam = 10
-    state_dim = 6  # Different from 8!
+    state_dim = 10  # LAYOUT_2D_CAM_3D_IMU
 
-    # Create filter result with state_dim=6
     filter_result = make_minimal_filter_result_ekf(n_cam, state_dim)
     t_imu, U_imu, t_cam = make_minimal_imu_data(n_imu=100, n_cam=n_cam)
 
-    # Create minimal config (smoother doesn't actually use most of these)
-    config = EKFConfig()
+    config = EKFConfig(state_mode="2d_cam_3d_imu")
 
-    # This should NOT crash with dimension errors
+    # This should NOT crash with dimension errors.
     result = rts_smoother(filter_result, config, t_imu, U_imu, t_cam)
 
-    # Verify output shapes match state_dim
     assert result.smoothed_means.shape == (n_cam, state_dim)
     assert result.smoothed_covariances.shape == (n_cam, state_dim, state_dim)
 
 
 @patch("trodestrack.runtime.offline.dynamics_function", mock_dynamics_function)
 def test_rts_smoother_works_with_reduced_state():
-    """Test RTS smoother with reduced state (e.g., position-only, no biases)."""
+    """RTS smoother with a reduced 5D state (vision_only)."""
     n_cam = 5
-    state_dim = 4  # Example: [x, y, vx, vy] only
+    state_dim = 5  # LAYOUT_VISION_ONLY
 
     filter_result = make_minimal_filter_result_ekf(n_cam, state_dim)
     t_imu, U_imu, t_cam = make_minimal_imu_data(n_imu=50, n_cam=n_cam)
-    config = EKFConfig()
+    config = EKFConfig(state_mode="vision_only")
 
     result = rts_smoother(filter_result, config, t_imu, U_imu, t_cam)
 
@@ -278,36 +281,45 @@ def test_rts_smoother_works_with_reduced_state():
     assert result.smoothed_covariances.shape == (n_cam, state_dim, state_dim)
 
 
-@patch("trodestrack.runtime.offline.dynamics_function", mock_dynamics_function)
-def test_rts_smoother_works_with_extended_state():
-    """Test RTS smoother with extended state (e.g., 3D future state)."""
-    n_cam = 5
-    state_dim = 12  # Example: 3D position, velocity, orientation, biases
-
-    filter_result = make_minimal_filter_result_ekf(n_cam, state_dim)
-    t_imu, U_imu, t_cam = make_minimal_imu_data(n_imu=50, n_cam=n_cam)
-    config = EKFConfig()
-
-    result = rts_smoother(filter_result, config, t_imu, U_imu, t_cam)
-
-    assert result.smoothed_means.shape == (n_cam, state_dim)
-    assert result.smoothed_covariances.shape == (n_cam, state_dim, state_dim)
+# NOTE: a separate "extended state" test (>10D) is not in the matrix because
+# every registered layout above 10D is quaternion-orientation, which requires
+# 6-channel IMU input and a unit-norm quaternion in the state vector — that's
+# beyond the scope of the dimension-generic-infrastructure check this file
+# covers. The 10D
+# ``test_rts_smoother_derives_state_dimension_from_data`` already exercises
+# the non-8D codepath.
 
 
 @patch("trodestrack.runtime.offline.dynamics_function", mock_dynamics_function)
 def test_rts_smoother_works_with_standard_8d_state():
-    """Test that standard 8D state still works (backward compatibility)."""
+    """Standard 8D state still works (backward compatibility)."""
     n_cam = 5
-    state_dim = 8  # Standard PRD state
+    state_dim = 8  # LAYOUT_2D_FULL
 
     filter_result = make_minimal_filter_result_ekf(n_cam, state_dim)
     t_imu, U_imu, t_cam = make_minimal_imu_data(n_imu=50, n_cam=n_cam)
-    config = EKFConfig()
+    config = EKFConfig(state_mode="2d_full")
 
     result = rts_smoother(filter_result, config, t_imu, U_imu, t_cam)
 
     assert result.smoothed_means.shape == (n_cam, state_dim)
     assert result.smoothed_covariances.shape == (n_cam, state_dim, state_dim)
+
+
+@patch("trodestrack.runtime.offline.dynamics_function", mock_dynamics_function)
+def test_rts_smoother_rejects_filter_result_layout_mismatch():
+    """rts_smoother raises when filter_result dim disagrees with config.state_mode."""
+    n_cam = 5
+
+    # 5D filter_result paired with 8D 2d_full config — layout-wrong combo.
+    filter_result = make_minimal_filter_result_ekf(n_cam, state_dim=5)
+    t_imu, U_imu, t_cam = make_minimal_imu_data(n_imu=50, n_cam=n_cam)
+    config = EKFConfig(state_mode="2d_full")
+
+    import pytest
+
+    with pytest.raises(ValueError, match=r"does not match ekf_config\.state_mode"):
+        rts_smoother(filter_result, config, t_imu, U_imu, t_cam)
 
 
 # =============================================================================
@@ -317,15 +329,20 @@ def test_rts_smoother_works_with_standard_8d_state():
 
 @patch("trodestrack.runtime.offline.dynamics_function", mock_dynamics_function)
 def test_sigma_point_smoother_derives_state_dimension_from_data():
-    """Test that sigma-point smoother derives state dimension from filtered_means."""
+    """Sigma-point smoother infrastructure handles 10D without hardcoding 8.
+
+    The UKF rejects quaternion-orientation layouts, so the registered
+    non-quaternion dimensions available to this test are 5 / 8 / 10.
+    Using 10 keeps the "no hardcoded 8" coverage intact while honoring
+    the layout-vs-filter-result guard at the public boundary.
+    """
     n_cam = 10
-    state_dim = 6
+    state_dim = 10  # LAYOUT_2D_CAM_3D_IMU
 
     filter_result = make_minimal_filter_result_ukf(n_cam, state_dim)
     t_imu, U_imu, t_cam = make_minimal_imu_data(n_imu=100, n_cam=n_cam)
-    config = UKFConfig()
+    config = UKFConfig(state_mode="2d_cam_3d_imu")
 
-    # This should NOT crash with dimension errors
     result = sigma_point_smoother(filter_result, config, t_imu, U_imu, t_cam)
 
     assert result.smoothed_means.shape == (n_cam, state_dim)
@@ -334,29 +351,13 @@ def test_sigma_point_smoother_derives_state_dimension_from_data():
 
 @patch("trodestrack.runtime.offline.dynamics_function", mock_dynamics_function)
 def test_sigma_point_smoother_works_with_reduced_state():
-    """Test sigma-point smoother with reduced state."""
+    """Sigma-point smoother with a reduced 5D state (vision_only)."""
     n_cam = 5
-    state_dim = 4
+    state_dim = 5  # LAYOUT_VISION_ONLY
 
     filter_result = make_minimal_filter_result_ukf(n_cam, state_dim)
     t_imu, U_imu, t_cam = make_minimal_imu_data(n_imu=50, n_cam=n_cam)
-    config = UKFConfig()
-
-    result = sigma_point_smoother(filter_result, config, t_imu, U_imu, t_cam)
-
-    assert result.smoothed_means.shape == (n_cam, state_dim)
-    assert result.smoothed_covariances.shape == (n_cam, state_dim, state_dim)
-
-
-@patch("trodestrack.runtime.offline.dynamics_function", mock_dynamics_function)
-def test_sigma_point_smoother_works_with_extended_state():
-    """Test sigma-point smoother with extended state."""
-    n_cam = 5
-    state_dim = 12
-
-    filter_result = make_minimal_filter_result_ukf(n_cam, state_dim)
-    t_imu, U_imu, t_cam = make_minimal_imu_data(n_imu=50, n_cam=n_cam)
-    config = UKFConfig()
+    config = UKFConfig(state_mode="vision_only")
 
     result = sigma_point_smoother(filter_result, config, t_imu, U_imu, t_cam)
 
@@ -366,18 +367,33 @@ def test_sigma_point_smoother_works_with_extended_state():
 
 @patch("trodestrack.runtime.offline.dynamics_function", mock_dynamics_function)
 def test_sigma_point_smoother_works_with_standard_8d_state():
-    """Test standard 8D state (backward compatibility)."""
+    """Standard 8D state (backward compatibility)."""
     n_cam = 5
-    state_dim = 8
+    state_dim = 8  # LAYOUT_2D_FULL
 
     filter_result = make_minimal_filter_result_ukf(n_cam, state_dim)
     t_imu, U_imu, t_cam = make_minimal_imu_data(n_imu=50, n_cam=n_cam)
-    config = UKFConfig()
+    config = UKFConfig(state_mode="2d_full")
 
     result = sigma_point_smoother(filter_result, config, t_imu, U_imu, t_cam)
 
     assert result.smoothed_means.shape == (n_cam, state_dim)
     assert result.smoothed_covariances.shape == (n_cam, state_dim, state_dim)
+
+
+@patch("trodestrack.runtime.offline.dynamics_function", mock_dynamics_function)
+def test_sigma_point_smoother_rejects_filter_result_layout_mismatch():
+    """sigma_point_smoother raises when filter_result dim disagrees with config."""
+    n_cam = 5
+
+    filter_result = make_minimal_filter_result_ukf(n_cam, state_dim=5)
+    t_imu, U_imu, t_cam = make_minimal_imu_data(n_imu=50, n_cam=n_cam)
+    config = UKFConfig(state_mode="2d_full")
+
+    import pytest
+
+    with pytest.raises(ValueError, match=r"does not match ukf_config\.state_mode"):
+        sigma_point_smoother(filter_result, config, t_imu, U_imu, t_cam)
 
 
 # =============================================================================
@@ -387,21 +403,25 @@ def test_sigma_point_smoother_works_with_standard_8d_state():
 
 @patch("trodestrack.runtime.offline.dynamics_function", mock_dynamics_function)
 def test_sigma_point_count_adapts_to_state_dimension():
-    """Test that sigma points are generated correctly for various dimensions.
+    """Sigma-point count adapts to state dimension across registered modes.
 
-    For state dimension n, we should have 2n+1 sigma points.
+    For state dimension n the smoother should construct ``2n+1`` sigma
+    points without crashing. We exercise every registered non-quaternion
+    UKF dimension paired with its matching state_mode (the layout-vs-
+    filter-result guard in sigma_point_smoother enforces the pairing).
     """
-    # We don't directly test _compute_sigma_points here, but we verify
-    # the smoother doesn't crash due to wrong sigma-point counts
-    test_dims = [3, 5, 8, 10, 12]
+    cases = [
+        (5, "vision_only"),
+        (8, "2d_full"),
+        (10, "2d_cam_3d_imu"),
+    ]
 
-    for state_dim in test_dims:
+    for state_dim, state_mode in cases:
         n_cam = 3
         filter_result = make_minimal_filter_result_ukf(n_cam, state_dim)
         t_imu, U_imu, t_cam = make_minimal_imu_data(n_imu=30, n_cam=n_cam)
-        config = UKFConfig()
+        config = UKFConfig(state_mode=state_mode)
 
-        # Should not crash
         result = sigma_point_smoother(filter_result, config, t_imu, U_imu, t_cam)
         assert result.smoothed_means.shape == (n_cam, state_dim)
 

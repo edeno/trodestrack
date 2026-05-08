@@ -21,6 +21,12 @@ import pytest
             "EXTENDED_KALMAN_FILTER_DONATE_ARGNUMS",
         ),
         (
+            "trodestrack.models.ekf",
+            "_extended_kalman_filter_3d_jit",
+            "EXTENDED_KALMAN_FILTER_3D_STATIC_ARGNAMES",
+            "EXTENDED_KALMAN_FILTER_3D_DONATE_ARGNUMS",
+        ),
+        (
             "trodestrack.runtime.offline",
             "_rts_smoother_jit",
             "RTS_SMOOTHER_STATIC_ARGNAMES",

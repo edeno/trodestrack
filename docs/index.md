@@ -8,9 +8,9 @@ TrodesTrack combines video tracking (Trodes LEDs and/or DeepLabCut keypoints) wi
 
 - **Sensor Fusion**: Extended Kalman Filter (EKF) and Unscented Kalman Filter (UKF) for combining video (~30 Hz) and IMU (100 Hz) measurements
 - **3D IMU Support**: Full 6-axis IMU processing (3-axis gyro + 3-axis accel) with gravity compensation
-- **Online & Offline Processing**: Real-time filtering and RTS smoothing for offline analysis
-- **Robust Handling**: Occlusions, LED swaps, reflections, and sensor dropout
-- **JAX-Accelerated**: High-performance implementation using JAX - **316x realtime** on CPU, GPU-ready
+- **Online & Offline Processing**: Forward-only EKF and RTS smoothing — both run as batch operations over complete input arrays. The "online" CLI is forward-only, not a streaming ingest loop.
+- **Robust Handling**: Occlusions, reflections, and camera/sensor dropout. Transient LED swaps are mitigated by Mahalanobis gating on dual-LED measurements; persistent LED swaps can be corrected before filtering with config-driven LED identity correction. A whole-session global label reversal still needs `led_identity.initial_state: original` or `swapped`.
+- **JAX-Accelerated**: JIT-compiled JAX. Throughput-floor benchmarks (≥10× realtime offline on CPU, ≤33 ms amortized mean per frame online on a 30-minute session) live in [tests/benchmark/test_throughput.py](https://github.com/edeno/trodestrack/blob/master/tests/benchmark/test_throughput.py); they are not run on every PR. Absolute throughput is hardware-dependent.
 - **Rich Simulation**: Comprehensive synthetic data generation for testing and validation
 - **Diagnostic Visualization**: Publication-quality video output for quality control
 
@@ -23,7 +23,8 @@ TrodesTrack achieves production-ready accuracy:
 | Position RMSE | < 2 cm | < 2 cm |
 | Velocity RMSE | < 10 cm/s | < 10 cm/s |
 | Heading RMSE | < 7 deg | < 7 deg |
-| Throughput | > 10x realtime | **316x realtime** |
+| Throughput (offline) | ≥ 10× realtime | reference run on M-series Mac CPU ~38× realtime under block-until-ready timing (floor checked by `JAX_PLATFORMS=cpu pytest -m benchmark`, not on every PR; **scope: synthetic 2D `simulate_rat_imu` 30-min session with `state_mode="2d_full"` — does not cover the YAML real-data workflow or other layouts**) |
+| Latency (online, amortized mean) | ≤ 33 ms / frame | reference run on M-series Mac CPU ~0.41 ms / frame under block-until-ready timing (floor checked by `JAX_PLATFORMS=cpu pytest -m benchmark`, not on every PR; same scope caveat as above) |
 
 ## Quick Example
 
@@ -38,12 +39,20 @@ sim = simulate_circular(sim_config)
 
 # Run EKF
 ekf_config = EKFConfig()
-result = extended_kalman_filter(ekf_config, sim)
+result = extended_kalman_filter(
+    ekf_config,
+    sim["t_imu"],
+    sim["U_imu"],
+    sim["t_cam_exp"],
+    sim["Z_cam_led1"],
+    sim["Z_cam_led2"],
+    sim["mask_cam"],
+)
 
 # Extract states using layout (dimension-agnostic!)
 layout = get_layout(ekf_config.state_mode)
 positions = result.filtered_means[:, layout.pos_idx]  # (N, 2) in meters
-velocities = result.filtered_means[:, layout.vel_idx]  # (N, 2) in m/s
+velocities = result.filtered_means[:, layout.vel_idx]  # (N, 3) for default 2d_cam_3d_imu (vx, vy, vz)
 headings = result.filtered_means[:, layout.heading_idx]  # (N,) in radians
 ```
 
@@ -75,13 +84,13 @@ headings = result.filtered_means[:, layout.heading_idx]  # (N,) in radians
 
     [:octicons-arrow-right-24: User Guide](user-guide/index.md)
 
--   :material-api:{ .lg .middle } **API Reference**
+-   :material-api:{ .lg .middle } **Python API**
 
     ---
 
-    Complete API documentation for all modules
+    Importable functions, configs, and result types
 
-    [:octicons-arrow-right-24: API Reference](reference/)
+    [:octicons-arrow-right-24: Python API](getting-started/python-api.md)
 
 </div>
 
@@ -124,4 +133,4 @@ If you use TrodesTrack in your research, please cite:
 
 ## License
 
-MIT License - see [LICENSE](https://github.com/edeno/trodestrack/blob/main/LICENSE) for details.
+MIT License - see [LICENSE](https://github.com/edeno/trodestrack/blob/master/LICENSE) for details.

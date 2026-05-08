@@ -11,6 +11,7 @@ import pytest
 
 from trodestrack.qa.plots import (
     plot_covariance_ellipse,
+    plot_heading_error,
     plot_nees_histogram,
     plot_nis_histogram,
     plot_position_error,
@@ -159,6 +160,55 @@ class TestPlotVelocityError:
         assert "m/s" in ax.get_ylabel()
 
         plt.close(fig)
+
+
+class TestPlotHeadingError:
+    """plot_heading_error must validate inputs as strictly as the position/velocity helpers."""
+
+    def test_heading_error_basic(self) -> None:
+        t = np.linspace(0, 10, 100)
+        ht = np.linspace(0, 1.0, 100)
+        he = ht.copy()
+        fig, _ax = plot_heading_error(t, ht, he)
+        assert isinstance(fig, plt.Figure)
+        plt.close(fig)
+
+    def test_heading_error_rejects_shape_mismatch(self) -> None:
+        t = np.linspace(0, 10, 100)
+        ht = np.linspace(0, 1.0, 100)
+        he = np.linspace(0, 1.0, 50)  # wrong length
+        with pytest.raises(ValueError, match=r"Shape mismatch"):
+            plot_heading_error(t, ht, he)
+
+    def test_heading_error_rejects_non_1d_headings(self) -> None:
+        t = np.linspace(0, 10, 100)
+        ht = np.zeros((100, 1))  # 2D where 1D expected
+        he = np.zeros((100, 1))
+        with pytest.raises(ValueError, match=r"headings.*must be 1-D"):
+            plot_heading_error(t, ht, he)
+
+    def test_heading_error_rejects_time_mismatch(self) -> None:
+        t = np.linspace(0, 10, 100)
+        ht = np.zeros(50)
+        he = np.zeros(50)
+        with pytest.raises(ValueError, match=r"Shape mismatch:"):
+            plot_heading_error(t, ht, he)
+
+    def test_heading_error_rejects_bad_mask(self) -> None:
+        t = np.linspace(0, 10, 100)
+        ht = np.zeros(100)
+        he = np.zeros(100)
+        # Bad mask shape
+        with pytest.raises(ValueError, match=r"valid_mask must have shape"):
+            plot_heading_error(t, ht, he, valid_mask=np.ones(50, dtype=bool))
+        # Bad mask dtype (int with non-{0,1} value)
+        with pytest.raises(ValueError, match=r"boolean or 0/1 integer"):
+            plot_heading_error(
+                t,
+                ht,
+                he,
+                valid_mask=np.array([2] + [1] * 99, dtype=np.int32),
+            )
 
 
 class TestPlotNEESHistogram:

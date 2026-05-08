@@ -323,6 +323,7 @@ def test_property_output_structure_complete(config: RatIMUSimConfig, seed: int) 
         "yaw_rate_truth",
         "accel_world_truth",
         "accel_body_truth",
+        "specific_force_truth",
         "U_imu",
         "bias_gyro",
         "bias_accel_x",

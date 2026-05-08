@@ -469,3 +469,78 @@ def test_camera_model_parity_with_ekf_helpers(simple_state, layout_2d_full):
     # Parity check: ≤1e-7 mean difference
     mean_diff = jnp.abs(meas_pred - expected_pred).mean()
     assert mean_diff <= 1e-7, f"Mean difference {mean_diff} exceeds 1e-7"
+
+
+# =============================================================================
+# Constructor Shape Validation
+# =============================================================================
+#
+# Without these gates, ``innovation`` / ``meas_cov`` / ``subspace`` /
+# ``use_measurement`` later index by ``frame_idx`` and JAX silently clamps
+# out-of-range indices to the last row, so an undersized z_led1_all reuses
+# frame 0 for every later step. Direct constructor users (tests, custom
+# pipelines) need the same gate the public EKF/UKF entry points already
+# enforce via validate_camera_input_shapes.
+
+
+def test_camera_model_rejects_mismatched_led_frame_counts(layout_2d_full):
+    """LED1/LED2 must share (n_time, 2)."""
+    with pytest.raises(ValueError, match=r"share shape \(n_time, 2\)"):
+        CameraPositionModel(
+            led_distance=0.04,
+            measurement_noise_base=1e-4,
+            layout=layout_2d_full,
+            z_led1_all=jnp.zeros((1, 2)),
+            z_led2_all=jnp.zeros((2, 2)),
+        )
+
+
+def test_camera_model_rejects_conf_with_wrong_n_time(layout_2d_full):
+    """conf_all must have shape (n_time, 4) matching z_led1_all/z_led2_all."""
+    with pytest.raises(ValueError, match=r"conf_all must have shape \(n_time, 4\)"):
+        CameraPositionModel(
+            led_distance=0.04,
+            measurement_noise_base=1e-4,
+            layout=layout_2d_full,
+            z_led1_all=jnp.zeros((1, 2)),
+            z_led2_all=jnp.zeros((1, 2)),
+            conf_all=jnp.ones((2, 4)),
+        )
+
+
+def test_camera_model_rejects_z_led1_with_wrong_trailing_dim(layout_2d_full):
+    """LED arrays must have a trailing dim of 2."""
+    with pytest.raises(ValueError, match=r"z_led1_all must have shape \(n_time, 2\)"):
+        CameraPositionModel(
+            led_distance=0.04,
+            measurement_noise_base=1e-4,
+            layout=layout_2d_full,
+            z_led1_all=jnp.zeros((3, 3)),
+            z_led2_all=jnp.zeros((3, 3)),
+        )
+
+
+def test_heading_model_rejects_mismatched_led_frame_counts(
+    heading_config, layout_2d_full
+):
+    """LED1/LED2 must share (n_time, 2) in HeadingPseudoModel as well."""
+    with pytest.raises(ValueError, match=r"share shape \(n_time, 2\)"):
+        HeadingPseudoModel(
+            config=heading_config,
+            layout=layout_2d_full,
+            z_led1_all=jnp.zeros((1, 2)),
+            z_led2_all=jnp.zeros((2, 2)),
+        )
+
+
+def test_heading_model_rejects_z_led1_with_wrong_trailing_dim(
+    heading_config, layout_2d_full
+):
+    """HeadingPseudoModel must reject LED arrays whose trailing dim != 2."""
+    with pytest.raises(ValueError, match=r"z_led1_all must have shape \(n_time, 2\)"):
+        HeadingPseudoModel(
+            config=heading_config,
+            layout=layout_2d_full,
+            z_led1_all=jnp.zeros((3, 3)),
+            z_led2_all=jnp.zeros((3, 3)),
+        )

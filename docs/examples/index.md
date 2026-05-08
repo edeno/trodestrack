@@ -129,7 +129,7 @@ uv run python examples/04_ukf_basic_scenarios.py
 **Output:** 3 comparison PNGs + side-by-side metrics tables
 
 !!! note "Verdict"
-    EKF won 5/9 metrics vs UKF's 4/9. UKF is ~1-5x slower. **Recommendation:** Start with EKF; switch to UKF only if EKF fails to meet accuracy requirements.
+    EKF won 6/9 metrics vs UKF's 3/9. Under JIT-compiled JAX with warm dispatch, UKF and EKF run at a comparable wall-clock cost on these scenarios; on backends without JIT (per-step Python loops) UKF can be several times slower. **Recommendation:** Start with EKF and re-measure on your target backend; switch to UKF only if EKF fails to meet accuracy requirements.
 
 ## Robustness (05-06)
 
@@ -212,16 +212,16 @@ uv run python examples/08_qa_report_generation.py
 
 **Examples 03-04** use NEES (Normalized Estimation Error Squared) to check if the filter's uncertainty estimates are honest:
 
-- NEES ~ 8.0 (for 8D state) = filter is consistent
-- NEES < 6.0 = overconfident (covariance too small)
-- NEES > 10.0 = underconfident (covariance too large)
+- NEES ~ state_dim = filter is consistent (e.g., ~2 for position-only NEES, ~8 for full 8D state)
+- NEES well below state_dim = underconfident (covariance too large)
+- NEES well above state_dim = overconfident (covariance too small)
 
 ### Computational Tradeoffs
 
 **Example 04** demonstrates:
 
 - EKF: 1 linearization point -> fast
-- UKF: 17 sigma points -> 1-5x slower but handles nonlinearity better
+- UKF: 17 sigma points -> comparable wall-clock under JIT-compiled JAX with warm dispatch; several times slower on per-step Python loops. Better handling of strong nonlinearity is the reason to choose it.
 - **Verdict:** EKF is sufficient for most scenarios
 
 ## Running All Examples
@@ -236,6 +236,20 @@ done
 
 ## Output Locations
 
-- **PNGs:** `output/examples/` directory (created automatically)
-- **Videos:** `diagnostics/videos/` directory
-- **PDFs:** Same directory as the example script
+Each example writes to a different path; consult the script if you need the
+exact filename. Quick reference for the shipped examples:
+
+- **Example 01** (`01_simple_simulations.py`) → `examples/01_simple_simulations.png`
+  (next to the script).
+- **Example 02** (`02_rat_imu_simulation.py`) → five PNGs in the *current
+  working directory* (e.g. `02_basic_sim.png`, `02_two_led_sim.png`,
+  `03_confidence_sim.png`, `04_noise_validation.png`,
+  `05_vision_robustness.png`).
+- **Examples 03 / 03b / 04 / 05 / 06** → PNGs next to each script
+  (`examples/<name>.png`).
+- **Example 07** (`07_smoother_demonstration.py`) →
+  `output/dropout_smoother_comparison.mp4` (resolved relative to the
+  process working directory).
+- **Example 08** (`08_qa_report_generation.py`) →
+  `examples/example_qa_report.pdf` (next to the script via
+  `Path(__file__).parent`).

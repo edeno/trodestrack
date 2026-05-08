@@ -21,10 +21,6 @@ Protocol Methods
 - `innovation()`: Innovation z - h(x) with sensor-specific processing (e.g., angle wrapping)
 - `subspace()`: LED validity flags and selector matrix for lifted updates
 
-References
-----------
-- incremental_refactor_plan.md: PR1 - MeasurementModel Protocol
-- PRD.md: Section 6 (Mathematical Model), Section 12 (Robustness)
 """
 
 from __future__ import annotations
@@ -65,21 +61,28 @@ class MeasurementModel(Protocol):
 
     Notes
     -----
-    - Implementations should cache frame-specific data via `set_frame_data()`
-    - All arrays use static shapes for JAX compatibility
-    - Invalid observations gated via large R (1e6) instead of branching
-    - Protocol is `@runtime_checkable` for isinstance() checks
+    - Implementations preallocate the per-frame arrays (LED positions,
+      masks, confidences) at construction time and index them by
+      ``frame_idx`` inside the JIT-traced filter; there is no
+      ``set_frame_data()`` hook today.
+    - All arrays use static shapes for JAX compatibility.
+    - Invalid observations gated via large R (1e6) instead of branching.
+    - Protocol is `@runtime_checkable` for isinstance() checks.
 
     Examples
     --------
+    >>> import jax.numpy as jnp
     >>> from trodestrack.models.sensors import CameraPositionModel
     >>> from trodestrack.models.sensors.protocols import MeasurementModel
     >>> from trodestrack.models.state_layout import get_layout
     >>> layout = get_layout("2d_full")
+    >>> n_frames = 4
     >>> model = CameraPositionModel(
     ...     led_distance=0.04,
     ...     measurement_noise_base=0.005**2,
     ...     layout=layout,
+    ...     z_led1_all=jnp.zeros((n_frames, 2)),
+    ...     z_led2_all=jnp.zeros((n_frames, 2)),
     ... )
     >>> isinstance(model, MeasurementModel)
     True

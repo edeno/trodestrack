@@ -2,18 +2,20 @@
 
 This module validates system performance against PRD requirements:
 - Offline smoothing ≥10× realtime (CPU) on 30 min session (PRD §4.3)
-- Online EKF latency ≤33 ms per frame (CPU) (PRD §4.4)
-
-These benchmarks ensure the filter implementation meets production throughput
-and latency requirements for both offline post-processing and real-time tracking.
-
-References:
-    - PRD.md Section 4: Core Outcomes (Acceptance Criteria)
+- Online EKF latency ≤33 ms per frame (CPU) (PRD §4.4) — measured here
+  as amortized mean per-frame time (total / num_frames) over a single
+  JIT'd ``lax.scan`` batch, which is a *necessary* but not sufficient
+  condition for the per-frame requirement. Per-frame tail / p99 latency
+  is not measured by this suite (the filter is not driven from a
+  streaming ingest loop), so this is a throughput-style proxy for the
+  forward-only "online" CLI rather than a streaming / real-time
+  guarantee.
 """
 
 import time
 from typing import Any
 
+import jax
 import numpy as np
 import pytest
 
@@ -21,8 +23,48 @@ from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
 from trodestrack.runtime.offline import rts_smoother
 from trodestrack.sim.rat_imu import RatIMUSimConfig, simulate_rat_imu
 
+
+def _block_until_ready(result: Any) -> Any:
+    """Force JAX dispatch to complete on every array leaf in ``result``.
+
+    JAX execution is asynchronous: ``extended_kalman_filter`` and
+    ``rts_smoother`` return ``ArrayImpl`` futures that the host gets back
+    immediately while the underlying XLA computation is still running.
+    Stopping the timer before materializing those leaves measures
+    dispatch latency rather than completed compute, so headline
+    throughput / latency numbers can under-report the real cost. Mirror
+    the existing helper used in ``test_ekf_3d_core_jit.py`` to walk the
+    pytree and call ``block_until_ready`` on every JAX array leaf.
+    """
+    for leaf in jax.tree_util.tree_leaves(result):
+        if hasattr(leaf, "block_until_ready"):
+            leaf.block_until_ready()
+    return result
+
+
+def _assert_cpu_backend() -> None:
+    """Assert the active JAX backend is CPU and report it.
+
+    The PRD floors are explicitly described as CPU targets ("≥10× realtime
+    on CPU", "≤33 ms per frame on CPU"). Without this gate, a runner with
+    ``JAX_PLATFORMS=cuda`` (or a local machine where jaxlib finds an
+    accelerator) would silently use the GPU and the printed numbers would
+    misrepresent what the floors actually cover. Run with
+    ``JAX_PLATFORMS=cpu pytest -m benchmark`` to enforce.
+    """
+    backend = jax.default_backend()
+    print(f"   JAX backend: {backend}")
+    if backend != "cpu":
+        raise RuntimeError(
+            f"Throughput benchmarks claim CPU floors but jax.default_backend()"
+            f" is {backend!r}. Set ``JAX_PLATFORMS=cpu`` (or "
+            "``JAX_PLATFORM_NAME=cpu``) before running, or skip these tests "
+            "on accelerator-equipped machines."
+        )
+
+
 # =============================================================================
-# PRD Performance Requirements (from PRD.md Section 4)
+# Performance Requirements (acceptance criteria)
 # =============================================================================
 
 PRD_OFFLINE_SMOOTHER_SPEEDUP_MIN = 10.0  # Offline ≥10× realtime (CPU)
@@ -37,16 +79,35 @@ BENCHMARK_SESSION_DURATION_S = 1800.0  # 30 minutes
 # =============================================================================
 
 
-def get_production_ekf_config(**overrides: Any) -> EKFConfig:
-    """Get production EKF configuration for benchmarking.
+def get_benchmark_ekf_config(**overrides: Any) -> EKFConfig:
+    """EKF configuration for the throughput benchmark.
 
-    Returns configuration matching production settings with adaptive dropout handling.
+    Sets sensor / dynamics fields (process noise, measurement noise,
+    IMU noise densities, damping, LED spacing, heading measurement) to
+    values matching the simulator below. **Internal toggles**
+    (``adaptive_q_during_dropout``, ``freeze_bias_during_blackout``,
+    ``reduce_imu_noise_during_blackout`` and the dropout-Q multipliers)
+    are NOT overridden — the benchmark therefore exercises the same
+    dropout-adaptive path users get from ``EKFConfig()`` defaults
+    (``adaptive_q_during_dropout=True`` etc).
 
-    Args:
-        **overrides: Optional parameter overrides
+    The ``state_mode`` is forced to ``"2d_full"`` (8D) because
+    ``simulate_rat_imu`` emits a 3-channel ``U_imu`` ``(yaw_rate,
+    accel_x, accel_y)`` that matches the 8D layout's
+    ``(b_gz, b_ax, b_ay)`` bias slot. The user-facing default
+    ``"2d_cam_3d_imu"`` (10D) needs a 6-channel IMU input that this
+    simulator does not produce; throughput on that layout would
+    require a different sim and may differ from what's measured here.
 
-    Returns:
-        EKFConfig with production settings
+    The headline floors checked by these tests therefore cover the
+    synthetic 2D ``simulate_rat_imu`` path only. The YAML real-data
+    workflow (``trodestrack online --config session.yaml``) is not
+    covered: it runs through additional preprocessing (parquet
+    loading, sample-and-hold removal, IMU calibration diagnostics,
+    LED identity correction) and an optional vision-only safety
+    check that roughly doubles filter wall-clock when enabled. The
+    README, ``docs/index.md``, and ``docs/TROUBLESHOOTING.md``
+    repeat this scope caveat next to the headline numbers.
     """
     defaults = dict(
         process_noise_pos=0.001,
@@ -60,14 +121,18 @@ def get_production_ekf_config(**overrides: Any) -> EKFConfig:
         damping_coeff=0.4,
         led_distance=0.04,
         use_heading_measurement=True,
-        adaptive_q_during_dropout=False,
-        dropout_q_pos_multiplier=10.0,
-        dropout_q_vel_multiplier=10.0,
-        dropout_q_bias_multiplier=0.1,
-        state_mode="2d_full",  # Use 8D layout (tests use hardcoded indices)
+        # Forced because the simulator only emits 3-channel U_imu —
+        # see the docstring above. All other fields below this line
+        # would override production defaults and are intentionally
+        # NOT set so the benchmark mirrors what users actually run.
+        state_mode="2d_full",
     )
     defaults.update(overrides)
     return EKFConfig(**defaults)
+
+
+# Backward-compatible alias for any external callers / scripts.
+get_production_ekf_config = get_benchmark_ekf_config
 
 
 # =============================================================================
@@ -89,6 +154,7 @@ def test_offline_smoother_throughput():
 
     Expected runtime: ~45-60 seconds (on modern CPU, measured on M-series Mac)
     """
+    _assert_cpu_backend()
     # Generate 30-minute realistic rat tracking session
     config = RatIMUSimConfig(
         duration_s=BENCHMARK_SESSION_DURATION_S,
@@ -112,7 +178,9 @@ def test_offline_smoother_throughput():
     # Get production EKF configuration
     ekf_config = get_production_ekf_config()
 
-    # Measure total processing time (filter + smoother)
+    # Measure total processing time (filter + smoother). Block on each
+    # JAX result inside the timed interval so we measure completed
+    # compute, not async dispatch — see ``_block_until_ready`` docstring.
     t_start = time.perf_counter()
 
     # Run forward filter
@@ -125,6 +193,7 @@ def test_offline_smoother_throughput():
         Z_cam_led2=sim_data["Z_cam_led2"],
         mask_cam=sim_data["mask_cam"],
     )
+    _block_until_ready(filter_result)
 
     # Run RTS smoother
     smoother_result = rts_smoother(
@@ -135,6 +204,7 @@ def test_offline_smoother_throughput():
         t_cam=sim_data["t_cam_exp"],
         mask_cam=sim_data["mask_cam"],
     )
+    _block_until_ready(smoother_result)
 
     t_end = time.perf_counter()
     processing_time_s = t_end - t_start
@@ -195,22 +265,29 @@ def test_offline_smoother_throughput():
 @pytest.mark.slow
 @pytest.mark.benchmark
 def test_online_ekf_latency():
-    """PRD §4.4: Online EKF should achieve ≤33 ms per-frame latency on CPU.
+    """PRD §4 Online: end-to-end latency ≤33 ms per frame (EKF on CPU).
 
-    Validates that the EKF prediction + update cycle can process a single
-    camera frame (with inter-frame IMU pre-integration) in ≤33 ms on CPU.
+    Validates that the EKF can keep up with a 30 Hz camera over a long
+    session: total wall-clock processing time divided by frame count
+    must stay below the 33 ms frame period.
 
-    This simulates online tracking where the filter must process each camera
-    frame as it arrives at 30 Hz (~33 ms frame period).
+    Caveat: this is an amortized / mean per-frame check, not a per-frame
+    tail-latency check. The filter runs as a single JIT-compiled
+    ``lax.scan`` over the full session, so individual scan steps are not
+    timed and slow tail frames cannot be detected here. Per-frame
+    distribution and p99 measurement require an unrolled / online-loop
+    harness; this test verifies only that the average frame budget is
+    met. For the cited PRD ≤33 ms requirement, the mean is a
+    *necessary*, not sufficient, condition.
 
     Strategy:
-        - Generate a realistic session with 30 Hz camera
-        - Run the full EKF filter (pre-integration + measurement update per frame)
-        - Measure total processing time and compute average per-frame latency
-        - PRD requires p99 latency ≤33 ms, we test mean latency ≤33 ms (stricter)
+        - Generate a realistic 30-min session with 30 Hz camera.
+        - Run the full EKF filter (pre-integration + measurement update per frame).
+        - Measure total processing time and assert mean per-frame ≤33 ms.
 
     Expected runtime: ~45-60 seconds (on modern CPU, measured on M-series Mac)
     """
+    _assert_cpu_backend()
     # Generate 30-minute realistic rat tracking session
     # (same as offline smoother benchmark for consistency)
     config = RatIMUSimConfig(
@@ -235,7 +312,8 @@ def test_online_ekf_latency():
     # Get production EKF configuration
     ekf_config = get_production_ekf_config()
 
-    # Measure filter processing time
+    # Measure filter processing time. Block on the JAX result inside the
+    # timed interval so we measure completed compute, not async dispatch.
     t_start = time.perf_counter()
 
     filter_result = extended_kalman_filter(
@@ -247,6 +325,7 @@ def test_online_ekf_latency():
         Z_cam_led2=sim_data["Z_cam_led2"],
         mask_cam=sim_data["mask_cam"],
     )
+    _block_until_ready(filter_result)
 
     t_end = time.perf_counter()
     total_processing_time_s = t_end - t_start
@@ -265,17 +344,22 @@ def test_online_ekf_latency():
     )
     print(f"Number of frames: {num_frames}")
     print(f"Total processing time: {total_processing_time_s:.2f} s")
-    print(f"Mean latency per frame: {mean_latency_per_frame_ms:.2f} ms")
+    print(f"Mean latency per frame (amortized): {mean_latency_per_frame_ms:.2f} ms")
     print(f"Camera frame period (30 Hz): {frame_period_ms:.2f} ms")
-    print(f"PRD requirement: ≤{PRD_ONLINE_EKF_LATENCY_MS_MAX:.1f} ms per frame")
+    print(
+        f"PRD requirement: ≤{PRD_ONLINE_EKF_LATENCY_MS_MAX:.1f} ms per frame "
+        "(this test checks MEAN only — necessary, not sufficient)"
+    )
     print(
         f"Status: {'PASS ✓' if mean_latency_per_frame_ms <= PRD_ONLINE_EKF_LATENCY_MS_MAX else 'FAIL ✗'}"
     )
 
-    # Validate PRD requirement
+    # Validate PRD ≤33 ms requirement at the mean (necessary condition).
+    # Tail / p99 verification requires an unrolled per-frame harness and is
+    # not covered by this test.
     assert mean_latency_per_frame_ms <= PRD_ONLINE_EKF_LATENCY_MS_MAX, (
         f"Mean EKF latency {mean_latency_per_frame_ms:.2f} ms exceeds "
-        f"PRD requirement {PRD_ONLINE_EKF_LATENCY_MS_MAX:.1f} ms"
+        f"PRD requirement {PRD_ONLINE_EKF_LATENCY_MS_MAX:.1f} ms (mean check)"
     )
 
     # Sanity check: verify filter produced valid results

@@ -20,7 +20,7 @@ Key phenomena illustrated:
 - IEKS relinearization around smoothed trajectory improves accuracy
 
 Usage:
-    uv run python examples/06_dropout_smoother_comparison.py
+    uv run python examples/07_smoother_demonstration.py
 
 Output:
     Saves MP4 video: output/dropout_smoother_comparison.mp4
@@ -114,7 +114,12 @@ def main() -> None:
         "reduce_imu_noise_during_blackout": True,
         "blackout_imu_noise_scale": 0.5,
     }
+    # Pin to the 8D ``2d_full`` layout so the heading/bias index extraction
+    # below (heading_idx=4, bias_accel_idx=(6, 7)) matches the filter state.
+    # The current EKFConfig() default is "2d_cam_3d_imu" (10D) where heading
+    # is at index 5 and accel biases start at 7.
     ekf_params = dict(
+        state_mode="2d_full",
         process_noise_pos=0.02,
         process_noise_vel=2.0,
         process_noise_heading=0.02,
@@ -152,16 +157,33 @@ def main() -> None:
         mask_cam=mask_with_dropout,  # Enable blackout-aware Q/R scaling
     )
 
-    # Compute dropout drift for both
+    # Interpolate truth to camera times — needed both for the dropout-
+    # drift metric (estimate vs truth) and for the RMSE / NEES summaries
+    # below.
+    t_truth = sim_data["t_imu"]
+    X_truth = sim_data["X_truth"]
+    t_cam = sim_data["t_cam_exp"]
+
+    pos_truth = np.column_stack(
+        [
+            np.interp(t_cam, t_truth, X_truth[:, 0]),
+            np.interp(t_cam, t_truth, X_truth[:, 1]),
+        ]
+    )
+    heading_truth = interp_angle(t_cam, t_truth, X_truth[:, 4])
+
+    # Compute dropout drift (tracking error growth vs camera-frame truth).
     drift_result_filter = compute_dropout_drift(
-        positions=filter_result.filtered_means[:, :2],
+        positions_est=filter_result.filtered_means[:, :2],
+        positions_true=pos_truth,
         valid_mask=mask_with_dropout,
         t=sim_data["t_cam_exp"],
         min_duration_s=4.5,
     )
 
     drift_result_smooth = compute_dropout_drift(
-        positions=smoother_result.smoothed_means[:, :2],
+        positions_est=smoother_result.smoothed_means[:, :2],
+        positions_true=pos_truth,
         valid_mask=mask_with_dropout,
         t=sim_data["t_cam_exp"],
         min_duration_s=4.5,
@@ -175,19 +197,6 @@ def main() -> None:
     print(f"  Smoothed: {drift_smooth_m:.4f} m")
     print(f"  Improvement: {drift_filter_m / drift_smooth_m:.2f}× reduction")
     print(f"  Theory (~0.50 m): {drift_smooth_m / 0.50:.2f}× observed/theory")
-
-    # Interpolate truth to camera times
-    t_truth = sim_data["t_imu"]
-    X_truth = sim_data["X_truth"]
-    t_cam = sim_data["t_cam_exp"]
-
-    pos_truth = np.column_stack(
-        [
-            np.interp(t_cam, t_truth, X_truth[:, 0]),
-            np.interp(t_cam, t_truth, X_truth[:, 1]),
-        ]
-    )
-    heading_truth = interp_angle(t_cam, t_truth, X_truth[:, 4])
 
     # Extract filter and smoother estimates
     pos_filter = np.array(filter_result.filtered_means[:, :2])

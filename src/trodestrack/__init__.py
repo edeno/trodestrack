@@ -37,11 +37,21 @@ Examples:
                      --camera-timestamps t_cam.txt --led1-positions led1.txt \\
                      --output-dir run1/
 
-  # Generate QA report from filter results
-  trodestrack report --run run1/ --pdf report.pdf
+  # Generate QA report (requires a separately-prepared QA directory containing
+  # ground-truth-aligned timestamps.npy, positions_true.npy, positions_est.npy,
+  # velocities_*.npy, headings_*.npy, nees.npy, and state_dim.txt; see
+  # examples/08_qa_report_generation.py and tests/cli/test_report_command.py).
+  trodestrack report --run qa_inputs/ --pdf report.pdf
 
   # Generate report with custom title
-  trodestrack report --run run1/ --pdf report.pdf --title "Session 2024-10-11"
+  trodestrack report --run qa_inputs/ --pdf report.pdf --title "Session 2024-10-11"
+
+Note: ``online`` and ``smooth`` write the raw filter state
+(filtered_means.txt, filtered_covariances.txt, marginal_loglik.txt) to
+``--output-dir``. The ``report`` command operates on a different,
+QA-prepared file layout that includes ground truth, so the two stages
+are not directly chained — generate ``report``'s inputs from your own
+analysis pipeline (see qa.metrics.compute_nees and qa.report.generate_qa_report).
 
 For more information, visit: https://github.com/edeno/trodestrack
         """,

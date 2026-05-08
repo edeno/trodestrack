@@ -5,7 +5,10 @@ dimension assumptions ("magic 8s") and enable extensibility to:
 - Vision-only tracking (5D)
 - IMU-only tracking (8D)
 - 2D camera + 3D IMU (10D)
-- Full 3D tracking (16D)
+    - 2D camera + 6-DOF IMU orientation (14D)
+    - 3D state vectors (15D Euler / 16D quaternion); the experimental
+        ``extended_kalman_filter_3d`` consumes the 16D ``3d_cam_6dof_imu``
+        alias.
 
 Each layout explicitly specifies which indices correspond to position,
 velocity, orientation, and bias states.
@@ -83,6 +86,11 @@ class StateLayout:
     def has_orientation_3d(self) -> bool:
         """Check if state uses 3D orientation (Euler or quaternion)."""
         return isinstance(self.heading_idx, tuple) and len(self.heading_idx) > 1
+
+    @property
+    def has_quaternion_orientation(self) -> bool:
+        """Check if state uses scalar-first quaternion orientation."""
+        return isinstance(self.heading_idx, tuple) and len(self.heading_idx) == 4
 
 
 def get_heading_index(layout: StateLayout) -> int:
@@ -181,6 +189,32 @@ Note: vz and b_az are weakly observable (no position measurement for z)
 """
 
 
+LAYOUT_2D_CAM_6DOF_IMU_ORIENTATION = StateLayout(
+    n=14,
+    pos_idx=(0, 1),  # x, y
+    vel_idx=(2, 3),  # vx, vy
+    heading_idx=(4, 5, 6, 7),  # qw, qx, qy, qz
+    bias_gyro_idx=(8, 9, 10),  # b_gx, b_gy, b_gz
+    bias_accel_idx=(11, 12, 13),  # b_ax, b_ay, b_az
+)
+"""2D camera with full 6-DOF IMU orientation.
+
+State: [x, y, vx, vy, qw, qx, qy, qz, b_gx, b_gy, b_gz, b_ax, b_ay, b_az]
+
+- Position: (x, y) from overhead camera
+- Velocity: (vx, vy) from camera-derived motion / constant-velocity prediction
+- Orientation: scalar-first body-to-world quaternion
+- Gyro bias: (b_gx, b_gy, b_gz) in rad/s
+- Accel bias: (b_ax, b_ay, b_az) in m/s²
+
+Used for: Experimental 2D camera tracking with full IMU orientation support.
+
+Note: Accelerometer-driven x/y translation is disabled by default in the filter
+configuration for this mode. The accelerometer is retained for orientation and
+future experimental translation work, not as a default position driver.
+"""
+
+
 LAYOUT_3D_EULER = StateLayout(
     n=15,
     pos_idx=(0, 1, 2),  # x, y, z
@@ -189,7 +223,7 @@ LAYOUT_3D_EULER = StateLayout(
     bias_gyro_idx=(9, 10, 11),  # b_gx, b_gy, b_gz
     bias_accel_idx=(12, 13, 14),  # b_ax, b_ay, b_az
 )
-"""Full 3D tracking with Euler angle orientation.
+"""15D state vector for 3D pose with Euler-angle orientation.
 
 State: [x, y, z, vx, vy, vz, roll, pitch, yaw, b_gx, b_gy, b_gz, b_ax, b_ay, b_az]
 
@@ -199,10 +233,13 @@ State: [x, y, z, vx, vy, vz, roll, pitch, yaw, b_gx, b_gy, b_gz, b_ax, b_ay, b_a
 - Gyro bias: (b_gx, b_gy, b_gz) in rad/s
 - Accel bias: (b_ax, b_ay, b_az) in m/s²
 
-Used for: Full 6-DOF pose tracking with 3D camera + 6-axis IMU
+No public filter entry point currently consumes this layout (the 2D
+``extended_kalman_filter`` rejects 15D states; the 3D path uses
+``LAYOUT_3D_CAM_6DOF_IMU``). Provided as a registered state vector for
+custom analyses or future filter work.
 
-Warning: Euler angles suffer from gimbal lock at pitch = ±90°
-Consider using quaternion representation (LAYOUT_3D_QUAT) for full 3D.
+Warning: Euler angles suffer from gimbal lock at pitch = ±90°. Prefer
+``LAYOUT_3D_QUAT`` / ``LAYOUT_3D_CAM_6DOF_IMU`` for tracking work.
 """
 
 
@@ -214,7 +251,7 @@ LAYOUT_3D_QUAT = StateLayout(
     bias_gyro_idx=(10, 11, 12),  # b_gx, b_gy, b_gz
     bias_accel_idx=(13, 14, 15),  # b_ax, b_ay, b_az
 )
-"""Full 3D tracking with quaternion orientation (preferred for 3D).
+"""16D state vector for 3D pose with quaternion orientation.
 
 State: [x, y, z, vx, vy, vz, qw, qx, qy, qz, b_gx, b_gy, b_gz, b_ax, b_ay, b_az]
 
@@ -224,7 +261,10 @@ State: [x, y, z, vx, vy, vz, qw, qx, qy, qz, b_gx, b_gy, b_gz, b_ax, b_ay, b_az]
 - Gyro bias: (b_gx, b_gy, b_gz) in rad/s
 - Accel bias: (b_ax, b_ay, b_az) in m/s²
 
-Used for: Full 6-DOF pose tracking with 3D camera + 6-axis IMU
+The UKF rejects quaternion layouts and the 2D ``extended_kalman_filter``
+rejects 16D states. To run 3D tracking on this state vector, use the
+separately registered ``LAYOUT_3D_CAM_6DOF_IMU`` alias with the
+experimental ``extended_kalman_filter_3d`` entry point.
 
 Preferred over Euler angles:
 - No gimbal lock
@@ -232,6 +272,22 @@ Preferred over Euler angles:
 - Standard in robotics/aerospace
 
 Note: Requires quaternion normalization constraint |q| = 1
+"""
+
+
+LAYOUT_3D_CAM_6DOF_IMU = StateLayout(
+    n=LAYOUT_3D_QUAT.n,
+    pos_idx=LAYOUT_3D_QUAT.pos_idx,
+    vel_idx=LAYOUT_3D_QUAT.vel_idx,
+    heading_idx=LAYOUT_3D_QUAT.heading_idx,
+    bias_gyro_idx=LAYOUT_3D_QUAT.bias_gyro_idx,
+    bias_accel_idx=LAYOUT_3D_QUAT.bias_accel_idx,
+)
+"""Full 3D camera with 6-DOF IMU fusion.
+
+Separate layout instance with the same 16D quaternion state structure as
+``LAYOUT_3D_QUAT`` and the explicit state-mode name used by the
+tilt/orientation implementation plan.
 """
 
 
@@ -244,8 +300,10 @@ LAYOUT_REGISTRY = {
     "vision_only": LAYOUT_VISION_ONLY,
     "imu_only": LAYOUT_2D_FULL,  # Same as 2d_full (8D with biases)
     "2d_cam_3d_imu": LAYOUT_2D_CAM_3D_IMU,
+    "2d_cam_6dof_imu_orientation": LAYOUT_2D_CAM_6DOF_IMU_ORIENTATION,
     "3d_euler": LAYOUT_3D_EULER,
     "3d_quat": LAYOUT_3D_QUAT,
+    "3d_cam_6dof_imu": LAYOUT_3D_CAM_6DOF_IMU,
 }
 """Lookup table mapping mode strings to StateLayout instances.
 
@@ -264,7 +322,8 @@ def get_layout(mode: str) -> StateLayout:
     ----------
     mode : str
         One of {"2d_full", "vision_only", "imu_only", "2d_cam_3d_imu",
-        "3d_euler", "3d_quat"}.
+        "2d_cam_6dof_imu_orientation", "3d_euler", "3d_quat",
+        "3d_cam_6dof_imu"}.
 
     Returns
     -------

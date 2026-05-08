@@ -15,14 +15,15 @@ Design
 
 References
 ----------
-- incremental_refactor_plan.md: PR1 - MeasurementModel Protocol
 - filter_common.py: measurement_function, confidence_to_R_diagonal, make_led_selector
 """
 
 from __future__ import annotations
 
+import jax
 import jax.numpy as jnp
-from jax import Array
+import numpy as np
+from jax import Array, jacfwd
 
 from trodestrack.models.filter_common import (
     confidence_to_R_diagonal,
@@ -30,6 +31,12 @@ from trodestrack.models.filter_common import (
     measurement_function,
 )
 from trodestrack.models.state_layout import StateLayout, get_heading_index
+
+
+def _is_traced(arr) -> bool:
+    """True when ``arr`` is a JAX tracer (cannot run host-side numeric checks)."""
+
+    return isinstance(arr, jax.core.Tracer)
 
 
 class CameraPositionModel:
@@ -145,6 +152,65 @@ class CameraPositionModel:
         confidence_clip_min : float, default 1e-2
             Minimum confidence for noise scaling.
         """
+        # Reject non-finite or non-positive scalar parameters at the
+        # constructor boundary. NaN previously slipped past the implicit
+        # ``> 0`` checks downstream and propagated through the camera
+        # measurement covariance built in confidence_to_R_diagonal:
+        # ``R = base / clip(conf, clip_min, 1.0)``. `np.clip(np.nan, ...)`
+        # is NaN, so a NaN base or NaN conf_all entry produced NaN R rows.
+        if not np.isfinite(measurement_noise_base) or measurement_noise_base <= 0:
+            raise ValueError(
+                "measurement_noise_base must be a finite strictly-positive "
+                f"variance; got {measurement_noise_base!r}."
+            )
+        if not np.isfinite(led_distance) or led_distance <= 0:
+            raise ValueError(
+                "led_distance must be a finite strictly-positive value in "
+                f"meters; got {led_distance!r}."
+            )
+        if not np.isfinite(confidence_clip_min) or confidence_clip_min <= 0:
+            raise ValueError(
+                "confidence_clip_min must be a finite strictly-positive "
+                f"floor; got {confidence_clip_min!r}."
+            )
+        if (
+            conf_all is not None
+            and not _is_traced(conf_all)
+            and not np.all(np.isfinite(np.asarray(conf_all)))
+        ):
+            raise ValueError(
+                "conf_all must contain only finite values; got "
+                "non-finite entries (NaN/inf)."
+            )
+
+        # Shape gate: ``innovation`` / ``meas_cov`` / ``subspace`` index the
+        # frame arrays by ``frame_idx``. JAX silently clamps out-of-range
+        # indices to the last row, so an undersized z_led1_all reuses
+        # frame 0 for every later step. Validate (n_time, 2) for both LEDs
+        # and (n_time, 4) for conf at the constructor boundary so direct
+        # callers (tests, custom pipelines) see the same gate the public
+        # entry points already enforce via validate_camera_input_shapes.
+        z_led1_arr = jnp.asarray(z_led1_all)
+        z_led2_arr = jnp.asarray(z_led2_all)
+        if z_led1_arr.ndim != 2 or z_led1_arr.shape[1] != 2:
+            raise ValueError(
+                f"z_led1_all must have shape (n_time, 2); got {z_led1_arr.shape}."
+            )
+        if z_led2_arr.shape != z_led1_arr.shape:
+            raise ValueError(
+                "z_led1_all and z_led2_all must share shape (n_time, 2); "
+                f"got z_led1_all={z_led1_arr.shape}, z_led2_all={z_led2_arr.shape}."
+            )
+        if conf_all is not None:
+            conf_arr = jnp.asarray(conf_all)
+            expected_conf_shape = (z_led1_arr.shape[0], 4)
+            if conf_arr.shape != expected_conf_shape:
+                raise ValueError(
+                    "conf_all must have shape (n_time, 4) matching "
+                    f"z_led1_all/z_led2_all; got {conf_arr.shape} for "
+                    f"n_time={z_led1_arr.shape[0]}."
+                )
+
         self.led_distance = led_distance
         self.measurement_noise_base = measurement_noise_base
         self.layout = layout
@@ -203,6 +269,13 @@ class CameraPositionModel:
              [1, 0, 0, 0, -d·sin(θ), 0, ...],
              [0, 1, 0, 0,  d·cos(θ), 0, ...]]
         """
+        if self.layout.has_quaternion_orientation:
+            return jacfwd(
+                lambda state: measurement_function(
+                    state, self.led_distance, self.layout
+                )
+            )(state_mean)
+
         h_idx = get_heading_index(self.layout)
         theta = state_mean[h_idx]
         d = self.led_distance / 2.0

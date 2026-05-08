@@ -2,11 +2,22 @@
 
 Real trodestrack data from rat "Arthur" recorded on March 24, 2022.
 
+> **Inputs not shipped in this repo.** The three raw input files below
+> are gitignored (`*.parquet` and `*.mp4`) and are not part of a clean
+> checkout. Drop them into this directory before running the loaders or
+> visualizers — the scripts resolve paths relative to this folder.
+> Contact the maintainer (<eric.denovellis@ucsf.edu>) for the recording.
+
 ## Files
+
+Inputs (not tracked — drop into `data/` before running):
 
 - **`arthur20220324_position_info.parquet`** - Camera tracking data (73,450 frames, 40 min)
 - **`arthur20220324_imu_info.parquet`** - IMU sensor data (72.5M samples with sample-and-hold)
 - **`20220324_arthur_02_r1.mp4`** - Video recording (279 MB)
+
+Tracked scripts (work once the inputs above are in place):
+
 - **`load_arthur_session.py`** - Data loader with unit conversion and preprocessing
 - **`visualize_session.py`** - Create video with LED tracking and 2D IMU (gyro Z, accel X/Y)
 - **`visualize_all_sensors.py`** - Create video showing complete 6-axis IMU data (all gyro + accel axes)

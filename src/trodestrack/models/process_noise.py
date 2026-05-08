@@ -6,6 +6,7 @@ import jax.numpy as jnp
 from jax import Array
 
 from trodestrack.models.filter_common import build_G_matrix_generic, symmetrize
+from trodestrack.models.quaternion import rotate_vector_body_to_world
 from trodestrack.models.state_layout import (
     LAYOUT_REGISTRY,
     StateLayout,
@@ -100,7 +101,11 @@ def build_Q_rate(config: Any, n: int, dtype: Any = jnp.float32) -> jnp.ndarray:
 
 
 def build_input_noise_cov(
-    config: Any, dt: float | Array, n_accel: int = 2, dtype: Any = jnp.float32
+    config: Any,
+    dt: float | Array,
+    n_accel: int = 2,
+    dtype: Any = jnp.float32,
+    n_gyro: int = 1,
 ) -> jnp.ndarray:
     """IMU input noise covariance from noise densities.
 
@@ -114,18 +119,19 @@ def build_input_noise_cov(
         Number of accelerometer axes (2 for 2D, 3 for 3D).
     dtype : jnp.dtype, default jnp.float32
         Array dtype.
+    n_gyro : int, default 1
+        Number of gyroscope axes (1 for yaw-only, 3 for quaternion orientation).
 
     Returns
     -------
     jnp.ndarray
-        Qu (n_accel+1, n_accel+1) for [ω_z(rad/s), f_x(m/s^2), f_y(m/s^2), ...].
-        - n_accel=2: returns (3, 3) for [ω_z, f_x, f_y]
-        - n_accel=3: returns (4, 4) for [ω_z, f_x, f_y, f_z]
+        Qu (n_gyro+n_accel, n_gyro+n_accel), for example
+        [ω_z, f_x, f_y] or [ω_x, ω_y, ω_z, f_x, f_y, f_z].
 
     Raises
     ------
     ValueError
-        If n_accel is not 2 or 3.
+        If n_accel is not 2 or 3, or n_gyro is not 1 or 3.
 
     Notes
     -----
@@ -133,14 +139,19 @@ def build_input_noise_cov(
     """
     if n_accel not in (2, 3):
         raise ValueError(f"n_accel must be 2 or 3, got {n_accel}")
+    if n_gyro not in (1, 3):
+        raise ValueError(f"n_gyro must be 1 or 3, got {n_gyro}")
 
     dt_arr = jnp.asarray(dt, dtype=dtype)
     sg = config.imu_gyro_noise_density**2 / dt_arr
     sa = config.imu_accel_noise_density**2 / dt_arr
 
-    # Build diagonal: [sg, sa, sa, ...] with n_accel accelerometer axes
+    # Build diagonal: gyro axes first, then accelerometer axes.
     diag = jnp.concatenate(
-        [jnp.array([sg], dtype=dtype), jnp.full(n_accel, sa, dtype=dtype)]
+        [
+            jnp.full(n_gyro, sg, dtype=dtype),
+            jnp.full(n_accel, sa, dtype=dtype),
+        ]
     )
     Qu = jnp.diag(diag)
     return symmetrize(Qu)
@@ -156,6 +167,7 @@ def assemble_Q(
     dtype=jnp.float32,
     G_override: jnp.ndarray | None = None,
     Qu_override: jnp.ndarray | None = None,
+    orientation_quaternion: jnp.ndarray | None = None,
 ) -> jnp.ndarray:
     """Assemble total process noise matrix.
 
@@ -177,6 +189,10 @@ def assemble_Q(
         Optional precomputed input mapping matrix G (n, 3).
     Qu_override : jnp.ndarray | None, optional
         Optional IMU input covariance (3, 3).
+    orientation_quaternion : jnp.ndarray | None, optional
+        Scalar-first body-to-world quaternion used to map full 3-axis
+        accelerometer input noise for quaternion layouts. If omitted, yaw-only
+        mapping is used as a conservative planar approximation.
 
     Returns
     -------
@@ -207,8 +223,11 @@ def assemble_Q(
     #                       3 bias terms (b_ax, b_ay, b_az) → 3D accel
     # Default to 2 for backward compatibility (2D tracking with 2D accel)
     n_accel = 2
+    n_gyro = 1
     if layout is not None:
         n_accel = len(layout.bias_accel_idx) if len(layout.bias_accel_idx) > 0 else 2
+        if layout.has_quaternion_orientation:
+            n_gyro = 3
 
     # Base random-walk diffusion (time-scaled)
     Q_rate = build_Q_rate(config, n, dtype=dtype) * jnp.asarray(dt, dtype=dtype)
@@ -248,7 +267,9 @@ def assemble_Q(
     Qu = (
         Qu_override
         if Qu_override is not None
-        else build_input_noise_cov(config, dt, n_accel=n_accel, dtype=dtype)
+        else build_input_noise_cov(
+            config, dt, n_accel=n_accel, dtype=dtype, n_gyro=n_gyro
+        )
     )
     if getattr(config, "reduce_imu_noise_during_blackout", False):
         scale = jnp.asarray(
@@ -281,8 +302,48 @@ def assemble_Q(
                     dtype=dtype,
                 )
                 Q = Q_rate + G @ Qu @ G.T
+            elif layout.has_quaternion_orientation:
+                G = jnp.zeros((n, n_gyro + n_accel), dtype=dtype)
+                quat_indices = cast(tuple[int, int, int, int], layout.heading_idx)
+                half_dt = 0.5 * jnp.asarray(dt, dtype=dtype)
+                # Gyro input noise is applied to the vector quaternion
+                # components. Independent diffusion on qw remains in Q_rate as
+                # a conservative prototype covariance term; normalization keeps
+                # the state on the unit-quaternion manifold after prediction.
+                for row, col in zip(quat_indices[1:], range(3), strict=True):
+                    G = G.at[row, col].set(half_dt)
+
+                if getattr(config, "enable_experimental_accel_translation", False):
+                    accel_col = n_gyro
+                    dt_arr = jnp.asarray(dt, dtype=dtype)
+                    half_dt2 = 0.5 * dt_arr**2
+                    if orientation_quaternion is None:
+                        c, s = jnp.cos(theta), jnp.sin(theta)
+                        rotation_world_from_body = jnp.array(
+                            [
+                                [c, -s, 0.0],
+                                [s, c, 0.0],
+                                [0.0, 0.0, 1.0],
+                            ],
+                            dtype=dtype,
+                        )
+                    else:
+                        rotation_world_from_body = rotate_vector_body_to_world(
+                            orientation_quaternion,
+                            jnp.eye(3, dtype=dtype),
+                        ).T
+
+                    for dim, (pos_i, vel_i) in enumerate(
+                        zip(layout.pos_idx, layout.vel_idx, strict=True)
+                    ):
+                        for axis in range(3):
+                            coeff = rotation_world_from_body[dim, axis]
+                            G = G.at[vel_i, accel_col + axis].set(dt_arr * coeff)
+                            G = G.at[pos_i, accel_col + axis].set(half_dt2 * coeff)
+
+                Q = Q_rate + G @ Qu @ G.T
             else:
-                # 3D orientation: no simple IMU mapping yet, use diffusion only
+                # 3D Euler orientation: no simple IMU mapping yet, use diffusion only
                 Q = Q_rate
         else:
             # No layout or no biases: diffusion only
@@ -304,5 +365,4 @@ def assemble_Q(
             row_mask = jnp.ones((n,), dtype=dtype).at[bias_indices].set(freeze_factor)
             Q = Q * row_mask[:, None] * row_mask[None, :]
 
-    # Symmetrize for numerical hygiene
-    return 0.5 * (Q + Q.T)
+    return symmetrize(Q)

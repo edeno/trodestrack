@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from trodestrack.cli.utils import load_data_file
+from trodestrack.cli.utils import load_data_file, validate_monotonic_timestamps
 
 
 def test_load_data_file_success(tmp_path: Path) -> None:
@@ -70,3 +70,24 @@ def test_load_data_file_invalid_content(tmp_path: Path) -> None:
         load_data_file(file_path, "test data")
 
     assert exc_info.value.code == 1
+
+
+def test_validate_monotonic_timestamps_rejects_short_streams(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Empty and 1-sample timestamp streams must error at the CLI layer.
+
+    Downstream code derives the sample period from ``np.diff(t)`` and
+    indexes ``t[-1] - t[0]`` for session-duration reporting; a 0- or
+    1-sample stream silently produces ``NaN`` rates and raw ``IndexError``
+    inside the filter rather than a clear CLI message.
+    """
+    for arr in (np.array([], dtype=float), np.array([0.5])):
+        with pytest.raises(SystemExit) as exc_info:
+            validate_monotonic_timestamps(arr, name="t_test")
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "at least two samples" in captured.err
+
+    # Two-sample monotonic stream still passes.
+    validate_monotonic_timestamps(np.array([0.0, 0.1]), name="t_test")

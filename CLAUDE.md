@@ -13,7 +13,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Running the Package:**
 
-- `uv run trodestrack` - Run the package entry point (requires implementing `main()` function in `src/trodestrack/__init__.py`)
+- `uv run trodestrack` - Run the CLI entry point (`main()` lives in `src/trodestrack/__init__.py` and dispatches the `online`, `smooth`, and `report` subcommands)
+- `uv run trodestrack --help` - List subcommands
 - `uv run python -m trodestrack` - Alternative way to run the package
 
 **Build & Distribution:**
@@ -42,7 +43,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Development Notes
 
 **Entry Point:**
-The package is configured with an entry point `trodestrack:main`, but the `main()` function needs to be implemented in `src/trodestrack/__init__.py`.
+The package is configured with the entry point `trodestrack:main`. `main()` is implemented in `src/trodestrack/__init__.py` and dispatches the registered subcommands (currently `online`, `smooth`, `report`); see `src/trodestrack/cli/` for each subcommand's argument parser.
 
 **Testing:**
 

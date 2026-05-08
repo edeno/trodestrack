@@ -73,6 +73,7 @@ def test_stationary_returns_correct_keys(config):
         "yaw_rate_truth",
         "accel_world_truth",
         "accel_body_truth",
+        "specific_force_truth",
         "config",
     }
 
@@ -513,7 +514,10 @@ def test_seed_reproducibility(config, sim_func, kwargs):
 
     assert np.allclose(sim1["X_truth"], sim2["X_truth"])
     assert np.allclose(sim1["U_imu"], sim2["U_imu"])
-    assert np.allclose(sim1["Z_cam_led1"], sim2["Z_cam_led1"])
+    # equal_nan=True since simple sims now NaN-out dropped frames in
+    # Z_cam_led1 to match the rat_imu convention; the NaN positions are
+    # deterministic from the seed and should match between runs.
+    assert np.allclose(sim1["Z_cam_led1"], sim2["Z_cam_led1"], equal_nan=True)
     assert np.array_equal(sim1["mask_cam"], sim2["mask_cam"])
 
 
@@ -533,6 +537,62 @@ def test_different_seeds_produce_different_results(config, sim_func, kwargs):
     # Ground truth should be the same
     assert np.allclose(sim1["X_truth"], sim2["X_truth"])
 
-    # But measurements should differ (due to noise)
+    # But measurements should differ (due to noise). Compare only finite
+    # samples — np.allclose returns False on NaN even when both arrays
+    # have identical NaN positions, so the raw `not np.allclose` would
+    # spuriously pass once the simple sims NaN-out dropped frames.
     assert not np.allclose(sim1["U_imu"], sim2["U_imu"])
-    assert not np.allclose(sim1["Z_cam_led1"], sim2["Z_cam_led1"])
+    finite_both = np.isfinite(sim1["Z_cam_led1"]) & np.isfinite(sim2["Z_cam_led1"])
+    assert finite_both.any(), "expected at least one finite-vs-finite LED1 sample"
+    assert not np.allclose(
+        sim1["Z_cam_led1"][finite_both], sim2["Z_cam_led1"][finite_both]
+    )
+
+
+def test_simulate_circular_rejects_non_positive_radius():
+    """``simulate_circular`` must reject radius ≤ 0.
+
+    Heading is computed as ``angle + π/2`` (tangent direction),
+    independent of ``radius``'s sign, while position / velocity scale
+    linearly with ``radius``. A negative radius therefore desynchronizes
+    heading from velocity direction by π — breaking the documented
+    "heading tangent to motion" invariant. Zero radius collapses to a
+    stationary point, also degenerate.
+    """
+    cfg = SimpleSimConfig(duration_s=1.0)
+
+    with pytest.raises(ValueError, match=r"radius must be strictly positive"):
+        simulate_circular(config=cfg, radius=-0.3, angular_velocity=1.0, seed=0)
+    with pytest.raises(ValueError, match=r"radius must be strictly positive"):
+        simulate_circular(config=cfg, radius=0.0, angular_velocity=1.0, seed=0)
+
+    # Positive radius must still construct, and heading must agree with
+    # velocity direction (sanity check that the validation didn't change
+    # the positive-case behavior).
+    sim = simulate_circular(config=cfg, radius=0.3, angular_velocity=1.0, seed=0)
+    X = sim["X_truth"]
+    vx, vy, heading = X[10, 2], X[10, 3], X[10, 4]
+    v_angle = float(np.arctan2(vy, vx))
+    diff = float(np.arctan2(np.sin(heading - v_angle), np.cos(heading - v_angle)))
+    assert abs(diff) < 1e-6, (
+        f"heading and velocity should agree under radius>0; got diff={diff}"
+    )
+
+
+def test_simple_short_duration_with_too_few_samples_is_rejected():
+    """SimpleSimConfig must reject durations producing < 2 IMU/camera samples.
+
+    The simple simulators compute counts as ``int(duration_s * fs_*)``;
+    very small positive durations previously produced empty camera
+    streams, which crashed downstream in prepare_video_data with an
+    IndexError on nearest-neighbor indexing.
+    """
+    # 0.02s @ fs_cam=30 → 0 camera samples (was: empty camera stream).
+    with pytest.raises(ValueError, match=r"need at least 2 of each"):
+        SimpleSimConfig(duration_s=0.02, fs_imu=100.0, fs_cam=30.0)
+    # 0.05s @ fs_cam=30 → 1 camera sample (still < 2).
+    with pytest.raises(ValueError, match=r"need at least 2 of each"):
+        SimpleSimConfig(duration_s=0.05, fs_imu=100.0, fs_cam=30.0)
+    # 0.1s @ fs_cam=30 → 3 camera samples (boundary, must accept).
+    cfg = SimpleSimConfig(duration_s=0.1, fs_imu=100.0, fs_cam=30.0)
+    assert cfg.duration_s == 0.1

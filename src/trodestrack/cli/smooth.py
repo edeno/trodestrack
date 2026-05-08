@@ -20,7 +20,9 @@ Output files:
     run1/marginal_loglik.txt: Marginal log-likelihood (scalar)
 
 Note:
-    n is the state dimension (default: 8 for standard 2D tracking with biases)
+    n is the state dimension (default: 10 for the "2d_cam_3d_imu" mode used
+    by EKFConfig() out of the box; pass --led-distance, --use-heading-measurement,
+    etc. to override individual filter parameters).
 """
 
 from __future__ import annotations
@@ -31,9 +33,32 @@ from pathlib import Path
 
 import numpy as np
 
-from trodestrack.cli.utils import load_data_file
+from trodestrack.cli.config_workflow import (
+    prepare_config_filter_run,
+    save_filter_outputs,
+    write_config_metadata,
+)
+from trodestrack.cli.utils import (
+    friendly_cli_errors,
+    load_data_file,
+    require_cli_inputs,
+    validate_camera_mask,
+    validate_finite_array,
+    validate_monotonic_timestamps,
+)
+from trodestrack.io import write_session_diagnostics
 from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
+from trodestrack.models.filter_common import FilterCoreConfig
 from trodestrack.runtime.offline import rts_smoother
+
+_FILTER_DEFAULTS = FilterCoreConfig()
+_LEGACY_REQUIRED_ARGS = (
+    "imu_timestamps",
+    "imu_measurements",
+    "camera_timestamps",
+    "led1_positions",
+    "output_dir",
+)
 
 
 def add_smooth_parser(subparsers: argparse._SubParsersAction) -> None:
@@ -64,30 +89,38 @@ producing lower-variance trajectories than forward filtering alone.
     # Required input arguments
     input_group = parser.add_argument_group("input files (required)")
     input_group.add_argument(
+        "--config",
+        type=Path,
+        required=False,
+        default=None,
+        help="YAML SessionConfig file. When provided, input files and output-dir may come from the config.",
+        metavar="FILE",
+    )
+    input_group.add_argument(
         "--imu-timestamps",
         type=Path,
-        required=True,
+        required=False,
         help="Path to IMU timestamps file (N_imu,) [seconds]",
         metavar="FILE",
     )
     input_group.add_argument(
         "--imu-measurements",
         type=Path,
-        required=True,
-        help="Path to IMU measurements file (N_imu, 3) [ω_z, f_x, f_y] in rad/s and m/s²",
+        required=False,
+        help="Path to IMU measurements file. Channel count depends on --state-mode: (N_imu, 3) [ω_z, f_x, f_y] for 2d_full / vision_only and the default 2d_cam_3d_imu (degenerate, vz idle); (N_imu, 4) [ω_z, f_x, f_y, f_z] for 2d_cam_3d_imu with 3D velocity; (N_imu, 6) [ω_x, ω_y, ω_z, f_x, f_y, f_z] for 2d_cam_6dof_imu_orientation. Units: rad/s and m/s².",
         metavar="FILE",
     )
     input_group.add_argument(
         "--camera-timestamps",
         type=Path,
-        required=True,
+        required=False,
         help="Path to camera timestamps file (N_cam,) [seconds]",
         metavar="FILE",
     )
     input_group.add_argument(
         "--led1-positions",
         type=Path,
-        required=True,
+        required=False,
         help="Path to LED1 positions file (N_cam, 2) [x, y] in meters",
         metavar="FILE",
     )
@@ -113,72 +146,94 @@ producing lower-variance trajectories than forward filtering alone.
     output_group.add_argument(
         "--output-dir",
         type=Path,
-        required=True,
+        required=False,
         help="Directory to save filter and smoother outputs",
         metavar="DIR",
     )
 
-    # Filter configuration
+    # Filter configuration. Defaults are None sentinels so omitted flags fall
+    # through to EKFConfig() / FilterCoreConfig defaults rather than being
+    # overridden by stale CLI-side numbers. Help strings pull live values from
+    # _FILTER_DEFAULTS so they stay in sync with the dataclass.
     filter_group = parser.add_argument_group("filter parameters (optional)")
     filter_group.add_argument(
         "--process-noise-pos",
         type=float,
-        default=0.02,
-        help="Position process noise (default: 0.02 m²/s)",
+        default=None,
+        help=f"Position process noise (default: {_FILTER_DEFAULTS.process_noise_pos:.2e} m²/s)",
     )
     filter_group.add_argument(
         "--process-noise-vel",
         type=float,
-        default=2.0,
-        help="Velocity process noise (default: 2.0 m²/s³)",
+        default=None,
+        help=f"Velocity process noise (default: {_FILTER_DEFAULTS.process_noise_vel:.2e} m²/s³)",
     )
     filter_group.add_argument(
         "--process-noise-heading",
         type=float,
-        default=0.02,
-        help="Heading process noise (default: 0.02 rad²/s)",
+        default=None,
+        help=f"Heading process noise (default: {_FILTER_DEFAULTS.process_noise_heading:.2e} rad²/s)",
     )
     filter_group.add_argument(
         "--process-noise-gyro-bias",
         type=float,
-        default=2e-6,
-        help="Gyro bias random walk density (default: 2e-6 rad²/s³)",
+        default=None,
+        help=f"Gyro bias random walk density (default: {_FILTER_DEFAULTS.process_noise_gyro_bias:.2e} rad²/s³)",
     )
     filter_group.add_argument(
         "--process-noise-accel-bias",
         type=float,
-        default=2e-4,
-        help="Accel bias random walk density (default: 2e-4 m²/s⁵)",
+        default=None,
+        help=f"Accel bias random walk density (default: {_FILTER_DEFAULTS.process_noise_accel_bias:.2e} m²/s⁵)",
     )
     filter_group.add_argument(
         "--measurement-noise-pos",
         type=float,
-        default=0.005**2,
-        help="Position measurement noise variance (default: 2.5e-5 m²)",
+        default=None,
+        help=f"Position measurement noise variance (default: {_FILTER_DEFAULTS.measurement_noise_pos:.2e} m²)",
     )
     filter_group.add_argument(
         "--imu-gyro-noise-density",
         type=float,
-        default=0.001,
-        help="IMU gyro noise density (default: 0.001 rad/s/√Hz)",
+        default=None,
+        help=f"IMU gyro noise density (default: {_FILTER_DEFAULTS.imu_gyro_noise_density:.2e} rad/s/√Hz)",
     )
     filter_group.add_argument(
         "--imu-accel-noise-density",
         type=float,
-        default=0.05,
-        help="IMU accel noise density (default: 0.05 m/s²/√Hz)",
+        default=None,
+        help=f"IMU accel noise density (default: {_FILTER_DEFAULTS.imu_accel_noise_density:.2e} m/s²/√Hz)",
     )
     filter_group.add_argument(
         "--damping-coeff",
         type=float,
-        default=0.5,
-        help="Velocity damping coefficient (default: 0.5 s⁻¹)",
+        default=None,
+        help=f"Velocity damping coefficient (default: {_FILTER_DEFAULTS.damping_coeff} s⁻¹)",
     )
     filter_group.add_argument(
         "--led-distance",
         type=float,
         default=None,
-        help="Expected LED spacing in meters (default: auto-detect from first valid frame)",
+        help="Expected LED spacing in meters (default: auto-detect via the median pairwise distance over frames where both LEDs are finite, with a hardcoded 0.04 m fallback when no such frames exist)",
+    )
+    filter_group.add_argument(
+        "--state-mode",
+        type=str,
+        default=None,
+        choices=(
+            "2d_full",
+            "vision_only",
+            "2d_cam_3d_imu",
+            "2d_cam_6dof_imu_orientation",
+        ),
+        help=(
+            f"State layout (default: {_FILTER_DEFAULTS.state_mode}). "
+            "`2d_cam_6dof_imu_orientation` requires a 6-channel IMU input "
+            "[gyro_x, gyro_y, gyro_z, accel_x, accel_y, accel_z]; "
+            "`3d_cam_6dof_imu` requires the experimental "
+            "`extended_kalman_filter_3d` entry point. Use the Python API "
+            "for that 3D-camera mode."
+        ),
     )
 
     # Smoother configuration
@@ -192,21 +247,35 @@ producing lower-variance trajectories than forward filtering alone.
     smoother_group.add_argument(
         "--use-heading-measurement",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=None,
         help="Use heading pseudo-measurement from dual LEDs (default: True)",
     )
 
     parser.set_defaults(func=run_smooth)
 
 
+@friendly_cli_errors
 def run_smooth(args: argparse.Namespace) -> None:
     """Execute the smooth command.
+
+    The :func:`friendly_cli_errors` decorator converts
+    ``FileNotFoundError`` / ``ValueError`` raised by downstream
+    library code (e.g. ``rts_smoother`` rejecting ``--num-iter 0``)
+    into a clean ``Error: ...`` stderr line, mirroring
+    :func:`trodestrack.cli.report.run_report`.
 
     Parameters
     ----------
     args : argparse.Namespace
         Parsed command-line arguments.
     """
+    # Defer the banner until inputs are validated; see online.py for
+    # the rationale.
+    if args.config is not None:
+        _run_smooth_from_config(args)
+        return
+
+    require_cli_inputs(args, _LEGACY_REQUIRED_ARGS, command="smooth")
     print("=" * 80)
     print("trodestrack smooth — Offline Smoothing")
     print("=" * 80)
@@ -218,13 +287,29 @@ def run_smooth(args: argparse.Namespace) -> None:
     t_cam = load_data_file(args.camera_timestamps, "Camera timestamps")
     Z_cam_led1 = load_data_file(args.led1_positions, "LED1 positions")
 
+    # Reject malformed inputs at the boundary so the filter does not
+    # silently produce NaN/poisoned states from non-finite IMU rows or
+    # negative dt from out-of-order timestamps. LED arrays intentionally
+    # tolerate NaN (handled via mask_cam downstream).
+    validate_monotonic_timestamps(t_imu, "IMU timestamps")
+    validate_monotonic_timestamps(t_cam, "Camera timestamps")
+    validate_finite_array(U_imu, "IMU measurements")
+
     n_imu = len(t_imu)
     n_cam = len(t_cam)
 
-    # Validate IMU data shape
-    if U_imu.shape != (n_imu, 3):
+    # Validate general IMU data shape. Layout-specific compatibility (e.g.
+    # 4-channel only valid for 2d_cam_3d_imu, 6-channel only valid for
+    # quaternion orientation) is enforced by validate_imu_input_shape
+    # downstream.
+    if U_imu.ndim != 2 or U_imu.shape[0] != n_imu or U_imu.shape[1] not in (3, 4, 6):
         print(
-            f"Error: IMU measurements shape {U_imu.shape} doesn't match (n_imu={n_imu}, 3)",
+            f"Error: IMU measurements shape {U_imu.shape} must be "
+            f"(n_imu={n_imu}, 3 | 4 | 6). Use 3 channels [ω_z, f_x, f_y], "
+            "4 channels [ω_z, f_x, f_y, f_z] with --state-mode "
+            "2d_cam_3d_imu, or 6 channels "
+            "[ω_x, ω_y, ω_z, f_x, f_y, f_z] with --state-mode "
+            "2d_cam_6dof_imu_orientation.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -252,13 +337,9 @@ def run_smooth(args: argparse.Namespace) -> None:
 
     # Load optional camera mask
     if args.camera_mask is not None:
-        mask_cam = load_data_file(args.camera_mask, "Camera mask").astype(bool)
-        if mask_cam.shape != (n_cam,):
-            print(
-                f"Error: Camera mask shape {mask_cam.shape} doesn't match (n_cam={n_cam},)",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+        mask_cam = validate_camera_mask(
+            load_data_file(args.camera_mask, "Camera mask"), n_cam
+        )
     else:
         mask_cam = np.ones(n_cam, dtype=bool)
 
@@ -267,26 +348,35 @@ def run_smooth(args: argparse.Namespace) -> None:
     print(f"  Valid camera frames: {mask_cam.sum()} ({100 * mask_cam.mean():.1f}%)")
     print(f"  Duration: {t_cam[-1] - t_cam[0]:.2f} s")
 
-    # Configure filter
+    # Configure filter. Filter only the kwargs the user explicitly set so
+    # EKFConfig falls back to its own defaults for anything not on the CLI.
+    # ``led_distance`` is special-cased: extended_kalman_filter auto-detects
+    # LED spacing only when ekf_config.led_distance is None, so an omitted
+    # ``--led-distance`` must pass ``None`` through (rather than fall back
+    # to the FilterCoreConfig default of 0.04 m).
     print("\nConfiguring Extended Kalman Filter...")
+    config_overrides = {
+        "state_mode": args.state_mode,
+        "process_noise_pos": args.process_noise_pos,
+        "process_noise_vel": args.process_noise_vel,
+        "process_noise_heading": args.process_noise_heading,
+        "process_noise_gyro_bias": args.process_noise_gyro_bias,
+        "process_noise_accel_bias": args.process_noise_accel_bias,
+        "measurement_noise_pos": args.measurement_noise_pos,
+        "imu_gyro_noise_density": args.imu_gyro_noise_density,
+        "imu_accel_noise_density": args.imu_accel_noise_density,
+        "damping_coeff": args.damping_coeff,
+        "use_heading_measurement": args.use_heading_measurement,
+    }
     ekf_config = EKFConfig(
-        process_noise_pos=args.process_noise_pos,
-        process_noise_vel=args.process_noise_vel,
-        process_noise_heading=args.process_noise_heading,
-        process_noise_gyro_bias=args.process_noise_gyro_bias,
-        process_noise_accel_bias=args.process_noise_accel_bias,
-        measurement_noise_pos=args.measurement_noise_pos,
-        imu_gyro_noise_density=args.imu_gyro_noise_density,
-        imu_accel_noise_density=args.imu_accel_noise_density,
-        damping_coeff=args.damping_coeff,
-        led_distance=args.led_distance,
-        use_heading_measurement=args.use_heading_measurement,
+        led_distance=args.led_distance,  # None -> auto-detect
+        **{k: v for k, v in config_overrides.items() if v is not None},
     )
 
-    print(f"  Process noise (pos): {args.process_noise_pos:.4f} m²/s")
-    print(f"  Process noise (vel): {args.process_noise_vel:.4f} m²/s³")
-    print(f"  Damping coefficient: {args.damping_coeff:.2f} s⁻¹")
-    print(f"  LED heading measurement: {args.use_heading_measurement}")
+    print(f"  Process noise (pos): {ekf_config.process_noise_pos:.2e} m²/s")
+    print(f"  Process noise (vel): {ekf_config.process_noise_vel:.2e} m²/s³")
+    print(f"  Damping coefficient: {ekf_config.damping_coeff:.2f} s⁻¹")
+    print(f"  LED heading measurement: {ekf_config.use_heading_measurement}")
 
     # Run forward filter
     print("\nRunning Extended Kalman Filter (forward pass)...")
@@ -348,18 +438,29 @@ def run_smooth(args: argparse.Namespace) -> None:
         f.write(f"  LED1 positions: {args.led1_positions}\n")
         f.write(f"  LED2 positions: {args.led2_positions}\n")
         f.write(f"  Camera mask: {args.camera_mask}\n\n")
-        f.write("Filter Configuration:\n")
-        f.write(f"  Process noise (pos): {args.process_noise_pos}\n")
-        f.write(f"  Process noise (vel): {args.process_noise_vel}\n")
-        f.write(f"  Process noise (heading): {args.process_noise_heading}\n")
-        f.write(f"  Process noise (gyro bias): {args.process_noise_gyro_bias}\n")
-        f.write(f"  Process noise (accel bias): {args.process_noise_accel_bias}\n")
-        f.write(f"  Measurement noise (pos): {args.measurement_noise_pos}\n")
-        f.write(f"  IMU gyro noise density: {args.imu_gyro_noise_density}\n")
-        f.write(f"  IMU accel noise density: {args.imu_accel_noise_density}\n")
-        f.write(f"  Damping coefficient: {args.damping_coeff}\n")
-        f.write(f"  LED distance: {args.led_distance}\n")
-        f.write(f"  Use heading measurement: {args.use_heading_measurement}\n\n")
+        f.write("Filter Configuration (effective values):\n")
+        f.write(f"  Process noise (pos): {ekf_config.process_noise_pos}\n")
+        f.write(f"  Process noise (vel): {ekf_config.process_noise_vel}\n")
+        f.write(f"  Process noise (heading): {ekf_config.process_noise_heading}\n")
+        f.write(f"  Process noise (gyro bias): {ekf_config.process_noise_gyro_bias}\n")
+        f.write(
+            f"  Process noise (accel bias): {ekf_config.process_noise_accel_bias}\n"
+        )
+        f.write(f"  Measurement noise (pos): {ekf_config.measurement_noise_pos}\n")
+        f.write(f"  IMU gyro noise density: {ekf_config.imu_gyro_noise_density}\n")
+        f.write(f"  IMU accel noise density: {ekf_config.imu_accel_noise_density}\n")
+        f.write(f"  Damping coefficient: {ekf_config.damping_coeff}\n")
+        if (
+            args.led_distance is None
+            and filter_result.estimated_led_distance is not None
+        ):
+            f.write(
+                f"  LED distance: {filter_result.estimated_led_distance:.4f} m (auto-detected)\n"
+            )
+        else:
+            f.write(f"  LED distance: {ekf_config.led_distance}\n")
+        f.write(f"  Use heading measurement: {ekf_config.use_heading_measurement}\n")
+        f.write(f"  State mode: {ekf_config.state_mode}\n\n")
         f.write("Smoother Configuration:\n")
         f.write(f"  IEKS iterations: {args.num_iter}\n\n")
         f.write("Results:\n")
@@ -379,3 +480,48 @@ def run_smooth(args: argparse.Namespace) -> None:
     print("  marginal_loglik.txt: Marginal log-likelihood (scalar)")
     print("  metadata.txt: Run configuration and metadata")
     print("\nSmoothing complete!")
+
+
+def _run_smooth_from_config(args: argparse.Namespace) -> None:
+    run = prepare_config_filter_run(args)
+
+    smoother_result = rts_smoother(
+        filter_result=run.filter_result,
+        ekf_config=run.ekf_config,
+        t_imu=run.session.t_imu,
+        U_imu=run.session.U_imu,
+        t_cam=run.session.t_cam,
+        num_iter=args.num_iter,
+        mask_cam=run.session.mask_cam,
+    )
+
+    save_filter_outputs(run)
+    n_cam = len(run.session.t_cam)
+    np.savetxt(run.output_dir / "smoothed_means.txt", smoother_result.smoothed_means)
+    np.savetxt(
+        run.output_dir / "smoothed_covariances.txt",
+        smoother_result.smoothed_covariances.reshape(n_cam, -1),
+    )
+
+    # Augment the .npz bundle with smoother arrays so consumers get
+    # the smoothed state alongside the forward filter output without
+    # re-loading text files.
+    bundle_path = run.output_dir / "filter_outputs.npz"
+    existing = dict(np.load(bundle_path)) if bundle_path.exists() else {}
+    existing["smoothed_means"] = np.asarray(smoother_result.smoothed_means)
+    existing["smoothed_covariances"] = np.asarray(smoother_result.smoothed_covariances)
+    existing["smoother_marginal_loglik"] = np.asarray(smoother_result.marginal_loglik)
+    np.savez(bundle_path, **existing)
+    with open(run.output_dir / "marginal_loglik.txt", "w") as f:
+        f.write(f"{smoother_result.marginal_loglik:.6f}\n")
+    write_config_metadata(
+        run,
+        title="trodestrack smooth — Config-driven offline smoothing",
+        marginal_loglik=float(smoother_result.marginal_loglik),
+        state_dim=smoother_result.smoothed_means.shape[1],
+        smoother_num_iter=args.num_iter,
+    )
+    if run.config.outputs.write_diagnostics:
+        write_session_diagnostics(run.session, run.output_dir, run.safety_report)
+
+    print(f"\nSaved config-driven smooth outputs to {run.output_dir}/")

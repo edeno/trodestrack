@@ -94,8 +94,78 @@ def test_position_rmse_wrong_dimension():
     true_pos = np.array([[0.0, 0.0, 0.0]])  # 3D
     est_pos = np.array([[0.0, 0.0, 0.0]])
 
-    with pytest.raises(ValueError, match="Expected 2D positions"):
+    with pytest.raises(ValueError, match=r"positions of shape \(N, 2\)"):
         compute_position_rmse(true_pos, est_pos)
+
+
+def test_position_rmse_one_d_input():
+    """1-D positions should raise ValueError, not IndexError."""
+    true_pos = np.array([1, 2])
+    est_pos = np.array([1, 2])
+
+    with pytest.raises(ValueError, match=r"positions of shape \(N, 2\)"):
+        compute_position_rmse(true_pos, est_pos)
+
+
+def test_position_rmse_rejects_corrupted_masks():
+    """``compute_position_rmse`` must apply the same dtype/dim contract as
+    the dropout-drift / plot helpers.
+
+    Previously it ran ``valid &= valid_mask`` straight, so an integer
+    mask with a stray ``2`` silently coerced (numpy int AND of ``2``
+    with True is True), a float mask raised a raw NumPy TypeError, and
+    a ``(N, 1)`` bool mask raised a broadcast error rather than a clear
+    ValueError.
+    """
+    true_pos = np.zeros((4, 2))
+    est_pos = np.array([[0.05, 0.0]] * 4)
+
+    # Bool / 0-1 int still work.
+    compute_position_rmse(
+        true_pos, est_pos, valid_mask=np.array([True, True, True, False])
+    )
+    compute_position_rmse(
+        true_pos, est_pos, valid_mask=np.array([1, 1, 1, 0], dtype=np.int32)
+    )
+
+    with pytest.raises(ValueError, match=r"boolean or 0/1 integer"):
+        compute_position_rmse(
+            true_pos, est_pos, valid_mask=np.array([1, 1, 2, 1], dtype=np.int32)
+        )
+    with pytest.raises(ValueError, match=r"boolean or 0/1 integer"):
+        compute_position_rmse(
+            true_pos, est_pos, valid_mask=np.array([1.0, 1.0, 1.0, 0.0])
+        )
+    with pytest.raises(ValueError, match=r"valid_mask must be 1-D"):
+        compute_position_rmse(
+            true_pos,
+            est_pos,
+            valid_mask=np.array([[True], [True], [True], [True]]),
+        )
+
+
+def test_velocity_rmse_rejects_corrupted_masks():
+    """Same contract as ``compute_position_rmse``: bool or 0/1 int 1-D only."""
+    true_vel = np.zeros((4, 2))
+    est_vel = np.array([[0.01, 0.0]] * 4)
+
+    compute_velocity_rmse(
+        true_vel, est_vel, valid_mask=np.array([True, True, False, True])
+    )
+    with pytest.raises(ValueError, match=r"boolean or 0/1 integer"):
+        compute_velocity_rmse(
+            true_vel, est_vel, valid_mask=np.array([1, 2, 1, 1], dtype=np.int32)
+        )
+    with pytest.raises(ValueError, match=r"boolean or 0/1 integer"):
+        compute_velocity_rmse(
+            true_vel, est_vel, valid_mask=np.array([1.0, 1.0, 1.0, 1.0])
+        )
+    with pytest.raises(ValueError, match=r"valid_mask must be 1-D"):
+        compute_velocity_rmse(
+            true_vel,
+            est_vel,
+            valid_mask=np.array([[True], [True], [True], [True]]),
+        )
 
 
 def test_position_rmse_no_valid_samples():
@@ -139,6 +209,15 @@ def test_velocity_rmse_with_mask():
     mask = np.array([True, True, False])
     rmse = compute_velocity_rmse(true_vel, est_vel, valid_mask=mask)
     assert_allclose(rmse, 0.0, atol=1e-10)
+
+
+def test_velocity_rmse_one_d_input():
+    """1-D velocities should raise ValueError, not IndexError."""
+    true_vel = np.array([1, 2])
+    est_vel = np.array([1, 2])
+
+    with pytest.raises(ValueError, match=r"velocities of shape \(N, 2\)"):
+        compute_velocity_rmse(true_vel, est_vel)
 
 
 # =============================================================================
@@ -613,12 +692,15 @@ def test_autocorrelation_constant_input():
 def test_dropout_drift_no_dropout():
     """No dropout should return None values."""
     t = np.linspace(0, 10, 100)
-    positions = np.column_stack([t * 0.1, np.zeros_like(t)])
+    truth = np.column_stack([t * 0.1, np.zeros_like(t)])
+    est = truth.copy()
     mask = np.ones(100, dtype=bool)  # All valid (no dropout)
 
-    result = compute_dropout_drift(positions, mask, t, min_duration_s=5.0)
+    result = compute_dropout_drift(est, truth, mask, t, min_duration_s=5.0)
 
     assert result["drift_m"] is None
+    assert result["end_error_m"] is None
+    assert result["start_error_m"] is None
     assert result["duration_s"] is None
     assert result["start_idx"] is None
     assert result["end_idx"] is None
@@ -627,32 +709,60 @@ def test_dropout_drift_no_dropout():
 def test_dropout_drift_too_short():
     """Dropout shorter than min_duration should return None."""
     t = np.linspace(0, 10, 100)
-    positions = np.column_stack([t * 0.1, np.zeros_like(t)])
+    truth = np.column_stack([t * 0.1, np.zeros_like(t)])
+    est = truth.copy()
+    mask = (t < 3.0) | (t >= 5.0)  # 2 s dropout, below 5 s threshold
 
-    # Create 2s dropout (shorter than 5s minimum)
-    mask = (t < 3.0) | (t >= 5.0)
-
-    result = compute_dropout_drift(positions, mask, t, min_duration_s=5.0)
+    result = compute_dropout_drift(est, truth, mask, t, min_duration_s=5.0)
 
     assert result["drift_m"] is None
 
 
-def test_dropout_drift_known_drift():
-    """Known dropout with constant velocity should give expected drift."""
-    # 10s trajectory at 0.1 m/s in x-direction
+def test_dropout_drift_perfect_estimator_reports_zero():
+    """A perfect estimator on a moving animal must report ~0 drift.
+
+    Previously the function returned ``||pos_est[end] - pos_est[start]||``
+    — the displacement of the estimate during the dropout — which is
+    nonzero whenever the animal is moving, regardless of tracking
+    quality. The PRD-relevant question is "did the IMU-only segment
+    grow tracking error?", which is zero when the estimate equals
+    truth at every sample.
+    """
     t = np.linspace(0, 10, 1000)
-    positions = np.column_stack([t * 0.1, np.zeros_like(t)])
+    truth = np.column_stack([t * 0.8, np.zeros_like(t)])  # 0.8 m/s
+    est = truth.copy()
+    mask = (t < 3.0) | (t >= 8.0)  # 5 s dropout
 
-    # Dropout from t=3s to t=8s (5s duration)
+    result = compute_dropout_drift(est, truth, mask, t, min_duration_s=4.0)
+
+    assert result["drift_m"] is not None
+    assert abs(result["drift_m"]) < 1e-9
+    assert abs(result["end_error_m"]) < 1e-9
+    assert abs(result["start_error_m"]) < 1e-9
+
+
+def test_dropout_drift_frozen_estimator_reports_full_excursion():
+    """An estimate that freezes when vision drops should accumulate the
+    animal's travel as tracking error.
+
+    With truth moving at 0.1 m/s and the estimate frozen at the
+    pre-dropout truth position, after a 5 s dropout the tracking error
+    at the last in-block sample is ~0.5 m of growth.
+    """
+    t = np.linspace(0, 10, 1000)
+    truth = np.column_stack([t * 0.1, np.zeros_like(t)])
     mask = (t < 3.0) | (t >= 8.0)
+    # Estimate matches truth before the dropout, then freezes.
+    freeze_idx = int(np.searchsorted(t, 3.0))
+    est = truth.copy()
+    est[freeze_idx:] = truth[freeze_idx]
 
-    result = compute_dropout_drift(positions, mask, t, min_duration_s=4.0)
+    result = compute_dropout_drift(est, truth, mask, t, min_duration_s=4.0)
 
-    # Drift should be ~0.5 m (5s * 0.1 m/s)
     assert result["drift_m"] is not None
     assert 0.45 < result["drift_m"] < 0.55
-
-    # Duration should be ~5s
+    assert 0.45 < result["end_error_m"] < 0.55
+    assert abs(result["start_error_m"]) < 1e-9
     assert result["duration_s"] is not None
     assert 4.8 < result["duration_s"] < 5.2
 
@@ -660,14 +770,18 @@ def test_dropout_drift_known_drift():
 def test_dropout_drift_multiple_blocks():
     """Should return first qualifying dropout block."""
     t = np.linspace(0, 20, 2000)
-    positions = np.column_stack([t * 0.1, np.zeros_like(t)])
-
-    # Two dropout blocks: [2-4s] (too short) and [10-16s] (long enough)
+    truth = np.column_stack([t * 0.1, np.zeros_like(t)])
     mask = (t < 2.0) | ((t >= 4.0) & (t < 10.0)) | (t >= 16.0)
 
-    result = compute_dropout_drift(positions, mask, t, min_duration_s=5.0)
+    # Estimate freezes during each dropout (drifting linearly behind truth).
+    est = truth.copy()
+    for s, e in [(2.0, 4.0), (10.0, 16.0)]:
+        s_idx, e_idx = int(np.searchsorted(t, s)), int(np.searchsorted(t, e))
+        est[s_idx:e_idx] = truth[s_idx]
 
-    # Should return second block (10-16s, ~6s duration, ~0.6m drift)
+    result = compute_dropout_drift(est, truth, mask, t, min_duration_s=5.0)
+
+    # Should return second block (10-16s, ~6s duration, ~0.6 m growth).
     assert result["drift_m"] is not None
     assert 0.55 < result["drift_m"] < 0.65
     assert 5.8 < result["duration_s"] < 6.2
@@ -675,12 +789,85 @@ def test_dropout_drift_multiple_blocks():
 
 def test_dropout_drift_shape_mismatch():
     """Mismatched input shapes should raise ValueError."""
-    positions = np.zeros((100, 2))
+    est = np.zeros((100, 2))
+    truth = np.zeros((100, 2))
     mask = np.zeros(50, dtype=bool)  # Wrong size
     t = np.zeros(100)
 
     with pytest.raises(ValueError, match="Shape mismatch"):
-        compute_dropout_drift(positions, mask, t)
+        compute_dropout_drift(est, truth, mask, t)
+
+
+def test_dropout_drift_truth_estimate_shape_mismatch():
+    """``positions_est`` and ``positions_true`` must share shape."""
+    t = np.linspace(0, 10, 100)
+    est = np.zeros((100, 2))
+    truth = np.zeros((50, 2))
+    mask = np.ones(100, dtype=bool)
+
+    with pytest.raises(ValueError, match=r"positions_est and positions_true"):
+        compute_dropout_drift(est, truth, mask, t)
+
+
+def test_dropout_drift_rejects_non_bool_or_01_integer_mask():
+    """Reject masks whose dtype isn't bool or 0/1 integer.
+
+    An integer mask containing a stray ``2`` previously survived all
+    earlier checks; ``~valid_mask_arr`` then produced ``-3`` (bitwise
+    invert), making the entire array "truthy" and silently hiding the
+    dropout. A float ``0.0/1.0`` mask raised a raw NumPy
+    ``TypeError`` from ``~``. Mirror the contract used by
+    ``qa.plots._validate_optional_bool_mask`` and
+    ``qa.imu_calibration``.
+    """
+    t = np.linspace(0, 10, 100)
+    truth = np.column_stack([t * 0.1, np.zeros_like(t)])
+    est = truth.copy()
+    mask_bool = (t < 3.0) | (t >= 8.0)
+
+    # Sanity: clean bool / 0-1 int masks still work.
+    compute_dropout_drift(est, truth, mask_bool, t, min_duration_s=4.0)
+    compute_dropout_drift(est, truth, mask_bool.astype(np.int32), t, min_duration_s=4.0)
+
+    # Integer mask with a stray 2: must reject.
+    mask_with_2 = mask_bool.astype(np.int32).copy()
+    mask_with_2[np.where(~mask_bool)[0][0]] = 2
+    with pytest.raises(ValueError, match=r"boolean or 0/1 integer"):
+        compute_dropout_drift(est, truth, mask_with_2, t, min_duration_s=4.0)
+
+    # Float mask: must raise the contract error, not a raw TypeError.
+    with pytest.raises(ValueError, match=r"boolean or 0/1 integer"):
+        compute_dropout_drift(
+            est, truth, mask_bool.astype(float), t, min_duration_s=4.0
+        )
+
+
+def test_dropout_drift_rejects_non_1d_mask():
+    """``valid_mask`` must be 1D (N,); column / row vectors must be rejected.
+
+    Previously the function only checked ``shape[0]`` and then ran
+    ``np.diff(..., axis=-1)`` over the mask. A column-vector mask
+    (a common shape coming out of column-vector loaders or one-hot
+    conversions) silently bypassed the dropout detection and returned
+    "no qualifying dropout" for what was actually a real dropout —
+    masking a PRD-relevant drift failure.
+    """
+    t = np.linspace(0, 10, 100)
+    truth = np.column_stack([t * 0.1, np.zeros_like(t)])
+    est = truth.copy()
+    mask_1d = (t < 3.0) | (t >= 8.0)  # 5 s dropout
+
+    # Sanity: 1D path still detects the dropout.
+    result_1d = compute_dropout_drift(est, truth, mask_1d, t, min_duration_s=4.0)
+    assert result_1d["duration_s"] is not None
+
+    # Column-vector mask: must reject, not silently return None.
+    with pytest.raises(ValueError, match=r"valid_mask must be 1-D"):
+        compute_dropout_drift(est, truth, mask_1d.reshape(-1, 1), t, min_duration_s=4.0)
+
+    # Row-vector mask: same rejection.
+    with pytest.raises(ValueError, match=r"valid_mask must be 1-D"):
+        compute_dropout_drift(est, truth, mask_1d.reshape(1, -1), t, min_duration_s=4.0)
 
 
 # =============================================================================

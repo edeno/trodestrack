@@ -74,7 +74,7 @@ uv run python examples/03_ekf_basic_scenarios.py
 **Learn:** Using built-in plotting utilities and state layouts
 **Duration:** ~5 seconds
 **Topics:**
-- **State Layout System:** Dimension-agnostic state extraction (works with 5D, 8D, 10D, 15D states)
+- **State Layout System:** Dimension-agnostic state extraction (works with 5D, 8D, 10D, 14D, 15D, 16D states)
 - Using `qa.plot_*` functions instead of manual matplotlib code
 - Covariance extraction and uncertainty visualization
 - DRY principle for plotting (Don't Repeat Yourself)
@@ -108,7 +108,27 @@ uv run python examples/04_ukf_basic_scenarios.py
 **Output:** 3 comparison PNGs + side-by-side metrics tables
 
 **Key Learning:**
-> **Verdict:** EKF won 5/9 metrics vs UKF's 4/9. UKF is ~1-5× slower. **Recommendation:** Start with EKF; switch to UKF only if EKF fails to meet accuracy requirements.
+> **Verdict:** EKF won 6/9 metrics vs UKF's 3/9. Under JIT-compiled JAX with warm dispatch, UKF and EKF run at a comparable wall-clock cost on these scenarios; on backends without JIT (per-step Python loops) UKF can be several times slower. **Recommendation:** Start with EKF and re-measure on your target backend; switch to UKF only if EKF fails to meet accuracy requirements.
+
+---
+
+### **Robustness to Camera Dropouts (05-06)**
+
+#### [05_ekf_with_dropouts.py](05_ekf_with_dropouts.py)
+**Learn:** EKF behavior under 10%, 20%, and 30% camera dropout.
+**Topics:** Adaptive Q during dropout, bias-freeze policy, IMU-only drift.
+
+```bash
+uv run python examples/05_ekf_with_dropouts.py
+```
+
+#### [06_ukf_with_dropouts.py](06_ukf_with_dropouts.py)
+**Learn:** Same dropout stress-test, UKF variant, for direct comparison
+with example 05.
+
+```bash
+uv run python examples/06_ukf_with_dropouts.py
+```
 
 ---
 
@@ -162,7 +182,10 @@ uv run python examples/08_qa_report_generation.py
 | 01 | Simulations | 1 PNG | ~5s | None |
 | 02 | Realistic IMU | 5 PNGs | ~10s | Example 01 |
 | 03 ⭐ | **EKF Basics** | **3 PNGs** | **~5s** | **Example 02** |
+| 03b | Plot utilities | PNGs | ~5s | Example 03 |
 | 04 | UKF vs EKF | 3 PNGs | ~10s | Example 03 |
+| 05 | EKF dropouts | PNGs | ~10s | Example 03 |
+| 06 | UKF dropouts | PNGs | ~10s | Example 04 |
 | 07 | Smoothing | 1 video | ~15s | Example 03 |
 | 08 | QA Reports | 1 PDF | ~2s | Any filter example |
 
@@ -178,14 +201,14 @@ uv run python examples/08_qa_report_generation.py
 
 ### Filter Consistency
 **Examples 03-04** use NEES (Normalized Estimation Error Squared) to check if the filter's uncertainty estimates are honest:
-- NEES ≈ 8.0 (for 8D state) → filter is consistent
-- NEES < 6.0 → overconfident (covariance too small)
-- NEES > 10.0 → underconfident (covariance too large)
+- NEES ≈ state_dim (e.g. 8 for 8D state) → filter is consistent
+- NEES > upper chi-square bound → overconfident (covariance too small)
+- NEES < lower chi-square bound → underconfident (covariance too large)
 
 ### Computational Tradeoffs
 **Example 04** demonstrates:
 - EKF: 1 linearization point → fast
-- UKF: 17 sigma points → 1-5× slower but handles nonlinearity better
+- UKF: 17 sigma points → comparable wall-clock under JIT-compiled JAX with warm dispatch; several times slower on per-step Python loops. Better handling of strong nonlinearity is the reason to choose it.
 - **Verdict:** EKF is sufficient for most scenarios
 
 ---
@@ -209,9 +232,13 @@ done
 
 ### Example Output Locations
 
-- **PNGs:** `output/examples/` directory (created automatically)
-- **Videos:** `diagnostics/videos/` directory
-- **PDFs:** Same directory as the example script
+Each example writes to a different path. Quick reference:
+
+- **Example 01** (`01_simple_simulations.py`) → `examples/01_simple_simulations.png` (next to the script).
+- **Example 02** (`02_rat_imu_simulation.py`) → five PNGs in the current working directory (`02_basic_sim.png`, `02_two_led_sim.png`, `03_confidence_sim.png`, `04_noise_validation.png`, `05_vision_robustness.png`).
+- **Examples 03 / 03b / 04 / 05 / 06** → PNGs next to each script (`examples/<name>.png`).
+- **Example 07** (`07_smoother_demonstration.py`) → `output/dropout_smoother_comparison.mp4` (resolved relative to the process working directory).
+- **Example 08** (`08_qa_report_generation.py`) → `examples/example_qa_report.pdf` (next to the script via `Path(__file__).parent`).
 
 ---
 

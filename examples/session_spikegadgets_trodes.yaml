@@ -1,0 +1,68 @@
+# Example YAML config for SpikeGadgets IMU parquet + Trodes dual-LED parquet.
+#
+# Run:
+#   uv run trodestrack online --config examples/session_spikegadgets_trodes.yaml
+#   uv run trodestrack smooth --config examples/session_spikegadgets_trodes.yaml
+#
+# Paths are resolved relative to this YAML file. Replace the inputs with your
+# own session files before running.
+
+inputs:
+  format: spikegadgets_trodes
+  imu_file: ../data/arthur20220324_imu_info.parquet
+  position_file: ../data/arthur20220324_position_info.parquet
+
+camera:
+  meters_per_pixel: 0.0022
+  led1_x_column: xloc
+  led1_y_column: yloc
+  led2_x_column: xloc2
+  led2_y_column: yloc2
+
+imu:
+  sample_hold_strategy: gyro_z_change
+  # ``time_offset_s`` defaults to 0.0 (the schema default). For new
+  # sessions, leave this commented out and run calibration; only set
+  # an explicit lag once ``imu_calibration_report.txt`` shows a
+  # non-zero yaw-rate lag. The bundled Arthur slice happens to need
+  # ~10 ms of correction (uncomment to reproduce the calibrated run).
+  # time_offset_s: 0.01
+  mode: 3d
+  run_calibration: true
+  require_calibration_for_fusion: true
+  calibration_min_yaw_correlation: 0.1
+  # Accel-driven translation is rejected when stationary gravity still has too
+  # much horizontal component or camera/IMU acceleration axes align poorly.
+  calibration_max_horizontal_gravity_mps2: 1.0
+  calibration_min_accel_axis_correlation_for_translation: 0.5
+
+filter:
+  # Conservative real-data fused mode: use the 6-DOF IMU for orientation while
+  # keeping accelerometer-driven translation disabled unless validated.
+  state_mode: 2d_cam_6dof_imu_orientation
+  enable_experimental_accel_translation: false
+  use_gravity_orientation_update: true
+  use_mahalanobis_gating: false
+
+led_identity:
+  mode: auto
+  # Use original/swapped when you know the whole session starts with a specific
+  # LED identity; auto cannot infer a global all-session label reversal and
+  # writes a diagnostics warning.
+  initial_state: auto
+  transition_penalty: 2.0
+  gyro_weight: 0.0
+  max_speed_mps: 3.0
+
+outputs:
+  output_dir: ../runs/arthur_session
+  write_diagnostics: true
+  run_safety_checks: true
+  safety_envelope_multiplier: 3.0
+  safety_extra_range_m: 0.5
+  safety_max_speed_mps: 3.0
+  safety_max_position_deviation_m: 0.5
+  safety_p95_position_deviation_m: 0.25
+  # Minimum dual-LED frames needed to estimate the camera midpoint envelope.
+  # Single-LED frames still contribute to fused-vs-vision deviation checks.
+  safety_min_dual_led_frames: 20

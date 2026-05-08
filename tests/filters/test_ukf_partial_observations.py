@@ -7,10 +7,12 @@ Critical bug fix: UKF was computing Kalman gain from full 4×4 innovation
 covariance even when only 1 LED was valid, causing overconfident estimates.
 """
 
+import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from trodestrack.models.ukf import UKFConfig, unscented_kalman_filter
+from trodestrack.models.state_layout import get_layout
+from trodestrack.models.ukf import UKFConfig, UKFState, unscented_kalman_filter
 from trodestrack.sim.rat_imu import RatIMUSimConfig, simulate_rat_imu
 
 
@@ -221,7 +223,12 @@ def test_ukf_no_leds_skips_update() -> None:
     )
     sim = simulate_rat_imu(config=sim_config, seed=42)
     # Disable gating for this edge case (all measurements are NaN)
-    config = UKFConfig(use_mahalanobis_gating=False)
+    config = UKFConfig(
+        use_mahalanobis_gating=False,
+        enable_zupt=True,
+        zupt_velocity_threshold=0.05,
+        zupt_measurement_noise=1e-4,
+    )
 
     # Create scenario with no LED observations (complete dropout)
     sim_no_leds = dict(sim)
@@ -229,6 +236,10 @@ def test_ukf_no_leds_skips_update() -> None:
     sim_no_leds["Z_cam_led2"] = np.full_like(sim["Z_cam_led2"], np.nan)
 
     result = unscented_kalman_filter(config, **_prepare_ukf_inputs(sim_no_leds))
+    result_no_zupt = unscented_kalman_filter(
+        UKFConfig(use_mahalanobis_gating=False, enable_zupt=False),
+        **_prepare_ukf_inputs(sim_no_leds),
+    )
 
     # With no measurements, covariance should grow (prediction-only)
     initial_var = result.filtered_covariances[0, 0, 0]
@@ -238,10 +249,72 @@ def test_ukf_no_leds_skips_update() -> None:
         "Covariance should grow with prediction-only (no measurement updates)"
     )
 
+    np.testing.assert_allclose(
+        result.filtered_covariances[0, 2, 2],
+        result_no_zupt.filtered_covariances[0, 2, 2],
+        atol=1e-7,
+    )
+    np.testing.assert_allclose(
+        result.filtered_covariances[0, 3, 3],
+        result_no_zupt.filtered_covariances[0, 3, 3],
+        atol=1e-7,
+    )
+
     # Filter should remain stable
     assert np.all(np.isfinite(result.filtered_means)), "Means should remain finite"
     assert np.all(np.isfinite(result.filtered_covariances)), (
         "Covariances should remain finite"
+    )
+
+
+def test_ukf_all_nan_leds_use_dropout_process_noise_even_when_mask_true() -> None:
+    layout = get_layout("2d_full")
+    t_imu = np.linspace(0.0, 0.1, 11, dtype=np.float32)
+    t_cam = np.array([0.0, 0.1], dtype=np.float32)
+    u_imu = np.zeros((t_imu.shape[0], 3), dtype=np.float32)
+    z1 = np.full((t_cam.shape[0], 2), np.nan, dtype=np.float32)
+    z2 = np.full((t_cam.shape[0], 2), np.nan, dtype=np.float32)
+    initial_state = UKFState(
+        mean=jnp.zeros(layout.n, dtype=jnp.float32),
+        cov=jnp.eye(layout.n, dtype=jnp.float32) * 1e-4,
+    )
+    config = UKFConfig(
+        state_mode="2d_full",
+        led_distance=0.04,
+        enable_zupt=False,
+        adaptive_q_during_dropout=True,
+        dropout_q_pos_multiplier=1000.0,
+        dropout_q_vel_multiplier=1000.0,
+        dropout_q_bias_multiplier=0.0,
+        freeze_bias_during_blackout=True,
+        reduce_imu_noise_during_blackout=False,
+        use_heading_measurement=False,
+    )
+
+    common_kwargs = dict(
+        t_imu=t_imu,
+        U_imu=u_imu,
+        t_cam=t_cam,
+        Z_cam_led1=z1,
+        Z_cam_led2=z2,
+        initial_state=initial_state,
+    )
+    result_mask_true = unscented_kalman_filter(
+        config,
+        mask_cam=np.ones(t_cam.shape[0], dtype=bool),
+        **common_kwargs,
+    )
+    result_mask_false = unscented_kalman_filter(
+        config,
+        mask_cam=np.zeros(t_cam.shape[0], dtype=bool),
+        **common_kwargs,
+    )
+
+    np.testing.assert_allclose(
+        result_mask_true.predicted_covariances[1],
+        result_mask_false.predicted_covariances[1],
+        rtol=1e-6,
+        atol=1e-8,
     )
 
 

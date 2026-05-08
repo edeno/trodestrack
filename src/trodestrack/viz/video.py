@@ -14,6 +14,7 @@ from matplotlib.artist import Artist
 from matplotlib.gridspec import GridSpec
 
 from trodestrack.models.ekf import EKFResult
+from trodestrack.models.state_layout import StateLayout, get_heading_index, get_layout
 from trodestrack.sim.utils import SimOut
 from trodestrack.viz.components import (
     BiasEstimatePanelArtist,
@@ -35,11 +36,64 @@ from trodestrack.viz.utils import VideoData, prepare_video_data
 log = logging.getLogger(__name__)
 
 
+def _predict_led_world(
+    position: np.ndarray, theta: float, led_offset_body: np.ndarray
+) -> np.ndarray:
+    """Rotate a body-frame LED offset into world frame and translate by position.
+
+    Used by the diagnostic-video residual panel so that predicted LED
+    positions reflect the actual configured ``led*_offset_body`` (which
+    can place LED1 either rear or front), not the default ±0.5 ×
+    led_distance assumption that hard-codes LED1=rear / LED2=front.
+    """
+    cos_t, sin_t = np.cos(theta), np.sin(theta)
+    return np.array(
+        [
+            position[0] + cos_t * led_offset_body[0] - sin_t * led_offset_body[1],
+            position[1] + sin_t * led_offset_body[0] + cos_t * led_offset_body[1],
+        ]
+    )
+
+
+def _led_label_direction_anomaly(
+    led1_pos: np.ndarray,
+    led2_pos: np.ndarray,
+    theta: float,
+    led1_offset_body: np.ndarray,
+    led2_offset_body: np.ndarray,
+) -> bool:
+    """Return True when the LED1/LED2 labels appear swapped relative to heading.
+
+    The simulator supports both default offsets (LED1 rear, LED2 front) and
+    custom offsets where LED1 may be the front marker. Compare the observed
+    inter-LED vector ``led2_pos - led1_pos`` against the *expected*
+    body-frame offset rotated into world frame: under correct labeling the
+    two vectors project positively onto each other; under swapped labels
+    they oppose. Hard-coding the default convention false-flags every frame
+    in custom-offset configurations.
+
+    Returns False when the configured offsets coincide (or the body-frame
+    inter-LED vector has zero length), since the direction check is
+    undefined.
+    """
+    expected_body = np.asarray(led2_offset_body) - np.asarray(led1_offset_body)
+    if not np.any(expected_body):
+        return False
+    cos_t, sin_t = np.cos(theta), np.sin(theta)
+    expected_world = np.array(
+        [
+            cos_t * expected_body[0] - sin_t * expected_body[1],
+            sin_t * expected_body[0] + cos_t * expected_body[1],
+        ]
+    )
+    observed_world = np.asarray(led2_pos) - np.asarray(led1_pos)
+    return float(np.dot(observed_world, expected_world)) < 0
+
+
 def create_diagnostic_video(
     sim_data: SimOut,
     output_path: str | Path,
     filter_results: EKFResult | None = None,
-    led_distance: float = 0.04,
     fps: int = 30,
     speedup: float = 1.0,
     time_window_s: float = 2.0,
@@ -48,6 +102,8 @@ def create_diagnostic_video(
     codec: str = "h264",
     bitrate: int = 2000,
     return_animation: bool = False,
+    state_mode: str | None = None,
+    layout: StateLayout | None = None,
 ) -> Path | tuple[Path, Any, Any]:
     """Generate diagnostic video from simulation data with optional filter overlay.
 
@@ -62,8 +118,6 @@ def create_diagnostic_video(
         Output video file path (e.g., "debug.mp4").
     filter_results : EKFResult or None, optional
         If provided, overlays filter predictions and diagnostics.
-    led_distance : float, default 0.04
-        LED spacing (m) for drawing LED markers.
     fps : int, default 30
         Video frame rate.
     speedup : float, default 1.0
@@ -80,6 +134,16 @@ def create_diagnostic_video(
         Video bitrate (kbps).
     return_animation : bool, default False
         If True, return tuple (path, anim, fig) for testing.
+    state_mode : str or None, optional
+        Filter state-mode name (e.g. ``"2d_full"``, ``"2d_cam_3d_imu"``).
+        Required when ``filter_results`` is provided unless ``layout`` is
+        given directly. Used to resolve heading and bias indices for the
+        diagnostic overlay so they line up with the actual filter layout.
+    layout : StateLayout or None, optional
+        Pre-resolved state layout. Takes precedence over ``state_mode``.
+        Must be a scalar-2D-heading layout (``layout.has_heading_2d``);
+        the diagnostic overlay does not currently support 3D-orientation
+        layouts.
 
     Returns
     -------
@@ -93,15 +157,91 @@ def create_diagnostic_video(
         >>> create_diagnostic_video(sim, "debug.mp4", fps=30)
         PosixPath('debug.mp4')
 
-        # With filter results
+        # With filter results — pass the same state_mode used for the filter so
+        # the overlay reads heading and biases from the right indices.
         >>> from trodestrack.models.ekf import extended_kalman_filter, EKFConfig
-        >>> result = extended_kalman_filter(EKFConfig(), ...)
+        >>> cfg = EKFConfig()
+        >>> result = extended_kalman_filter(cfg, ...)
         >>> create_diagnostic_video(
-        ...     sim, "debug_filter.mp4", filter_results=result, fps=30
+        ...     sim,
+        ...     "debug_filter.mp4",
+        ...     filter_results=result,
+        ...     state_mode=cfg.state_mode,
+        ...     fps=30,
         ... )
         PosixPath('debug_filter.mp4')
     """
     output_path = Path(output_path)
+
+    # Resolve a state layout for the filter overlay. We need the heading and
+    # bias indices for that layout; reading them as fixed columns silently
+    # mislabels heading as vz and shifts the bias panels for non-8D modes.
+    overlay_layout: StateLayout | None = None
+    if filter_results is not None:
+        if layout is not None:
+            overlay_layout = layout
+        elif state_mode is not None:
+            overlay_layout = get_layout(state_mode)
+        else:
+            raise ValueError(
+                "create_diagnostic_video requires `state_mode` (or `layout`) "
+                "when `filter_results` is provided so the overlay can resolve "
+                "heading and bias indices for the actual filter layout. "
+                "Pass state_mode=cfg.state_mode (e.g. '2d_full' or "
+                "'2d_cam_3d_imu')."
+            )
+
+        n_state = int(np.asarray(filter_results.filtered_means).shape[1])
+        if n_state != overlay_layout.n:
+            raise ValueError(
+                f"filter_results state dim ({n_state}) does not match "
+                f"layout '{state_mode or layout}' (n={overlay_layout.n})."
+            )
+        if not overlay_layout.has_heading_2d:
+            raise NotImplementedError(
+                "create_diagnostic_video only supports scalar-2D-heading "
+                "layouts today (e.g. 'vision_only', '2d_full', "
+                f"'2d_cam_3d_imu'). Got layout with heading_idx="
+                f"{overlay_layout.heading_idx!r}."
+            )
+
+        # Camera-frame alignment: the animation indexes filtered_means,
+        # filtered_covariances, and predicted_means by cam_idx (resolved
+        # from sim_data["t_cam_exp"]). A filter result with fewer frames
+        # than the simulation would silently produce an out-of-range
+        # index when prepare_video_data emits the last cam_idx.
+        n_cam_sim = int(np.asarray(sim_data["t_cam_exp"]).shape[0])
+        for fname in ("filtered_means", "filtered_covariances", "predicted_means"):
+            arr = np.asarray(getattr(filter_results, fname))
+            if arr.shape[0] != n_cam_sim:
+                raise ValueError(
+                    f"filter_results.{fname}.shape[0]={arr.shape[0]} does not "
+                    f"match sim_data['t_cam_exp'] length {n_cam_sim}; the "
+                    "diagnostic video indexes both by camera frame and "
+                    "would otherwise read past the filter result."
+                )
+
+    # ``fps`` / ``speedup`` are validated inside ``prepare_video_data``
+    # below; the rolling-window checks here use the post-validation fps,
+    # so duplicating the fps / speedup gate would be dead code.
+
+    # Validate the rolling-window parameters too. The diagnostic-panel
+    # artists size their deque buffers as ``int(window_s * fps)`` and a
+    # zero or negative window collapses the visible history to 0
+    # samples (deque maxlen=0 stores nothing) or raises ValueError on
+    # construction.
+    if not np.isfinite(time_window_s) or time_window_s * fps < 1:
+        raise ValueError(
+            f"time_window_s must be finite and yield int(time_window_s * fps) "
+            f">= 1 (got time_window_s={time_window_s!r}, fps={fps!r}); "
+            "smaller windows would collapse the diagnostic plots' history "
+            "buffers to zero samples."
+        )
+    if not np.isfinite(trail_length_s) or trail_length_s * fps < 1:
+        raise ValueError(
+            f"trail_length_s must be finite and yield int(trail_length_s * "
+            f"fps) >= 1 (got trail_length_s={trail_length_s!r}, fps={fps!r})."
+        )
 
     # Apply Tufte style
     apply_tufte_style()
@@ -213,6 +353,18 @@ def create_diagnostic_video(
     # Extract config for convenience
     config = sim_data["config"]
 
+    # Resolve LED body-frame offsets. ``RatIMUSimConfig`` exposes them
+    # explicitly; ``SimpleSimConfig`` does not, but ``simulate_circular``
+    # places LED1 = -0.02 m / LED2 = +0.02 m along heading. Use those as
+    # defaults so the spacing-deviation check, direction check, and
+    # legend labels work for both config types without an AttributeError.
+    led1_offset_body = np.asarray(
+        getattr(config, "led1_offset_body", np.array([-0.02, 0.0]))
+    )
+    led2_offset_body = np.asarray(
+        getattr(config, "led2_offset_body", np.array([0.02, 0.0]))
+    )
+
     # Set arena bounds based on data
     X_truth = video_data["X_truth"]
     x_min, x_max = X_truth[:, 0].min(), X_truth[:, 0].max()
@@ -316,54 +468,107 @@ def create_diagnostic_video(
         state_error_panel = StateErrorPanelArtist(
             ax_vel_error, ax_heading_error, window_s=time_window_s, fps=fps
         )
-        bias_panel = BiasEstimatePanelArtist(ax_bias, window_s=time_window_s, fps=fps)
+        # The bias panel reads ``layout.bias_gyro_idx[0]`` and
+        # ``layout.bias_accel_idx[0]`` per frame. Layouts without
+        # IMU biases (e.g. ``vision_only``) have empty bias index
+        # tuples, so leave bias_panel = None for those layouts; the
+        # update path already gates on ``bias_panel is not None``.
+        assert overlay_layout is not None
+        if overlay_layout.has_biases:
+            bias_panel = BiasEstimatePanelArtist(
+                ax_bias, window_s=time_window_s, fps=fps
+            )
         nees_panel = NEESPanelArtist(
             ax_nees, window_s=time_window_s, fps=fps, state_dim=2
         )
 
-    # Pre-compute event times for progress bar markers
+    # Pre-compute event times for progress bar markers. Track LED
+    # mislabeling (``swap_applied``) and wall reflections
+    # (``led_reflection_applied``) as distinct event categories so the
+    # progress bar can report them separately. The simulator publishes
+    # ground-truth masks for both; when those are present we trust them
+    # over the heuristic anomaly checks. The geometric checks remain as
+    # a fallback for sims that omit the masks (e.g. real-data inputs).
     log.info("Detecting events...")
-    event_times: dict[str, list[float]] = {"led_swap": [], "long_dropout": []}
+    event_times: dict[str, list[float]] = {
+        "led_swap": [],
+        "led_reflection": [],
+        "long_dropout": [],
+    }
 
-    for frame_idx in range(n_frames):
-        t = float(video_data["t_video"][frame_idx])
-        cam_idx = int(video_data["cam_idx"][frame_idx])
+    swap_mask = sim_data.get("swap_applied")
+    reflection_mask = sim_data.get("led_reflection_applied")
 
-        led1_pos = sim_data["Z_cam_led1"][cam_idx]
-        led2_pos = sim_data["Z_cam_led2"][cam_idx]
-        led1_visible = sim_data["mask_led1"][cam_idx]
-        led2_visible = sim_data["mask_led2"][cam_idx]
+    # Walk every camera frame, not just the rendered video frames. The
+    # video frame loop visits one sample per (1/fps × speedup) seconds
+    # of simulation time and silently skips swap/reflection/dropout
+    # events that fall between samples — a 30 Hz camera at fps=5,
+    # speedup=10 only sees 1 in 60 camera frames. Render decisions
+    # (which event markers to draw on the progress bar) must be
+    # derived from the full camera-rate ground truth.
+    cam_times = np.asarray(sim_data["t_cam_exp"])
+    n_cam = int(cam_times.shape[0])
+    mask_led1_all = np.asarray(sim_data["mask_led1"])
+    mask_led2_all = np.asarray(sim_data["mask_led2"])
+    z_led1_all = np.asarray(sim_data["Z_cam_led1"])
+    z_led2_all = np.asarray(sim_data["Z_cam_led2"])
 
-        # LED swap detection (spacing deviation + vector direction)
-        if led1_visible and led2_visible:
-            # Check 1: Spacing deviation (catches occlusion-induced swaps)
-            spacing = np.linalg.norm(led1_pos - led2_pos)
-            expected_spacing = np.linalg.norm(
-                config.led1_offset_body - config.led2_offset_body
+    # Theta at each camera frame for the geometric direction-anomaly
+    # fallback. Interpolating from the IMU-rate truth (X_truth column 4
+    # is heading) is fine because direction_anomaly only uses sin/cos.
+    use_geometric_fallback = swap_mask is None and reflection_mask is None
+    if use_geometric_fallback:
+        theta_imu = np.asarray(sim_data["X_truth"][:, 4])
+        t_imu_arr = np.asarray(sim_data["t_imu"])
+        # Unwrap before interp so wraparound between IMU samples doesn't
+        # produce a midpoint-to-zero artifact across the ±π discontinuity.
+        theta_cam = np.interp(cam_times, t_imu_arr, np.unwrap(theta_imu))
+
+    for cam_idx in range(n_cam):
+        t = float(cam_times[cam_idx])
+        led1_visible = bool(mask_led1_all[cam_idx])
+        led2_visible = bool(mask_led2_all[cam_idx])
+
+        # Prefer simulator-emitted ground-truth masks when available so
+        # reflection artifacts don't get collapsed into "LED swap" by the
+        # geometric heuristic below.
+        sim_swap = bool(swap_mask[cam_idx]) if swap_mask is not None else False
+        sim_reflection = (
+            bool(reflection_mask[cam_idx]) if reflection_mask is not None else False
+        )
+
+        if sim_swap:
+            event_times["led_swap"].append(t)
+        if sim_reflection:
+            event_times["led_reflection"].append(t)
+
+        # Geometric fallback (real-data inputs lacking the masks). Only
+        # fire when neither ground-truth mask was present, so we don't
+        # double-count under simulator inputs.
+        if use_geometric_fallback and led1_visible and led2_visible:
+            led1_pos = z_led1_all[cam_idx]
+            led2_pos = z_led2_all[cam_idx]
+            spacing = float(np.linalg.norm(led1_pos - led2_pos))
+            expected_spacing = float(
+                np.linalg.norm(led1_offset_body - led2_offset_body)
             )
             spacing_anomaly = abs(spacing - expected_spacing) > 0.5 * expected_spacing
 
-            # Check 2: LED vector direction (catches reflection/labeling swaps)
-            # Get body state for this frame
-            state = np.asarray(video_data["X_truth"][frame_idx])
-            theta = float(state[4])  # heading angle
-            body_x_axis = np.array([np.cos(theta), np.sin(theta)])
-            led_vector = led1_pos - led2_pos  # Vector from LED2 to LED1
-
-            # If LED1 is front and LED2 is back, dot product should be positive
-            # (led_vector should point in same direction as body X-axis)
-            dot_product = np.dot(led_vector, body_x_axis)
-            direction_anomaly = dot_product < 0  # Vector points backward = swap
+            direction_anomaly = _led_label_direction_anomaly(
+                led1_pos,
+                led2_pos,
+                float(theta_cam[cam_idx]),
+                led1_offset_body,
+                led2_offset_body,
+            )
 
             if spacing_anomaly or direction_anomaly:
                 event_times["led_swap"].append(t)
 
-        # Long dropout detection
+        # Long dropout detection: mark the start of each dropout run.
         if not (led1_visible or led2_visible):
-            # Only mark start of dropout sequence (avoid many markers)
-            if frame_idx == 0 or (
-                sim_data["mask_led1"][int(video_data["cam_idx"][frame_idx - 1])]
-                or sim_data["mask_led2"][int(video_data["cam_idx"][frame_idx - 1])]
+            if cam_idx == 0 or (
+                bool(mask_led1_all[cam_idx - 1]) or bool(mask_led2_all[cam_idx - 1])
             ):
                 event_times["long_dropout"].append(t)
 
@@ -381,6 +586,7 @@ def create_diagnostic_video(
 
     log.info(
         f"  Found {len(event_times['led_swap'])} LED swaps, "
+        f"{len(event_times['led_reflection'])} wall reflections, "
         f"{len(event_times['long_dropout'])} dropout sequences (debounced)"
     )
 
@@ -389,7 +595,18 @@ def create_diagnostic_video(
         ax_progress, duration_s=config.duration_s, event_times=event_times
     )
 
-    # Add legend entries for heading and velocity
+    # Add legend entries for heading and velocity. Derive front/rear
+    # labels from the resolved body-frame offsets so custom orderings
+    # (e.g. LED1 in front) render correctly.
+    led1_body_x = float(led1_offset_body.reshape(-1)[0])
+    led2_body_x = float(led2_offset_body.reshape(-1)[0])
+    if led1_body_x > led2_body_x:
+        led1_label, led2_label = "LED1 (front)", "LED2 (rear)"
+    elif led1_body_x < led2_body_x:
+        led1_label, led2_label = "LED1 (rear)", "LED2 (front)"
+    else:
+        led1_label, led2_label = "LED1", "LED2"
+
     from matplotlib.lines import Line2D
 
     legend_elements = [
@@ -400,7 +617,7 @@ def create_diagnostic_video(
             color="w",
             markerfacecolor=COLORS["blue"],
             markersize=8,
-            label="LED1 (front)",
+            label=led1_label,
         ),
         Line2D(
             [0],
@@ -409,7 +626,7 @@ def create_diagnostic_video(
             color="w",
             markerfacecolor=COLORS["orange"],
             markersize=8,
-            label="LED2 (back)",
+            label=led2_label,
         ),
         Line2D(
             [0],
@@ -571,13 +788,18 @@ def create_diagnostic_video(
                 "accel_y": U_imu_window[:, 2],
             }
 
-            # Extract ground truth for truth overlay (expected IMU values)
+            # Extract ground truth for truth overlay. The accelerometer
+            # measures *specific force* (a_body - g_body), not inertial
+            # acceleration; using ``accel_body_truth`` for the overlay
+            # under a tilted IMU shows a phantom ~|g·sin(tilt)| offset
+            # between measured and "truth" that's purely a quantity
+            # mismatch, not a model discrepancy.
             yaw_rate_truth_window = sim_data["yaw_rate_truth"][imu_mask]
-            accel_body_truth_window = sim_data["accel_body_truth"][imu_mask]
+            specific_force_truth_window = sim_data["specific_force_truth"][imu_mask]
             imu_truth = {
                 "yaw_rate": yaw_rate_truth_window,
-                "accel_x": accel_body_truth_window[:, 0],
-                "accel_y": accel_body_truth_window[:, 1],
+                "accel_x": specific_force_truth_window[:, 0],
+                "accel_y": specific_force_truth_window[:, 1],
             }
 
             imu_panel.update(
@@ -600,12 +822,13 @@ def create_diagnostic_video(
 
         camera_panel.update(led1_visible, conf1, led2_visible, conf2, latency_ms)
 
-        # Filter overlay (if provided)
+        # Filter overlay (if provided). bias_panel is gated separately
+        # below so layouts without biases (e.g. ``vision_only``) still
+        # render the position/residual/error/NEES panels.
         if (
             filter_artist is not None
             and residual_panel is not None
             and state_error_panel is not None
-            and bias_panel is not None
             and nees_panel is not None
             and filter_results is not None
         ):
@@ -614,11 +837,17 @@ def create_diagnostic_video(
             # ================================================================
             x_est = np.asarray(
                 filter_results.filtered_means[cam_idx]
-            )  # [x, y, vx, vy, θ, b_gz, b_ax, b_ay]
+            )  # state vector laid out per overlay_layout
             P_est = np.asarray(
                 filter_results.filtered_covariances[cam_idx]
-            )  # 8x8 covariance
+            )  # (n, n) covariance, n = overlay_layout.n
             x_pred = np.asarray(filter_results.predicted_means[cam_idx])
+
+            # Layout-resolved indices: assert overlay_layout was set above.
+            assert overlay_layout is not None
+            pos_x_idx, pos_y_idx = overlay_layout.pos_idx[0], overlay_layout.pos_idx[1]
+            vel_x_idx, vel_y_idx = overlay_layout.vel_idx[0], overlay_layout.vel_idx[1]
+            heading_idx_int = get_heading_index(overlay_layout)
 
             # Ground truth at camera time
             x_truth, y_truth, vx_truth, vy_truth, theta_truth = state
@@ -626,19 +855,28 @@ def create_diagnostic_video(
             # ================================================================
             # 1. Update filter position artist with uncertainty ellipse
             # ================================================================
-            filter_artist.update(float(x_est[0]), float(x_est[1]), P_est)
+            filter_artist.update(
+                float(x_est[pos_x_idx]),
+                float(x_est[pos_y_idx]),
+                P_est[np.ix_([pos_x_idx, pos_y_idx], [pos_x_idx, pos_y_idx])],
+            )
 
             # ================================================================
             # 2. Compute and update measurement residuals (innovations)
             # ================================================================
-            px_pred, py_pred, theta_pred = x_pred[0], x_pred[1], x_pred[4]
+            px_pred = x_pred[pos_x_idx]
+            py_pred = x_pred[pos_y_idx]
+            theta_pred = x_pred[heading_idx_int]
 
-            # Apply measurement function to compute predicted LED positions
-            dx = 0.5 * led_distance * np.cos(theta_pred)
-            dy = 0.5 * led_distance * np.sin(theta_pred)
-
-            led1_pred = np.array([px_pred - dx, py_pred - dy])  # Back LED
-            led2_pred = np.array([px_pred + dx, py_pred + dy])  # Front LED
+            # Apply measurement function to compute predicted LED positions.
+            # Use the resolved body-frame offsets, not ±0.5 * led_distance:
+            # the latter hard-codes the default LED1=rear / LED2=front
+            # convention and produces a constant ~LED-spacing-magnitude
+            # residual on configurations where LED1 is in front (a pure
+            # visualization-model mismatch, not filter error).
+            position_pred = np.array([px_pred, py_pred])
+            led1_pred = _predict_led_world(position_pred, theta_pred, led1_offset_body)
+            led2_pred = _predict_led_world(position_pred, theta_pred, led2_offset_body)
 
             # Compute residuals (innovation = observed - predicted)
             resid_led1 = (
@@ -654,14 +892,14 @@ def create_diagnostic_video(
             # 3. Compute and update state estimation errors
             # ================================================================
             # Velocity errors (cm/s)
-            error_vx = (x_est[2] - vx_truth) * 100
-            error_vy = (x_est[3] - vy_truth) * 100
+            error_vx = (x_est[vel_x_idx] - vx_truth) * 100
+            error_vy = (x_est[vel_y_idx] - vy_truth) * 100
 
             # Heading error (degrees, properly wrapped)
             def wrap_angle(theta):
                 return np.arctan2(np.sin(theta), np.cos(theta))
 
-            error_heading_rad = wrap_angle(x_est[4] - theta_truth)
+            error_heading_rad = wrap_angle(x_est[heading_idx_int] - theta_truth)
             error_heading_deg = np.degrees(error_heading_rad)
 
             state_error_panel.update(
@@ -672,25 +910,29 @@ def create_diagnostic_video(
             )
 
             # ================================================================
-            # 4. Update bias estimates (show filter learning IMU biases)
+            # 4. Update bias estimates (show filter learning IMU biases).
+            # Layouts without IMU biases (e.g. ``vision_only``) leave
+            # bias_panel as None and skip this block.
             # ================================================================
-            gyro_bias = x_est[5]  # rad/s
-            accel_bias_x = x_est[6]  # m/s²
-            accel_bias_y = x_est[7]  # m/s²
-
-            bias_panel.update(
-                t,
-                float(gyro_bias),
-                float(accel_bias_x),
-                float(accel_bias_y),
-            )
+            if bias_panel is not None:
+                gyro_bias_idx = overlay_layout.bias_gyro_idx[0]
+                accel_bias_x_idx = overlay_layout.bias_accel_idx[0]
+                accel_bias_y_idx = overlay_layout.bias_accel_idx[1]
+                bias_panel.update(
+                    t,
+                    float(x_est[gyro_bias_idx]),
+                    float(x_est[accel_bias_x_idx]),
+                    float(x_est[accel_bias_y_idx]),
+                )
 
             # ================================================================
             # 5. Compute and update NEES (filter consistency metric)
             # ================================================================
             # NEES for 2D position only (to match chi-squared bounds)
-            error_pos = np.array([x_est[0] - x_truth, x_est[1] - y_truth])
-            P_pos = P_est[:2, :2]
+            error_pos = np.array(
+                [x_est[pos_x_idx] - x_truth, x_est[pos_y_idx] - y_truth]
+            )
+            P_pos = P_est[np.ix_([pos_x_idx, pos_y_idx], [pos_x_idx, pos_y_idx])]
 
             try:
                 # NEES = e^T * P^{-1} * e

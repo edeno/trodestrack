@@ -9,7 +9,6 @@ state estimates using future observations. This produces lower-variance
 estimates than forward filtering alone.
 
 References:
-    - PRD.md Section 12: Algorithms & Implementation Notes
     - Särkkä (2013) "Bayesian Filtering and Smoothing", Algorithm 8.2
     - Dynamax inference_ekf.py, inference_ukf.py
 """
@@ -23,14 +22,23 @@ import jax.numpy as jnp
 import numpy as np
 from jax import jacfwd, lax, vmap
 
-from trodestrack.models.ekf import EKFConfig, EKFResult
+from trodestrack.models.ekf import EKF3DResult, EKFConfig, EKFResult
 from trodestrack.models.filter_common import (
+    build_quaternion_transition_jacobian,
     compute_imu_index_arrays,
     dynamics_function,
+    normalize_state_orientation,
     psd_solve,
+    state_yaw,
     symmetrize,
     validate_imu_input_shape,
+    validate_timestamps,
+    wrap_angle,
 )
+
+# Note: full camera-shape validator (validate_camera_input_shapes) is used
+# only by the EKF/UKF entrypoints, which take LED + mask + conf arrays. The
+# smoothers only get t_cam + mask_cam, validated inline below.
 from trodestrack.models.process_noise import assemble_Q
 from trodestrack.models.state_layout import StateLayout, get_heading_index, get_layout
 from trodestrack.models.ukf import UKFConfig, UKFResult, compute_sigma_points
@@ -64,15 +72,132 @@ class SmootherResult(NamedTuple):
 
 
 RTS_SMOOTHER_STATIC_ARGNAMES = ("layout", "ekf_config", "num_iter")
-# Donate filtered_means (arg 1) and filtered_covs (arg 2) to enable buffer reuse
-# in scan carry iterations. These arrays are large (N_cam, n) and (N_cam, n, n)
-# and are never used after smoother returns.
-RTS_SMOOTHER_DONATE_ARGNUMS: tuple[int, ...] = (1, 2)
+# Donate lin_means_init (arg 0) and filtered_covs (arg 2) to enable buffer
+# reuse in scan carry iterations. These arrays are copied by the wrapper and
+# are never used after smoother returns.
+RTS_SMOOTHER_DONATE_ARGNUMS: tuple[int, ...] = (0, 2)
 
 
 # =============================================================================
 # Helper Functions
 # =============================================================================
+
+
+def _smoother_vision_mask(
+    filter_result: object,
+    mask_cam: np.ndarray | None,
+    n_cam: int,
+    *,
+    func_name: str,
+) -> tuple[np.ndarray, bool]:
+    """Return the camera-frame vision mask used for blackout-aware smoothing."""
+    usable_mask = getattr(filter_result, "usable_vision_mask", None)
+    if usable_mask is None:
+        if mask_cam is None:
+            return np.ones(n_cam, dtype=bool), False
+        return _validate_smoother_mask(
+            mask_cam,
+            n_cam,
+            name="mask_cam",
+            func_name=func_name,
+        ), True
+
+    usable_arr = _validate_smoother_mask(
+        usable_mask,
+        n_cam,
+        name="filter_result.usable_vision_mask",
+        func_name=func_name,
+    )
+    if mask_cam is None:
+        return usable_arr, True
+    mask_arr = _validate_smoother_mask(
+        mask_cam,
+        n_cam,
+        name="mask_cam",
+        func_name=func_name,
+    )
+    return mask_arr & usable_arr, True
+
+
+def _validate_smoother_mask(
+    mask: np.ndarray,
+    n_cam: int,
+    *,
+    name: str,
+    func_name: str,
+) -> np.ndarray:
+    """Validate a smoother camera mask and return it as a boolean array."""
+    mask_arr = np.asarray(mask)
+    if mask_arr.shape != (n_cam,):
+        raise ValueError(
+            f"{func_name}: {name} must have shape ({n_cam},) to match "
+            f"t_cam / filter_result, got {mask_arr.shape}."
+        )
+    if mask_arr.dtype != np.bool_:
+        if not np.issubdtype(mask_arr.dtype, np.integer):
+            raise ValueError(
+                f"{func_name}: {name} must be boolean or 0/1 integer; "
+                f"got dtype {mask_arr.dtype!r}."
+            )
+        is_binary = np.isin(mask_arr, (0, 1))
+        if not np.all(is_binary):
+            bad = mask_arr[~is_binary]
+            raise ValueError(
+                f"{func_name}: {name} must contain only 0 or 1 (or be "
+                f"boolean); found {len(bad)} other value(s) "
+                f"(e.g. {bad[:5].tolist()})."
+            )
+    return mask_arr.astype(bool, copy=False)
+
+
+def _transition_mean_and_jacobian(
+    state_mean: jnp.ndarray,
+    linearization_mean: jnp.ndarray,
+    u_imu: jnp.ndarray,
+    dt_imu: jnp.ndarray,
+    *,
+    ekf_config: EKFConfig,
+    layout: StateLayout,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Predict one IMU step and return a transition Jacobian.
+
+    Quaternion layouts use the same first-order Jacobian structure as the EKF
+    prediction step to avoid autodiff through the zero-rotation quaternion
+    exponential. Scalar-heading layouts keep the existing autodiff path.
+    """
+
+    def f(x):
+        return dynamics_function(
+            x,
+            u_imu,
+            dt_imu,
+            ekf_config.damping_coeff,
+            layout,
+            gravity_body=ekf_config.imu_gravity_body,
+            enable_experimental_accel_translation=(
+                ekf_config.enable_experimental_accel_translation
+            ),
+        )
+
+    mean_pred = f(state_mean)
+
+    if not layout.has_quaternion_orientation:
+        return mean_pred, jacfwd(f)(linearization_mean)
+
+    linearization_pred = f(linearization_mean)
+    F_x = build_quaternion_transition_jacobian(
+        linearization_mean,
+        linearization_pred,
+        dt_imu,
+        ekf_config.damping_coeff,
+        layout,
+        u_imu=u_imu,
+        enable_experimental_accel_translation=(
+            ekf_config.enable_experimental_accel_translation
+        ),
+    )
+
+    return normalize_state_orientation(mean_pred, layout), F_x
 
 
 def _rts_smoother_impl(
@@ -93,21 +218,8 @@ def _rts_smoother_impl(
     """Core RTS smoother staged under ``jax.jit``."""
     n_cam = filtered_means.shape[0]
     n = filtered_means.shape[1]
-
-    def f(x, u, dt):
-        return dynamics_function(
-            x,
-            u,
-            dt,
-            ekf_config.damping_coeff,
-            layout,
-            gravity_body=ekf_config.imu_gravity_body,
-        )
-
-    F_jac = jacfwd(f, argnums=0)
     has_mask = jnp.asarray(mask_is_provided, dtype=bool)
-    h_idx = get_heading_index(layout)
-    has_heading = h_idx < n
+    has_scalar_heading = layout.has_heading_2d
 
     def predict_between_frames(
         t_idx: int,
@@ -131,11 +243,21 @@ def _rts_smoother_impl(
                     lambda: dt_imu_mean,
                 )
 
-                x_pred = f(x_s, u, dt)
-                F_k = F_jac(x_lin_s, u, dt)
+                x_pred, F_k = _transition_mean_and_jacobian(
+                    x_s,
+                    x_lin_s,
+                    u,
+                    dt,
+                    ekf_config=ekf_config,
+                    layout=layout,
+                )
 
                 dtype = x_pred.dtype
-                theta = x_pred[h_idx] if has_heading else jnp.asarray(0.0, dtype=dtype)
+                theta = (
+                    x_pred[get_heading_index(layout)]
+                    if has_scalar_heading
+                    else state_yaw(x_pred, layout)
+                )
                 Q_total = assemble_Q(
                     ekf_config,
                     theta=theta,
@@ -143,12 +265,24 @@ def _rts_smoother_impl(
                     n=n,
                     has_vision=jnp.logical_not(in_blackout),
                     dtype=dtype,
+                    orientation_quaternion=(
+                        x_pred[jnp.array(layout.heading_idx, dtype=jnp.int32)]
+                        if layout.has_quaternion_orientation
+                        else None
+                    ),
                 )
 
                 P_pred = F_k @ P_s @ F_k.T + Q_total
                 P_pred = symmetrize(P_pred)
                 F_new = F_k @ F_prev
-                x_lin_pred = f(x_lin_s, u, dt)
+                x_lin_pred, _ = _transition_mean_and_jacobian(
+                    x_lin_s,
+                    x_lin_s,
+                    u,
+                    dt,
+                    ekf_config=ekf_config,
+                    layout=layout,
+                )
 
                 return (x_pred, P_pred, F_new, x_lin_pred), None
 
@@ -178,14 +312,27 @@ def _rts_smoother_impl(
             t, filtered_mean, filtered_cov, lin_mean
         )
 
-        # Correct for angle wrapping in heading (if present in layout)
-        h_idx = get_heading_index(layout)
-        resid = smoothed_mean_next - m_pred
-        resid = resid.at[h_idx].set(
-            jnp.arctan2(jnp.sin(resid[h_idx]), jnp.cos(resid[h_idx]))
-        )
+        smoothed_mean_next_aligned = smoothed_mean_next
+        if layout.has_heading_2d:
+            h_idx = get_heading_index(layout)
+            resid = smoothed_mean_next_aligned - m_pred
+            resid = resid.at[h_idx].set(wrap_angle(resid[h_idx]))
+        elif layout.has_quaternion_orientation:
+            quat_idx = jnp.array(layout.heading_idx, dtype=jnp.int32)
+            sign = jnp.where(
+                jnp.dot(smoothed_mean_next[quat_idx], m_pred[quat_idx]) < 0.0,
+                jnp.asarray(-1.0, dtype=smoothed_mean_next.dtype),
+                jnp.asarray(1.0, dtype=smoothed_mean_next.dtype),
+            )
+            smoothed_mean_next_aligned = smoothed_mean_next.at[quat_idx].set(
+                sign * smoothed_mean_next[quat_idx]
+            )
+            resid = smoothed_mean_next_aligned - m_pred
+        else:
+            resid = smoothed_mean_next_aligned - m_pred
 
         smoothed_mean = filtered_mean + G @ resid
+        smoothed_mean = normalize_state_orientation(smoothed_mean, layout)
         smoothed_cov = filtered_cov + G @ (smoothed_cov_next - P_pred) @ G.T
         smoothed_cov = symmetrize(smoothed_cov)
 
@@ -239,7 +386,7 @@ _rts_smoother_jit = jax.jit(
 
 
 def rts_smoother(
-    filter_result: EKFResult,
+    filter_result: EKFResult | EKF3DResult,
     ekf_config: EKFConfig,
     t_imu: np.ndarray,
     U_imu: np.ndarray,
@@ -251,20 +398,34 @@ def rts_smoother(
 
     Parameters
     ----------
-    filter_result : EKFResult
-        Output from :func:`trodestrack.models.ekf.extended_kalman_filter`.
+    filter_result : EKFResult or EKF3DResult
+        Output from :func:`trodestrack.models.ekf.extended_kalman_filter` or
+        :func:`trodestrack.models.ekf.extended_kalman_filter_3d`.
     ekf_config : EKFConfig
         EKF configuration (for dynamics and Q assembly).
     t_imu : np.ndarray
         IMU timestamps (N_imu,) in seconds.
     U_imu : np.ndarray
-        IMU measurements [ω_z(rad/s), f_x(m/s^2), f_y(m/s^2)] (N_imu, 3).
+        IMU measurements. Shape depends on the state layout:
+        - (N_imu, 3) ``[ω_z, f_x, f_y]`` for non-quaternion layouts
+          (``"2d_full"``, ``"vision_only"``, and the default
+          ``"2d_cam_3d_imu"`` as a degenerate path that leaves ``vz`` idle);
+        - (N_imu, 4) ``[ω_z, f_x, f_y, f_z]`` for the default
+          ``"2d_cam_3d_imu"`` layout when 3D-velocity dynamics are desired;
+        - (N_imu, 6) ``[ω_x, ω_y, ω_z, f_x, f_y, f_z]`` for
+          quaternion-orientation layouts (e.g. ``"3d_cam_6dof_imu"``).
+        Channel-vs-layout compatibility is enforced by
+        :func:`trodestrack.models.filter_common.validate_imu_input_shape`.
     t_cam : np.ndarray
         Camera timestamps (N_cam,) in seconds.
     num_iter : int, default 1
         Number of IEKS iterations; 1 yields standard RTS.
     mask_cam : np.ndarray | None, optional
-        Camera validity mask (N_cam,). If provided, applies blackout-aware noise scaling.
+        Optional camera validity mask (N_cam,). For filter results that carry
+        ``usable_vision_mask``, this is combined with that forward-filter mask
+        so all-NaN LED frames remain blackouts even when the raw camera mask is
+        true. For legacy filter results without ``usable_vision_mask``, this
+        mask enables blackout-aware process-noise scaling.
 
     Returns
     -------
@@ -272,12 +433,86 @@ def rts_smoother(
         Smoothed means and covariances at camera times; log-likelihood copied
         from the forward EKF pass.
     """
+    # Reject num_iter < 1 explicitly. The inner ``for _ in range(num_iter)``
+    # loop never runs for 0 / negative values and the wrapper would
+    # otherwise return the filtered result as if smoothing succeeded.
+    # Mirrors EKFConfig.num_iter validation.
+    if not isinstance(num_iter, int) or num_iter < 1:
+        raise ValueError(
+            "num_iter must be an integer >= 1 (1 = standard RTS, "
+            f">1 = IEKS iterations); got {num_iter!r}."
+        )
+
+    # Reject non-finite filter_result entries up front. The smoother runs
+    # IMU pre-integration around these means and would otherwise propagate
+    # NaN/inf through every backward pass and report a "successful"
+    # smoothed result.
+    fmeans = np.asarray(filter_result.filtered_means)
+    fcovs = np.asarray(filter_result.filtered_covariances)
+    if not np.all(np.isfinite(fmeans)):
+        n_bad = int(np.sum(~np.isfinite(fmeans)))
+        raise ValueError(
+            f"rts_smoother: filter_result.filtered_means contains {n_bad} "
+            "non-finite value(s) (NaN/inf); the smoother cannot recover "
+            "from a corrupted forward pass."
+        )
+    if not np.all(np.isfinite(fcovs)):
+        n_bad = int(np.sum(~np.isfinite(fcovs)))
+        raise ValueError(
+            f"rts_smoother: filter_result.filtered_covariances contains "
+            f"{n_bad} non-finite value(s) (NaN/inf)."
+        )
+
     # Validate IMU input shape early so silent channel mismatches fail loudly.
     validate_imu_input_shape(
         U_imu,
         get_layout(ekf_config.state_mode),
+        t_imu=t_imu,
         func_name="rts_smoother",
     )
+
+    # Layout-vs-filter-result dimension check. The dynamics path uses
+    # ``ekf_config.state_mode`` (and thus its layout's vel/heading/bias
+    # indices), while the arrays and process-noise sizing are driven by
+    # ``filter_result.filtered_means.shape[1]``. A mismatch silently
+    # produced layout-wrong but finite output (e.g. running 2d_full
+    # dynamics on a 5D vision_only filter_result returned a 5D smoothed
+    # array). Catch this at the boundary so the failure names the actual
+    # contract.
+    expected_n = get_layout(ekf_config.state_mode).n
+    actual_n = int(filter_result.filtered_means.shape[1])
+    if actual_n != expected_n:
+        raise ValueError(
+            f"rts_smoother: filter_result.filtered_means.shape[1]={actual_n} "
+            f"does not match ekf_config.state_mode='{ekf_config.state_mode}' "
+            f"(layout.n={expected_n}). Use the same state_mode that produced "
+            "filter_result, or rerun the forward filter with the requested "
+            "state_mode."
+        )
+
+    # Reject non-finite / non-monotonic timestamps so np.diff(t_imu) and
+    # the smoother's IMU pre-integration don't silently propagate NaN.
+    validate_timestamps(t_imu, name="t_imu", func_name="rts_smoother", min_size=2)
+    validate_timestamps(t_cam, name="t_cam", func_name="rts_smoother")
+
+    # Validate t_cam / mask_cam alignment with the filter result. JAX
+    # indexing silently clamps a too-short mask_cam to its last in-range
+    # value, marking every later frame with that stale flag. Catch the
+    # length mismatch at the entry point.
+    n_cam = int(filter_result.filtered_means.shape[0])
+    t_cam_arr = np.asarray(t_cam)
+    if t_cam_arr.ndim != 1 or t_cam_arr.shape[0] != n_cam:
+        raise ValueError(
+            f"rts_smoother: t_cam must have shape ({n_cam},) to match "
+            f"filter_result.filtered_means, got {t_cam_arr.shape}."
+        )
+    if mask_cam is not None:
+        mask_arr = np.asarray(mask_cam)
+        if mask_arr.shape != (n_cam,):
+            raise ValueError(
+                f"rts_smoother: mask_cam must have shape ({n_cam},) to match "
+                f"t_cam / filter_result, got {mask_arr.shape}."
+            )
 
     # Convert to JAX arrays
     t_imu_jax = jnp.array(t_imu)
@@ -291,11 +526,13 @@ def rts_smoother(
     dt_imu_mean = jnp.mean(jnp.diff(t_imu_jax))
     imu_index_arrays = compute_imu_index_arrays(t_imu, t_cam)
 
-    mask_is_provided = mask_cam is not None
-    if mask_is_provided:
-        mask_cam_jax = jnp.array(mask_cam, dtype=bool)
-    else:
-        mask_cam_jax = jnp.ones(filtered_means.shape[0], dtype=bool)
+    vision_mask, mask_is_provided = _smoother_vision_mask(
+        filter_result,
+        mask_cam,
+        n_cam,
+        func_name="rts_smoother",
+    )
+    mask_cam_jax = jnp.array(vision_mask, dtype=bool)
 
     layout = get_layout(ekf_config.state_mode)
 
@@ -503,12 +740,9 @@ def _sigma_point_smoother_impl(
         # Compute smoother gain: G = S_cross @ P_pred^{-1}
         G = psd_solve(P_pred, S_cross.T).T
 
-        # Correct for angle wrapping in heading (if present in layout)
         h_idx = get_heading_index(layout)
         resid = smoothed_mean_next - m_pred
-        resid = resid.at[h_idx].set(
-            jnp.arctan2(jnp.sin(resid[h_idx]), jnp.cos(resid[h_idx]))
-        )
+        resid = resid.at[h_idx].set(wrap_angle(resid[h_idx]))
 
         # Smooth mean and covariance
         smoothed_mean = filtered_mean + G @ resid
@@ -564,7 +798,11 @@ def sigma_point_smoother(
     t_cam : np.ndarray
         Camera timestamps (N_cam,) in seconds.
     mask_cam : np.ndarray | None, optional
-        Camera validity mask (N_cam,). If provided, applies blackout-aware noise scaling.
+        Optional camera validity mask (N_cam,). For filter results that carry
+        ``usable_vision_mask``, this is combined with that forward-filter mask
+        so all-NaN LED frames remain blackouts even when the raw camera mask is
+        true. For legacy filter results without ``usable_vision_mask``, this
+        mask enables blackout-aware process-noise scaling.
 
     Returns
     -------
@@ -578,17 +816,83 @@ def sigma_point_smoother(
     between filtered[k] and predicted[k+1], which is needed for the gain.
     State dimension is derived from filter_result.filtered_means.shape[1].
 
-    Blackout-aware Q/R scaling (when mask_cam is provided):
+    Blackout-aware process-noise scaling (when a forward usable-vision mask or
+    ``mask_cam`` is available):
     - During vision blackouts, reduces accel bias RW noise and IMU input noise
     - Helps tighten how hard post-gap vision "pulls" backward through gaps
     - Mirrors EKF RTS smoother behavior for consistency
     """
+    # Reject non-finite filter_result entries up front. The smoother runs
+    # IMU pre-integration around these means and would otherwise propagate
+    # NaN/inf through every backward pass and report a "successful"
+    # smoothed result.
+    fmeans = np.asarray(filter_result.filtered_means)
+    fcovs = np.asarray(filter_result.filtered_covariances)
+    if not np.all(np.isfinite(fmeans)):
+        n_bad = int(np.sum(~np.isfinite(fmeans)))
+        raise ValueError(
+            f"sigma_point_smoother: filter_result.filtered_means contains "
+            f"{n_bad} non-finite value(s) (NaN/inf); the smoother cannot "
+            "recover from a corrupted forward pass."
+        )
+    if not np.all(np.isfinite(fcovs)):
+        n_bad = int(np.sum(~np.isfinite(fcovs)))
+        raise ValueError(
+            f"sigma_point_smoother: filter_result.filtered_covariances "
+            f"contains {n_bad} non-finite value(s) (NaN/inf)."
+        )
+
     # Validate IMU input shape early so silent channel mismatches fail loudly.
     validate_imu_input_shape(
         U_imu,
         get_layout(ukf_config.state_mode),
+        t_imu=t_imu,
         func_name="sigma_point_smoother",
     )
+
+    # Layout-vs-filter-result dimension check. The dynamics path uses
+    # ``ukf_config.state_mode``, while the arrays and process-noise
+    # sizing are driven by ``filter_result.filtered_means.shape[1]``.
+    # A mismatch silently produced layout-wrong but finite output
+    # (e.g. running 2d_full dynamics on a 5D vision_only filter_result
+    # returned a 5D smoothed array). Catch this at the boundary so the
+    # failure names the actual contract.
+    expected_n = get_layout(ukf_config.state_mode).n
+    actual_n = int(filter_result.filtered_means.shape[1])
+    if actual_n != expected_n:
+        raise ValueError(
+            f"sigma_point_smoother: filter_result.filtered_means.shape[1]="
+            f"{actual_n} does not match ukf_config.state_mode="
+            f"'{ukf_config.state_mode}' (layout.n={expected_n}). Use the "
+            "same state_mode that produced filter_result, or rerun the "
+            "forward UKF with the requested state_mode."
+        )
+
+    # Reject non-finite / non-monotonic timestamps so np.diff(t_imu) and
+    # the sigma-point smoother's IMU pre-integration don't silently
+    # propagate NaN.
+    validate_timestamps(
+        t_imu, name="t_imu", func_name="sigma_point_smoother", min_size=2
+    )
+    validate_timestamps(t_cam, name="t_cam", func_name="sigma_point_smoother")
+
+    # Validate t_cam / mask_cam alignment with the filter result so a
+    # too-short mask_cam doesn't silently reuse its last in-range value
+    # for every later frame (JAX out-of-bounds indexing clamps).
+    n_cam = int(filter_result.filtered_means.shape[0])
+    t_cam_arr_check = np.asarray(t_cam)
+    if t_cam_arr_check.ndim != 1 or t_cam_arr_check.shape[0] != n_cam:
+        raise ValueError(
+            f"sigma_point_smoother: t_cam must have shape ({n_cam},) to "
+            f"match filter_result, got {t_cam_arr_check.shape}."
+        )
+    if mask_cam is not None:
+        mask_arr_check = np.asarray(mask_cam)
+        if mask_arr_check.shape != (n_cam,):
+            raise ValueError(
+                f"sigma_point_smoother: mask_cam must have shape ({n_cam},) "
+                f"to match t_cam / filter_result, got {mask_arr_check.shape}."
+            )
 
     # Convert to JAX arrays
     t_imu_jax = jnp.array(t_imu)
@@ -600,12 +904,13 @@ def sigma_point_smoother(
     filtered_means = filter_result.filtered_means.copy()  # (N_cam, n)
     filtered_covs = filter_result.filtered_covariances.copy()  # (N_cam, n, n)
 
-    # Convert mask_cam to JAX (sentinel all-True when not provided, matching EKF smoother)
-    mask_is_provided = mask_cam is not None
-    if mask_is_provided:
-        mask_cam_jax = jnp.array(mask_cam, dtype=bool)
-    else:
-        mask_cam_jax = jnp.ones(filtered_means.shape[0], dtype=bool)
+    vision_mask, mask_is_provided = _smoother_vision_mask(
+        filter_result,
+        mask_cam,
+        n_cam,
+        func_name="sigma_point_smoother",
+    )
+    mask_cam_jax = jnp.array(vision_mask, dtype=bool)
     n = filtered_means.shape[1]  # Derive state dimension from data
 
     # Compute UKF sigma-point weights (dimension-dependent)

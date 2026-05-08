@@ -26,7 +26,7 @@ from trodestrack.sim.simple import (
 )
 
 # =============================================================================
-# PRD Requirements (from PRD.md Section 4) - All in SI units
+# Acceptance Criteria - All in SI units
 # =============================================================================
 
 PRD_POSITION_RMSE_M = 0.02  # Position RMSE <= 0.02 m (2 cm)

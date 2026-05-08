@@ -119,7 +119,15 @@ from trodestrack.models.ekf import extended_kalman_filter, EKFConfig
 sim = simulate_circular(SimpleSimConfig(duration_s=1.0))
 
 # Run filter
-result = extended_kalman_filter(EKFConfig(), sim)
+result = extended_kalman_filter(
+    EKFConfig(),
+    sim["t_imu"],
+    sim["U_imu"],
+    sim["t_cam_exp"],
+    sim["Z_cam_led1"],
+    sim["Z_cam_led2"],
+    sim["mask_cam"],
+)
 
 print(f"Filtered {len(result.filtered_means)} frames successfully!")
 print(f"Position shape: {result.filtered_means[:, :2].shape}")

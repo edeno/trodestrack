@@ -25,15 +25,18 @@
   - Before/after: Raw IMU vs EKF with bias estimation
   - File size: ~250 KB
 
-### 3. Code Infrastructure (100%)
-- ✅ Created `code/generate_slide05abc_imu_physics.py` (458 lines)
-- ✅ Created `code/generate_slide03_trajectory_comparison.py` (189 lines)
-- ✅ Created `code/generate_slide14_uncertainty.py` (263 lines)
-- ✅ Created `code/generate_slide16_smoother.py` (256 lines)
-- ✅ Created `code/generate_slide18_diagnostic.py` (101 lines)
-- ✅ Created `code/generate_slide21_nees.py` (219 lines)
-- ✅ All scripts fully functional and tested
-- ✅ Uses TrodesTrack simulator to generate realistic demonstrations
+### 3. Code Infrastructure
+- ✅ Created `code/generate_slide05abc_imu_physics.py`
+- ✅ Created `code/generate_slide03_trajectory_comparison.py`
+- ✅ Created `code/generate_slide14_uncertainty.py`
+- ✅ Created `code/generate_slide16_smoother.py`
+- ✅ Created `code/generate_slide12_imu_integration.py`
+- ✅ Created `code/generate_slide21_nees.py`
+- ⏳ Deferred: `code/generate_slide02_failure_modes.py` and
+  `code/generate_slide18_diagnostic.py` — slides 2 and 18 currently render
+  as bullet content in `build_presentation.py` until those generators land.
+- ✅ All shipped scripts use the TrodesTrack simulator to generate realistic
+  demonstrations.
 
 ### 4. Core Concept Visuals (100% - 11 of 11 completed) ✅
 
@@ -58,11 +61,12 @@
 **Time spent**: 1 hour
 **Description**: 3-panel comparison of vision-only, EKF, and RTS smoother during 5s dropout
 
-#### ✅ Slide 18: 9-Panel Diagnostic
+#### ⏳ Slide 18: 9-Panel Diagnostic
 **File**: `code/generate_slide18_diagnostic.py`
-**Visual**: `visuals/slide18_diagnostic_panel.png` (~254 KB)
-**Status**: COMPLETED
-**Time spent**: 30 min
+**Visual**: `visuals/slide18_diagnostic_panel.png`
+**Status**: DEFERRED — generator script and PNG not yet committed; slide 18
+renders as bullet content in `build_presentation.py` describing the
+9-panel layout produced by `trodestrack.viz.video.create_diagnostic_video`.
 **Description**: Comprehensive diagnostic video screenshot
 
 #### ✅ Slide 21: NEES Histogram
@@ -78,29 +82,12 @@
 
 ### Priority 1: Core Concept Visuals (Required for MVP)
 
-#### Slide 2: Failure Modes Grid
+#### ⏳ Slide 2: Failure Modes Grid
 **File**: `code/generate_slide02_failure_modes.py`
-**Description**: 2×2 grid showing occlusion, reflection, blur, dim lighting
-**Estimated time**: 1-2 hours
-**Status**: Not started
-
-#### Slide 8: Before/After Video
-**File**: `code/generate_slide08_beforeafter.py`
-**Description**: 10-second video comparing vision-only vs sensor fusion during dropout
-**Estimated time**: 2-3 hours (video rendering)
-**Status**: Not started
-
-#### Slide 12: IMU Integration Visualization
-**File**: `code/generate_slide12_imu_integration.py`
-**Description**: Show IMU pre-integration between camera frames
-**Estimated time**: 1-2 hours
-**Status**: Not started
-
-#### ✅ Slide 2: Failure Modes Grid
-**File**: `code/generate_slide02_failure_modes.py`
-**Visual**: `visuals/slide02_failure_modes.png` (~675 KB)
-**Status**: COMPLETED
-**Time spent**: 1 hour
+**Visual**: `visuals/slide02_failure_modes.png`
+**Status**: DEFERRED — generator script and PNG not yet committed; slide 2
+renders as bullet content in `build_presentation.py` enumerating the four
+documented failure modes (occlusion, reflection, motion blur, dim lighting).
 **Description**: 2×2 grid showing occlusion, reflection, blur, and dim lighting
 
 #### ✅ Slide 8: Before/After Video
@@ -117,8 +104,7 @@
 **Time spent**: 1 hour
 **Description**: Three-panel view showing timeline, IMU measurements, and spatial trajectory between camera frames
 
-**Total Priority 1 Completed**: 11/11 visuals ✅ (all Priority 1 work complete!)
-**Total Priority 1 Time**: 10.5 hours total
+**Total Priority 1 Status**: 8 of 10 PNGs shipped + 1 MP4. Slide 2 (failure modes) and slide 18 (9-panel diagnostic) are deferred — those slides currently render as bullet content in `build_presentation.py`; their generator scripts have not landed.
 
 ---
 
@@ -141,7 +127,7 @@
   - Slides 33-36: Section 5 (ADVANCED TOPICS)
   - Slides 37-43: Section 6 (CONCLUSION)
   - 3 extra slides: Section dividers
-- ✅ Integrated all 11 generated visuals
+- ✅ Integrated all 8 generated visuals; slide 2 and slide 18 render as bullet content (generators deferred)
 - ✅ Applied color scheme (Blue, Orange, Green, Red, Gray)
 - ✅ Added speaker notes to all slides
 - ✅ 16:9 aspect ratio, professional formatting
@@ -198,9 +184,9 @@
 ## 🎯 Recommended Next Steps
 
 ### For Minimal Viable Presentation (MVP):
-1. ✅ ~~**Generate Priority 1 visuals**~~ → COMPLETE! (11/11 done in 10.5 hours)
+1. ⏳ **Generate Priority 1 visuals**: 8 of 10 shipped + 1 MP4. Slide 2 (failure modes) and slide 18 (9-panel diagnostic) still deferred — currently rendered as bullet content in `build_presentation.py`.
 2. ✅ ~~**Create PowerPoint presentation**~~ → COMPLETE! (46 slides in 2 hours)
-3. **Add video to Slide 8** (5 minutes) ← **NEXT STEP**
+3. **Add video to Slide 8** (5 minutes)
    - Open `trodestrack_presentation.pptx`
    - Navigate to Slide 8
    - Insert → Video → `videos/slide08_beforeafter.mp4`
@@ -229,36 +215,38 @@
 docs/presentation/
 ├── PRESENTATION_OUTLINE.md          ✅ Complete (43 slides outlined)
 ├── PROGRESS_REPORT.md               ✅ This file (updated)
-├── TASKS.md                         ✅ Updated (Phase 1 complete)
-├── trodestrack_presentation.pptx    ⏳ Not started
+├── TASKS.md                         ✅ Updated (Phase 1 partial: 8/10)
+├── trodestrack_presentation.pptx    ✅ Built locally via build_presentation.py
+│                                       (gitignored — regenerate after edits)
 ├── speaker_notes.md                 ⏳ Not started
 ├── handout.pdf                      ⏳ Not started
 │
-├── visuals/                         ✅ 11/11 Priority 1 generated ✅
-│   ├── slide02_failure_modes.png           ✅ 675 KB
-│   ├── slide03_trajectory_comparison.png   ✅ 305 KB
-│   ├── slide05a_accelerometer_physics.png  ✅ 136 KB
-│   ├── slide05b_gyroscope_physics.png      ✅ 187 KB
-│   ├── slide05c_bias_correction.png        ✅ 127 KB
-│   ├── slide12_imu_integration.png         ✅ 263 KB
-│   ├── slide14_uncertainty.png             ✅ 267 KB
-│   ├── slide16_smoother_comparison.png     ✅ 192 KB
-│   ├── slide18_diagnostic_panel.png        ✅ 248 KB
-│   └── slide21_nees_histogram.png          ✅ 198 KB
+├── visuals/                                 8 PNGs shipped
+│   ├── slide03_trajectory_comparison.png    ✅
+│   ├── slide05a_accelerometer_physics.png   ✅
+│   ├── slide05b_gyroscope_physics.png       ✅
+│   ├── slide05c_bias_correction.png         ✅
+│   ├── slide12_imu_integration.png          ✅
+│   ├── slide14_uncertainty.png              ✅
+│   ├── slide16_smoother_comparison.png      ✅
+│   └── slide21_nees_histogram.png           ✅
+│   (slide02_failure_modes.png and slide18_diagnostic_panel.png deferred;
+│    those slides render as bullet content in build_presentation.py.)
 │
-├── videos/                          ✅ 1/1 generated ✅
-│   └── slide08_beforeafter.mp4      ✅ 672 KB
+├── videos/                                  generated locally (gitignored)
+│   └── slide08_beforeafter.mp4              ✳ regenerate via
+│                                              generate_slide08_beforeafter_video.py
 │
-└── code/                            ✅ 9/9 scripts complete ✅
-    ├── generate_slide02_failure_modes.py         ✅ Complete (222 lines)
-    ├── generate_slide03_trajectory_comparison.py ✅ Complete (189 lines)
-    ├── generate_slide05abc_imu_physics.py        ✅ Complete (458 lines)
-    ├── generate_slide08_beforeafter_video.py     ✅ Complete (322 lines)
-    ├── generate_slide12_imu_integration.py       ✅ Complete (260 lines)
-    ├── generate_slide14_uncertainty.py           ✅ Complete (263 lines)
-    ├── generate_slide16_smoother.py              ✅ Complete (256 lines)
-    ├── generate_slide18_diagnostic.py            ✅ Complete (101 lines)
-    └── generate_slide21_nees.py                  ✅ Complete (219 lines)
+└── code/                                    7 generator scripts shipped
+    ├── generate_slide03_trajectory_comparison.py ✅
+    ├── generate_slide05abc_imu_physics.py        ✅
+    ├── generate_slide08_beforeafter_video.py     ✅
+    ├── generate_slide12_imu_integration.py       ✅
+    ├── generate_slide14_uncertainty.py           ✅
+    ├── generate_slide16_smoother.py              ✅
+    └── generate_slide21_nees.py                  ✅
+    (generate_slide02_failure_modes.py and generate_slide18_diagnostic.py
+     deferred — see corresponding slides in build_presentation.py.)
 ```
 
 ---
@@ -323,24 +311,24 @@ result = extended_kalman_filter(
 
 ## 📧 Deliverables Summary
 
-### What's Ready Now (MVP Complete! 🎉):
+### What's Ready Now:
 1. ✅ Complete 43-slide outline with detailed pedagogical structure
-2. ✅ **ALL 11 Priority 1 visuals** (publication-quality):
-   - 3 IMU physics slides (5A, 5B, 5C)
-   - Failure modes grid (slide 2)
-   - Trajectory comparison (slide 3)
-   - Before/after video (slide 8) - 10s split-screen MP4
-   - IMU integration (slide 12)
-   - Uncertainty evolution (slide 14)
-   - Smoother comparison (slide 16)
-   - 9-panel diagnostic (slide 18)
-   - NEES histogram (slide 21)
-3. ✅ **PowerPoint presentation** (trodestrack_presentation.pptx, 2.5 MB):
+2. ⏳ **8 of 10 Priority 1 PNGs shipped + 1 MP4** (publication-quality):
+   - 3 IMU physics slides (5A, 5B, 5C) ✅
+   - Trajectory comparison (slide 3) ✅
+   - Before/after video (slide 8) ✅ — 10s split-screen MP4
+   - IMU integration (slide 12) ✅
+   - Uncertainty evolution (slide 14) ✅
+   - Smoother comparison (slide 16) ✅
+   - NEES histogram (slide 21) ✅
+   - Failure modes grid (slide 2) ⏳ — bullet content; generator deferred
+   - 9-panel diagnostic (slide 18) ⏳ — bullet content; generator deferred
+3. ✅ **PowerPoint presentation** (trodestrack_presentation.pptx):
    - 46 slides total (43 content + 3 section dividers)
-   - All visuals integrated
+   - 7 generator scripts ship + the builder; slides 2 and 18 render as bullets
    - Professional formatting (16:9, color scheme applied)
    - Speaker notes on every slide
-4. ✅ 10 working code generation scripts (fully tested)
+4. ✅ 7 working code generation scripts (fully tested)
 5. ✅ Organized folder structure with all assets
 6. ✅ Updated documentation (TASKS.md, PROGRESS_REPORT.md)
 
@@ -363,17 +351,18 @@ open docs/presentation/visuals/slide05c_bias_correction.png
 
 ### Regenerate All Visuals:
 ```bash
-# Regenerate all Priority 1 visuals
-uv run python docs/presentation/code/generate_slide02_failure_modes.py
+# Run all generation scripts that ship in this repo
 uv run python docs/presentation/code/generate_slide03_trajectory_comparison.py
 uv run python docs/presentation/code/generate_slide05abc_imu_physics.py
 uv run python docs/presentation/code/generate_slide08_beforeafter_video.py
 uv run python docs/presentation/code/generate_slide12_imu_integration.py
 uv run python docs/presentation/code/generate_slide14_uncertainty.py
 uv run python docs/presentation/code/generate_slide16_smoother.py
-uv run python docs/presentation/code/generate_slide18_diagnostic.py
 uv run python docs/presentation/code/generate_slide21_nees.py
 ```
+
+Slides 2 (failure modes) and 18 (9-panel diagnostic) are bullet content
+in the current builder; their generator scripts have not landed yet.
 
 ### View All Generated Files:
 ```bash

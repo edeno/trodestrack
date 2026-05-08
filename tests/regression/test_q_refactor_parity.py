@@ -22,26 +22,32 @@ def reference_Q(
     q_bax = jnp.asarray(cfg.process_noise_accel_bias * dt, dtype=dtype)
     q_bay = jnp.asarray(cfg.process_noise_accel_bias * dt, dtype=dtype)
 
-    if cfg.adaptive_q_during_dropout and (not has_vision):
-        q_px = q_px * cfg.dropout_q_pos_multiplier
-        q_py = q_py * cfg.dropout_q_pos_multiplier
-        q_vx = q_vx * cfg.dropout_q_vel_multiplier
-        q_vy = q_vy * cfg.dropout_q_vel_multiplier
-        q_bg = q_bg * cfg.dropout_q_bias_multiplier
-        q_bax = q_bax * cfg.dropout_q_bias_multiplier
-        q_bay = q_bay * cfg.dropout_q_bias_multiplier
+    if cfg.adaptive_q_during_dropout:
+        one = jnp.asarray(1.0, dtype=dtype)
+        pos_mult = jnp.where(has_vision, one, cfg.dropout_q_pos_multiplier)
+        vel_mult = jnp.where(has_vision, one, cfg.dropout_q_vel_multiplier)
+        bias_mult = jnp.where(has_vision, one, cfg.dropout_q_bias_multiplier)
+        q_px = q_px * pos_mult
+        q_py = q_py * pos_mult
+        q_vx = q_vx * vel_mult
+        q_vy = q_vy * vel_mult
+        q_bg = q_bg * bias_mult
+        q_bax = q_bax * bias_mult
+        q_bay = q_bay * bias_mult
 
     Q_proc = jnp.diag(
         jnp.array([q_px, q_py, q_vx, q_vy, q_th, q_bg, q_bax, q_bay], dtype=dtype)
     )
 
     # IMU input noise mapped into state via G
-    std_w = cfg.imu_gyro_noise_density / np.sqrt(dt)
-    std_f = cfg.imu_accel_noise_density / np.sqrt(dt)
-    Qu = jnp.diag(jnp.array([std_w**2, std_f**2, std_f**2], dtype=dtype))
+    dt_arr = jnp.asarray(dt, dtype=dtype)
+    sg = cfg.imu_gyro_noise_density**2 / dt_arr
+    sa = cfg.imu_accel_noise_density**2 / dt_arr
+    Qu = jnp.diag(jnp.array([sg, sa, sa], dtype=dtype))
 
-    if cfg.reduce_imu_noise_during_blackout and (not has_vision):
-        Qu = Qu * cfg.blackout_imu_noise_scale
+    if cfg.reduce_imu_noise_during_blackout:
+        imu_mult = jnp.where(has_vision, 1.0, cfg.blackout_imu_noise_scale)
+        Qu = Qu * jnp.asarray(imu_mult, dtype=dtype)
 
     c, s = jnp.cos(theta), jnp.sin(theta)
     G = jnp.zeros((8, 3), dtype=dtype)
@@ -53,10 +59,13 @@ def reference_Q(
 
     Q = Q_proc + G @ Qu @ G.T
 
-    if cfg.freeze_bias_during_blackout and (not has_vision):
-        for idx in (5, 6, 7):
-            Q = Q.at[idx, :].set(0.0)
-            Q = Q.at[:, idx].set(0.0)
+    if cfg.freeze_bias_during_blackout:
+        freeze_factor = jnp.where(
+            has_vision, jnp.asarray(1.0, dtype=dtype), jnp.asarray(0.0, dtype=dtype)
+        )
+        bias_indices = jnp.array([5, 6, 7], dtype=jnp.int32)
+        row_mask = jnp.ones((8,), dtype=dtype).at[bias_indices].set(freeze_factor)
+        Q = Q * row_mask[:, None] * row_mask[None, :]
 
     return 0.5 * (Q + Q.T)
 
@@ -86,6 +95,7 @@ def test_ekf_parity_before_after_q_refactor(
     )
 
     ekf_cfg = EKFConfig(
+        state_mode="2d_full",
         use_mahalanobis_gating=True,
         adaptive_q_during_dropout=True,
         reduce_imu_noise_during_blackout=True,
@@ -103,24 +113,38 @@ def test_ekf_parity_before_after_q_refactor(
         mask_cam=sim["mask_cam"],
     )
 
-    # Monkeypatch assemble_Q to use reference_Q and run OLD-equivalent path
-    import trodestrack.models.process_noise as pn
+    # Monkeypatch the EKF module's bound symbol, not process_noise.assemble_Q:
+    # ekf.py imports assemble_Q directly, so patching the source module would
+    # leave the traced EKF path untouched.
+    import trodestrack.models.ekf as ekf_module
 
-    def assemble_Q_ref(config, theta, dt, n, *, has_vision, dtype=jnp.float32):
+    def assemble_Q_ref(
+        config,
+        theta,
+        dt,
+        n,
+        *,
+        has_vision,
+        dtype=jnp.float32,
+        orientation_quaternion=None,
+    ):
         assert n == 8
         return reference_Q(config, theta, dt, has_vision).astype(dtype)
 
-    monkeypatch.setattr(pn, "assemble_Q", assemble_Q_ref)
-
-    res_old = extended_kalman_filter(
-        ekf_config=ekf_cfg,
-        t_imu=sim["t_imu"],
-        U_imu=sim["U_imu"],
-        t_cam=sim["t_cam_exp"],
-        Z_cam_led1=sim["Z_cam_led1"],
-        Z_cam_led2=sim["Z_cam_led2"],
-        mask_cam=sim["mask_cam"],
-    )
+    monkeypatch.setattr(ekf_module, "assemble_Q", assemble_Q_ref)
+    ekf_module._extended_kalman_filter_jit.clear_cache()
+    try:
+        res_old = extended_kalman_filter(
+            ekf_config=ekf_cfg,
+            t_imu=sim["t_imu"],
+            U_imu=sim["U_imu"],
+            t_cam=sim["t_cam_exp"],
+            Z_cam_led1=sim["Z_cam_led1"],
+            Z_cam_led2=sim["Z_cam_led2"],
+            mask_cam=sim["mask_cam"],
+        )
+    finally:
+        ekf_module._extended_kalman_filter_jit.clear_cache()
 
     # Compare filtered and predicted trajectories
     atol = 1e-7

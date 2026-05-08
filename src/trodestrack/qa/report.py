@@ -139,8 +139,34 @@ def generate_qa_report(
     # Convert to Path
     pdf_path = Path(pdf_path)
 
+    # Validate the time axis itself before using its length to bind the
+    # other shape checks. The PDF embeds time-domain plots that index
+    # ``t`` directly, so a non-1D / non-finite / non-monotonic ``t``
+    # silently produced a finished-looking but wrong report.
+    t_arr = np.asarray(t)
+    if t_arr.ndim != 1:
+        raise ValueError(f"t must be 1D (N,) in seconds; got shape {t_arr.shape}.")
+    if t_arr.size < 2:
+        raise ValueError(
+            f"t must have at least two samples for a meaningful report; "
+            f"got shape {t_arr.shape}."
+        )
+    if not np.all(np.isfinite(t_arr)):
+        n_bad = int(np.sum(~np.isfinite(t_arr)))
+        raise ValueError(
+            f"t contains {n_bad} non-finite value(s) (NaN/inf); the report's "
+            "time-axis plots require finite seconds."
+        )
+    if not np.all(np.diff(t_arr) > 0):
+        first_bad = int(np.argmax(np.diff(t_arr) <= 0))
+        raise ValueError(
+            f"t must be strictly increasing; first non-increasing step at "
+            f"index {first_bad + 1} (t[{first_bad}]={t_arr[first_bad]!r}, "
+            f"t[{first_bad + 1}]={t_arr[first_bad + 1]!r})."
+        )
+
     # Validation: Check array shapes
-    N = t.shape[0]
+    N = t_arr.shape[0]
     if positions_true.shape != (N, 2):
         raise ValueError(
             f"Shape mismatch: positions_true {positions_true.shape} vs t {t.shape}"
@@ -170,6 +196,16 @@ def generate_qa_report(
 
     if nis is not None and measurement_dim is None:
         raise ValueError("measurement_dim required when nis is provided")
+
+    # NIS shape: documented as (N,), aligned to the same time base as the
+    # other arrays. Without this guard a mismatched NIS (e.g. NIS over a
+    # different sample set) silently summarised next to the trajectory
+    # plots, attaching consistency stats to the wrong frames.
+    if nis is not None and nis.shape != (N,):
+        raise ValueError(
+            f"Shape mismatch: nis {nis.shape} vs t {t.shape}; nis must be "
+            f"({N},) so its time alignment matches positions/headings."
+        )
 
     # Validation: Check PDF path is writable
     if not pdf_path.parent.exists():

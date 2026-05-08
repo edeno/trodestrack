@@ -15,7 +15,6 @@ Design
 
 References
 ----------
-- incremental_refactor_plan.md: PR1 - MeasurementModel Protocol
 - filter_common.py: prepare_heading_measurement
 - ekf.py: update_heading
 """
@@ -23,10 +22,12 @@ References
 from __future__ import annotations
 
 import jax.numpy as jnp
+from jax import jacfwd
 
 from trodestrack.models.filter_common import (
     FilterCoreConfig,
     prepare_heading_measurement,
+    state_yaw,
     wrap_angle,
 )
 from trodestrack.models.state_layout import StateLayout, get_heading_index
@@ -136,6 +137,25 @@ class HeadingPseudoModel:
         z_led2_all : jnp.ndarray
             LED2 positions (T, 2) [x, y] in meters.
         """
+        # Shape gate: ``meas_cov`` / ``use_measurement`` / ``innovation``
+        # index the frame arrays by ``frame_idx``. JAX silently clamps
+        # out-of-range indices to the last row, so an undersized z_led1_all
+        # reuses frame 0 for every later step. Validate (n_time, 2) for
+        # both LEDs at the constructor boundary so direct callers (tests,
+        # custom pipelines) see the same gate the public EKF/UKF entry
+        # points already enforce via validate_camera_input_shapes.
+        z_led1_arr = jnp.asarray(z_led1_all)
+        z_led2_arr = jnp.asarray(z_led2_all)
+        if z_led1_arr.ndim != 2 or z_led1_arr.shape[1] != 2:
+            raise ValueError(
+                f"z_led1_all must have shape (n_time, 2); got {z_led1_arr.shape}."
+            )
+        if z_led2_arr.shape != z_led1_arr.shape:
+            raise ValueError(
+                "z_led1_all and z_led2_all must share shape (n_time, 2); "
+                f"got z_led1_all={z_led1_arr.shape}, z_led2_all={z_led2_arr.shape}."
+            )
+
         self.config = config
         self.layout = layout
 
@@ -163,10 +183,10 @@ class HeadingPseudoModel:
 
         Notes
         -----
-        Measurement function: h(x) = x[heading_idx]
+        Measurement function: h(x) = yaw(x), where yaw is either the scalar
+        heading state or the yaw extracted from a quaternion orientation.
         """
-        h_idx = get_heading_index(self.layout)
-        return state_mean[h_idx : h_idx + 1]  # Keep as 1D array
+        return jnp.array([state_yaw(state_mean, self.layout)])
 
     def jacobian(self, state_mean: jnp.ndarray) -> jnp.ndarray:
         """Return Jacobian selecting heading component.
@@ -183,8 +203,12 @@ class HeadingPseudoModel:
 
         Notes
         -----
-        H = [0, 0, 0, 0, 1, 0, 0, 0] for 8D state (heading at index 4).
+        H selects the scalar heading for 2D layouts. Quaternion layouts use
+        automatic differentiation through the yaw extraction.
         """
+        if self.layout.has_quaternion_orientation:
+            return jacfwd(lambda state: self.predict(state))(state_mean)
+
         n = state_mean.shape[0]
         h_idx = get_heading_index(self.layout)
         H = jnp.zeros((1, n))
@@ -218,6 +242,13 @@ class HeadingPseudoModel:
         _, R_heading, _ = prepare_heading_measurement(z_led1, z_led2, self.config)
 
         return jnp.array([[R_heading]])
+
+    def use_measurement(self, frame_idx: int) -> jnp.ndarray:
+        """Return whether the heading pseudo-measurement should be applied."""
+        z_led1 = self.z_led1_all[frame_idx]
+        z_led2 = self.z_led2_all[frame_idx]
+        _, _, use_heading = prepare_heading_measurement(z_led1, z_led2, self.config)
+        return use_heading
 
     def innovation(self, frame_idx: int, meas_pred: jnp.ndarray) -> jnp.ndarray:
         """Compute angle-wrapped innovation.

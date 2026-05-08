@@ -47,6 +47,10 @@ class SimOut(TypedDict):
         yaw_rate_truth: Ground truth yaw rate (N_imu,)
         accel_world_truth: Ground truth inertial accel in world frame (N_imu, 2)
         accel_body_truth: Ground truth inertial accel in body frame (N_imu, 2)
+        specific_force_truth: Ground truth noiseless specific force in body
+            frame (N_imu, 2). This is the quantity ``U_imu[:, 1:3]`` measures
+            (a_body - g_body); for a level IMU it equals ``accel_body_truth``
+            but for a tilted IMU it differs by the rotated gravity term.
 
         config: Configuration object used for this simulation
     """
@@ -61,6 +65,7 @@ class SimOut(TypedDict):
     yaw_rate_truth: np.ndarray
     accel_world_truth: np.ndarray
     accel_body_truth: np.ndarray
+    specific_force_truth: np.ndarray
 
     # IMU measurements
     U_imu: np.ndarray
@@ -258,7 +263,7 @@ def confidence_to_noise_scale(
         >>> conf = np.array([1.0, 0.5, 0.1])
         >>> scales = confidence_to_noise_scale(conf, base_std=0.01, epsilon=0.01)
         >>> scales  # Lower confidence → higher noise
-        array([0.00990099, 0.01414214, 0.03015113])
+        array([0.00995037, 0.0140028 , 0.03015113])
     """
     return base_std / np.sqrt(epsilon + confidence)
 

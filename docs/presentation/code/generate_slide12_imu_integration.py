@@ -49,7 +49,7 @@ def generate_slide12():
 
     # Extract data
     t_imu = sim["t_imu"]
-    U_imu = sim["U_imu"]  # [accel_x, accel_y, gyro_z]
+    U_imu = sim["U_imu"]  # (T_imu, 3) = [omega_z, f_x, f_y]; see rat_imu.py
     t_cam = sim["t_cam_exp"]
     X_truth = sim["X_truth"]
 
@@ -166,11 +166,11 @@ def generate_slide12():
     # ========================================================================
     # Panel 2 (Middle): IMU measurements
     # ========================================================================
-    # Plot gyro Z
+    # Plot gyro Z (column 0 in [omega_z, f_x, f_y])
     ax2_gyro = ax2
     ax2_gyro.plot(
         t_imu_between,
-        np.rad2deg(U_imu_between[:, 2]),
+        np.rad2deg(U_imu_between[:, 0]),
         "o-",
         color=RED,
         linewidth=4,
@@ -188,11 +188,11 @@ def generate_slide12():
         loc="upper left", fontsize=10, frameon=True, fancybox=False, framealpha=0.95
     )
 
-    # Plot accel X, Y on second y-axis
+    # Plot accel X, Y on second y-axis (columns 1 and 2 in [omega_z, f_x, f_y])
     ax2_accel = ax2.twinx()
     ax2_accel.plot(
         t_imu_between,
-        U_imu_between[:, 0],
+        U_imu_between[:, 1],
         "s-",
         color=GREEN,
         linewidth=4,
@@ -202,7 +202,7 @@ def generate_slide12():
     )
     ax2_accel.plot(
         t_imu_between,
-        U_imu_between[:, 1],
+        U_imu_between[:, 2],
         "^-",
         color=BLUE,
         linewidth=4,

@@ -8,9 +8,9 @@ trodestrack combines video tracking (Trodes LEDs and/or DeepLabCut keypoints) wi
 
 - **Sensor Fusion**: Extended Kalman Filter (EKF) and Unscented Kalman Filter (UKF) for combining video (~30 Hz) and IMU (100 Hz) measurements
 - **3D IMU Support**: Full 6-axis IMU processing (3-axis gyro + 3-axis accel) with gravity compensation
-- **Online & Offline Processing**: Real-time filtering and RTS smoothing for offline analysis
-- **Robust Handling**: Occlusions, LED swaps, reflections, and sensor dropout
-- **JAX-Accelerated**: High-performance implementation using JAX - **316× realtime** on CPU, GPU-ready
+- **Online & Offline Processing**: Forward-only EKF and RTS smoothing — both run as batch operations over complete input arrays. The `trodestrack online` CLI is forward-only ("no future-frame dependence"), not a streaming / real-time ingest loop.
+- **Robust Handling**: Occlusions, reflections, and camera/sensor dropout. Config-driven real-data runs can apply persistent LED identity correction before filtering and fail fast when IMU calibration or fused trajectories look implausible.
+- **JAX-Accelerated**: High-performance JIT-compiled JAX implementation. The throughput-floor benchmarks (≥10× realtime offline on CPU, ≤33 ms amortized mean per frame online on a 30-minute session) live in [tests/benchmark/test_throughput.py](tests/benchmark/test_throughput.py) and are not run on every PR — invoke them locally with `JAX_PLATFORMS=cpu uv run pytest -m benchmark` (the CPU pin is required; the benchmark errors on accelerator backends to keep the documented floors meaningful). Reference run on an M-series Mac CPU under the corrected (block-until-ready) timing: ~38× realtime / ~0.41 ms per frame; absolute throughput is hardware-dependent.
 - **Rich Simulation**: Comprehensive synthetic data generation for testing and validation
 - **Diagnostic Visualization**: Publication-quality video output for quality control
 
@@ -82,7 +82,7 @@ This generates 3 diagnostic PNGs showing filter performance, bias convergence, a
 uv run python examples/04_ukf_basic_scenarios.py
 ```
 
-Compares sigma-point (UKF) vs Jacobian (EKF) approaches. **Verdict:** EKF wins 5/9 metrics and is 1-5× faster—start with EKF!
+Compares sigma-point (UKF) vs Jacobian (EKF) approaches. **Verdict:** EKF wins 6/9 metrics (UKF: 3/9). Under JIT-compiled JAX with warm dispatch, the wall-clock cost is comparable on these scenarios; on backends without JIT (per-step Python loops) UKF can be several times slower. Start with EKF and re-measure on your target backend.
 
 ### 3. Test Dropout Robustness
 
@@ -107,7 +107,41 @@ Shows how backward RTS smoothing achieves **3× drift reduction** on 5-second dr
 uv run python examples/08_qa_report_generation.py
 ```
 
-Creates a publication-quality PDF with all PRD metrics, NEES/NIS checks, and time series plots.
+Creates a publication-quality PDF with the full set of accuracy metrics, NEES/NIS consistency checks, and time-series plots.
+
+### Real Data With a YAML Config
+
+For SpikeGadgets/Trodes-style real data, use a session YAML instead of long per-file CLI flags:
+
+```yaml
+inputs:
+  format: spikegadgets_trodes
+  imu_file: path/to/imu.parquet
+  position_file: path/to/position.parquet
+camera:
+  meters_per_pixel: 0.0022
+filter:
+  state_mode: 2d_cam_6dof_imu_orientation
+  enable_experimental_accel_translation: false
+  use_gravity_orientation_update: true
+  use_mahalanobis_gating: false
+outputs:
+  output_dir: runs/session_001
+led_identity:
+  mode: auto
+  initial_state: auto
+```
+
+Run forward filtering or offline smoothing:
+
+```bash
+uv run trodestrack online --config session.yaml
+uv run trodestrack smooth --config session.yaml
+```
+
+The config loader supports prepared text arrays and SpikeGadgets IMU parquet plus Trodes dual-LED parquet. Real-data IMU-fused runs write loader/calibration diagnostics and run a vision-only plausibility check before accepting fused output; this roughly doubles filter runtime when `outputs.run_safety_checks: true`. The safety check gates trajectory envelope, speed, and fused-vs-vision position deviation. It requires enough dual-LED frames to estimate the camera midpoint envelope (`outputs.safety_min_dual_led_frames`, default `20`), while single-LED frames still contribute to fused-vs-vision deviation checks. Accelerometer-driven translation also requires stationary gravity to have a small horizontal component and camera/IMU acceleration axes to correlate above the configured thresholds. For tilted headstages, start with `2d_cam_6dof_imu_orientation` and leave accelerometer-driven translation disabled until the safety check passes. This validated default fuses 6-DOF IMU orientation with camera position; it does not claim accelerometer-driven position integration.
+
+See [`examples/session_spikegadgets_trodes.yaml`](examples/session_spikegadgets_trodes.yaml) for a runnable template with the real-data safety and LED-identity options spelled out. Set `led_identity.initial_state: original` or `swapped` when you know the first valid dual-LED frame's label convention; `auto` cannot infer a global all-session label reversal from continuity alone.
 
 ### Python API Examples
 
@@ -117,28 +151,36 @@ Creates a publication-quality PDF with all PRD metrics, NEES/NIS checks, and tim
 from trodestrack.sim.rat_imu import RatIMUSimConfig, simulate_rat_imu
 
 # Default config matches SpikeGadgets hardware (104 Hz IMU, realistic noise)
-config = RatIMUSimConfig(duration_s=10.0, seed=42)
-sim = simulate_rat_imu(config)
+config = RatIMUSimConfig(duration_s=10.0)
+sim = simulate_rat_imu(config, seed=42)  # seed is an arg of simulate_rat_imu
 ```
 
 #### Run EKF filter
 
 ```python
-from trodestrack.models.ekf import ekf_forward, EKFConfig, ekf_initialize_state
+from trodestrack.models.ekf import extended_kalman_filter, EKFConfig
 
-# Initialize from simulation
 cfg = EKFConfig()
-x0, P0 = ekf_initialize_state(sim, cfg)
-
-# Run filter
-fwd = ekf_forward(x0, P0, cfg, sim)
+result = extended_kalman_filter(
+    cfg,
+    sim["t_imu"],
+    sim["U_imu"],
+    sim["t_cam_exp"],
+    sim["Z_cam_led1"],
+    sim["Z_cam_led2"],
+    sim["mask_cam"],
+)
+# result.filtered_means: (N_cam, n_state)
+# result.filtered_covariances: (N_cam, n_state, n_state)
 ```
 
 #### Working with State Layouts (Recommended Pattern)
 
-TrodesTrack uses an explicit **state layout system** to eliminate hardcoded dimension assumptions and support multiple tracking modes (5D, 8D, 10D, 15D states). **Always use state layouts** instead of magic indices like `[:, 0:2]`.
+TrodesTrack uses an explicit **state layout system** to eliminate hardcoded dimension assumptions and support multiple tracking modes (5D, 8D, 10D, 14D, 15D, 16D states). **Always use state layouts** instead of magic indices like `[:, 0:2]`.
 
 ```python
+import numpy as np
+
 from trodestrack.models.ekf import extended_kalman_filter, EKFConfig
 from trodestrack.models.state_layout import get_layout
 from trodestrack.sim.simple import simulate_circular, SimpleSimConfig
@@ -147,21 +189,38 @@ from trodestrack.sim.simple import simulate_circular, SimpleSimConfig
 sim_config = SimpleSimConfig(duration_s=10.0)
 sim = simulate_circular(sim_config)
 ekf_config = EKFConfig()
-result = extended_kalman_filter(ekf_config, sim)
+result = extended_kalman_filter(
+    ekf_config,
+    sim["t_imu"],
+    sim["U_imu"],
+    sim["t_cam_exp"],
+    sim["Z_cam_led1"],
+    sim["Z_cam_led2"],
+    sim["mask_cam"],
+)
 
 # Get state layout from filter config (BEST PRACTICE!)
-layout = get_layout(ekf_config.state_mode)  # Usually "2d_full" (8D state)
+# EKFConfig defaults to "2d_cam_3d_imu" (10D: [x, y, vx, vy, vz, theta, biases...]).
+layout = get_layout(ekf_config.state_mode)
 
 # ✅ GOOD: Extract states using layout indices (dimension-agnostic)
-positions = result.filtered_means[:, layout.pos_idx]      # (N, 2) in meters
-velocities = result.filtered_means[:, layout.vel_idx]     # (N, 2) in m/s
-headings = result.filtered_means[:, layout.heading_idx]   # (N,) in radians
+positions = result.filtered_means[:, layout.pos_idx]      # (N, 2) for 2D layouts, (N, 3) for 3D
+velocities = result.filtered_means[:, layout.vel_idx]     # (N, 3) for 2d_cam_3d_imu, (N, 2) for 2d_full
+# Heading shape depends on layout: scalar yaw for 2D layouts, 3-tuple Euler
+# for 3d_euler, 4-tuple quaternion for 3d_quat / 3d_cam_6dof_imu /
+# 2d_cam_6dof_imu_orientation. Guard before treating as a 1D angle.
+heading_block = result.filtered_means[:, layout.heading_idx]
+if layout.has_heading_2d:
+    headings = heading_block.squeeze(-1) if heading_block.ndim == 2 else heading_block
+    # headings: (N,) yaw in radians
+else:
+    headings = heading_block  # (N, 3) Euler or (N, 4) quaternion components
 
 # ❌ BAD: Hardcoded indices (breaks when switching state modes!)
 # positions = result.filtered_means[:, 0:2]  # Fragile! Don't do this!
 
 # Extract uncertainties (covariances) using layout indices
-P = result.filtered_covariances                           # (N, 8, 8) full covariance
+P = result.filtered_covariances                           # (N, layout.n, layout.n)
 pos_cov = P[:, layout.pos_idx, :][:, :, layout.pos_idx] # (N, 2, 2) position covariance
 pos_std = np.sqrt(np.diagonal(pos_cov, axis1=1, axis2=2)) # (N, 2) position uncertainty
 
@@ -183,15 +242,17 @@ plt.show()
 
 | Layout String | Dimensions | State Vector | Use Case |
 |--------------|-----------|--------------|----------|
-| `"2d_full"` | 8D | `[x, y, vx, vy, θ, b_gz, b_ax, b_ay]` | Standard sensor fusion (camera + IMU) |
-| `"vision_only"` | 5D | `[x, y, vx, vy, θ]` | Camera-only tracking (no biases) |
-| `"2d_cam_3d_imu"` | 10D | `[x, y, vx, vy, vz, θ, b_gz, b_ax, b_ay, b_az]` | 2D camera with 3D accel (detect rearing) |
-| `"3d_euler"` | 15D | `[x, y, z, vx, vy, vz, roll, pitch, yaw, b_gx, b_gy, b_gz, b_ax, b_ay, b_az]` | Full 3D tracking with Euler angles |
-| `"3d_quat"` | 16D | `[x, y, z, vx, vy, vz, qw, qx, qy, qz, b_gx, b_gy, b_gz, b_ax, b_ay, b_az]` | Full 3D tracking with quaternions |
+| `"2d_cam_3d_imu"` | 10D | `[x, y, vx, vy, vz, θ, b_gz, b_ax, b_ay, b_az]` | **Default**: 2D camera with 3D accel (detect rearing) |
+| `"2d_full"` | 8D | `[x, y, vx, vy, θ, b_gz, b_ax, b_ay]` | Standard 2D sensor fusion (camera + 2-axis IMU) |
+| `"vision_only"` | 5D | `[x, y, vx, vy, θ]` | Camera-driven tracking, no IMU integration (the public APIs still require placeholder IMU timestamps/measurements; see `docs/user-guide/state-layouts.md`) |
+| `"2d_cam_6dof_imu_orientation"` | 14D | `[x, y, vx, vy, qw, qx, qy, qz, b_gx, b_gy, b_gz, b_ax, b_ay, b_az]` | Experimental: 2D camera + 6-DOF IMU with quaternion orientation |
+| `"3d_euler"` | 15D | `[x, y, z, vx, vy, vz, roll, pitch, yaw, b_gx, b_gy, b_gz, b_ax, b_ay, b_az]` | State vector for 3D pose with Euler-angle orientation. **No public entry point today** — the 2D `extended_kalman_filter` rejects 15D states and the 3D path requires `3d_cam_6dof_imu`. |
+| `"3d_quat"` | 16D | `[x, y, z, vx, vy, vz, qw, qx, qy, qz, b_gx, b_gy, b_gz, b_ax, b_ay, b_az]` | State vector for 3D pose with quaternion orientation. **UKF rejects quaternion layouts**; consume via the experimental `extended_kalman_filter_3d` using `"3d_cam_6dof_imu"` (same vector, distinct registration). |
+| `"3d_cam_6dof_imu"` | 16D | same as `"3d_quat"` | **Required** by the experimental `extended_kalman_filter_3d` entry point (3D LED observations + 6-channel IMU). This is the only registered mode that flows end-to-end through a 3D camera filter today. |
 
 **Why use state layouts?**
 
-1. **Dimension-agnostic code**: Works with 5D, 8D, 10D, 15D states without modification
+1. **Dimension-agnostic code**: Works with 5D, 8D, 10D, 14D, 15D, 16D states without modification
 2. **Self-documenting**: `layout.pos_idx` is clearer than `[:, 0:2]`
 3. **Robust to changes**: Switching state modes doesn't break your analysis code
 4. **Matches internal implementation**: Filters use the same layout system
@@ -201,16 +262,46 @@ See [`src/trodestrack/models/state_layout.py`](src/trodestrack/models/state_layo
 #### Generate QA report
 
 ```python
-from trodestrack.qa.report import generate_filter_report
+import numpy as np
+from trodestrack.models.state_layout import get_layout
+from trodestrack.qa.report import generate_qa_report
+from trodestrack.qa.metrics import compute_nees
 
-generate_filter_report(
-    states_fwd=fwd['x'],
-    states_truth=sim['x_truth'],
-    covariances=fwd['P'],
-    config=cfg,
-    output_path="report.pdf"
+layout = get_layout(ekf_config.state_mode)
+
+# Align ground truth (IMU rate, 5D [x, y, vx, vy, theta]) to camera frames.
+X_truth_at_cam = np.array(
+    [sim["X_truth"][np.argmin(np.abs(sim["t_imu"] - t_c))] for t_c in sim["t_cam_exp"]]
+)
+filtered = np.asarray(result.filtered_means)
+filtered_cov = np.asarray(result.filtered_covariances)
+
+# Layout-aware indexing handles every scalar-heading state mode.
+pos_idx = list(layout.pos_idx)
+vel_idx_2d = list(layout.vel_idx)[:2]  # X_truth has only vx, vy
+heading_col = int(layout.heading_idx)
+
+# Position-only NEES (state_dim=2): expected mean ~ 2 for a consistent filter.
+nees = compute_nees(
+    states_true=X_truth_at_cam[:, :2],
+    states_est=filtered[:, pos_idx],
+    covariances_est=filtered_cov[np.ix_(np.arange(filtered.shape[0]), pos_idx, pos_idx)],
+)
+generate_qa_report(
+    pdf_path="report.pdf",
+    t=sim["t_cam_exp"],
+    positions_true=X_truth_at_cam[:, :2],
+    positions_est=filtered[:, pos_idx],
+    velocities_true=X_truth_at_cam[:, 2:4],
+    velocities_est=filtered[:, vel_idx_2d],
+    headings_true=X_truth_at_cam[:, 4],
+    headings_est=filtered[:, heading_col],
+    nees=nees,
+    state_dim=2,
 )
 ```
+
+The CLI `trodestrack report` wraps this; see [`src/trodestrack/cli/report.py`](src/trodestrack/cli/report.py) for the full call site.
 
 ### Explore All Examples
 
@@ -247,15 +338,15 @@ See [`examples/README.md`](examples/README.md) for the complete learning path. E
 - ✅ **QA & Diagnostics** (M4)
   - Comprehensive metrics (RMSE, NEES, NIS, innovation statistics)
   - Publication-quality plots and multi-page PDF reports
-  - CLI tool: `trodestrack report --run run1/ --pdf report.pdf`
+  - CLI tool: `trodestrack report --run qa_inputs/ --pdf report.pdf` (consumes a separately-prepared QA-input directory; see `--help`)
   - Diagnostic videos with 9-panel filter state visualization
 - ✅ **Testing & Validation**
-  - 236+ unit, integration, and property tests (all passing)
-  - PRD acceptance criteria achieved:
+  - 700+ unit, integration, regression, and property tests across the suite. The default CI-style run uses `pytest -m "not slow and not benchmark"` and excludes long-running tests marked `slow` or `benchmark`. Invoke the excluded ones locally with `uv run pytest -m "slow or benchmark"`. Persistent LED-swap correction is covered by `test_persistent_swap_prefilter_recovers_led_identities` in `tests/filters/test_robustness.py`. Rerun `uv run pytest` for the current pass count — the absolute number drifts as tests are added.
+  - Accuracy and performance targets achieved on the simulated benchmark:
     - Position RMSE ≤ 2 cm ✓
     - Velocity RMSE ≤ 10 cm/s ✓
     - Heading RMSE ≤ 7° ✓
-    - Throughput: 316× realtime (CPU), latency: 0.11 ms/frame ✓
+    - Throughput-floor benchmarks (≥10× realtime offline on CPU, ≤33 ms amortized mean per frame online on a 30-minute session) live in [tests/benchmark/test_throughput.py](tests/benchmark/test_throughput.py); they are not part of the default CI matrix. Reference run on an M-series Mac CPU under the corrected (block-until-ready) timing: ~38× realtime / ~0.41 ms per frame; absolute throughput is hardware-dependent. These floors cover the synthetic 2D benchmark path, not the YAML real-data workflow with calibration, LED identity correction, and the extra vision-only safety pass.
 - ✅ **3D IMU Support** (M5)
   - Full 6-axis IMU processing (gyro + accel)
   - Gravity-aware dynamics with 3D acceleration
@@ -265,7 +356,7 @@ See [`examples/README.md`](examples/README.md) for the complete learning path. E
   - JIT-compiled UKF (mirrors EKF pattern)
   - Vectorized operations (sigma points, bias freeze)
   - Host-side preprocessing for efficiency
-  - 316× realtime speedup on 5-minute session
+  - On the 30-minute throughput benchmark, reference run on an M-series Mac CPU under the corrected (block-until-ready) timing: ~38× realtime / ~0.41 ms per frame. Floor checks (≥10× realtime offline, ≤33 ms amortized mean per frame online) live in [tests/benchmark/test_throughput.py](tests/benchmark/test_throughput.py); run them locally with `JAX_PLATFORMS=cpu uv run pytest -m benchmark` (the CPU pin is required to satisfy the in-test backend assertion).
 
 ### In Progress 🚧
 
@@ -274,22 +365,25 @@ See [`examples/README.md`](examples/README.md) for the complete learning path. E
   - DeepLabCut keypoint format
   - SpikeGadgets raw IMU format
 - 🚧 **CLI Tools**
-  - `trodestrack smooth --config session.yaml`
-  - `trodestrack online --config session.yaml`
+  - Additional real-data loaders beyond the current `--config` workflows
+    for prepared arrays and SpikeGadgets IMU parquet plus Trodes dual-LED
+    parquet. Both `trodestrack smooth --config session.yaml` and
+    `trodestrack online --config session.yaml` are available today; the
+    per-file flags remain supported for prepared arrays.
 
 ## Documentation
 
 ### User Documentation
 
-- **[Examples README](examples/README.md)** - Start here! Progressive learning path with 8 pedagogical examples
-- **[Tuning Guide](TUNING.md)** - NEES-based diagnostics and parameter selection (coming soon)
-- **[Troubleshooting Guide](TROUBLESHOOTING.md)** - Common filter failures and solutions (coming soon)
+- **[Examples README](examples/README.md)** - Start here! Progressive learning path with 9 pedagogical examples (01–08 plus 03b)
+- **[Tuning Guide](docs/TUNING.md)** - NEES-based diagnostics and parameter selection
+- **[Troubleshooting Guide](docs/TROUBLESHOOTING.md)** - Common filter failures and solutions
+- **[State Layouts](docs/user-guide/state-layouts.md)** - Available state modes and dimension-agnostic API
 
 ### Developer Documentation
 
-- [Product Requirements Document (PRD.md)](PRD.md) - Full project specification
 - [Development Guide (CLAUDE.md)](CLAUDE.md) - Commands and architecture
-- [Task Tracking (TASKS.md)](TASKS.md) - Current roadmap and completion status
+- [Implementation plans](docs/plans/) - Active milestone plans and superseded-plan notes
 
 ## Development
 
@@ -308,8 +402,8 @@ uv run mypy src/trodestrack --ignore-missing-imports
 # Linting
 uv run ruff check src/ tests/
 
-# Formatting
-uv run black src/ tests/
+# Formatting (Ruff is the project's formatter; see pyproject.toml [tool.ruff])
+uv run ruff format src/ tests/
 ```
 
 ### Development commands
@@ -325,9 +419,9 @@ trodestrack/
   runtime/      # Online filter API + offline smoother workflows
   qa/           # Metrics (RMSE, NEES, NIS), plots, PDF reports
   viz/          # Diagnostic videos with multi-panel state visualization
-  cli/          # CLI: trodestrack report (more commands coming)
-  io/           # Data loaders: Trodes, DLC, SpikeGadgets (coming soon)
-  config/       # Configuration schemas (coming soon)
+  cli/          # CLI: trodestrack online / smooth / report
+  io/           # Session loading, real-data safety checks, LED identity correction
+  config/       # YAML session configuration schemas
 ```
 
 ## Contributing
@@ -340,7 +434,7 @@ This project follows strict test-driven development (TDD) practices:
 4. Run tests until they pass
 5. Refactor for clarity
 
-See [PRD.md](PRD.md) for development guidelines and code style requirements.
+See [CLAUDE.md](CLAUDE.md) for development guidelines and code style requirements.
 
 ## Citation
 

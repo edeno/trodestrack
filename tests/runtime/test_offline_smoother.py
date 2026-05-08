@@ -11,7 +11,6 @@ Test strategy:
     - Verify smoothed covariances are smaller than filtered
 
 References:
-    - PRD.md Section 12: Algorithms & Implementation Notes
     - Särkkä (2013) "Bayesian Filtering and Smoothing", Algorithm 8.2 (RTS)
 """
 
@@ -20,6 +19,7 @@ import numpy as np
 import pytest
 
 from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
+from trodestrack.models.state_layout import get_layout
 from trodestrack.models.ukf import UKFConfig, unscented_kalman_filter
 from trodestrack.qa.metrics import compute_position_rmse
 from trodestrack.runtime.offline import rts_smoother, sigma_point_smoother
@@ -114,12 +114,17 @@ class TestRTSSmoother:
             t_cam=sim["t_cam_exp"],
         )
 
-        # Check final gyro bias estimate (index 5)
+        # Check final gyro bias estimate. Resolve the index from the
+        # actual EKFConfig layout — under the default 10D 2d_cam_3d_imu
+        # layout, b_gz is at index 6 (index 5 is the heading), so reading
+        # column 5 silently validated heading instead of bias.
+        layout = get_layout(cfg.state_mode)
+        b_gz_idx = layout.bias_gyro_idx[0]
         true_bias = float(
             sim["bias_gyro"][0]
         )  # rad/s (constant bias, take first element)
-        filtered_bias = float(filter_result.filtered_means[-1, 5])
-        smoothed_bias = float(smoother_result.smoothed_means[-1, 5])
+        filtered_bias = float(filter_result.filtered_means[-1, b_gz_idx])
+        smoothed_bias = float(smoother_result.smoothed_means[-1, b_gz_idx])
 
         bias_error_filter = abs(filtered_bias - true_bias)
         bias_error_smoother = abs(smoothed_bias - true_bias)

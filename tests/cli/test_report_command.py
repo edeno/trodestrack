@@ -188,3 +188,88 @@ class TestReportCommand:
         finally:
             if pdf_path.exists():
                 pdf_path.unlink()
+
+    def test_report_command_nis_without_measurement_dim_errors(
+        self, mock_run_directory: Path
+    ) -> None:
+        """``trodestrack report`` must reject ``nis.npy`` without
+        ``measurement_dim.txt`` instead of silently defaulting df=4.
+
+        The chi-square consistency bounds and "% in bounds" depend on
+        ``measurement_dim`` (df=2 for position-only NIS, df=4 for
+        dual-LED, etc.). Silently defaulting to 4 produced a
+        successful run with potentially-wrong bounds — masking real
+        consistency violations on non-dual-LED layouts.
+        """
+        np.save(
+            mock_run_directory / "nis.npy",
+            np.random.chisquare(df=2, size=200),
+        )
+        assert not (mock_run_directory / "measurement_dim.txt").exists()
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+            pdf_path = Path(f.name)
+
+        try:
+            result = subprocess.run(
+                [
+                    "uv",
+                    "run",
+                    "trodestrack",
+                    "report",
+                    "--run",
+                    str(mock_run_directory),
+                    "--pdf",
+                    str(pdf_path),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode != 0, (
+                f"Expected non-zero exit on missing measurement_dim.txt, "
+                f"got {result.returncode}; stderr={result.stderr!r}"
+            )
+            assert "measurement_dim.txt" in result.stderr, (
+                f"Expected stderr to mention measurement_dim.txt; got {result.stderr!r}"
+            )
+            # Report should NOT have been written.
+            assert pdf_path.stat().st_size == 0
+        finally:
+            if pdf_path.exists():
+                pdf_path.unlink()
+
+    def test_report_command_nis_with_measurement_dim_succeeds(
+        self, mock_run_directory: Path
+    ) -> None:
+        """Providing ``measurement_dim.txt`` alongside ``nis.npy`` must work."""
+        np.save(
+            mock_run_directory / "nis.npy",
+            np.random.chisquare(df=2, size=200),
+        )
+        (mock_run_directory / "measurement_dim.txt").write_text("2")
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+            pdf_path = Path(f.name)
+
+        try:
+            result = subprocess.run(
+                [
+                    "uv",
+                    "run",
+                    "trodestrack",
+                    "report",
+                    "--run",
+                    str(mock_run_directory),
+                    "--pdf",
+                    str(pdf_path),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode == 0, (
+                f"Expected zero exit with measurement_dim=2; stderr={result.stderr!r}"
+            )
+            assert pdf_path.exists() and pdf_path.stat().st_size > 0
+        finally:
+            if pdf_path.exists():
+                pdf_path.unlink()

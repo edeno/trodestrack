@@ -4,16 +4,21 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 from trodestrack.models.ekf import EKFConfig, EKFState
 from trodestrack.models.filter_common import (
     FilterCoreConfig,
     FilterState,
+    camera_stationary_zupt_gate_2d,
     gravity_compensate,
+    imu_stationary_zupt_gate,
     initialize_state,
     rotate_body_accel_to_world,
     update_zupt,
+    update_zupt_visual_context,
 )
+from trodestrack.models.state_layout import get_layout
 from trodestrack.models.ukf import UKFConfig, UKFState
 
 
@@ -50,6 +55,10 @@ def test_filter_core_config_defaults_match_existing_configs() -> None:
         "enable_zupt",
         "zupt_velocity_threshold",
         "zupt_measurement_noise",
+        "zupt_gyro_threshold_rad_s",
+        "zupt_accel_threshold_m_s2",
+        "zupt_camera_stationary_window_frames",
+        "zupt_visual_context_hold_frames",
     ]
 
     for field in shared_fields:
@@ -113,6 +122,171 @@ def test_update_zupt_accepts_filter_configs() -> None:
     state_ukf, log_lik_ukf = update_zupt(state, ukf_config)
     assert isinstance(state_ukf, FilterState)
     assert bool(jnp.isfinite(log_lik_ukf))
+
+
+def test_update_zupt_disabled_is_exact_noop_with_large_covariance() -> None:
+    mean = jnp.array([0.0, 0.0, 10.0, -5.0, 0.0, 0.0, 0.0, 0.0])
+    cov = jnp.eye(8) * 1e6
+    state = FilterState(mean=mean, cov=cov)
+
+    posterior, log_lik = update_zupt(
+        state,
+        EKFConfig(enable_zupt=False, state_mode="2d_full"),
+    )
+
+    np.testing.assert_allclose(posterior.mean, mean)
+    np.testing.assert_allclose(posterior.cov, cov)
+    assert float(log_lik) == 0.0
+
+
+def test_update_zupt_inactive_is_exact_noop_with_large_covariance() -> None:
+    mean = jnp.zeros(8)
+    cov = jnp.eye(8) * 1e6
+    state = FilterState(mean=mean, cov=cov)
+
+    posterior, log_lik = update_zupt(
+        state,
+        EKFConfig(enable_zupt=True, zupt_velocity_threshold=0.05, state_mode="2d_full"),
+        active=False,
+    )
+
+    np.testing.assert_allclose(posterior.mean, mean)
+    np.testing.assert_allclose(posterior.cov, cov)
+    assert float(log_lik) == 0.0
+
+
+def test_update_zupt_active_corrects_large_velocity_state() -> None:
+    """Stationarity is caller-gated; an active ZUPT corrects bad velocity."""
+
+    mean = jnp.array([0.0, 0.0, 10.0, -5.0, 0.0, 0.0, 0.0, 0.0])
+    cov = jnp.eye(8) * 1e6
+    state = FilterState(mean=mean, cov=cov)
+
+    posterior, log_lik = update_zupt(
+        state,
+        EKFConfig(
+            enable_zupt=True,
+            zupt_velocity_threshold=0.02,
+            state_mode="2d_full",
+        ),
+    )
+
+    assert np.linalg.norm(np.asarray(posterior.mean[2:4])) < 1e-3
+    assert float(log_lik) != 0.0
+
+
+def test_imu_stationary_zupt_gate_uses_measured_imu_quietness() -> None:
+    layout = get_layout("2d_full")
+    quiet = jnp.array(
+        [
+            [0.001, 0.02, -0.01],
+            [-0.001, -0.02, 0.01],
+        ]
+    )
+    valid = jnp.array([True, True])
+    config = EKFConfig(
+        zupt_gyro_threshold_rad_s=0.02,
+        zupt_accel_threshold_m_s2=0.2,
+    )
+
+    assert bool(imu_stationary_zupt_gate(quiet, valid, config, layout))
+
+    rotating = quiet.at[:, 0].set(0.1)
+    assert not bool(imu_stationary_zupt_gate(rotating, valid, config, layout))
+
+    accelerating = quiet.at[:, 1].set(1.0)
+    assert not bool(imu_stationary_zupt_gate(accelerating, valid, config, layout))
+
+
+def test_camera_stationary_zupt_gate_uses_visual_speed_not_state_speed() -> None:
+    config = EKFConfig(zupt_velocity_threshold=0.05)
+    t_cam = jnp.arange(12, dtype=jnp.float32) / 30.0
+    stationary = jnp.zeros((12, 2), dtype=jnp.float32)
+    moving = jnp.column_stack([0.2 * t_cam, jnp.zeros_like(t_cam)])
+    offset = jnp.array([0.04, 0.0], dtype=jnp.float32)
+    mask = jnp.ones((12,), dtype=bool)
+
+    valid, is_stationary = camera_stationary_zupt_gate_2d(
+        t_cam,
+        stationary,
+        stationary + offset,
+        mask,
+        jnp.asarray(11),
+        config,
+    )
+    assert bool(valid)
+    assert bool(is_stationary)
+
+    valid, is_stationary = camera_stationary_zupt_gate_2d(
+        t_cam,
+        moving,
+        moving + offset,
+        mask,
+        jnp.asarray(11),
+        config,
+    )
+    assert bool(valid)
+    assert not bool(is_stationary)
+
+
+def test_update_zupt_visual_context_expires_after_configured_dropout_hold() -> None:
+    config = EKFConfig(zupt_visual_context_hold_frames=2)
+    age = jnp.asarray(7, dtype=jnp.int32)
+
+    context, age = update_zupt_visual_context(
+        jnp.asarray(True),
+        jnp.asarray(True),
+        jnp.asarray(False),
+        age,
+        config,
+    )
+    assert bool(context)
+    assert int(age) == 0
+
+    context, age = update_zupt_visual_context(
+        jnp.asarray(False),
+        jnp.asarray(False),
+        context,
+        age,
+        config,
+    )
+    assert bool(context)
+    assert int(age) == 1
+
+    context, age = update_zupt_visual_context(
+        jnp.asarray(False),
+        jnp.asarray(False),
+        context,
+        age,
+        config,
+    )
+    assert bool(context)
+    assert int(age) == 2
+
+    context, age = update_zupt_visual_context(
+        jnp.asarray(False),
+        jnp.asarray(False),
+        context,
+        age,
+        config,
+    )
+    assert not bool(context)
+    assert int(age) == 3
+
+
+def test_update_zupt_visual_context_zero_hold_does_not_carry_dropout() -> None:
+    config = EKFConfig(zupt_visual_context_hold_frames=0)
+
+    context, age = update_zupt_visual_context(
+        jnp.asarray(False),
+        jnp.asarray(False),
+        jnp.asarray(True),
+        jnp.asarray(0, dtype=jnp.int32),
+        config,
+    )
+
+    assert not bool(context)
+    assert int(age) == 1
 
 
 # =============================================================================
@@ -235,3 +409,68 @@ def test_gravity_compensate_returns_jax_array() -> None:
     accel_compensated = gravity_compensate(accel_world)
 
     assert isinstance(accel_compensated, jnp.ndarray)
+
+
+def test_filter_core_config_bool_fields_require_strict_bool() -> None:
+    """Bool toggles in FilterCoreConfig must reject non-bool values.
+
+    Plain truthiness silently accepts ``"False"`` (truthy), integers,
+    and lists. The values later flow into JAX boolean ops (``&`` /
+    ``lax.cond``) and either silently take the wrong branch or crash
+    deep in JAX with ``TypeError: unsupported operand type(s) for &:
+    'str' and 'jaxlib.xla_extension.ArrayImpl'``. CLI / YAML / env
+    loaders are an obvious source — require ``bool`` exactly.
+    """
+    bool_fields = (
+        "use_mahalanobis_gating",
+        "use_heading_measurement",
+        "adaptive_heading_noise",
+        "adaptive_q_during_dropout",
+        "freeze_bias_during_blackout",
+        "reduce_imu_noise_during_blackout",
+        "enable_experimental_accel_translation",
+        "use_gravity_orientation_update",
+        "enable_zupt",
+    )
+    for fname in bool_fields:
+        for bad in ("False", "True", 1, 0, [1]):
+            with pytest.raises(ValueError, match=rf"{fname} must be a Python"):
+                FilterCoreConfig(**{fname: bad})
+
+    # Subclasses inherit the gate.
+    with pytest.raises(ValueError, match=r"use_heading_measurement must be a Python"):
+        EKFConfig(use_heading_measurement="False")
+    with pytest.raises(ValueError, match=r"use_heading_measurement must be a Python"):
+        UKFConfig(use_heading_measurement="False")
+
+    # True / False still accepted on the parent and the subclasses.
+    FilterCoreConfig(use_heading_measurement=True)
+    FilterCoreConfig(use_heading_measurement=False)
+    EKFConfig(use_heading_measurement=True)
+    UKFConfig(use_heading_measurement=False)
+
+
+def test_filter_core_config_disables_zupt_for_vision_only() -> None:
+    """ZUPT needs IMU stationarity evidence and is not valid in vision-only mode."""
+
+    core = FilterCoreConfig(state_mode="vision_only")
+    ekf = EKFConfig(state_mode="vision_only")
+    ukf = UKFConfig(state_mode="vision_only")
+    explicit = EKFConfig(state_mode="vision_only", enable_zupt=True)
+
+    assert core.enable_zupt is False
+    assert ekf.enable_zupt is False
+    assert ukf.enable_zupt is False
+    assert explicit.enable_zupt is False
+
+
+def test_filter_core_config_rejects_invalid_zupt_visual_hold_frames() -> None:
+    for bad in (-1, 1.5, "2"):
+        with pytest.raises(
+            ValueError,
+            match=r"zupt_visual_context_hold_frames must be a non-negative integer",
+        ):
+            FilterCoreConfig(zupt_visual_context_hold_frames=bad)
+
+    FilterCoreConfig(zupt_visual_context_hold_frames=0)
+    FilterCoreConfig(zupt_visual_context_hold_frames=3)

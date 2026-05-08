@@ -18,25 +18,27 @@ CONTEXT:
   2. docs/presentation/PROGRESS_REPORT.md (what's done, what's remaining)
   3. docs/presentation/TASKS.md (step-by-step checklist)
   4. .claude/docs/PRD.md (package requirements and specs)
-  5. .claude/docs/CLAUDE.md (development commands and workflow)
+  5. CLAUDE.md (project root — development commands and workflow)
 
-WHAT'S ALREADY DONE:
+WHAT'S ALREADY DONE (see "File Paths Reference" below for the authoritative
+list, but as of this writing):
 - ✅ Complete 43-slide outline with pedagogical design
-- ✅ 3 IMU physics visuals generated (slides 5A, 5B, 5C)
-- ✅ Working code template: docs/presentation/code/generate_slide05abc_imu_physics.py
+- ✅ Generators shipped for slides 3, 5A/5B/5C, 8, 12, 14, 16, and 21
+- ✅ build_presentation.py assembles the .pptx end-to-end
 - ✅ Folder structure created in docs/presentation/
+- ⏳ Generators NOT yet shipped: slide 2 (failure modes) and slide 18
+  (9-panel diagnostic). Those slides currently render as bullet content
+  in build_presentation.py and are the only Phase-1 visual gaps.
 
 YOUR TASK:
-Continue generating visuals following TASKS.md Phase 1 checklist. Start with the easiest:
+Pick up the remaining gaps. The outstanding generators are:
 
-1. Slide 3: Trajectory comparison (ground truth vs noisy vision-only)
-2. Slide 21: NEES histogram
-3. Slide 18: 9-panel diagnostic screenshot
-4. Slide 14: Uncertainty evolution (covariance ellipses)
-5. Slide 16: Smoother comparison (3 algorithms on dropout)
-6. Slide 2: Failure modes grid (occlusion, reflection, blur, dim)
-7. Slide 12: IMU integration visualization
-8. Slide 8: Before/after video (10s, split-screen)
+1. Slide 2: Failure modes grid (occlusion, reflection, blur, dim)
+2. Slide 18: 9-panel diagnostic screenshot
+
+For everything else under "WHAT'S ALREADY DONE", regenerate locally only
+if you actually need to (the .pptx and .mp4 are gitignored — see the
+project README for the rebuild commands).
 
 IMPORTANT TECHNICAL DETAILS:
 - Use the simulator: from trodestrack.sim.rat_imu import simulate_rat_imu, RatIMUSimConfig
@@ -119,23 +121,35 @@ Use pedagogical best practices: concrete examples before abstract concepts, anal
 ```
 docs/presentation/
 ├── PRESENTATION_OUTLINE.md          # 43-slide detailed outline
-├── PROGRESS_REPORT.md               # Status update (11% complete)
+├── PROGRESS_REPORT.md               # Status update (see file for current numbers)
 ├── TASKS.md                         # Step-by-step checklist
 ├── HANDOFF_PROMPT.md                # This file
 │
-├── visuals/                         # Generated images (3/20+ so far)
+├── visuals/                         # Generated images (8 PNGs shipped today)
+│   ├── slide03_trajectory_comparison.png   ✅
 │   ├── slide05a_accelerometer_physics.png  ✅
 │   ├── slide05b_gyroscope_physics.png      ✅
 │   ├── slide05c_bias_correction.png        ✅
-│   └── [15+ more to generate]
+│   ├── slide12_imu_integration.png         ✅
+│   ├── slide14_uncertainty.png             ✅
+│   ├── slide16_smoother_comparison.png     ✅
+│   └── slide21_nees_histogram.png          ✅
+│   (slide02_failure_modes.png and slide18_diagnostic_panel.png deferred;
+│    those slides currently render as bullet content in build_presentation.py.)
 │
-├── videos/                          # Video files (0/2 so far)
-│   ├── slide08_beforeafter.mp4      ⏳
-│   └── slide12_integration.mp4      ⏳ (optional)
+├── videos/                          # 1 MP4 shipped
+│   └── slide08_beforeafter.mp4      ✅
 │
-└── code/                            # Generation scripts
-    ├── generate_slide05abc_imu_physics.py  ✅ (458 lines, working)
-    └── [8+ more to create]
+└── code/                            # 7 generator scripts shipped
+    ├── generate_slide03_trajectory_comparison.py ✅
+    ├── generate_slide05abc_imu_physics.py        ✅
+    ├── generate_slide08_beforeafter_video.py     ✅
+    ├── generate_slide12_imu_integration.py       ✅
+    ├── generate_slide14_uncertainty.py           ✅
+    ├── generate_slide16_smoother.py              ✅
+    └── generate_slide21_nees.py                  ✅
+    (generate_slide02_failure_modes.py and generate_slide18_diagnostic.py
+     deferred — see corresponding slides in build_presentation.py.)
 ```
 
 ---
@@ -230,9 +244,12 @@ plt.close()
 from trodestrack.viz import create_diagnostic_video
 
 video_path = create_diagnostic_video(
-    sim_data=sim,
-    filter_result=result,
-    output_path="docs/presentation/videos/slideXX_name.mp4",
+    sim,                                                 # SimOut (positional)
+    "docs/presentation/videos/slideXX_name.mp4",         # output_path (positional)
+    filter_results=result,                               # plural; takes EKFResult/EKF3DResult
+    state_mode=cfg.state_mode,                           # required when filter_results is set;
+                                                         # resolves heading and bias indices
+                                                         # for the filter overlay
     fps=30,
     speedup=1.0,        # Realtime
     time_window_s=2.0,  # Show 2s of history
@@ -408,9 +425,11 @@ uv run python -c "from trodestrack.models.ekf import extended_kalman_filter; pri
 
 ---
 
-**Last Updated**: 2025-10-18
-**Status**: 11% complete (3/28 visuals done)
-**Next Task**: Generate Slide 3 (trajectory comparison)
+**Last Updated**: see git log for the most recent presentation-tree change.
+**Status**: 8 PNGs shipped + 1 MP4 + 7 generator scripts; slides 2 (failure
+modes) and 18 (9-panel diagnostic) currently render as bullet content.
+**Next Task**: write generator scripts for slides 2 and 18 to upgrade them
+from bullet content to full-image slides.
 
 ---
 

@@ -26,6 +26,35 @@ if TYPE_CHECKING:
 from trodestrack.models.state_layout import get_heading_index
 
 
+def validate_bool_mask_dtype(
+    mask: NDArray[np.generic],
+    name: str = "valid_mask",
+) -> NDArray[np.bool_]:
+    """Coerce ``mask`` to bool only after confirming it is bool-or-0/1.
+
+    A bare ``np.asarray(mask).astype(bool)`` silently turns ``NaN`` and any
+    nonzero integer (e.g. ``2``, ``-1``) into ``True``, so a corrupted
+    mask passes through every downstream "treat True as valid" branch.
+    Reject anything that isn't strictly ``np.bool_`` or an integer mask
+    whose values lie in ``{0, 1}``.
+
+    Lives in ``qa.metrics`` rather than ``qa.plots`` because
+    ``qa.plots`` already imports from ``qa.metrics`` (for ``chi2_bounds``);
+    keeping this helper here lets ``qa.metrics``,
+    ``qa.imu_calibration`` and ``qa.plots`` all reuse the same gate
+    without a circular import.
+    """
+
+    arr = np.asarray(mask)
+    if arr.dtype != np.bool_ and not (
+        np.issubdtype(arr.dtype, np.integer) and np.all(np.isin(arr, (0, 1)))
+    ):
+        raise ValueError(
+            f"{name} must be boolean or 0/1 integer; got dtype {arr.dtype!r}."
+        )
+    return arr.astype(bool)
+
+
 def compute_position_rmse(
     positions_true: NDArray[np.float64],
     positions_est: NDArray[np.float64],
@@ -67,8 +96,12 @@ def compute_position_rmse(
             f"Shape mismatch: true {positions_true.shape} vs est {positions_est.shape}"
         )
 
-    if positions_true.shape[1] != 2:
-        raise ValueError(f"Expected 2D positions, got shape {positions_true.shape}")
+    # Check ndim before indexing shape[1] — a 1-D input would otherwise
+    # raise IndexError instead of the documented ValueError.
+    if positions_true.ndim != 2 or positions_true.shape[1] != 2:
+        raise ValueError(
+            f"Expected positions of shape (N, 2); got shape {positions_true.shape}."
+        )
 
     # Build validity mask: finite values + optional user-provided mask
     valid = np.isfinite(positions_true).all(axis=1) & np.isfinite(positions_est).all(
@@ -79,7 +112,17 @@ def compute_position_rmse(
             raise ValueError(
                 f"Mask shape {valid_mask.shape} incompatible with positions {positions_true.shape}"
             )
-        valid &= valid_mask
+        # Reject non-bool / non-0-or-1-integer / non-1D masks before the
+        # ``valid &= valid_mask`` AND. A float ``0.0/1.0`` mask raises a
+        # raw NumPy TypeError; a stray integer ``2`` silently coerces
+        # to True; a ``(N, 1)`` bool mask broadcasts incorrectly. Mirror
+        # the gate already used by ``compute_dropout_drift`` /
+        # ``qa.plots`` / ``qa.imu_calibration``.
+        if valid_mask.ndim != 1:
+            raise ValueError(
+                f"valid_mask must be 1-D (N,); got shape {valid_mask.shape}."
+            )
+        valid &= validate_bool_mask_dtype(valid_mask, name="valid_mask")
 
     if not np.any(valid):
         raise ValueError("No valid samples remaining after masking and NaN filtering")
@@ -127,8 +170,12 @@ def compute_velocity_rmse(
             f"Shape mismatch: true {velocities_true.shape} vs est {velocities_est.shape}"
         )
 
-    if velocities_true.shape[1] != 2:
-        raise ValueError(f"Expected 2D velocities, got shape {velocities_true.shape}")
+    # Check ndim before indexing shape[1] — a 1-D input would otherwise
+    # raise IndexError instead of the documented ValueError.
+    if velocities_true.ndim != 2 or velocities_true.shape[1] != 2:
+        raise ValueError(
+            f"Expected velocities of shape (N, 2); got shape {velocities_true.shape}."
+        )
 
     # Build validity mask: finite values + optional user-provided mask
     valid = np.isfinite(velocities_true).all(axis=1) & np.isfinite(velocities_est).all(
@@ -139,7 +186,13 @@ def compute_velocity_rmse(
             raise ValueError(
                 f"Mask shape {valid_mask.shape} incompatible with velocities {velocities_true.shape}"
             )
-        valid &= valid_mask
+        # Same dtype + 1-D contract as compute_position_rmse — see comment
+        # there for why the bare ``valid &= valid_mask`` is unsafe.
+        if valid_mask.ndim != 1:
+            raise ValueError(
+                f"valid_mask must be 1-D (N,); got shape {valid_mask.shape}."
+            )
+        valid &= validate_bool_mask_dtype(valid_mask, name="valid_mask")
 
     if not np.any(valid):
         raise ValueError("No valid samples remaining after masking and NaN filtering")
@@ -189,8 +242,19 @@ def compute_heading_error(
     diff = headings_true - headings_est
     diff_wrapped = np.arctan2(np.sin(diff), np.cos(diff))
 
-    # Mean absolute error in radians (SI unit)
-    mae_rad = np.mean(np.abs(diff_wrapped))
+    # Mean absolute error in radians (SI unit). Drop non-finite samples so
+    # a single NaN/inf in either input does not poison the summary —
+    # compute_position_rmse and compute_velocity_rmse already filter NaNs,
+    # and the QA report relies on that contract for both surfaces. Match
+    # those helpers and raise if no finite samples remain so the QA
+    # report can't silently embed a NaN heading metric.
+    finite = np.isfinite(diff_wrapped)
+    if not np.any(finite):
+        raise ValueError(
+            "No valid samples remaining after NaN filtering in heading "
+            "MAE; both inputs must share at least one finite-paired sample."
+        )
+    mae_rad = np.mean(np.abs(diff_wrapped[finite]))
 
     return float(mae_rad)
 
@@ -232,8 +296,18 @@ def compute_heading_rmse(
     diff = headings_true - headings_est
     diff_wrapped = np.arctan2(np.sin(diff), np.cos(diff))
 
-    # Root mean square error in radians
-    rmse_rad = np.sqrt(np.mean(diff_wrapped**2))
+    # Root mean square error in radians. Drop non-finite samples so a
+    # single NaN/inf in either input does not poison the summary; match
+    # compute_position_rmse / compute_velocity_rmse and raise if no
+    # finite-paired sample remains so the QA report can't silently embed
+    # a NaN heading RMSE.
+    finite = np.isfinite(diff_wrapped)
+    if not np.any(finite):
+        raise ValueError(
+            "No valid samples remaining after NaN filtering in heading "
+            "RMSE; both inputs must share at least one finite-paired sample."
+        )
+    rmse_rad = np.sqrt(np.mean(diff_wrapped[finite] ** 2))
 
     return float(rmse_rad)
 
@@ -292,17 +366,33 @@ def compute_nees(
         >>> nees = compute_nees(X_truth, X_est, P_est, heading_idx=4)
 
     Notes:
-        For a D-dimensional state, NEES ~ chi^2(D) if filter is consistent.
-        - 95% confidence interval for D=5: [1.145, 11.07]
-        - 95% confidence interval for D=8: [2.733, 15.51]
+        For a D-dimensional state, NEES ~ chi^2(D) if the filter is consistent.
+        Central 95% intervals (chi2.ppf at 0.025 / 0.975), matching the
+        helper in :func:`get_chi2_confidence_interval`:
+
+        - D=5:  [0.8312, 12.8325]
+        - D=8:  [2.1797, 17.5345]
+        - D=10: [3.2470, 20.4832]
+        - D=14: [5.6287, 26.1189]
+        - D=15: [6.2621, 27.4884]
+        - D=16: [6.9077, 28.8454]
 
         If NEES is consistently outside this range, the filter is either:
         - Over-confident (NEES too high): covariance underestimated
         - Under-confident (NEES too low): covariance overestimated
 
-        **Important**: For states containing heading/orientation angles, always
-        pass the ``layout`` parameter to ensure proper angle wrapping. Without this,
-        NEES values will be incorrectly large when angles wrap through 0°/360°.
+        **Heading / orientation handling.** When ``layout`` describes a
+        scalar 2D heading (``layout.has_heading_2d``), this function
+        wraps the heading-component residual to ``[-π, π]`` so the NEES
+        is not inflated by 0°/360° wraparound. For 3D-orientation
+        layouts (Euler tuples or quaternions, i.e. ``layout.heading_idx``
+        is a 3- or 4-tuple), no orientation residual handling is
+        applied — the orientation components enter the residual
+        unwrapped, which is generally only meaningful when truth and
+        estimate are referenced to the same parameterization without
+        sign flips. Treat 3D NEES from this helper as an approximate
+        diagnostic, not a calibrated chi-square test, and prefer
+        per-component diagnostics for 3D orientation.
     """
     if states_true.shape != states_est.shape:
         raise ValueError(
@@ -428,6 +518,26 @@ def compute_nis(
     return nis
 
 
+def _validate_finite_1d_samples(values: NDArray[np.float64], name: str) -> None:
+    """Reject empty or non-finite-only sample arrays for QA stats helpers.
+
+    Common precondition for ``compute_nees_stats`` / ``compute_nis_stats``
+    / ``within_envelope`` — np.mean / std / min / max return NaN/inf on
+    these inputs, and the QA report would silently embed a misleading
+    summary.
+    """
+    arr = np.asarray(values)
+    if arr.ndim != 1:
+        raise ValueError(f"{name} must be 1D, got shape {arr.shape}.")
+    if arr.size == 0:
+        raise ValueError(f"{name} must have at least one sample, got an empty array.")
+    finite = np.isfinite(arr)
+    if not np.any(finite):
+        raise ValueError(
+            f"{name} contains no finite samples (all NaN/inf); cannot summarize."
+        )
+
+
 def compute_nis_stats(
     nis: NDArray[np.float64],
     measurement_dim: int,
@@ -469,16 +579,19 @@ def compute_nis_stats(
         >>> stats["pct_in_bounds"] > 90.0
         True
     """
+    _validate_finite_1d_samples(nis, name="nis")
+    nis_finite = np.asarray(nis)[np.isfinite(nis)]
+
     lower, upper = chi2_bounds(df=measurement_dim, confidence=confidence)
     pct_in_bounds = (
-        within_envelope(nis, df=measurement_dim, confidence=confidence) * 100.0
+        within_envelope(nis_finite, df=measurement_dim, confidence=confidence) * 100.0
     )
 
     return {
-        "mean": float(np.mean(nis)),
-        "std": float(np.std(nis)),
-        "min": float(np.min(nis)),
-        "max": float(np.max(nis)),
+        "mean": float(np.mean(nis_finite)),
+        "std": float(np.std(nis_finite)),
+        "min": float(np.min(nis_finite)),
+        "max": float(np.max(nis_finite)),
         "chi2_lower": float(lower),
         "chi2_upper": float(upper),
         "pct_in_bounds": float(pct_in_bounds),
@@ -529,9 +642,22 @@ def compute_residual_autocorrelation(
         - Significant ACF[1] indicates lag-1 correlation (most common issue)
         - 95% confidence bounds: ± 1.96 / sqrt(N) for large N
     """
+    if not isinstance(max_lag, int) or max_lag < 0:
+        raise ValueError(f"max_lag must be a non-negative integer; got {max_lag!r}.")
+
     if residuals.ndim == 1:
         # Univariate residuals
         N = len(residuals)
+        # Need at least max_lag + 2 samples so the slices residuals[:N-lag]
+        # and residuals[lag:] are both non-empty *and* the variance is well
+        # defined (var uses ddof=1). Without this, lag=N produces an empty
+        # slice (NaN) and lag>N raises an opaque broadcasting error.
+        if max_lag >= N:
+            raise ValueError(
+                f"max_lag ({max_lag}) must be < N ({N}); residuals have "
+                "too few samples to compute autocorrelation at the "
+                "requested lag. Reduce max_lag or supply a longer series."
+            )
         mean = np.mean(residuals)
         var = np.var(residuals, ddof=1)
 
@@ -601,14 +727,19 @@ def compute_nees_stats(
         >>> stats["pct_in_bounds"] > 90.0
         True
     """
+    _validate_finite_1d_samples(nees, name="nees")
+    nees_finite = np.asarray(nees)[np.isfinite(nees)]
+
     lower, upper = chi2_bounds(df=state_dim, confidence=confidence)
-    pct_in_bounds = within_envelope(nees, df=state_dim, confidence=confidence) * 100.0
+    pct_in_bounds = (
+        within_envelope(nees_finite, df=state_dim, confidence=confidence) * 100.0
+    )
 
     return {
-        "mean": float(np.mean(nees)),
-        "std": float(np.std(nees)),
-        "min": float(np.min(nees)),
-        "max": float(np.max(nees)),
+        "mean": float(np.mean(nees_finite)),
+        "std": float(np.std(nees_finite)),
+        "min": float(np.min(nees_finite)),
+        "max": float(np.max(nees_finite)),
         "chi2_lower": float(lower),
         "chi2_upper": float(upper),
         "pct_in_bounds": float(pct_in_bounds),
@@ -650,6 +781,18 @@ def chi2_bounds(df: int, confidence: float = 0.95) -> tuple[float, float]:
         For NEES/NIS consistency checks, approximately `confidence*100`% of
         values should fall within this interval if the filter is well-calibrated.
     """
+    # scipy.stats.chi2.ppf returns NaN for df <= 0, which the QA report
+    # would otherwise embed as nan chi2_lower / chi2_upper / 0% in_bounds
+    # entries. Reject up front with a precise message.
+    if not isinstance(df, (int, np.integer)) or df < 1:
+        raise ValueError(
+            f"df must be a positive integer (degrees of freedom); got {df!r}."
+        )
+    if not np.isfinite(confidence) or not (0.0 < confidence < 1.0):
+        raise ValueError(
+            f"confidence must be a finite value in (0, 1); got {confidence!r}."
+        )
+
     from scipy.stats import chi2
 
     alpha = 1.0 - confidence
@@ -734,33 +877,47 @@ def within_envelope(
         For a well-calibrated filter, approximately `confidence*100`% of NEES
         or NIS values should fall within the chi-squared confidence envelope.
         Significant deviations indicate filter miscalibration:
-        - Too many outside upper bound → underconfident filter (P too large)
-        - Too many outside lower bound → overconfident filter (P too small)
+        - Too many outside upper bound → overconfident filter (P too small);
+          actual error² is larger than the covariance reports
+        - Too many outside lower bound → underconfident filter (P too large);
+          actual error² is smaller than the covariance reports
     """
+    _validate_finite_1d_samples(values, name="values")
+    values_finite = np.asarray(values)[np.isfinite(values)]
+
     lower, upper = chi2_bounds(df=df, confidence=confidence)
-    within_bounds = (values >= lower) & (values <= upper)
+    within_bounds = (values_finite >= lower) & (values_finite <= upper)
     return float(np.mean(within_bounds))
 
 
 def compute_dropout_drift(
-    positions: NDArray[np.float64],
+    positions_est: NDArray[np.float64],
+    positions_true: NDArray[np.float64],
     valid_mask: NDArray[np.bool_],
     t: NDArray[np.float64],
     min_duration_s: float = 5.0,
 ) -> dict[str, float | None]:
-    """Position drift during first contiguous dropout block.
+    """Tracking-error growth during the first qualifying dropout block.
 
-    Measures how far the filter drifts during camera occlusion, which is a
-    critical PRD requirement: drift should be ≤3.5 m after 5s dropout
-    on production hardware (consumer-grade IMU, 95th percentile bound).
-    In simulation the filter achieves ~11 cm; see ``test_ekf_long_dropout_drift``.
+    The PRD requirement is that *IMU-only tracking error* should not grow
+    beyond a bound during a camera dropout (≤3.5 m after 5 s on consumer
+    hardware). The previous implementation took only the estimate and
+    returned ``||pos_est[end] - pos_est[start]||`` — endpoint
+    *displacement* of the estimate, not tracking error. A perfect
+    estimator on a moving animal then reported nonzero "drift" purely
+    from animal motion, while a frozen-but-wrong estimator reported zero
+    "drift" even when its tracking error stayed huge. Compare estimate
+    against truth instead so the metric measures what it claims.
 
     Parameters
     ----------
-    positions : NDArray[np.float64]
-        Estimated positions (N, 2) in meters.
+    positions_est : NDArray[np.float64]
+        Filter-estimated positions (N, 2) in meters.
+    positions_true : NDArray[np.float64]
+        Ground-truth positions (N, 2) in meters, sampled on the same
+        timeline as ``positions_est`` and ``t``.
     valid_mask : NDArray[np.bool_]
-        Camera validity mask (N,), False indicates dropout.
+        Camera validity mask (N,); False indicates dropout.
     t : NDArray[np.float64]
         Timestamps (N,) in seconds.
     min_duration_s : float, default 5.0
@@ -769,55 +926,122 @@ def compute_dropout_drift(
     Returns
     -------
     dict[str, float | None]
-        Dict with keys: 'drift_m', 'duration_s', 'start_idx', 'end_idx'.
+        Dict with keys:
+
+        * ``drift_m``: tracking-error growth = ``||err(end)|| -
+          ||err(start)||`` (m). Positive when error grew during the
+          dropout; negative is possible if the dropout started in a
+          high-error state and the IMU happened to point back toward
+          truth, but typically ``≥ 0``.
+        * ``end_error_m``: tracking error at the last in-block sample
+          (``||pos_est[end_idx - 1] - pos_true[end_idx - 1]||``). PRD
+          checks usually compare this against the absolute bound.
+        * ``start_error_m``: tracking error at the first in-block
+          sample (``||pos_est[start_idx] - pos_true[start_idx]||``).
+        * ``duration_s``, ``start_idx``, ``end_idx`` (unchanged).
 
     Example:
-        >>> # Simulate 10s trajectory with 5s dropout at t=3-8s
+        >>> # 10 s trajectory; 5 s dropout from t=3-8 s. Animal moves
+        >>> # at 0.1 m/s. A *perfect* estimator should report ~0 drift,
+        >>> # despite the animal having moved 0.5 m during the dropout.
         >>> t = np.linspace(0, 10, 100)
-        >>> positions = np.column_stack(
-        ...     [t * 0.1, np.zeros_like(t)]
-        ... )  # Moving at 0.1 m/s
-        >>> valid_mask = (t < 3.0) | (t >= 8.0)  # Dropout from 3-8s
-        >>> result = compute_dropout_drift(positions, valid_mask, t, min_duration_s=4.0)
-        >>> # Drift should be ~0.5 m (5s * 0.1 m/s)
-        >>> 0.4 < result["drift_m"] < 0.6
+        >>> truth = np.column_stack([t * 0.1, np.zeros_like(t)])
+        >>> est = truth.copy()  # perfect tracking
+        >>> mask = (t < 3.0) | (t >= 8.0)
+        >>> result = compute_dropout_drift(est, truth, mask, t, min_duration_s=4.0)
+        >>> abs(result["drift_m"]) < 1e-9
         True
-        >>> np.isclose(result["duration_s"], 5.0, atol=0.1)
+        >>> abs(result["end_error_m"]) < 1e-9
         True
 
     Notes:
-        PRD Acceptance Criteria (§4.2, updated):
-        - After 5s camera dropout, IMU-only drift should be ≤3.5 m
-          (production hardware bound; simulation achieves ≤15 cm)
-        - Previous 0.15-0.20 m requirements were at physical limits of
-          consumer-grade IMUs (~3 cm/s drift rate)
+        PRD Acceptance Criteria (§4.2):
+        - After 5 s camera dropout, IMU-only drift should be ≤3.5 m
+          on consumer-grade IMUs (95th percentile bound). In
+          simulation the filter typically tracks to a few cm of truth.
 
-        This function identifies the FIRST contiguous dropout block that
-        exceeds min_duration_s and measures drift from block start to end.
+        This function identifies the FIRST contiguous dropout block
+        whose duration exceeds ``min_duration_s`` and reports the
+        tracking-error metrics on that block.
     """
-    if positions.shape[0] != valid_mask.shape[0] or positions.shape[0] != t.shape[0]:
+    raw_mask_arr = np.asarray(valid_mask)
+    pos_est = np.asarray(positions_est)
+    pos_true = np.asarray(positions_true)
+    # Reject non-1D masks. ``(N, 1)`` (a common shape from column-
+    # vector loading or one-hot conversion) silently bypassed the
+    # dropout detection.
+    if raw_mask_arr.ndim != 1:
         raise ValueError(
-            f"Shape mismatch: positions {positions.shape}, mask {valid_mask.shape}, time {t.shape}"
+            f"valid_mask must be 1-D (N,); got shape {raw_mask_arr.shape}."
+        )
+    # Reject non-bool / non-0-or-1-integer masks. Without this gate
+    # an integer mask containing ``2`` would survive the ``ndim``
+    # check, then ``~valid_mask_arr`` (bitwise invert on integers)
+    # produces ``-3`` which is "truthy" — the resulting "dropout"
+    # mask hides real dropouts and the function silently returns all
+    # ``None`` fields. A float ``0.0/1.0`` mask raises a raw
+    # ``TypeError`` from ``~`` instead of the documented contract
+    # error. Mirror the gate already used by ``qa.plots`` and
+    # ``qa.imu_calibration`` so PRD dropout checks can't be hidden by
+    # a corrupted mask.
+    valid_mask_arr = validate_bool_mask_dtype(raw_mask_arr, name="valid_mask")
+    if pos_est.shape != pos_true.shape:
+        raise ValueError(
+            "positions_est and positions_true must have the same shape; "
+            f"got {pos_est.shape} vs {pos_true.shape}."
+        )
+    if pos_est.ndim != 2 or pos_est.shape[1] != 2:
+        raise ValueError(f"positions must have shape (N, 2); got {pos_est.shape}.")
+    if pos_est.shape[0] != valid_mask_arr.shape[0] or pos_est.shape[0] != t.shape[0]:
+        raise ValueError(
+            f"Shape mismatch: positions {pos_est.shape}, "
+            f"mask {valid_mask_arr.shape}, time {t.shape}"
         )
 
     # Find contiguous dropout blocks
-    dropout = ~valid_mask
+    dropout = ~valid_mask_arr
     diff = np.diff(dropout.astype(int), prepend=0, append=0)
-    starts = np.where(diff == 1)[0]  # Dropout begins
-    ends = np.where(diff == -1)[0]  # Dropout ends
+    starts = np.where(diff == 1)[0]  # Dropout begins (first invalid sample)
+    ends = np.where(diff == -1)[0]  # Dropout ends (first valid sample after, exclusive)
 
-    # Find first block with duration >= min_duration_s
+    # Each contiguous dropout block covers samples [start_idx, end_idx).
+    # The duration of the *interval covered by those samples* is
+    # ``t[end_idx] - t[start_idx]`` when end_idx < N (the block ends when
+    # the next valid sample arrives). For example, a 150-frame dropout at
+    # 30 Hz spanning samples [s, s+150) has duration t[s+150] - t[s] = 5.0 s,
+    # whereas ``t[end_idx - 1] - t[start_idx]`` only covers 149 sample
+    # intervals (≈4.967 s) and would silently fail a min_duration_s=5.0
+    # threshold for an exactly-5 s block.
+    #
+    # If the dropout extends to the end of the trace (end_idx == N) there
+    # is no "next valid sample"; extrapolate by adding the local sample
+    # period (median dt over the block, or the global median if the block
+    # is too short for a local estimate).
+    n = len(t)
     for start_idx, end_idx in zip(starts, ends, strict=False):
-        duration = t[end_idx - 1] - t[start_idx]
-        if duration >= min_duration_s:
-            # Measure drift from start to end
-            pos_start = positions[start_idx]
-            pos_end = positions[end_idx - 1]
-            drift = np.linalg.norm(pos_end - pos_start)
+        if end_idx < n:
+            duration = float(t[end_idx] - t[start_idx])
+        elif end_idx - start_idx >= 2:
+            local_dt = float(np.median(np.diff(t[start_idx:end_idx])))
+            duration = float(t[end_idx - 1] - t[start_idx] + local_dt)
+        elif n >= 2:
+            global_dt = float(np.median(np.diff(t)))
+            duration = global_dt
+        else:
+            duration = 0.0
 
+        if duration >= min_duration_s:
+            # Tracking error at start and end of the dropout (estimate vs
+            # truth norms), and the *growth* over the block.
+            err_start = float(np.linalg.norm(pos_est[start_idx] - pos_true[start_idx]))
+            err_end = float(
+                np.linalg.norm(pos_est[end_idx - 1] - pos_true[end_idx - 1])
+            )
             return {
-                "drift_m": float(drift),
-                "duration_s": float(duration),
+                "drift_m": err_end - err_start,
+                "end_error_m": err_end,
+                "start_error_m": err_start,
+                "duration_s": duration,
                 "start_idx": int(start_idx),
                 "end_idx": int(end_idx),
             }
@@ -825,6 +1049,8 @@ def compute_dropout_drift(
     # No qualifying dropout found
     return {
         "drift_m": None,
+        "end_error_m": None,
+        "start_error_m": None,
         "duration_s": None,
         "start_idx": None,
         "end_idx": None,

@@ -5,12 +5,13 @@ A comprehensive 30-minute presentation explaining TrodesTrack sensor-fusion trac
 ## 📁 Contents
 
 ### Main Deliverable
-- **[trodestrack_presentation.pptx](trodestrack_presentation.pptx)** (2.5 MB)
+- **`trodestrack_presentation.pptx`** (built locally, ~2.5 MB)
   - 46 slides (43 content + 3 section dividers)
   - 16:9 aspect ratio, professional formatting
   - All visuals integrated
   - Speaker notes on every slide
-  - **Ready for presentation!**
+  - **Not tracked in git** (`.pptx` is gitignored). Generate it with the
+    "Rebuild Presentation from Scratch" command below before presenting.
 
 ### Supporting Materials
 - **[PRESENTATION_OUTLINE.md](PRESENTATION_OUTLINE.md)** - Full 43-slide structure with learning objectives
@@ -19,70 +20,107 @@ A comprehensive 30-minute presentation explaining TrodesTrack sensor-fusion trac
 - **[HANDOFF_PROMPT.md](HANDOFF_PROMPT.md)** - Instructions for continuing work
 
 ### Generated Assets
-- **`visuals/`** - 10 high-quality images (150 DPI, PNG format):
-  - `slide02_failure_modes.png` (675 KB)
-  - `slide03_trajectory_comparison.png` (305 KB)
-  - `slide05a_accelerometer_physics.png` (136 KB)
-  - `slide05b_gyroscope_physics.png` (187 KB)
-  - `slide05c_bias_correction.png` (127 KB)
-  - `slide12_imu_integration.png` (263 KB)
-  - `slide14_uncertainty.png` (267 KB)
-  - `slide16_smoother_comparison.png` (192 KB)
-  - `slide18_diagnostic_panel.png` (248 KB)
-  - `slide21_nees_histogram.png` (198 KB)
+- **`visuals/`** - 8 high-quality images (150 DPI, PNG format):
+  - `slide03_trajectory_comparison.png`
+  - `slide05a_accelerometer_physics.png`
+  - `slide05b_gyroscope_physics.png`
+  - `slide05c_bias_correction.png`
+  - `slide12_imu_integration.png`
+  - `slide14_uncertainty.png`
+  - `slide16_smoother_comparison.png`
+  - `slide21_nees_histogram.png`
 
-- **`videos/`** - 1 demonstration video:
-  - `slide08_beforeafter.mp4` (672 KB, 10 seconds)
+  Slides 2 (failure modes) and 18 (9-panel diagnostic) are content slides
+  in the current builder; their figure generators have not been landed yet.
 
-- **`code/`** - 10 Python scripts to regenerate all assets:
-  - `build_presentation.py` (720 lines) - PowerPoint builder
-  - `generate_slide02_failure_modes.py` (222 lines)
-  - `generate_slide03_trajectory_comparison.py` (189 lines)
-  - `generate_slide05abc_imu_physics.py` (458 lines)
-  - `generate_slide08_beforeafter_video.py` (322 lines)
-  - `generate_slide12_imu_integration.py` (260 lines)
-  - `generate_slide14_uncertainty.py` (263 lines)
-  - `generate_slide16_smoother.py` (256 lines)
-  - `generate_slide18_diagnostic.py` (101 lines)
-  - `generate_slide21_nees.py` (219 lines)
+- **`videos/`** - demonstration videos generated locally; **not tracked in
+  git** (`*.mp4` is gitignored). Regenerate with the script below.
+  - `slide08_beforeafter.mp4` (~672 KB, 10 seconds — produced by
+    `generate_slide08_beforeafter_video.py`)
+
+- **`code/`** - Python scripts to regenerate all shipped assets:
+  - `build_presentation.py` - PowerPoint builder
+  - `generate_slide03_trajectory_comparison.py`
+  - `generate_slide05abc_imu_physics.py`
+  - `generate_slide08_beforeafter_video.py`
+  - `generate_slide12_imu_integration.py`
+  - `generate_slide14_uncertainty.py`
+  - `generate_slide16_smoother.py`
+  - `generate_slide21_nees.py`
+
+  Generators for slide 2 (failure modes) and slide 18 (9-panel diagnostic)
+  are not yet implemented; those slides render as bullet content in the
+  current builder.
 
 ## 🚀 Quick Start
 
 ### View the Presentation
+
+`trodestrack_presentation.pptx` is **not tracked in git**. Build it locally
+first (see "Rebuild Presentation from Scratch" below), then:
+
 ```bash
 open docs/presentation/trodestrack_presentation.pptx
 ```
 
 ### Complete the Presentation (Manual Step)
-The presentation is 99% complete. One manual step required:
 
-1. Open `trodestrack_presentation.pptx`
-2. Navigate to Slide 8 ("Quick Preview: Before & After")
-3. Click Insert → Video → Browse
-4. Select `videos/slide08_beforeafter.mp4`
-5. Resize video to fit content area
-6. Save
+The build is 99% complete after the rebuild step. One manual edit is
+required for the embedded video:
+
+1. Generate the video first:
+   `uv run python docs/presentation/code/generate_slide08_beforeafter_video.py`
+   (writes `docs/presentation/videos/slide08_beforeafter.mp4`; also
+   gitignored).
+2. Open `trodestrack_presentation.pptx`.
+3. Navigate to Slide 8 ("Quick Preview: Before & After").
+4. Click Insert → Video → Browse.
+5. Select `videos/slide08_beforeafter.mp4`.
+6. Resize video to fit content area.
+7. Save.
 
 **Why manual?** python-pptx doesn't support video embedding programmatically.
 
-### Regenerate All Visuals
+### Setup (one-time)
+
+Both the slide-08 video generator and `build_presentation.py` need
+extras that are **not** in the default install:
+
 ```bash
-# Run all generation scripts
-uv run python docs/presentation/code/generate_slide02_failure_modes.py
+# Install python-pptx + matplotlib animation deps (declared under the
+# ``video`` extra in pyproject.toml).
+uv sync --extra video
+
+# System ffmpeg is required for the matplotlib FFMpegWriter used by
+# generate_slide08_beforeafter_video.py:
+#   macOS:   brew install ffmpeg
+#   Ubuntu:  sudo apt install ffmpeg
+```
+
+### Regenerate All Visuals
+
+```bash
+# Run all generation scripts that ship in this repo
 uv run python docs/presentation/code/generate_slide03_trajectory_comparison.py
 uv run python docs/presentation/code/generate_slide05abc_imu_physics.py
 uv run python docs/presentation/code/generate_slide08_beforeafter_video.py
 uv run python docs/presentation/code/generate_slide12_imu_integration.py
 uv run python docs/presentation/code/generate_slide14_uncertainty.py
 uv run python docs/presentation/code/generate_slide16_smoother.py
-uv run python docs/presentation/code/generate_slide18_diagnostic.py
 uv run python docs/presentation/code/generate_slide21_nees.py
 ```
 
+Slide 2 (failure modes) and slide 18 (9-panel diagnostic) generators
+are not yet implemented; the builder currently renders those as bullet
+slides instead of full-image slides.
+
 ### Rebuild Presentation from Scratch
+
 ```bash
-# Regenerate PowerPoint file (includes all visuals)
+# Requires the ``video`` extra (see Setup above) for python-pptx.
 uv run python docs/presentation/code/build_presentation.py
+# If you skipped uv sync, the one-shot equivalent is:
+# uv run --with python-pptx python docs/presentation/code/build_presentation.py
 ```
 
 ## 📊 Presentation Structure
@@ -96,11 +134,13 @@ uv run python docs/presentation/code/build_presentation.py
 
 ### Section 2: HOW IT WORKS (Slides 9-18)
 - Kalman filtering (predict-update cycle)
-- State vector (8D: position, velocity, heading, biases)
+- State vector — registered modes (5D vision-only, 8D `2d_full`, 10D
+  default `2d_cam_3d_imu`, 14D `2d_cam_6dof_imu_orientation`, and the
+  experimental 16D `3d_cam_6dof_imu`); slide 23 enumerates them
 - IMU pre-integration between camera frames
 - Uncertainty evolution (covariance)
 - EKF vs UKF vs RTS smoothing
-- Robustness features (gating, LED swaps, damping)
+- Robustness features (gating, transient LED-swap mitigation via dual-LED residuals, pre-filter persistent LED identity correction, damping)
 - 9-panel diagnostic video
 
 ### Section 3: FEATURES & CAPABILITIES (Slides 19-25)
@@ -108,19 +148,23 @@ uv run python docs/presentation/code/build_presentation.py
 - Quality assurance metrics (NEES, RMSE)
 - Automated QA reports
 - Flexible state tracking modes
-- Performance (300× realtime on CPU)
-- Real data support (Trodes, DeepLabCut, SpikeGadgets)
+- Performance: ≥10× realtime offline floor (CI-tested), ~38× on M-series Mac CPU under block-until-ready timing
+- Real-data ingestion **today**: generic NumPy arrays (timestamps + LED
+  positions + IMU samples). Native loaders for Trodes LED CSV,
+  DeepLabCut CSV, and SpikeGadgets MDA/REC are on the roadmap, not
+  shipped — slide 25 calls this out. Bring your own conversion to
+  NumPy, then call the filters / CLIs.
 
 ### Section 4: GETTING STARTED (Slides 26-32)
 - Installation (Python + uv)
-- Learning path (10 progressive examples)
+- Learning path (9 progressive examples)
 - Decision tree (which filter to use)
 - When to use TrodesTrack
 - Troubleshooting common issues
 - Resources and support
 
 ### Section 5: ADVANCED TOPICS (Slides 33-36)
-- JAX implementation (JIT, GPU, 300× speedup)
+- JAX implementation (JIT, GPU-ready; speedup vs Python loops should be measured per machine, not hard-coded)
 - Roadmap: Extending to 3D
 - Custom measurement models (plugin architecture)
 
@@ -153,7 +197,7 @@ All visuals cite PRD metrics:
 - Heading error target: ≤7°
 - Dropout drift target: ≤3.5 m @ 5s
 - NEES target: ≈8 for 8D state (≈5 for measurable DOF)
-- Throughput: ≥300× realtime (CPU)
+- Throughput: ≥10× realtime offline floor on CPU (CI-tested by `tests/benchmark/test_throughput.py`); reference run on M-series Mac CPU under block-until-ready timing is ~38× realtime / ~0.41 ms per frame.
 
 ## 🛠️ Development Time
 

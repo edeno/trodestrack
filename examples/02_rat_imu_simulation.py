@@ -904,12 +904,15 @@ def plot_vision_robustness(sim_data: dict[str, np.ndarray]) -> plt.Figure:
     # -------------------------------------------------------------------------
     ax_resid = fig.add_subplot(gs[3, 0])
 
-    # Compute LED1 residuals (measurement - interpolated truth)
-    px_interp = np.interp(t_cam, t_imu, X[:, 0])
-    py_interp = np.interp(t_cam, t_imu, X[:, 1])
-
-    resid_x = (led1[:, 0] - px_interp) * 1000  # mm
-    resid_y = (led1[:, 1] - py_interp) * 1000  # mm
+    # Compute LED1 residuals (noisy measurement - noiseless ground-truth
+    # LED1 position). Subtracting the body center (X[:, 0:2]) instead of
+    # ``led1_truth_cam`` would bake in the configured LED1 body-frame
+    # offset and report ~|offset| residuals on every clean frame; the
+    # ground-truth LED position already accounts for the offset and the
+    # heading at each camera timestamp.
+    led1_truth = sim_data["led1_truth_cam"]
+    resid_x = (led1[:, 0] - led1_truth[:, 0]) * 1000  # mm
+    resid_y = (led1[:, 1] - led1_truth[:, 1]) * 1000  # mm
 
     ax_resid.plot(
         t_cam[mask_led1],
@@ -1140,12 +1143,17 @@ def main() -> None:
     else:
         print("   No occlusions detected")
 
-    # Count LED swaps (approximate by checking if both LEDs visible)
+    # Count LED swaps from the simulator's ground-truth ``swap_applied``
+    # mask. ``int(n_candidates * led_swap_prob)`` is only an expectation
+    # under the (now Bernoulli) sampling and was diverging from the
+    # simulated reality. Since this example exists to demonstrate
+    # simulator artifacts, the actual mask is the better evidence.
     both_visible = sim5["mask_led1"] & sim5["mask_led2"]
-    n_swap_candidates = np.sum(both_visible)
-    expected_swaps = int(n_swap_candidates * config5.led_swap_prob)
+    n_swap_candidates = int(np.sum(both_visible))
+    n_swaps_actual = int(np.sum(sim5["swap_applied"]))
     print(
-        f"   LED swap candidates: {n_swap_candidates}, expected swaps: ~{expected_swaps}"
+        f"   LED swap candidates: {n_swap_candidates}, actual swaps "
+        f"(swap_applied mask): {n_swaps_actual}"
     )
 
     # Mean confidence

@@ -45,7 +45,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 # =============================================================================
-# PRD Requirements (from PRD.md Section 4)
+# Acceptance Criteria
 # =============================================================================
 
 PRD_POSITION_RMSE_M = 0.02  # Position RMSE <= 0.02 m (2 cm)
@@ -334,11 +334,12 @@ def test_5s_dropout_drift_integration():
     sim_data["mask_cam"] = mask_with_dropouts
 
     # Run EKF with adaptive dropout handling
-    filter_result, _ground_truth = run_ekf_on_sim(sim_data, use_heading=True)
+    filter_result, ground_truth = run_ekf_on_sim(sim_data, use_heading=True)
 
     # Compute drift for each dropout period independently
     # (Each dropout needs its own mask to be measured correctly)
     pos_est = filter_result.filtered_means[:, :2]
+    pos_truth_cam = ground_truth["pos_truth"]
     max_drift = 0.0
 
     for i, (start_t, end_t) in enumerate(dropout_periods):
@@ -348,11 +349,12 @@ def test_5s_dropout_drift_integration():
         end_idx = np.searchsorted(sim_data["t_cam_exp"], end_t)
         mask_single_dropout[start_idx:end_idx] = False
 
-        # Compute drift for THIS dropout only
+        # Compute drift (tracking error growth) for THIS dropout only.
         from trodestrack.qa.metrics import compute_dropout_drift
 
         drift_result = compute_dropout_drift(
-            positions=pos_est,
+            positions_est=pos_est,
+            positions_true=pos_truth_cam,
             valid_mask=mask_single_dropout,
             t=sim_data["t_cam_exp"],
             min_duration_s=4.5,

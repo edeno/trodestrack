@@ -57,6 +57,27 @@ class SimpleSimConfig:
 
     def __post_init__(self):
         """Validate configuration parameters."""
+        # Reject non-finite scalar parameters first. Bare ``<= 0`` / ``< 0``
+        # comparisons silently accept NaN (NaN compares False to both),
+        # and the simulator then emits non-finite IMU / truth arrays —
+        # e.g. gyro_noise_density=NaN produced non-finite U_imu.
+        finite_scalar_fields = (
+            "duration_s",
+            "fs_imu",
+            "fs_cam",
+            "gyro_noise_density",
+            "accel_noise_density",
+            "gyro_bias_std",
+            "accel_bias_std",
+            "cam_noise_std",
+            "cam_dropout_prob",
+            "gravity",
+        )
+        for fname in finite_scalar_fields:
+            value = getattr(self, fname)
+            if not np.isfinite(value):
+                raise ValueError(f"{fname} must be a finite value; got {value!r}.")
+
         # Duration validation
         if self.duration_s <= 0:
             raise ValueError(
@@ -75,6 +96,22 @@ class SimpleSimConfig:
             raise ValueError(
                 f"Camera sampling rate must be positive, got {self.fs_cam} Hz.\n"
                 f"Example: fs_cam=30.0 (30 Hz)"
+            )
+
+        # Minimum-sample-count gate (mirrors RatIMUSimConfig). The simple
+        # simulators compute counts as ``int(duration_s * fs_*)``; very
+        # short positive durations therefore produce zero or one sample
+        # per stream and crash downstream (e.g. ``prepare_video_data``
+        # nearest-neighbor indexing raises IndexError when the camera
+        # stream is empty). Require at least 2 IMU and 2 camera samples.
+        T_imu = int(self.duration_s * self.fs_imu)
+        T_cam = int(self.duration_s * self.fs_cam)
+        if T_imu < 2 or T_cam < 2:
+            raise ValueError(
+                f"duration_s={self.duration_s}s at fs_imu={self.fs_imu} Hz, "
+                f"fs_cam={self.fs_cam} Hz produces only T_imu={T_imu}, "
+                f"T_cam={T_cam} samples; need at least 2 of each. "
+                f"Increase duration_s or sampling rates."
             )
 
         # Probability validation
@@ -109,6 +146,30 @@ class SimpleSimConfig:
                 f"IMU bias stds must be non-negative.\n"
                 f"Got gyro={self.gyro_bias_std}, accel={self.accel_bias_std}"
             )
+
+
+def _validate_xy_array(value: np.ndarray, name: str) -> np.ndarray:
+    """Coerce ``value`` into a finite ``(2,)`` float array.
+
+    Used by the simple-scenario sims for ``position``, ``initial_position``,
+    ``velocity``, and ``center``. Without this guard, a malformed
+    ``(1,)`` argument raises a raw IndexError mid-simulation, and a
+    NaN argument silently produces non-finite truth/IMU/camera arrays.
+    """
+    arr = np.asarray(value, dtype=float)
+    if arr.shape != (2,):
+        raise ValueError(f"{name} must have shape (2,); got {arr.shape}.")
+    if not np.all(np.isfinite(arr)):
+        raise ValueError(f"{name} must contain finite values; got {arr!r}.")
+    return arr
+
+
+def _validate_finite_scalar(value: float, name: str) -> float:
+    """Reject non-finite scalar arguments to the simple-sim functions."""
+
+    if not np.isfinite(value):
+        raise ValueError(f"{name} must be a finite value; got {value!r}.")
+    return float(value)
 
 
 def simulate_stationary(
@@ -151,6 +212,8 @@ def simulate_stationary(
         config = SimpleSimConfig()
     if position is None:
         position = np.array([0.5, 0.5])
+    position = _validate_xy_array(position, "position")
+    heading = _validate_finite_scalar(heading, "heading")
 
     rng = np.random.default_rng(seed)
 
@@ -212,6 +275,10 @@ def simulate_stationary(
             position[1] + cam_noise_y,
         ]
     )
+    # Match rat_imu's convention: dropped frames carry NaN LED coordinates
+    # so diagnostics that infer validity from finite values agree with
+    # mask_cam. Filters that honor mask_cam are unaffected.
+    Z_cam_led1[~mask_cam] = np.nan
 
     # Single LED mask (for consistency, LED1 only)
     mask_led1 = mask_cam.copy()
@@ -253,6 +320,8 @@ def simulate_stationary(
         "accel_body_truth": np.zeros(
             (T_imu, 2)
         ),  # No motion, no tilt → specific force = 0
+        # Level IMU + no motion → specific force = inertial accel = 0.
+        "specific_force_truth": np.zeros((T_imu, 2)),
         "config": config,
     }
 
@@ -296,6 +365,8 @@ def simulate_constant_velocity(
         initial_position = np.array([0.1, 0.1])
     if velocity is None:
         velocity = np.array([0.2, 0.1])  # 0.224 m/s = 22.4 cm/s
+    initial_position = _validate_xy_array(initial_position, "initial_position")
+    velocity = _validate_xy_array(velocity, "velocity")
 
     rng = np.random.default_rng(seed)
 
@@ -362,6 +433,9 @@ def simulate_constant_velocity(
             y_cam + cam_noise_y,
         ]
     )
+    # Match rat_imu's convention: dropped frames carry NaN LED coordinates
+    # so diagnostics inferring validity from finite values agree with mask_cam.
+    Z_cam_led1[~mask_cam] = np.nan
 
     # Single LED mask (for consistency, LED1 only)
     mask_led1 = mask_cam.copy()
@@ -401,6 +475,8 @@ def simulate_constant_velocity(
         "accel_body_truth": np.zeros(
             (T_imu, 2)
         ),  # Constant velocity, no tilt → specific force = 0
+        # Level IMU + constant velocity → specific force = inertial accel = 0.
+        "specific_force_truth": np.zeros((T_imu, 2)),
         "config": config,
     }
 
@@ -445,6 +521,21 @@ def simulate_circular(
         config = SimpleSimConfig()
     if center is None:
         center = np.array([0.5, 0.5])
+    center = _validate_xy_array(center, "center")
+    radius = _validate_finite_scalar(radius, "radius")
+    angular_velocity = _validate_finite_scalar(angular_velocity, "angular_velocity")
+    # Heading is computed as ``angle + π/2`` (tangent direction)
+    # independent of the sign of ``radius``, while position and
+    # velocity scale linearly with ``radius``. A negative radius
+    # therefore breaks the documented "heading tangent to motion"
+    # invariant — heading and velocity-direction differ by π. Zero
+    # radius collapses position to the center and produces zero
+    # velocity, which is degenerate for a "circular motion" sim.
+    if radius <= 0:
+        raise ValueError(
+            f"radius must be strictly positive (heading is computed as "
+            f"angle + π/2 and is sign-blind to radius); got {radius}."
+        )
 
     rng = np.random.default_rng(seed)
 
@@ -551,6 +642,12 @@ def simulate_circular(
         ]
     )
 
+    # Match rat_imu's convention: dropped frames carry NaN LED coordinates
+    # so diagnostics inferring validity from finite values agree with
+    # mask_cam. Filters that honor mask_cam are unaffected.
+    Z_cam_led1[~mask_cam] = np.nan
+    Z_cam_led2[~mask_cam] = np.nan
+
     # Both LEDs available for heading observability
     mask_led1 = mask_cam.copy()
     mask_led2 = mask_cam.copy()
@@ -587,5 +684,8 @@ def simulate_circular(
         "yaw_rate_truth": np.full(T_imu, omega),
         "accel_world_truth": np.column_stack([accel_world_x, accel_world_y]),
         "accel_body_truth": np.column_stack([accel_body_x, accel_body_y]),
+        # Level IMU (no tilt in simple sims) → specific force equals
+        # inertial acceleration in body frame.
+        "specific_force_truth": np.column_stack([accel_body_x, accel_body_y]),
         "config": config,
     }

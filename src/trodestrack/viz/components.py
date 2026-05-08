@@ -13,12 +13,31 @@ import numpy as np
 from jax import Array
 from matplotlib.axes import Axes
 from matplotlib.collections import LineCollection
+from matplotlib.colors import to_rgb
 from matplotlib.lines import Line2D
 from matplotlib.patches import Circle, FancyArrowPatch
 from matplotlib.text import Text
 from matplotlib.transforms import Affine2D
 
 from trodestrack.viz.styles import COLORS
+
+
+def _set_scrolling_xlim(ax: Axes, time_array: np.ndarray) -> None:
+    """Apply a scrolling xlim that doesn't trigger matplotlib's
+    "Attempting to set identical low and high xlims" warning when only
+    one rolling-buffer sample is present (a routine condition on the
+    first rendered frame of every per-step diagnostic panel). Pad ±1 ms
+    around the single sample so the axis stays meaningful.
+    """
+    if len(time_array) == 0:
+        return
+    t0 = float(time_array[0])
+    t1 = float(time_array[-1])
+    if t1 > t0:
+        ax.set_xlim(t0, t1)
+    else:
+        pad = 1e-3
+        ax.set_xlim(t0 - pad, t0 + pad)
 
 
 class RatArtist:
@@ -232,9 +251,13 @@ class LEDArtist:
             self.expected_marker = None
             self.residual_line = None
 
-        # Track last known position for dropout marker
-        self.last_x = 0.0
-        self.last_y = 0.0
+        # Track last known position for dropout marker. Initialize to
+        # None so a session that opens with a dropout doesn't render a
+        # phantom red X at the origin — the dropout marker should only
+        # appear after at least one *visible* sample establishes a real
+        # last-known position.
+        self.last_x: float | None = None
+        self.last_y: float | None = None
 
     def update(
         self,
@@ -304,8 +327,14 @@ class LEDArtist:
             self.marker.set_data([], [])
             self.halo.set_alpha(0.0)
 
-            # Show red X at last known position
-            self.dropout_marker.set_data([self.last_x], [self.last_y])
+            # Show red X at last known position — but only if we've seen
+            # at least one visible sample. Before the first detection
+            # there is no meaningful "last known position" and rendering
+            # at (0, 0) draws a phantom dropout in the arena corner.
+            if self.last_x is not None and self.last_y is not None:
+                self.dropout_marker.set_data([self.last_x], [self.last_y])
+            else:
+                self.dropout_marker.set_data([], [])
 
             # Hide residuals when dropped out
             if (
@@ -349,6 +378,11 @@ class TrailArtist:
         self.trail_frames = int(trail_length_s * fps)
         self.positions: deque[list[float]] = deque(maxlen=self.trail_frames)
         self.color = color
+        # Resolve once so update() can build per-segment RGBA arrays
+        # without re-parsing the spec on every frame; ignoring this
+        # previously hard-coded the fade gradient to blue regardless
+        # of the requested ``color``.
+        self._color_rgb = to_rgb(color)
 
         # LineCollection for efficient multi-segment rendering
         self.lines = LineCollection([], linewidths=1.5, colors=color, zorder=4)
@@ -378,10 +412,11 @@ class TrailArtist:
                 for i in range(len(self.positions) - 1)
             ]
 
-            # Fade alpha from 0 (oldest) to 0.6 (newest) using RGBA per segment
-            # COLORS["blue"] = "#2166AC" → RGB (0.133, 0.4, 0.675)
+            # Fade alpha from 0 (oldest) to 0.6 (newest) using RGBA per
+            # segment built from the configured trail color.
+            r, g, b = self._color_rgb
             alphas = np.linspace(0.0, 0.6, len(segments))
-            colors = [(0.133, 0.4, 0.675, a) for a in alphas]
+            colors = [(r, g, b, a) for a in alphas]
 
             self.lines.set_segments(segments)
             self.lines.set_colors(colors)
@@ -721,11 +756,13 @@ class IMUPanelArtist:
                 self.accel_x_truth_line.set_data([], [])
                 self.accel_y_truth_line.set_data([], [])
 
-            # Set x-axis limits based on actual data range
-            if len(t_raw) > 0:
-                self.ax_gyro.set_xlim(t_raw[0], t_raw[-1])
-                self.ax_accel_x.set_xlim(t_raw[0], t_raw[-1])
-                self.ax_accel_y.set_xlim(t_raw[0], t_raw[-1])
+            # Set x-axis limits via shared helper that pads ±1 ms when
+            # only one sample is in the window (avoids matplotlib's
+            # "identical xlim" warning on the first rendered frame).
+            t_raw_arr = np.asarray(t_raw)
+            _set_scrolling_xlim(self.ax_gyro, t_raw_arr)
+            _set_scrolling_xlim(self.ax_accel_x, t_raw_arr)
+            _set_scrolling_xlim(self.ax_accel_y, t_raw_arr)
         else:
             # Single sample mode (legacy): buffer interpolated points
             if imu_data is not None:
@@ -927,6 +964,10 @@ class ProgressBarArtist:
                     color = COLORS["orange"]
                     marker = "v"
                     label = "LED swap"
+                elif event_type == "led_reflection":
+                    color = COLORS["purple"]
+                    marker = "^"
+                    label = "Wall reflection"
                 elif event_type == "long_dropout":
                     color = COLORS["red"]
                     marker = "x"
@@ -1029,30 +1070,69 @@ class FilterArtist:
     def update(self, x_pred: float, y_pred: float, P: np.ndarray | Array) -> list[Any]:
         """Update filter prediction and uncertainty.
 
-        Args:
-            x_pred: Predicted x position in meters
-            y_pred: Predicted y position in meters
-            P: Full state covariance matrix (8×8), position covariance at [:2, :2]
+        Parameters
+        ----------
+        x_pred : float
+            Predicted x position in meters.
+        y_pred : float
+            Predicted y position in meters.
+        P : np.ndarray or jax.Array
+            2x2 position covariance matrix. The caller is responsible
+            for selecting the position rows/cols from the full state
+            covariance via the filter layout.
 
-        Returns:
-            List of modified artists
+        Returns
+        -------
+        list[Any]
+            List of modified artists.
 
-        Raises:
-            ValueError: If P is not shape (8, 8)
+        Raises
+        ------
+        ValueError
+            If ``P`` is not shape ``(2, 2)``.
         """
         # Validate input shape
         P_np = np.asarray(P)
-        if P_np.shape != (8, 8):
-            raise ValueError(f"Expected P shape (8, 8), got {P_np.shape}")
+        if P_np.shape != (2, 2):
+            raise ValueError(f"Expected P shape (2, 2), got {P_np.shape}")
+
+        # Skip the overlay when the filter has diverged (non-finite mean
+        # or covariance). Writing NaN/Inf into the marker position or
+        # ellipse dimensions silently produces an invalid overlay rather
+        # than a hard error — eigh can also return NaNs and propagate
+        # non-finite width/height into the ellipse patch.
+        if not (
+            np.isfinite(x_pred) and np.isfinite(y_pred) and np.all(np.isfinite(P_np))
+        ):
+            self.pred_marker.set_data([], [])
+            self.uncertainty_ellipse.width = 0.0
+            self.uncertainty_ellipse.height = 0.0
+            return [self.pred_marker, self.uncertainty_ellipse]
+
+        # Compute covariance ellipse (95% confidence for 2D: χ²(2, 0.05) = 5.991)
+        P_pos = P_np
+        eigenvalues, eigenvectors = np.linalg.eigh(P_pos)
+
+        # A valid position covariance is symmetric positive
+        # semidefinite, so any negative eigenvalue (beyond a tiny
+        # numerical floor) means the filter has produced a non-PSD
+        # covariance. Silently clipping it to zero used to render a
+        # degenerate ellipse on top of the marker, masking the
+        # divergence. Treat it the same as a non-finite covariance:
+        # clear the overlay so the failure is visible.
+        psd_floor = -1e-9 * max(np.max(np.abs(eigenvalues)), 1.0)
+        if np.any(eigenvalues < psd_floor):
+            self.pred_marker.set_data([], [])
+            self.uncertainty_ellipse.width = 0.0
+            self.uncertainty_ellipse.height = 0.0
+            return [self.pred_marker, self.uncertainty_ellipse]
 
         # Update marker position
         self.pred_marker.set_data([x_pred], [y_pred])
 
-        # Compute covariance ellipse (95% confidence for 2D: χ²(2, 0.05) = 5.991)
-        P_pos = P_np[:2, :2]
-        eigenvalues, eigenvectors = np.linalg.eigh(P_pos)
-
-        # Ensure eigenvalues are positive (numerical stability)
+        # Clamp tiny negative eigenvalues from floating-point roundoff
+        # before sqrt; the PSD check above already rejected real
+        # negatives.
         eigenvalues = np.clip(eigenvalues, 0.0, None)
 
         # Orientation angle from first eigenvector
@@ -1151,13 +1231,17 @@ class ResidualPanelArtist:
             self.line_led1.set_data(time_array, np.array(self.resid_led1_buffer))
             self.line_led2.set_data(time_array, np.array(self.resid_led2_buffer))
 
-            # Auto-scale x-axis to show scrolling window
-            self.ax.set_xlim(time_array[0], time_array[-1])
+            # Auto-scale x-axis to show scrolling window (helper pads
+            # ±1 ms when only one sample is in the buffer to avoid the
+            # matplotlib "identical xlim" warning).
+            _set_scrolling_xlim(self.ax, time_array)
 
-            # Auto-scale y-axis based on recent data (with some margin)
-            # Filter out NaN values for scaling
+            # Auto-scale y-axis based on recent data (with some margin).
+            # Use ``np.isfinite`` (not ``not np.isnan``): a diverged filter
+            # can emit ±Inf residuals and matplotlib's set_ylim raises
+            # "Axis limits cannot be NaN or Inf", aborting video render.
             all_resid = list(self.resid_led1_buffer) + list(self.resid_led2_buffer)
-            valid_resid = [r for r in all_resid if not np.isnan(r)]
+            valid_resid = [r for r in all_resid if np.isfinite(r)]
             if len(valid_resid) > 0:
                 y_max = max(abs(min(valid_resid)), abs(max(valid_resid)))
                 y_lim = max(y_max * 1.2, 1.0)  # At least ±1 cm
@@ -1276,7 +1360,7 @@ class StateErrorPanelArtist:
             time_array = np.array(self.time_buffer_vel)
             self.line_vx.set_data(time_array, np.array(self.error_vx_buffer))
             self.line_vy.set_data(time_array, np.array(self.error_vy_buffer))
-            self.ax_vel.set_xlim(time_array[0], time_array[-1])
+            _set_scrolling_xlim(self.ax_vel, time_array)
 
         # Update heading error
         self.time_buffer_heading.append(t)
@@ -1285,7 +1369,7 @@ class StateErrorPanelArtist:
         if len(self.time_buffer_heading) > 0:
             time_array = np.array(self.time_buffer_heading)
             self.line_heading.set_data(time_array, np.array(self.error_heading_buffer))
-            self.ax_heading.set_xlim(time_array[0], time_array[-1])
+            _set_scrolling_xlim(self.ax_heading, time_array)
 
         return [self.line_vx, self.line_vy, self.line_heading]
 
@@ -1383,15 +1467,21 @@ class BiasEstimatePanelArtist:
             self.line_ax.set_data(time_array, np.array(self.accel_bias_x_buffer))
             self.line_ay.set_data(time_array, np.array(self.accel_bias_y_buffer))
 
-            # Auto-scale x-axis
-            self.ax.set_xlim(time_array[0], time_array[-1])
+            # Auto-scale x-axis (single-sample-safe).
+            _set_scrolling_xlim(self.ax, time_array)
 
-            # Auto-scale y-axis based on data range
-            all_biases = (
-                list(self.gyro_bias_buffer)
-                + list(self.accel_bias_x_buffer)
-                + list(self.accel_bias_y_buffer)
-            )
+            # Auto-scale y-axis based on data range. Filter out non-finite
+            # samples — a diverged filter can emit ±Inf bias estimates and
+            # matplotlib's set_ylim raises on Inf, aborting video render.
+            all_biases = [
+                b
+                for b in (
+                    list(self.gyro_bias_buffer)
+                    + list(self.accel_bias_x_buffer)
+                    + list(self.accel_bias_y_buffer)
+                )
+                if np.isfinite(b)
+            ]
             if len(all_biases) > 0:
                 y_max = max(abs(min(all_biases)), abs(max(all_biases)))
                 y_lim = max(y_max * 1.2, 0.01)  # At least ±0.01
@@ -1496,13 +1586,26 @@ class NEESPanelArtist:
             time_array = np.array(self.time_buffer)
             nees_array = np.array(self.nees_buffer)
 
-            # Filter out NaN for plotting
-            valid_mask = ~np.isnan(nees_array)
+            # Filter to *finite* samples (not just non-NaN). A diverged
+            # filter or near-singular covariance can emit ±Inf NEES, which
+            # downstream matplotlib set_ylim rejects with "Axis limits
+            # cannot be NaN or Inf" and aborts video render. The NEES line
+            # is stroked through only the finite samples (the other
+            # diagnostic panels pass NaN straight to set_data, which
+            # matplotlib renders as a gap; NEES filters first to keep its
+            # line continuous). When the rolling window contains no
+            # finite samples we must explicitly clear the line —
+            # otherwise the previously-rendered NEES value stays visible
+            # during dropout / divergence windows and gives a misleading
+            # "consistency reading" for periods when NEES is unavailable.
+            valid_mask = np.isfinite(nees_array)
             if np.any(valid_mask):
                 self.line_nees.set_data(time_array[valid_mask], nees_array[valid_mask])
+            else:
+                self.line_nees.set_data([], [])
 
-            # Auto-scale x-axis
-            self.ax.set_xlim(time_array[0], time_array[-1])
+            # Auto-scale x-axis (single-sample-safe).
+            _set_scrolling_xlim(self.ax, time_array)
 
             # Auto-scale y-axis based on data (but keep bounds visible)
             valid_nees = nees_array[valid_mask]

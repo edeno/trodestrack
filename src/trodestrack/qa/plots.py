@@ -20,8 +20,38 @@ from matplotlib.patches import Ellipse
 from numpy.typing import NDArray
 
 from trodestrack.models.state_layout import StateLayout, get_heading_index
-from trodestrack.qa.metrics import chi2_bounds
+from trodestrack.qa.metrics import chi2_bounds, validate_bool_mask_dtype
 from trodestrack.viz.styles import COLORS, apply_tufte_style
+
+
+def _validate_time_axis(
+    t: NDArray[np.floating], name: str = "t"
+) -> NDArray[np.float64]:
+    """Reject non-1D time vectors used as plotting x-axes.
+
+    Matplotlib raises an opaque "x and y must have same first dimension"
+    when plot is fed a (N, 1) ``t``; this guard names the contract.
+    """
+
+    arr = np.asarray(t)
+    if arr.ndim != 1:
+        raise ValueError(f"{name} must be 1D (N,) in seconds; got shape {arr.shape}.")
+    return arr
+
+
+def _validate_optional_bool_mask(
+    mask: NDArray[np.bool_] | None,
+    expected_len: int,
+    name: str = "valid_mask",
+) -> NDArray[np.bool_] | None:
+    """Reject malformed valid_mask arrays before they index plotted arrays."""
+
+    if mask is None:
+        return None
+    arr = np.asarray(mask)
+    if arr.shape != (expected_len,):
+        raise ValueError(f"{name} must have shape ({expected_len},); got {arr.shape}.")
+    return validate_bool_mask_dtype(arr, name=name)
 
 
 def plot_residuals(
@@ -68,10 +98,17 @@ def plot_residuals(
         - Residuals within ±2σ bands ~95% of time indicates correct R tuning
         - Correlated residuals (visible patterns) indicate Q too small or timing issues
     """
-    if t.shape[0] != residuals.shape[0]:
+    t = _validate_time_axis(t, name="t")
+    residuals_arr = np.asarray(residuals)
+    if residuals_arr.ndim != 2:
         raise ValueError(
-            f"Shape mismatch: time {t.shape} vs residuals {residuals.shape}"
+            f"residuals must be 2D (N, D); got shape {residuals_arr.shape}."
         )
+    if t.shape[0] != residuals_arr.shape[0]:
+        raise ValueError(
+            f"Shape mismatch: time {t.shape} vs residuals {residuals_arr.shape}"
+        )
+    residuals = residuals_arr
 
     apply_tufte_style()
 
@@ -85,6 +122,11 @@ def plot_residuals(
             dim_labels = ["LED1 X (m)", "LED1 Y (m)", "LED2 X (m)", "LED2 Y (m)"]
         else:
             dim_labels = [f"Dim {i + 1}" for i in range(D)]
+    elif len(dim_labels) != D:
+        raise ValueError(
+            f"dim_labels must have length D={D} (one per residual column); "
+            f"got len={len(dim_labels)}."
+        )
 
     # Create subplots: one per dimension, stacked vertically
     fig, axes = plt.subplots(
@@ -162,15 +204,23 @@ def plot_position_error(
     Notes:
         PRD requirement: position error ≤ 0.02 m (2 cm)
     """
-    if positions_true.shape != positions_est.shape:
+    t = _validate_time_axis(t, name="t")
+    pt = np.asarray(positions_true)
+    pe = np.asarray(positions_est)
+    if pt.shape != pe.shape:
+        raise ValueError(f"Shape mismatch: true {pt.shape} vs est {pe.shape}")
+    if pt.ndim != 2 or pt.shape[1] != 2:
         raise ValueError(
-            f"Shape mismatch: true {positions_true.shape} vs est {positions_est.shape}"
+            f"positions_true / positions_est must have shape (N, 2); got {pt.shape}."
         )
+    if pt.shape[0] != t.shape[0]:
+        raise ValueError(f"Shape mismatch: positions {pt.shape} vs time {t.shape}.")
+    valid_mask = _validate_optional_bool_mask(valid_mask, t.shape[0])
 
     apply_tufte_style()
 
     # Compute Euclidean error
-    errors = positions_true - positions_est
+    errors = pt - pe
     euclidean_error = np.linalg.norm(errors, axis=1)
 
     # Apply validity mask if provided
@@ -240,15 +290,23 @@ def plot_velocity_error(
     Notes:
         PRD requirement: velocity error ≤ 0.10 m/s (10 cm/s)
     """
-    if velocities_true.shape != velocities_est.shape:
+    t = _validate_time_axis(t, name="t")
+    vt = np.asarray(velocities_true)
+    ve = np.asarray(velocities_est)
+    if vt.shape != ve.shape:
+        raise ValueError(f"Shape mismatch: true {vt.shape} vs est {ve.shape}")
+    if vt.ndim != 2 or vt.shape[1] != 2:
         raise ValueError(
-            f"Shape mismatch: true {velocities_true.shape} vs est {velocities_est.shape}"
+            f"velocities_true / velocities_est must have shape (N, 2); got {vt.shape}."
         )
+    if vt.shape[0] != t.shape[0]:
+        raise ValueError(f"Shape mismatch: velocities {vt.shape} vs time {t.shape}.")
+    valid_mask = _validate_optional_bool_mask(valid_mask, t.shape[0])
 
     apply_tufte_style()
 
     # Compute Euclidean error
-    errors = velocities_true - velocities_est
+    errors = vt - ve
     euclidean_error = np.linalg.norm(errors, axis=1)
 
     # Apply validity mask if provided
@@ -320,15 +378,27 @@ def plot_heading_error(
         PRD requirement: heading error ≤ 7.0 degrees
         Angle wrapping ensures errors are in [-π, π] range.
     """
-    if headings_true.shape != headings_est.shape:
+    # Mirror the validation contract used by ``plot_position_error`` /
+    # ``plot_velocity_error`` so bad inputs raise a clear ValueError
+    # instead of a raw matplotlib "x and y must have same first
+    # dimension" or NumPy "too many indices" deeper in the call.
+    t = _validate_time_axis(t, name="t")
+    ht = np.asarray(headings_true)
+    he = np.asarray(headings_est)
+    if ht.shape != he.shape:
+        raise ValueError(f"Shape mismatch: true {ht.shape} vs est {he.shape}")
+    if ht.ndim != 1:
         raise ValueError(
-            f"Shape mismatch: true {headings_true.shape} vs est {headings_est.shape}"
+            f"headings_true / headings_est must be 1-D (N,); got shape {ht.shape}."
         )
+    if ht.shape[0] != t.shape[0]:
+        raise ValueError(f"Shape mismatch: headings {ht.shape} vs time {t.shape}.")
+    valid_mask = _validate_optional_bool_mask(valid_mask, t.shape[0])
 
     apply_tufte_style()
 
     # Compute wrapped heading error (in [-π, π])
-    errors = headings_true - headings_est
+    errors = ht - he
     errors_wrapped = np.arctan2(np.sin(errors), np.cos(errors))
     errors_deg = np.rad2deg(np.abs(errors_wrapped))
 
@@ -739,7 +809,12 @@ def plot_heading_consistency_from_leds(
     m = np.asarray(filtered_means)
     led1 = np.asarray(Z_cam_led1)
     led2 = np.asarray(Z_cam_led2)
-    cam_mask = np.asarray(mask_cam).astype(bool)
+    # Reject NaN / non-{0,1} integer masks before they coerce silently
+    # into "valid" (``np.asarray([1, 0, 2, NaN]).astype(bool)`` is
+    # ``[True, False, True, True]`` — the 2 and the NaN both become
+    # True). The simulator and CLI emit clean bool masks; this gate
+    # protects loaded / saved masks from third-party tools.
+    cam_mask = validate_bool_mask_dtype(np.asarray(mask_cam), name="mask_cam")
 
     # Heading indices and vectors
     h_idx = get_heading_index(layout)

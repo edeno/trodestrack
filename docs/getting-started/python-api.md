@@ -19,19 +19,27 @@ TrodesTrack expects data in a dictionary format with specific keys:
 ```python
 sim = {
     # Timestamps
-    't_cam_exp': np.array(...),      # (N,) camera exposure times in seconds
     't_imu': np.array(...),          # (M,) IMU timestamps in seconds
+    't_cam_exp': np.array(...),      # (N,) camera exposure times in seconds
 
     # Camera measurements
     'Z_cam_led1': np.array(...),     # (N, 2) LED1 positions [x, y] in meters
     'Z_cam_led2': np.array(...),     # (N, 2) LED2 positions [x, y] in meters
     'mask_cam': np.array(...),       # (N,) boolean mask for valid frames
 
-    # IMU measurements
-    'u_imu': np.array(...),          # (M, 3) IMU data [gyro_z, accel_x, accel_y]
+    # IMU measurements. Channel count depends on the configured state mode:
+    #   (M, 3) [omega_z, f_x, f_y]                    — non-quaternion layouts;
+    #                                                    works with the default
+    #                                                    "2d_cam_3d_imu" as a
+    #                                                    degenerate path (vz idle).
+    #   (M, 4) [omega_z, f_x, f_y, f_z]               — "2d_cam_3d_imu" with 3D velocity.
+    #   (M, 6) [omega_x, omega_y, omega_z, f_x, f_y, f_z] — quaternion-orientation
+    #                                                       layouts (e.g.
+    #                                                       "3d_cam_6dof_imu").
+    'U_imu': np.array(...),
 
-    # Optional: ground truth for validation
-    'x_truth': np.array(...),        # (N, 8) true state vectors
+    # Optional: ground truth for validation (at IMU rate)
+    'X_truth': np.array(...),        # (M, 5) true state [x, y, vx, vy, theta]
 }
 ```
 
@@ -49,25 +57,26 @@ from trodestrack.sim.simple import (
     SimpleSimConfig,
 )
 
-# Configure simulation
+# Configure simulation. ``seed`` is an argument of each simulate_* call,
+# not a SimpleSimConfig field.
 config = SimpleSimConfig(
     duration_s=10.0,
-    cam_rate=30.0,        # Hz
-    imu_rate=200.0,       # Hz
-    seed=42,              # Reproducibility
+    fs_cam=30.0,          # Camera sampling rate (Hz)
+    fs_imu=200.0,         # IMU sampling rate (Hz)
 )
 
 # Stationary rat at (0.5, 0.5) meters
-sim = simulate_stationary(position=[0.5, 0.5], config=config)
+sim = simulate_stationary(position=[0.5, 0.5], config=config, seed=42)
 
 # Moving at constant velocity
 sim = simulate_constant_velocity(
     velocity=[0.2, 0.0],  # m/s
-    config=config
+    config=config,
+    seed=42,
 )
 
 # Circular motion
-sim = simulate_circular(config=config)
+sim = simulate_circular(config=config, seed=42)
 ```
 
 ### Realistic Rat IMU Simulation
@@ -79,26 +88,17 @@ from trodestrack.sim.rat_imu import RatIMUSimConfig, simulate_rat_imu
 
 config = RatIMUSimConfig(
     duration_s=30.0,                  # 30 second session
-    imu_rate=104.0,                   # SpikeGadgets hardware rate
-    cam_rate=30.0,
-    arena_size=(1.0, 1.0),           # 1m x 1m arena
-
-    # Motion dynamics
-    mean_speed=0.15,                  # m/s
-    velocity_tau=0.5,                 # OU correlation time
-
-    # Sensor noise (SpikeGadgets specs)
-    gyro_noise_density=0.01,          # deg/s/sqrt(Hz)
-    accel_noise_density=0.2,          # mg/sqrt(Hz)
+    fs_imu=104.0,                     # SpikeGadgets hardware IMU rate (Hz)
+    fs_cam=30.0,                      # Camera frame rate (Hz)
+    arena_w=1.0,                      # Arena width  (x-axis, meters)
+    arena_h=1.0,                      # Arena height (y-axis, meters)
 
     # Camera artifacts
-    dropout_prob=0.1,                 # 10% dropout rate
-    swap_prob=0.02,                   # 2% LED swap rate
-
-    seed=42,
+    cam_dropout_prob=0.1,             # 10% frame dropout rate
 )
 
-sim = simulate_rat_imu(config)
+# ``seed`` is an argument of ``simulate_rat_imu``, not the config.
+sim = simulate_rat_imu(config, seed=42)
 ```
 
 ## Filter Configuration
@@ -109,33 +109,33 @@ sim = simulate_rat_imu(config)
 from trodestrack.models.ekf import EKFConfig
 
 cfg = EKFConfig(
-    # State mode (determines state dimension)
-    state_mode="2d_full",             # 8D: [x, y, vx, vy, theta, b_gz, b_ax, b_ay]
+    # State mode (determines state dimension; default is 2d_cam_3d_imu)
+    state_mode="2d_cam_3d_imu",          # 10D: [x,y,vx,vy,vz,θ,b_gz,b_ax,b_ay,b_az]
 
     # Process noise
-    process_noise_pos=0.02,           # m^2/s
-    process_noise_vel=2.0,            # m^2/s^3
-    process_noise_heading=0.02,       # rad^2/s
-    process_noise_gyro_bias=2e-6,     # rad^2/s^3
-    process_noise_accel_bias=2e-4,    # m^2/s^5
+    process_noise_pos=1e-4,              # m^2/s
+    process_noise_vel=5e-3,              # m^2/s^3
+    process_noise_heading=5e-4,          # rad^2/s
+    process_noise_gyro_bias=5e-8,        # rad^2/s^3
+    process_noise_accel_bias=2e-5,       # m^2/s^5
 
     # Measurement noise
-    measurement_noise_pos=0.005**2,   # m^2 (5mm)
-    measurement_noise_heading=0.05**2, # rad^2 (~3 deg)
+    measurement_noise_pos=0.01**2,       # m^2 (1 cm)
+    measurement_noise_heading=0.05**2,   # rad^2 (~3 deg)
 
     # Dynamics
-    damping_coeff=0.5,                # 1/s (velocity decay)
+    damping_coeff=0.2,                   # 1/s (velocity decay)
 
     # Robustness features
-    use_mahalanobis_gating=True,      # Reject outliers
-    mahalanobis_threshold_prob=0.997, # 3-sigma gate
+    use_mahalanobis_gating=True,         # Reject outliers (3σ)
+    mahalanobis_threshold_prob=0.997,    # 3-sigma gate
 
-    enable_zupt=False,                # Zero-velocity updates
-    zupt_velocity_threshold=0.05,     # m/s
+    enable_zupt=True,                    # Zero-velocity updates
+    zupt_velocity_threshold=0.02,        # m/s
 
     # Adaptive noise during dropout
     adaptive_q_during_dropout=True,
-    dropout_q_pos_multiplier=10.0,
+    dropout_q_pos_multiplier=2.0,        # see docs/TUNING.md for the full set
 )
 ```
 
@@ -144,19 +144,76 @@ cfg = EKFConfig(
 ```python
 from trodestrack.models.ukf import UKFConfig
 
-# UKF uses same base parameters plus sigma-point settings
+# UKF uses same base parameters plus sigma-point settings.
+# Defaults: alpha=sqrt(3)≈1.732, beta=2.0, kappa=1.0 (UKFConfig.aggressive()).
+# Note: alpha must be large enough that (n + λ) = α² (n + κ) ≥ 1e-2
+# (UKFConfig._MIN_N_PLUS_LAMBDA). UKFConfig validates this in __post_init__
+# and rejects degenerate spreads — e.g. alpha=1e-3 with kappa=0.0, n=10
+# resolves to (n+λ)≈1e-5 and raises ValueError.
 cfg = UKFConfig(
     state_mode="2d_full",
     # ... same parameters as EKFConfig ...
 
-    # UKF-specific
-    alpha=1e-3,    # Sigma point spread
+    # UKF-specific (use the validated aggressive preset)
+    alpha=1.732,   # sqrt(3): wide sigma-point spread
     beta=2.0,      # Prior knowledge (2.0 for Gaussian)
-    kappa=0.0,     # Secondary scaling parameter
+    kappa=1.0,     # Secondary scaling parameter
 )
 ```
 
 ## Running Filters
+
+### YAML Session Loader
+
+For real data or reusable prepared-array runs, load a session config first and pass the prepared arrays to the EKF:
+
+```python
+from trodestrack.config import load_session_config
+from trodestrack.io import load_session, write_session_diagnostics
+from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
+
+session_config = load_session_config("session.yaml")
+session = load_session(session_config)
+cfg = EKFConfig(
+    **session_config.filter.to_ekf_kwargs(led_distance=session.led_distance)
+)
+result = extended_kalman_filter(
+    cfg,
+    session.t_imu,
+    session.U_imu,
+    session.t_cam,
+    session.Z_cam_led1,
+    session.Z_cam_led2,
+    session.mask_cam,
+    conf_cam=session.conf_cam,
+)
+write_session_diagnostics(session, session_config.outputs.output_dir)
+```
+
+`SessionConfig` supports `inputs.format: prepared_arrays` for existing text-array workflows and `inputs.format: spikegadgets_trodes` for SpikeGadgets IMU parquet plus Trodes dual-LED parquet. Real-data configs can remove sample-and-hold IMU repeats, convert raw SpikeGadgets integers to SI units, apply axis/sign maps and time offsets, run IMU calibration diagnostics, expose the 6-DOF orientation fused mode, and pre-correct persistent LED swaps with:
+
+```yaml
+led_identity:
+  mode: auto
+  initial_state: auto
+```
+
+Set `initial_state: original` or `swapped` when you know the first valid dual-LED frame's label convention. Leaving it at `auto` corrects continuity breaks but cannot infer a global all-session label reversal; config-driven runs record that ambiguity in metadata and LED identity diagnostics.
+
+The CLI wrappers (`trodestrack online --config session.yaml` and `trodestrack smooth --config session.yaml`) also run the real-data safety check by default for IMU-fused SpikeGadgets/Trodes sessions. That check runs an extra vision-only EKF over the same session and gates the fused result on trajectory envelope, speed, and fused-vs-vision position deviation; vision-only and fused log-likelihoods are *reported* in the safety report and metadata but not used to pass/fail the run. The envelope gate needs enough dual-LED frames to estimate the camera midpoint envelope (`outputs.safety_min_dual_led_frames`, default `20`), while single-LED frames still contribute to fused-vs-vision deviation checks. Expect roughly a second filter pass of runtime. Accelerometer-driven translation has an earlier calibration gate: stationary gravity must have a small horizontal component and camera-derived acceleration must align with IMU accelerometer axes above the configured thresholds.
+
+For tilted headstages, start with:
+
+```yaml
+filter:
+  state_mode: 2d_cam_6dof_imu_orientation
+  enable_experimental_accel_translation: false
+  use_gravity_orientation_update: true
+```
+
+Enable accelerometer-driven translation only after that fused configuration passes the real-data safety check. The validated default fuses 6-DOF IMU orientation with camera position; it is not a claim that accelerometer-driven position integration is ready for tilted real headstages.
+
+For config-driven `state_mode: vision_only`, Mahalanobis gating defaults off unless you explicitly set `filter.use_mahalanobis_gating: true`. This avoids rejecting large but valid camera motion in camera-only real-data runs.
 
 ### Extended Kalman Filter
 
@@ -164,11 +221,21 @@ cfg = UKFConfig(
 from trodestrack.models.ekf import extended_kalman_filter, EKFConfig
 
 cfg = EKFConfig()
-result = extended_kalman_filter(cfg, sim)
+filter_args = (
+    cfg,
+    sim["t_imu"],
+    sim["U_imu"],
+    sim["t_cam_exp"],
+    sim["Z_cam_led1"],
+    sim["Z_cam_led2"],
+    sim["mask_cam"],
+)
+result = extended_kalman_filter(*filter_args)
 
-# Result is a FilterResult namedtuple
-print(f"Filtered means shape: {result.filtered_means.shape}")       # (N, 8)
-print(f"Filtered covariances shape: {result.filtered_covariances.shape}")  # (N, 8, 8)
+# Result is an EKFResult NamedTuple. The state dimension follows the
+# layout for cfg.state_mode (default "2d_cam_3d_imu" -> 10D state).
+print(f"Filtered means shape: {result.filtered_means.shape}")       # (N, layout.n)
+print(f"Filtered covariances shape: {result.filtered_covariances.shape}")  # (N, layout.n, layout.n)
 ```
 
 ### Unscented Kalman Filter
@@ -177,7 +244,15 @@ print(f"Filtered covariances shape: {result.filtered_covariances.shape}")  # (N,
 from trodestrack.models.ukf import unscented_kalman_filter, UKFConfig
 
 cfg = UKFConfig()
-result = unscented_kalman_filter(cfg, sim)
+result = unscented_kalman_filter(
+    cfg,
+    sim["t_imu"],
+    sim["U_imu"],
+    sim["t_cam_exp"],
+    sim["Z_cam_led1"],
+    sim["Z_cam_led2"],
+    sim["mask_cam"],
+)
 ```
 
 ### RTS Smoother (Offline)
@@ -187,17 +262,9 @@ For offline analysis, the smoother uses future observations:
 ```python
 from trodestrack.runtime.offline import rts_smoother
 
-# Run forward filter first
-forward_result = extended_kalman_filter(cfg, sim)
-
-# Then run backward smoother
+forward_result = extended_kalman_filter(*filter_args)
 smoothed_result = rts_smoother(
-    forward_result.filtered_means,
-    forward_result.filtered_covariances,
-    forward_result.transition_matrices,
-    forward_result.process_covariances,
-    cfg,
-    sim
+    forward_result, cfg, sim["t_imu"], sim["U_imu"], sim["t_cam_exp"]
 )
 ```
 
@@ -211,10 +278,21 @@ from trodestrack.models.state_layout import get_layout
 # Get layout from config
 layout = get_layout(cfg.state_mode)
 
-# Extract states (works with any state dimension!)
-positions = result.filtered_means[:, layout.pos_idx]
-velocities = result.filtered_means[:, layout.vel_idx]
-headings = result.filtered_means[:, layout.heading_idx]
+# Extract states using layout indices.
+# layout.pos_idx / layout.vel_idx are always tuples, so these slices stack
+# the named components into (N, k) arrays for any registered mode.
+positions = result.filtered_means[:, layout.pos_idx]      # (N, 2) for 2D, (N, 3) for 3D
+velocities = result.filtered_means[:, layout.vel_idx]     # (N, k_vel)
+
+# Heading layout-aware: scalar yaw for 2D modes; 3-tuple Euler or 4-tuple
+# quaternion for 14D / 15D / 16D modes. Cast to a scalar yaw only when the
+# layout actually exposes one.
+heading_block = result.filtered_means[:, layout.heading_idx]
+if layout.has_heading_2d:
+    headings = heading_block.squeeze(-1) if heading_block.ndim == 2 else heading_block
+    # headings: (N,) yaw in radians
+else:
+    headings = heading_block  # (N, 3) Euler or (N, 4) quaternion — handle separately
 
 # Extract covariances
 P = result.filtered_covariances
@@ -226,10 +304,13 @@ pos_std = np.sqrt(np.diagonal(pos_cov, axis1=1, axis2=2))  # (N, 2)
 
 | Mode | Dim | State Vector | Use Case |
 |------|-----|--------------|----------|
-| `"2d_full"` | 8D | [x, y, vx, vy, theta, b_gz, b_ax, b_ay] | Standard sensor fusion |
-| `"vision_only"` | 5D | [x, y, vx, vy, theta] | Camera-only tracking |
-| `"2d_cam_3d_imu"` | 10D | [x, y, vx, vy, vz, theta, b_gz, b_ax, b_ay, b_az] | 2D camera + 3D accel |
-| `"3d_euler"` | 15D | [x, y, z, vx, vy, vz, roll, pitch, yaw, ...] | Full 3D tracking |
+| `"2d_cam_3d_imu"` | 10D | [x, y, vx, vy, vz, theta, b_gz, b_ax, b_ay, b_az] | **Default**: 2D camera + 3D accel |
+| `"2d_full"` | 8D | [x, y, vx, vy, theta, b_gz, b_ax, b_ay] | Standard 2D sensor fusion |
+| `"vision_only"` | 5D | [x, y, vx, vy, theta] | Camera-driven tracking; APIs still require placeholder IMU arrays |
+| `"2d_cam_6dof_imu_orientation"` | 14D | [x, y, vx, vy, qw, qx, qy, qz, b_gx, b_gy, b_gz, b_ax, b_ay, b_az] | Experimental: 2D camera + 6-DOF IMU with quaternion orientation |
+| `"3d_euler"` | 15D | [x, y, z, vx, vy, vz, roll, pitch, yaw, b_gx, b_gy, b_gz, b_ax, b_ay, b_az] | 3D-pose state vector (Euler angles). No public filter entry point consumes it today — the 2D `extended_kalman_filter` rejects it and the 3D path requires `3d_cam_6dof_imu`. |
+| `"3d_quat"` | 16D | [x, y, z, vx, vy, vz, qw, qx, qy, qz, b_gx, b_gy, b_gz, b_ax, b_ay, b_az] | 3D-pose state vector (quaternion). UKF rejects quaternion layouts; route via the experimental `extended_kalman_filter_3d` using `"3d_cam_6dof_imu"` (same vector). |
+| `"3d_cam_6dof_imu"` | 16D | same as `"3d_quat"` | **Required** by the experimental `extended_kalman_filter_3d` entry point (3D LED observations + 6-channel IMU); the only registered mode that flows end-to-end through a 3D camera filter today. |
 
 See [State Layouts](../user-guide/state-layouts.md) for complete documentation.
 
@@ -238,14 +319,51 @@ See [State Layouts](../user-guide/state-layouts.md) for complete documentation.
 ### Generate QA Report
 
 ```python
-from trodestrack.qa.report import generate_filter_report
+import numpy as np
+from trodestrack.models.state_layout import get_layout
+from trodestrack.qa.metrics import compute_nees
+from trodestrack.qa.report import generate_qa_report
 
-generate_filter_report(
-    states_fwd=result.filtered_means,
-    states_truth=sim.get('x_truth'),
-    covariances=result.filtered_covariances,
-    config=cfg,
-    output_path="qa_report.pdf"
+layout = get_layout(cfg.state_mode)
+
+# Align ground truth (IMU rate, 5D [x, y, vx, vy, theta]) to camera frames.
+X_truth_at_cam = np.array(
+    [sim["X_truth"][np.argmin(np.abs(sim["t_imu"] - t_c))] for t_c in sim["t_cam_exp"]]
+)
+filtered = np.asarray(result.filtered_means)
+filtered_cov = np.asarray(result.filtered_covariances)
+
+pos_idx = list(layout.pos_idx)
+vel_idx_2d = list(layout.vel_idx)[:2]  # X_truth has only vx, vy
+# This QA snippet assumes a scalar 2D-yaw layout. Cast guarded; for
+# 3-tuple Euler / 4-tuple quaternion layouts you would build per-component
+# diagnostics instead.
+if not layout.has_heading_2d:
+    raise ValueError(
+        f"This QA example expects a scalar-heading layout; got "
+        f"layout.heading_idx={layout.heading_idx!r}. Build per-component "
+        "orientation diagnostics for 14D/15D/16D layouts."
+    )
+heading_idx_raw = layout.heading_idx
+heading_col = int(heading_idx_raw[0] if isinstance(heading_idx_raw, tuple) else heading_idx_raw)
+
+# Position-only NEES (state_dim=2): expected mean ~ 2 for a consistent filter.
+nees = compute_nees(
+    states_true=X_truth_at_cam[:, :2],
+    states_est=filtered[:, pos_idx],
+    covariances_est=filtered_cov[np.ix_(np.arange(filtered.shape[0]), pos_idx, pos_idx)],
+)
+generate_qa_report(
+    pdf_path="qa_report.pdf",
+    t=sim["t_cam_exp"],
+    positions_true=X_truth_at_cam[:, :2],
+    positions_est=filtered[:, pos_idx],
+    velocities_true=X_truth_at_cam[:, 2:4],
+    velocities_est=filtered[:, vel_idx_2d],
+    headings_true=X_truth_at_cam[:, 4],
+    headings_est=filtered[:, heading_col],
+    nees=nees,
+    state_dim=2,
 )
 ```
 
@@ -253,25 +371,33 @@ generate_filter_report(
 
 ```python
 from trodestrack.qa.metrics import (
-    compute_rmse,
+    compute_position_rmse,
     compute_nees,
-    compute_nis,
 )
 
-# Position RMSE
-pos_rmse = compute_rmse(
-    result.filtered_means[:, layout.pos_idx],
-    sim['x_truth'][:, layout.pos_idx]
-)
+# X_truth from the simulator is laid out as [x, y, vx, vy, theta], so its
+# position columns are the first two regardless of filter layout.
+truth_xy = X_truth_at_cam[:, :2]
+
+# Estimated position columns come from the filter layout, not hardcoded indices.
+filtered = np.asarray(result.filtered_means)
+filtered_cov = np.asarray(result.filtered_covariances)
+est_xy = filtered[:, list(layout.pos_idx)[:2]]
+est_xy_cov = filtered_cov[
+    np.ix_(np.arange(filtered.shape[0]), list(layout.pos_idx)[:2], list(layout.pos_idx)[:2])
+]
+
+# Position RMSE — signature is compute_position_rmse(positions_true, positions_est, ...)
+pos_rmse = compute_position_rmse(truth_xy, est_xy)
 print(f"Position RMSE: {pos_rmse * 100:.2f} cm")
 
-# NEES (filter consistency)
+# NEES (filter consistency, position only)
 nees = compute_nees(
-    result.filtered_means,
-    result.filtered_covariances,
-    sim['x_truth']
+    states_true=truth_xy,
+    states_est=est_xy,
+    covariances_est=est_xy_cov,
 )
-print(f"Mean NEES: {nees.mean():.2f} (expected: {layout.state_dim})")
+print(f"Mean NEES: {nees.mean():.2f} (expected ~ 2 for position-only NEES)")
 ```
 
 ### Create Diagnostic Video
@@ -280,11 +406,13 @@ print(f"Mean NEES: {nees.mean():.2f} (expected: {layout.state_dim})")
 from trodestrack.viz.video import create_diagnostic_video
 
 create_diagnostic_video(
-    sim=sim,
-    fwd=result,
-    output_path="diagnostics.mp4",
+    sim,                       # SimOut from simulate_rat_imu
+    "diagnostics.mp4",         # output_path (positional)
+    filter_results=result,     # optional EKFResult overlay
+    state_mode=cfg.state_mode, # required when filter_results is set; resolves
+                               # heading and bias indices for the overlay
     fps=30,
-    speedup=2.0  # 2x playback speed
+    speedup=2.0,               # 2x playback speed
 )
 ```
 
@@ -293,19 +421,33 @@ create_diagnostic_video(
 TrodesTrack raises informative errors:
 
 ```python
-from trodestrack.models.ekf import EKFConfig
+from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
+from trodestrack.models.state_layout import get_layout
 
-# Invalid state mode
+# EKFConfig itself does not validate state_mode at construction time;
+# the lookup happens inside get_layout(...) (and inside the filter call
+# path), which raises KeyError for unknown modes.
+cfg = EKFConfig(state_mode="invalid")  # no error here
 try:
-    cfg = EKFConfig(state_mode="invalid")
-except ValueError as e:
-    print(f"Error: {e}")  # "Unknown state_mode: invalid"
+    layout = get_layout(cfg.state_mode)
+except KeyError as e:
+    print(f"Error: {e}")  # "'invalid' is not a registered state_mode"
 
-# Data shape mismatch
+# Data shape mismatch. extended_kalman_filter takes positional arrays
+# (ekf_config, t_imu, U_imu, t_cam, Z_cam_led1, Z_cam_led2, mask_cam, ...)
+# and validates IMU shape via validate_imu_input_shape — passing a
+# wrong-shaped IMU array raises ValueError; passing the wrong number of
+# positional args raises TypeError before the shape check runs.
 try:
-    result = extended_kalman_filter(cfg, bad_data)
+    cfg = EKFConfig(state_mode="2d_full")
+    bad_U_imu = np.zeros((100, 7))  # 7 channels is not a valid layout
+    result = extended_kalman_filter(
+        cfg,
+        sim["t_imu"], bad_U_imu, sim["t_cam_exp"],
+        sim["Z_cam_led1"], sim["Z_cam_led2"], sim["mask_cam"],
+    )
 except ValueError as e:
-    print(f"Error: {e}")  # Informative message about shape mismatch
+    print(f"Error: {e}")  # validate_imu_input_shape message
 ```
 
 ## Performance Tips
@@ -319,4 +461,4 @@ except ValueError as e:
 
 - **[State Layouts](../user-guide/state-layouts.md)**: Deep dive into dimension-agnostic coding
 - **[Tuning Guide](../user-guide/tuning.md)**: Optimize filter parameters
-- **[API Reference](../reference/)**: Complete API documentation
+- **[Troubleshooting Guide](../user-guide/troubleshooting.md)**: Common filter failures and solutions

@@ -402,11 +402,18 @@ def build_section_1_problem(builder):
     )
 
     # Slide 2: The Behavioral Tracking Challenge
-    builder.add_full_image_slide(
+    # (Originally a slide02_failure_modes.png illustration; the generator
+    # was never landed, so this is a bulleted slide until a figure ships.)
+    builder.add_content_slide(
         title="The Behavioral Tracking Challenge",
-        image_path="slide02_failure_modes.png",
-        caption="Common failure modes: occlusion, reflection, motion blur, dim lighting",
-        notes="Neuroscience experiments rely on accurate tracking. Four common failure modes shown: LED occlusion (rat near wall), reflections from surfaces, motion blur during fast movements, and dim lighting reducing confidence. These failures corrupt analyses like place cells, trajectory decoding, and behavior scoring.",
+        bullets=[
+            "Occlusion: rat near walls or under shelter loses LED visibility",
+            "Reflections: mirrored arena surfaces produce phantom detections",
+            "Motion blur: fast head turns smear LED centroids",
+            "Dim lighting: low contrast lowers detection confidence",
+            "Each failure corrupts place-cell mapping, decoding, and behavior scoring",
+        ],
+        notes="Neuroscience experiments rely on accurate tracking. Four common failure modes: LED occlusion (rat near wall), reflections from surfaces, motion blur during fast movements, and dim lighting reducing confidence. These failures corrupt analyses like place cells, trajectory decoding, and behavior scoring.",
     )
 
     # Slide 3: Real-World Consequences
@@ -487,28 +494,28 @@ def build_section_1_problem(builder):
         title="What is TrodesTrack?",
         bullets=[
             "Python package for sensor-fusion rat tracking",
-            "Inputs: Trodes/DLC camera + SpikeGadgets IMU",
+            "Inputs: NumPy arrays (LED positions + IMU samples); Trodes/DLC/SpikeGadgets loaders planned",
             "Algorithms: Extended Kalman Filter (EKF), Unscented Kalman Filter (UKF), RTS Smoother",
             "Outputs: Position, velocity, heading + uncertainty",
             "Key features: Bias estimation, outlier rejection, dropout tolerance",
-            "Built with JAX: Fast (300× realtime), GPU-ready",
+            "Built with JAX: ≥10× realtime CPU floor (CI-tested), GPU-ready",
         ],
-        notes="TrodesTrack is an open-source Python package. It ingests camera tracking (Trodes LEDs or DeepLabCut) and SpikeGadgets IMU data. Implements EKF, UKF, and RTS smoothing with JAX (300× realtime on CPU). Outputs full state [x, y, vx, vy, θ, biases] with uncertainty estimates (covariance matrices).",
+        notes="TrodesTrack is an open-source Python package. Today it consumes generic NumPy arrays (camera LED positions + IMU samples) — typical sources are Trodes LED CSV, DeepLabCut CSV, and SpikeGadgets IMU exports, but format-specific loaders are still on the roadmap. Implements EKF, UKF, and RTS smoothing with JAX. Throughput floor (≥10× realtime offline on CPU) is enforced by tests/benchmark/test_throughput.py; the reference run on an M-series Mac CPU under block-until-ready timing was ~38× realtime / ~0.41 ms per frame. Outputs full state [x, y, vx, vy, θ, biases] with uncertainty estimates (covariance matrices).",
     )
 
     # Slide 8: Quick Preview - Before & After
     builder.add_content_slide(
         title="Quick Preview: Before & After",
         bullets=[
-            "Scenario: 5-second camera dropout",
-            "Vision-only: Huge drift (3+ meters)",
-            "Sensor fusion: Bounded error (<10 cm)",
+            "Scenario: 1-second camera dropout (t = 2.5–3.5 s)",
+            "Vision-only: Drift grows freely",
+            "Sensor fusion: Bounded error",
             "Video shows: Split-screen comparison",
             "Left: Vision-only extrapolation",
             "Right: TrodesTrack sensor fusion",
         ],
         image_path=None,  # Video will be added manually
-        notes="This video shows a 10-second session with a 5-second camera dropout. Left: vision-only tracking extrapolates position, drifts 3+ meters. Right: TrodesTrack uses IMU pre-integration to maintain accuracy within 10 cm. Notice uncertainty grows during dropout (ellipses expand) and shrinks when camera returns. This is the core value proposition!",
+        notes="This video shows a 10-second session with a 1-second camera dropout (t = 2.5–3.5 s). Left: vision-only tracking extrapolates position and drifts. Right: TrodesTrack uses IMU pre-integration to maintain accuracy. Notice uncertainty grows during dropout (ellipses expand) and shrinks when camera returns. This is the core value proposition!",
     )
     # Note: Videos need to be added manually to PowerPoint after generation
 
@@ -537,14 +544,14 @@ def build_section_2_how_it_works(builder):
     builder.add_content_slide(
         title="What We Track: The State Vector",
         bullets=[
-            "8-dimensional state: [x, y, vₓ, vᵧ, θ, b_gz, b_ax, b_ay]",
-            "Position: (x, y) in meters",
-            "Velocity: (vₓ, vᵧ) in m/s",
-            "Heading: θ in radians",
-            "Biases: b_gz (gyro), b_ax, b_ay (accel)",
+            "Default state (mode 2d_cam_3d_imu, 10D):",
+            "  [x, y, vₓ, vᵧ, vz, θ, b_gz, b_ax, b_ay, b_az]",
+            "Position (x, y) m · velocity (vₓ, vᵧ, vz) m/s · heading θ rad",
+            "Gyro bias b_gz · accel biases (b_ax, b_ay, b_az)",
             "Why biases? Prevent unbounded drift over time",
+            "Other modes via state_mode: vision_only (5D), 2d_full (8D), 3d_quat (16D)",
         ],
-        notes="TrodesTrack uses an 8D state vector. Position and velocity are obvious. Heading θ tracks rat orientation. The key innovation: estimating IMU biases [b_gz, b_ax, b_ay] as part of the state. These biases drift slowly (random walk), and estimating them prevents unbounded integration error. Camera measurements provide the observability needed to correct biases.",
+        notes="TrodesTrack's default state vector is the 10D 2d_cam_3d_imu layout: [x, y, vx, vy, vz, θ, b_gz, b_ax, b_ay, b_az]. Position and velocity are obvious; vz is included for rearing detection. Heading θ tracks rat orientation in 2D. The key innovation: estimating IMU biases as part of the state — they drift slowly (random walk), and estimating them prevents unbounded integration error. Camera measurements provide the observability needed to correct biases. Other state_mode choices: vision_only (5D, camera-only) for the simplest case, 2d_full (8D, 2D-IMU only) for sessions without vertical motion, and 3d_quat / 3d_cam_6dof_imu (16D, experimental) for full 3D pose with quaternion orientation.",
     )
 
     # Slide 12: The Predict Step (IMU Integration)
@@ -585,10 +592,10 @@ def build_section_2_how_it_works(builder):
             "UKF (Unscented Kalman Filter): Samples sigma points, no linearization",
             "EKF: Faster, good for mild nonlinearities",
             "UKF: Slower, better for strong nonlinearities",
-            "TrodesTrack default: EKF (meets <33 ms latency)",
+            "TrodesTrack default: EKF (mean per-frame ≤33 ms over a 30-min session, batch lax.scan)",
             "UKF available for offline smoothing",
         ],
-        notes="EKF linearizes the dynamics (Jacobians). UKF uses sigma points (deterministic sampling). For 2D tracking, nonlinearities are mild (heading rotation), so EKF works well. UKF is more accurate but 3× slower. TrodesTrack uses EKF by default for online filtering (<33 ms per frame). UKF is available for offline smoothing where speed is less critical.",
+        notes="EKF linearizes the dynamics (Jacobians). UKF uses sigma points (deterministic sampling). For 2D tracking, nonlinearities are mild (heading rotation), so EKF works well. UKF is more accurate but 3× slower. TrodesTrack uses EKF by default for forward-only filtering. The PRD's ≤33 ms per-frame latency target is verified by tests/benchmark/test_throughput.py as an amortized mean over a 30-min batch lax.scan (necessary but not sufficient for true per-frame tail latency); the filter is not driven from a streaming per-frame ingest loop. UKF is available for offline smoothing where speed is less critical.",
     )
 
     # Slide 16: Offline Smoothing
@@ -604,20 +611,27 @@ def build_section_2_how_it_works(builder):
         title="Robustness Features",
         bullets=[
             "Mahalanobis gating: Reject outliers beyond 3σ threshold",
-            "LED swap resolution: Handle front/back confusion via residuals",
+            "Transient LED-swap mitigation: gating + dual-LED residuals reject one-frame swaps",
             "Confidence scaling: Weight camera by DLC confidence",
             "Bias estimation: Adapt to slowly changing IMU characteristics",
             "Arena bounds: Soft constraint to stay within known region",
             "Damping: Exponential decay prevents velocity explosion during dropout",
         ],
-        notes="TrodesTrack includes multiple robustness mechanisms. Mahalanobis gating rejects outliers (e.g., reflections) beyond χ² threshold. LED swaps are resolved by comparing wrapped residuals. DLC confidence scales measurement noise (low confidence → high noise). Bias estimation adapts to IMU drift. Arena bounds provide soft constraints. Velocity damping (λ term) prevents unbounded growth during long dropouts.",
+        notes="TrodesTrack includes multiple robustness mechanisms. Mahalanobis gating rejects outliers (e.g., reflections) beyond χ² threshold. Transient LED swaps are absorbed by gating on the dual-LED residual; persistent (sustained) front/back swaps can be corrected before filtering with LED identity correction, while all-session global reversals require an initial-state prior. DLC confidence scales measurement noise (low confidence → high noise). Bias estimation adapts to IMU drift. Arena bounds provide soft constraints. Velocity damping (λ term) prevents unbounded growth during long dropouts.",
     )
 
     # Slide 18: The 9-Panel Diagnostic Video
-    builder.add_full_image_slide(
+    # (Originally a slide18_diagnostic_panel.png illustration; the generator
+    # was never landed. Replace with a bulleted layout description until a
+    # captured frame from create_diagnostic_video is available.)
+    builder.add_content_slide(
         title="The 9-Panel Diagnostic Video",
-        image_path="slide18_diagnostic_panel.png",
-        caption="Real-time monitoring: trajectory, sensors, errors, NEES, biases",
+        bullets=[
+            "Top row:    arena view · gyro time series · accelerometer time series",
+            "Middle row: camera status · position error · velocity error",
+            "Bottom row: heading error · NEES (filter consistency) · bias estimates",
+            "Generated by trodestrack.viz.video.create_diagnostic_video(...)",
+        ],
         notes="TrodesTrack generates 9-panel diagnostic videos for quality assurance. Top row: arena view, gyro, accel. Middle row: camera status, position error, velocity error. Bottom row: heading error, NEES (consistency), bias estimates. This comprehensive view lets you diagnose tracking failures, tune filter parameters, and verify results before analysis.",
     )
 
@@ -668,42 +682,43 @@ def build_section_3_features(builder):
     builder.add_content_slide(
         title="Flexible State Tracking Modes",
         bullets=[
-            "2d_pos: Position only (x, y) - 2D state",
-            "2d_vel: Position + velocity (x, y, vₓ, vᵧ) - 4D state",
-            "2d_full: Position + velocity + heading + biases - 8D state (default)",
-            "heading_only: Heading only (θ, b_gz) - 2D state",
-            "Future 3d_pose: Full 6-DOF (x, y, z, roll, pitch, yaw) - 16D state",
-            "Tradeoff: Complexity vs accuracy vs computation",
+            "vision_only: [x, y, vx, vy, θ] — 5D, camera only, no IMU biases",
+            "2d_full: [x, y, vx, vy, θ, b_gz, b_ax, b_ay] — 8D, 2D camera + 2D IMU",
+            "2d_cam_3d_imu: 10D, 2D camera + 3D IMU (default; adds vz, b_az for rearing)",
+            "2d_cam_6dof_imu_orientation: 14D, quaternion orientation + 2D camera (experimental)",
+            "3d_euler / 3d_quat / 3d_cam_6dof_imu: 15-16D, full 3D pose",
+            "Switch by setting EKFConfig(state_mode=...); see docs/user-guide/state-layouts.md",
         ],
-        notes="TrodesTrack supports multiple state layouts via get_layout() API. 2d_pos is simplest (no velocity). 2d_vel adds velocity but no heading. 2d_full (default) includes heading and biases (8D). heading_only tracks orientation alone (useful for virtual reality). Future 3D extension will support full 6-DOF pose. Choose layout based on experiment needs and computational budget.",
+        notes='TrodesTrack supports multiple state layouts via the registry in trodestrack.models.state_layout (see get_layout()). The shipped layouts are vision_only (5D, camera-only), 2d_full (8D), 2d_cam_3d_imu (10D, the default — includes vz / b_az for rearing detection), 2d_cam_6dof_imu_orientation (14D, experimental quaternion orientation with a 2D camera), 3d_euler (15D), and 3d_quat (16D). The experimental ``extended_kalman_filter_3d`` entry point requires state_mode="3d_cam_6dof_imu" (16D, same vector layout as 3d_quat) — 3d_euler / 3d_quat are EKF-compatible state vectors but do not flow through the 3D-camera filter directly. Choose a layout by passing state_mode to EKFConfig / UKFConfig; the user-guide page docs/user-guide/state-layouts.md has the per-mode index tables.',
     )
 
     # Slide 24: Performance & Scalability
     builder.add_content_slide(
         title="Performance & Scalability",
         bullets=[
-            "CPU (single core): 300× realtime (5-min session in 1 second)",
-            "GPU (single card): 1000×+ realtime (30-min session in 2 seconds)",
+            "CPU floor (CI-tested): ≥10× realtime offline on a 30-min session",
+            "CPU reference (M-series Mac, block-until-ready): ~38× realtime / ~0.41 ms per frame",
+            "GPU support: same code, just change device (re-measure on your hardware before quoting)",
             "Memory efficient: O(n) scaling, ~100 MB for 30-min session",
             "Batch processing: Parallelize across sessions",
-            "Online latency: <33 ms per frame (EKF)",
+            "Forward-only EKF mean per-frame ≤33 ms over a 30-min session (amortized batch lax.scan; NOT per-frame streaming)",
             "JAX JIT compilation: First run slow, subsequent runs fast",
         ],
-        notes="TrodesTrack is highly optimized using JAX. CPU performance: 300× realtime on single core (M1 Mac / Intel Xeon). GPU acceleration: 1000×+ realtime on NVIDIA A100. Memory scales linearly O(n). Batch processing across sessions is embarrassingly parallel. Online filtering meets <33 ms latency requirement (30 Hz). JAX JIT compilation adds ~10s overhead on first run, then subsequent runs are instant.",
+        notes="TrodesTrack is highly optimized using JAX. The throughput floor (≥10× realtime offline on CPU) is enforced by tests/benchmark/test_throughput.py with block-until-ready timing; the reference run on an M-series Mac CPU was ~38× realtime / ~0.41 ms per frame. Absolute throughput is hardware-dependent, so re-measure on your target backend before quoting numbers. The codebase has no thread/core pinning, so calling this 'single core' would be unsupported; describe it simply as 'CPU'. GPU acceleration is supported via JAX's standard device-placement story but no first-party GPU benchmark is shipped today. Memory scales linearly O(n). Batch processing across sessions is embarrassingly parallel. The PRD's ≤33 ms-per-frame target is verified by tests/benchmark/test_throughput.py as the amortized mean (total / num_frames over a single 30-min batch lax.scan), which is necessary but not sufficient for tail / p99 per-frame latency — there is no streaming per-frame ingest harness today, so this is a throughput-style proxy for the forward-only 'online' CLI rather than a real-time guarantee. JAX JIT compilation adds ~10s overhead on first run, then subsequent runs are instant.",
     )
 
     # Slide 25: Real Data Support
     builder.add_content_slide(
-        title="Real Data Support",
+        title="Real Data Support (Status)",
         bullets=[
-            "Input formats: Trodes LEDs, DeepLabCut CSV, SpikeGadgets IMU (.mda, .rec)",
-            "Homography calibration: Interactive tool (click arena corners)",
-            "Time synchronization: Hardware-synced (SpikeGadgets clock)",
-            "Preprocessing: Remove IMU sample-and-hold repeats, convert units",
-            "Output formats: Parquet (states), HDF5 (diagnostics), MP4 (videos)",
-            "Example datasets: fetch_example() downloads demo session",
+            "Today: generic NumPy array inputs (timestamps + LED positions + IMU)",
+            "CLI: ``trodestrack online`` / ``smooth`` / ``report`` (text + .npy I/O)",
+            "Diagnostic videos: MP4 via ``trodestrack.viz.video``",
+            "Planned: native loaders for Trodes LED CSV, DeepLabCut CSV, SpikeGadgets MDA/REC",
+            "Planned: homography calibration tool, Parquet/HDF5 outputs, fetch_example() demo data",
+            "User pipeline today: convert to NumPy arrays, then call the filters / CLIs",
         ],
-        notes="TrodesTrack ingests real data from Trodes (LED CSV), DeepLabCut (DLC CSV), and SpikeGadgets (MDA/REC files). Homography calibration tool (calib-homography command) maps pixels to meters via arena corners. Time sync assumes hardware-synced clocks. Preprocessing handles unit conversions and removes sample-and-hold repeats. Outputs: Parquet (time series), HDF5 (full diagnostics), MP4 (videos). Demo datasets available via fetch_example().",
+        notes="TrodesTrack today consumes generic NumPy arrays for IMU + camera inputs and ships a CLI ('trodestrack online / smooth / report') that reads text files (.txt for filter outputs and .npy for QA inputs). Diagnostic videos render via the trodestrack.viz.video module. Format-specific loaders for Trodes LED CSV, DeepLabCut CSV, and SpikeGadgets MDA/REC, a homography calibration tool, Parquet/HDF5 outputs, and a fetch_example() demo helper are planned (see README.md 'In Progress'). Until they ship, users convert their own data to NumPy arrays and call the filter or CLI directly.",
     )
 
 
@@ -729,32 +744,33 @@ def build_section_4_getting_started(builder):
 
     # Slide 28: Learning Path
     builder.add_content_slide(
-        title="Learning Path: 10 Examples",
+        title="Learning Path: 9 Examples",
         bullets=[
-            "01-02: Simple motion + EKF basics (35 lines total)",
-            "03-05: Dropout handling, UKF, RTS smoothing",
-            "06-08: Real data ingestion (Trodes, DLC, SpikeGadgets)",
-            "09: Homography calibration (interactive tool)",
-            "10: Full pipeline (end-to-end workflow)",
+            "01-02: Simple simulations + realistic IMU (analytic + SpikeGadgets)",
+            "03 / 03b: EKF basics + plot-utility patterns",
+            "04: UKF vs EKF comparison (verdict: start with EKF)",
+            "05-06: Dropout robustness for EKF and UKF",
+            "07: RTS / IEKS smoothing for offline analysis",
+            "08: QA report generation (PDF with NEES diagnostics)",
             "",
             "📚 Estimated time: 2-3 hours to complete all examples",
             "🚀 Each example runs in <1 minute",
         ],
-        notes="TrodesTrack includes 10 progressive examples in the examples/ folder. Start with simple circular motion (5 lines), then EKF on synthetic data (30 lines). Examples 3-5 cover dropout, UKF, smoothing. Examples 6-8 show real data ingestion. Example 9 demonstrates homography calibration. Example 10 is the full pipeline. Each example is self-contained and runnable in <1 minute. Total learning time: 2-3 hours.",
+        notes="TrodesTrack includes 9 progressive examples in the examples/ folder (01, 02, 03, 03b, 04, 05, 06, 07, 08). Start with simple simulations and a realistic IMU walkthrough (01-02), then EKF basics on synthetic data (03) and dimension-agnostic plot utilities (03b). Example 04 compares EKF vs UKF. Examples 05 and 06 stress-test EKF and UKF under camera dropout. Example 07 demonstrates RTS / IEKS smoothing. Example 08 generates a full QA PDF. Real-data ingestion loaders, homography calibration, and end-to-end pipeline examples are planned but not yet shipped. Each example is self-contained and runnable in <1 minute. Total learning time: 2-3 hours.",
     )
 
     # Slide 29: Decision Tree: Which Filter?
     builder.add_content_slide(
         title="Decision Tree: Which Filter to Use?",
         bullets=[
-            "Need real-time (<33 ms)? → Use EKF",
+            "Forward-only (no future-frame dependence)? → Use EKF",
             "Strong nonlinearities? → Use UKF (offline only)",
             "Offline analysis + max accuracy? → Use RTS smoother",
             "Iterative refinement? → Use IEKS (iterated EKF smoother)",
             "Unsure? → Start with EKF (default)",
             "All filters have identical API: just swap config",
         ],
-        notes="Decision tree for choosing filter. Real-time requirement → EKF (fastest). Strong nonlinearities (e.g., 3D rotations) → UKF. Offline analysis + max accuracy → RTS smoother. Iterative refinement → IEKS (not yet implemented). When unsure, start with EKF (default, works for 95% of cases). All filters share identical API (filter config object + same input arrays), so switching is trivial.",
+        notes="Decision tree for choosing filter. Forward-only / no-lookahead use → EKF (fastest; this is what the trodestrack online CLI runs as a batch over complete files — not a streaming per-frame ingest). Strong nonlinearities (e.g., 3D rotations) → UKF. Offline analysis + max accuracy → RTS smoother. Iterative refinement → IEKS, exposed today as ``rts_smoother(..., num_iter=N)`` and as the ``--num-iter`` flag on ``trodestrack smooth``; example 07 demonstrates ``num_iter=2``. When unsure, start with EKF (default, works for 95% of cases). All filters share identical API (filter config object + same input arrays), so switching is trivial.",
     )
 
     # Slide 30: When to Use TrodesTrack
@@ -767,10 +783,10 @@ def build_section_4_getting_started(builder):
             "  • High accuracy needs (RMSE <2 cm)",
             "",
             "❌ NOT RECOMMENDED FOR:",
-            "  • Full 3D tracking (2D only for now)",
-            "  • Real-time closed-loop (<33 ms latency)",
+            "  • Production 3D tracking (3D EKF is experimental)",
+            "  • Closed-loop / per-frame streaming (no streaming ingest API today)",
         ],
-        notes="TrodesTrack is ideal for: SpikeGadgets IMU + camera setups, 2D planar tracking, high accuracy requirements, long sessions with occlusions. Python-based. NOT recommended for: Full 3D tracking (2D only for now), real-time closed-loop control (latency ~33 ms may be too slow), non-planar arenas (assumes flat surface). For 3D, use top-down projection. For closed-loop, consider simpler trackers or specialized hardware.",
+        notes="TrodesTrack is ideal for: SpikeGadgets IMU + camera setups, 2D planar tracking, high accuracy requirements, long sessions with occlusions. Python-based. NOT recommended for: production 3D tracking (the extended_kalman_filter_3d entry point exists today but is experimental — 2D is the supported path); closed-loop / per-frame streaming (the trodestrack online CLI is forward-only batch over complete files, not a streaming ingest harness — there is no per-frame ingest API today, so closed-loop is unsupported regardless of latency); non-planar arenas (assumes flat surface). For production 3D, use top-down projection. For closed-loop, consider simpler trackers or specialized hardware.",
     )
 
     # Slide 31: Troubleshooting Common Issues
@@ -799,7 +815,7 @@ def build_section_4_getting_started(builder):
             "PRD: Full technical specification (.claude/docs/PRD.md)",
             "Contact: eric.denovellis@ucsf.edu",
         ],
-        notes="All resources available on GitHub. README has quickstart guide. Examples folder has 10 progressive tutorials. TUNING.md explains NEES-based parameter selection. TROUBLESHOOTING.md covers common failure modes. PRD (.claude/docs/PRD.md) has full mathematical specification. Report bugs via GitHub Issues. Contact Eric Denovellis for questions or collaboration.",
+        notes="All resources available on GitHub. README has quickstart guide. Examples folder has 9 progressive tutorials (01-08 plus 03b). TUNING.md explains NEES-based parameter selection. TROUBLESHOOTING.md covers common failure modes. The mathematical specification lives in the implementation plans under docs/plans/. Report bugs via GitHub Issues. Contact Eric Denovellis for questions or collaboration.",
     )
 
 
@@ -817,24 +833,25 @@ def build_section_5_advanced(builder):
             "jax.lax.scan: Efficient loop fusion for filtering",
             "Pure functions: No side effects, enables parallelization",
             "XLA compilation: First run slow (~10s), then instant",
-            "Speedup: 300× vs pure Python loops",
+            "Speedup vs pure Python: large but hardware-dependent — measure on your backend before quoting",
             "GPU: Same code runs on GPU via jax.device_put()",
         ],
-        notes="TrodesTrack is built on JAX (Google's NumPy successor). jax.lax.scan fuses loops for efficient filtering. Pure functional design enables JIT compilation and parallelization. XLA backend compiles Python to machine code (first run slow, subsequent runs instant). Result: 300× speedup vs pure Python. GPU support is trivial: same code, just change device. This architecture enables real-time performance on modest hardware.",
+        notes="TrodesTrack is built on JAX (Google's NumPy successor). jax.lax.scan fuses loops for efficient filtering. Pure functional design enables JIT compilation and parallelization. XLA backend compiles Python to machine code (first run slow, subsequent runs instant). The speedup vs pure Python loops is large but hardware-dependent and not pinned by any in-repo benchmark; quote a measured number from your own backend rather than a hard-coded multiplier. GPU support is trivial: same code, just change device. The JAX architecture is what makes the forward-only batch filter cheap to run end-to-end (mean per-frame ≤33 ms over a 30-min session on commodity CPU); it does NOT itself provide a streaming / per-frame ingest API — see slides 8-9 and the trodestrack online CLI docs.",
     )
 
     # Slide 35: Extending to 3D
     builder.add_content_slide(
         title="Roadmap: Extending to 3D",
         bullets=[
-            "Current: 2D state (x, y, θ, vx, vy, biases) - 8D",
-            "Future: 3D pose (x, y, z, roll, pitch, yaw, velocities, biases) - 16D",
-            "Requires: Full gyro/accel (all 3 axes), magnetometer (heading)",
-            "Challenge: Quaternion vs Euler angles (gimbal lock)",
-            "Use case: Rearing, climbing, non-planar behaviors",
-            "Timeline: Prototype in 2025",
+            "Today (default): 10D 2d_cam_3d_imu — 2D camera + 3D-velocity IMU,",
+            "  scalar yaw, with vz / accel-z bias for rearing detection",
+            "Today (experimental): 14D 2d_cam_6dof_imu_orientation",
+            "  (quaternion orientation + 2D camera) and 16D 3d_cam_6dof_imu",
+            "  (full 3D pose, 6-DOF IMU, 3D camera observations)",
+            "Future: validated 3D-camera datasets, RTS smoother in 3D mode,",
+            "  magnetometer fusion, non-planar arenas",
         ],
-        notes="Current version: 2D tracking (x, y, heading). Future roadmap: Full 3D pose (x, y, z, roll, pitch, yaw). Requires using all 3 gyro axes, full accelerometer, and magnetometer for heading. Mathematical challenge: Quaternion representation (no gimbal lock) vs Euler angles (intuitive but singular). Use case: Rearing behavior, climbing, non-planar arenas. Prototype targeted for 2025. Architecture is designed to support this extension.",
+        notes="Today's default is the 10D 2d_cam_3d_imu layout: 2D camera + 3D-velocity IMU with scalar-yaw orientation, and vz / b_az for vertical-motion behaviors like rearing. The 14D 2d_cam_6dof_imu_orientation layout (quaternion orientation with a 2D camera) and the 16D 3d_cam_6dof_imu layout (full 3D pose using extended_kalman_filter_3d with 3D camera observations and 6-DOF IMU) are shipped but experimental — see the tilt-orientation/3D-camera implementation plan in docs/plans/. Future work focuses on validating the 3D camera path against real datasets, finishing RTS smoothing in 3D, and integrating magnetometer fusion. The architecture is layout-driven, so adding a new state_mode is a registry edit rather than a refactor.",
     )
 
     # Slide 36: Custom Measurement Models
@@ -846,9 +863,9 @@ def build_section_5_advanced(builder):
             "Examples: ZUPT (zero velocity update), compass heading, arena bounds",
             "Plugin architecture: Swap measurement models without changing filter",
             "Composable: Combine multiple measurement types",
-            "See models/measurements.py for templates",
+            "Source: src/trodestrack/models/sensors/ — protocols.py + concrete models",
         ],
-        notes="TrodesTrack supports custom measurement models. Built-in models: LED position (x, y), LED heading (from front/back LEDs), velocity pseudo-measurements (when rat is stationary). To add your own: implement h(x) (measurement function) and H (Jacobian). Examples: ZUPT (zero velocity update when stationary), compass heading (magnetometer), arena bounds (soft constraints). Plugin architecture allows swapping models. See models/measurements.py for templates.",
+        notes="TrodesTrack supports custom measurement models. Built-in models live under src/trodestrack/models/sensors/: camera_position.py (2D LED position), camera_position_3d.py (experimental 3D LED), heading_pseudo.py (heading from front/back LEDs), and zupt.py (zero-velocity update when stationary). The shared interface is defined in src/trodestrack/models/sensors/protocols.py — implement h(x) (measurement function) and H (Jacobian) following that protocol to add your own. Examples discussed in the talk: ZUPT (already shipped), compass heading (magnetometer, future), arena bounds (soft constraints). Plugin architecture allows swapping models without changing the filter core.",
     )
 
 
@@ -866,12 +883,12 @@ def build_section_6_conclusion(builder):
             "🧮 Kalman filtering = optimal fusion framework",
             "⚙️ IMU bias estimation prevents unbounded drift",
             "📊 Accuracy: <2 cm RMSE, <3.5 m drift @ 5s",
-            "⚡ Performance: 300× realtime on CPU (JAX)",
+            "⚡ Performance: ≥10× realtime offline floor (CI-tested), ~38× on M-series Mac CPU",
             "",
             "🚀 Start with Example 01 → real data in ~3 hours",
-            "📖 Full documentation + 10 progressive examples",
+            "📖 Full documentation + 9 progressive examples",
         ],
-        notes="Key takeaways for neuroscientists. Sensor fusion dramatically outperforms vision-only. Kalman filtering is the optimal framework for combining noisy sensors. IMU bias estimation is critical (not optional). Accelerometers measure specific force (gravity included), gyros drift unbounded. TrodesTrack meets strict accuracy targets: <2 cm RMSE, <3.5 m dropout drift. JAX provides extreme speed. Learning path: 10 examples, ~3 hours to competence.",
+        notes="Key takeaways for neuroscientists. Sensor fusion dramatically outperforms vision-only. Kalman filtering is the optimal framework for combining noisy sensors. IMU bias estimation is critical (not optional). Accelerometers measure specific force (gravity included), gyros drift unbounded. TrodesTrack meets strict accuracy targets: <2 cm RMSE, <3.5 m dropout drift. JAX provides extreme speed. Learning path: 9 examples, ~3 hours to competence.",
     )
 
     # Slide 39: Comparison to Alternatives
@@ -912,11 +929,11 @@ def build_section_6_conclusion(builder):
             "GitHub: github.com/edeno/trodestrack",
             "Email: eric.denovellis@ucsf.edu",
             "",
-            "Try it: uv sync && uv run python examples/01_simple.py",
+            "Try it: uv sync && uv run python examples/01_simple_simulations.py",
             "",
-            "Slides + code: github.com/edeno/trodestrack/docs/presentation/",
+            "Slides + code: github.com/edeno/trodestrack/tree/master/docs/presentation",
         ],
-        notes="Thank you for your attention! Questions welcome. Try TrodesTrack yourself: clone the repo, run 'uv sync', then 'uv run python examples/01_simple.py'. Full slides and generation code available in docs/presentation/ folder. Contributions and feedback welcome via GitHub Issues or email.",
+        notes="Thank you for your attention! Questions welcome. Try TrodesTrack yourself: clone the repo, run 'uv sync', then 'uv run python examples/01_simple_simulations.py'. Full slides and generation code available in docs/presentation/ folder. Contributions and feedback welcome via GitHub Issues or email.",
     )
 
     # Slide 42: Acknowledgments (optional)
