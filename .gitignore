@@ -34,6 +34,11 @@ site/
 # Development artifacts
 .DS_Store
 .claude/
+# Tracked contributor reference (PRD, JAX principles, variable naming
+# review, implementation plans). Un-ignored so future files don't need
+# ``git add -f``.
+!.claude/docs/
+!.claude/docs/**
 *.zip
 
 # IDE/Editor files
