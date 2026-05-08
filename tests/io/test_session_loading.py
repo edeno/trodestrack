@@ -788,7 +788,10 @@ def test_safety_check_rejects_fused_drift_from_vision_baseline(monkeypatch):
         estimated_led_distance=0.04,
     )
 
-    def fake_vision_filter(*args, **kwargs):
+    captured_vision_config = {}
+
+    def fake_vision_filter(ekf_config, *args, **kwargs):
+        captured_vision_config["config"] = ekf_config
         return EKFResult(
             filtered_means=vision_means,
             filtered_covariances=np.repeat(np.eye(5)[None, :, :], len(t_cam), axis=0),
@@ -809,6 +812,8 @@ def test_safety_check_rejects_fused_drift_from_vision_baseline(monkeypatch):
     )
 
     assert not report.passed
+    assert captured_vision_config["config"].state_mode == "vision_only"
+    assert captured_vision_config["config"].enable_zupt is False
     assert "vision-only baseline" in report.message
     assert report.max_vision_position_deviation_m == pytest.approx(0.2)
     assert report.p95_vision_position_deviation_m == pytest.approx(0.2)

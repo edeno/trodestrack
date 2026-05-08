@@ -239,6 +239,8 @@ class FilterConfig(BaseModel):
         data = self.model_dump(exclude_none=True)
         if self.state_mode == "vision_only" and self.use_mahalanobis_gating is None:
             data["use_mahalanobis_gating"] = False
+        if self.state_mode == "vision_only" and self.enable_zupt is None:
+            data["enable_zupt"] = False
         data["led_distance"] = (
             self.led_distance if self.led_distance is not None else led_distance
         )

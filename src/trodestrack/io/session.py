@@ -161,7 +161,10 @@ def run_real_data_safety_check(
     fused_range = tuple(float(x) for x in np.ptp(pos, axis=0))
 
     vision_config = replace(
-        ekf_config, state_mode="vision_only", use_mahalanobis_gating=False
+        ekf_config,
+        state_mode="vision_only",
+        use_mahalanobis_gating=False,
+        enable_zupt=False,
     )
     dummy_imu = np.zeros((session.t_imu.shape[0], 3))
     vision = extended_kalman_filter(
