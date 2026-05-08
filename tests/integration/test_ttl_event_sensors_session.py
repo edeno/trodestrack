@@ -13,7 +13,6 @@ These tests use a constant-velocity trajectory to keep the sim cheap, then:
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from trodestrack.config.schemas import (
     BeamSpec,
@@ -71,15 +70,19 @@ def _camera_dropout(sim, t_start: float, t_end: float):
     return mask, led1, led2
 
 
-def _events_to_dense(events, sources, t_cam, max_events_per_frame=4):
-    """Convert event list + sources into the dense arrays the EKF consumes."""
+def _events_to_dense(events, specs, t_cam, max_events_per_frame=4):
+    """Convert event list + specs into the dense arrays the EKF consumes.
+
+    Takes the original spec dataclasses (not the resolved EventLocationSource
+    instances, which discard ``active_edge``) so the helper mirrors the
+    production path in ``_attach_ttl_events`` and respects per-spec
+    ``active_edge`` overrides.
+    """
+    sources = [s.to_event_source() for s in specs]
     anchors = np.stack([s.anchor for s in sources], axis=0)
     covariances = np.stack([s.R for s in sources], axis=0)
-    source_id_to_index = {s.source_id: i for i, s in enumerate(sources)}
-    source_active_edges = {
-        s.source_id: EDGE_TO_INT["fall" if s.source_type == "beam" else "rise"]
-        for s in sources
-    }
+    source_id_to_index = {s.id: i for i, s in enumerate(specs)}
+    source_active_edges = {s.id: EDGE_TO_INT[s.active_edge] for s in specs}
     t_evt = np.array([e.time for e in events])
     sid = np.array([e.source_id for e in events], dtype=int)
     edge = np.array([EDGE_TO_INT[e.edge] for e in events], dtype=int)
@@ -119,7 +122,9 @@ def test_beam_grid_reduces_dropout_position_rmse():
     # Beams perpendicular to motion (along y) at five x-locations covering
     # the dropout window. Centered at the trajectory's y (0.1) with a short
     # length so the along-beam Gaussian approximation does not pull
-    # systematically off-trajectory.
+    # systematically off-trajectory. The 0.001 m offset avoids beam x
+    # values that happen to coincide with discrete IMU sample positions
+    # (which would double-count crossings).
     beams = [
         BeamSpec(
             id=10 + k,
@@ -127,17 +132,19 @@ def test_beam_grid_reduces_dropout_position_rmse():
             receiver=(x_loc, 0.2),
             sigma_perp_m=0.01,
         )
-        for k, x_loc in enumerate(np.linspace(0.20, 0.60, 5))
+        for k, x_loc in enumerate(np.linspace(0.205, 0.605, 5))
     ]
-    sources = [b.to_event_source() for b in beams]
     events = events_from_trajectory(
         np.asarray(sim["t_imu"]),
         np.column_stack([sim["X_truth"][:, 0], sim["X_truth"][:, 1]]),
         beams=beams,
     )
-    assert len(events) >= 3, "Expected several beam crossings during dropout"
+    # All five beams sit on the trajectory and should fire exactly once.
+    assert len(events) == len(beams), (
+        f"Expected {len(beams)} beam crossings; got {len(events)}"
+    )
 
-    anchors, covariances, indices = _events_to_dense(events, sources, sim["t_cam_exp"])
+    anchors, covariances, indices = _events_to_dense(events, beams, sim["t_cam_exp"])
 
     # Baseline (no events).
     baseline = extended_kalman_filter(ekf_cfg, **common_kwargs)
@@ -173,7 +180,6 @@ def test_zone_trigger_collapses_uncertainty():
     truth_x = float(np.interp(1.0, sim["t_imu"], sim["X_truth"][:, 0]))
     truth_y = float(np.interp(1.0, sim["t_imu"], sim["X_truth"][:, 1]))
     zone = ZoneTriggerSpec(id=99, center=(truth_x, truth_y), sigma_m=0.02)
-    sources = [zone.to_event_source()]
 
     events = events_from_trajectory(
         np.asarray(sim["t_imu"]),
@@ -182,7 +188,7 @@ def test_zone_trigger_collapses_uncertainty():
         zone_trigger_radius_m=0.05,
     )
     assert len(events) >= 1
-    anchors, covariances, indices = _events_to_dense(events, sources, sim["t_cam_exp"])
+    anchors, covariances, indices = _events_to_dense(events, [zone], sim["t_cam_exp"])
 
     result = extended_kalman_filter(
         ekf_cfg,
@@ -208,30 +214,26 @@ def test_zone_trigger_collapses_uncertainty():
     assert pos_var < 0.05**2
 
 
-@pytest.mark.parametrize("two_events_in_same_frame", [True, False])
-def test_multiple_events_in_one_frame_parity(two_events_in_same_frame):
-    """Events in one frame produce the same posterior as sequential application
-    when the underlying measurements are independent and conditionally
-    consistent."""
+def test_two_events_in_one_frame_match_average_anchor():
+    """Two simultaneous zone triggers at symmetric anchors pull posterior
+    toward their midpoint; finite-output smoke for the stacked update."""
     sim = _build_session(duration_s=1.5, vx=0.2)
     ekf_cfg = _ekf_config()
     n_cam = sim["t_cam_exp"].shape[0]
 
-    # Two zone triggers at different anchors.
-    zone1 = ZoneTriggerSpec(id=1, center=(0.30, 0.05), sigma_m=0.02)
-    zone2 = ZoneTriggerSpec(id=2, center=(0.30, -0.05), sigma_m=0.02)
-    sources = [zone1.to_event_source(), zone2.to_event_source()]
-    anchors = np.stack([s.anchor for s in sources], axis=0)
-    covariances = np.stack([s.R for s in sources], axis=0)
+    # Two zone triggers symmetric about the trajectory at t≈mid.
+    truth_x = float(np.interp(0.75, sim["t_imu"], sim["X_truth"][:, 0]))
+    truth_y = float(np.interp(0.75, sim["t_imu"], sim["X_truth"][:, 1]))
+    zone1 = ZoneTriggerSpec(id=1, center=(truth_x, truth_y + 0.05), sigma_m=0.05)
+    zone2 = ZoneTriggerSpec(id=2, center=(truth_x, truth_y - 0.05), sigma_m=0.05)
+    specs = [zone1, zone2]
+    anchors = np.stack([z.to_event_source().anchor for z in specs], axis=0)
+    covariances = np.stack([z.to_event_source().R for z in specs], axis=0)
 
     indices = np.full((n_cam, 4), -1, dtype=np.int32)
     fire_frame = n_cam // 2
-    if two_events_in_same_frame:
-        indices[fire_frame, 0] = 0
-        indices[fire_frame, 1] = 1
-    else:
-        indices[fire_frame, 0] = 0
-        indices[fire_frame + 1, 0] = 1
+    indices[fire_frame, 0] = 0
+    indices[fire_frame, 1] = 1
 
     result = extended_kalman_filter(
         ekf_cfg,
@@ -245,9 +247,13 @@ def test_multiple_events_in_one_frame_parity(two_events_in_same_frame):
         event_source_covariances=covariances,
         event_indices_per_frame=indices,
     )
-    # Posterior remains finite and pulled toward the average anchor.
-    final_pos = np.asarray(result.filtered_means)[-1, 0:2]
-    assert np.all(np.isfinite(final_pos))
+    pos_post = np.asarray(result.filtered_means)[fire_frame, 0:2]
+    # Posterior y should land between the two symmetric anchors (≈ truth_y),
+    # not near either anchor in isolation. The two events stacked into one
+    # update produce an averaged-anchor pull.
+    assert abs(pos_post[1] - truth_y) < 0.04
+    # And x should still be near the (shared) anchor x.
+    assert abs(pos_post[0] - truth_x) < 0.05
 
 
 def test_rfid_collapses_position_uncertainty():
@@ -259,7 +265,6 @@ def test_rfid_collapses_position_uncertainty():
     truth_x = float(np.interp(1.0, sim["t_imu"], sim["X_truth"][:, 0]))
     truth_y = float(np.interp(1.0, sim["t_imu"], sim["X_truth"][:, 1]))
     reader = RFIDReaderSpec(id=42, center=(truth_x, truth_y), effective_radius_m=0.05)
-    sources = [reader.to_event_source()]
 
     events = events_from_trajectory(
         np.asarray(sim["t_imu"]),
@@ -267,7 +272,7 @@ def test_rfid_collapses_position_uncertainty():
         rfid_readers=[reader],
     )
     assert len(events) >= 1
-    anchors, covariances, indices = _events_to_dense(events, sources, sim["t_cam_exp"])
+    anchors, covariances, indices = _events_to_dense(events, [reader], sim["t_cam_exp"])
 
     result = extended_kalman_filter(
         ekf_cfg,

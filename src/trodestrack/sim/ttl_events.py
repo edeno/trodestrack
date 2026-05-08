@@ -31,37 +31,48 @@ class SyntheticEvent:
     edge: str
 
 
-def _segments_cross(
-    p1: np.ndarray, p2: np.ndarray, q1: np.ndarray, q2: np.ndarray
-) -> tuple[bool, float]:
-    """Test whether segments (p1->p2) and (q1->q2) cross.
-
-    Returns ``(crossed, t)`` where ``t in [0, 1]`` is the parameter along
-    p1->p2 at the crossing, or ``(False, 0.0)`` if they do not cross.
-    """
-    r = p2 - p1
-    s = q2 - q1
-    denom = r[0] * s[1] - r[1] * s[0]
-    if abs(denom) < 1e-12:
-        return False, 0.0
-    qp = q1 - p1
-    t = (qp[0] * s[1] - qp[1] * s[0]) / denom
-    u = (qp[0] * r[1] - qp[1] * r[0]) / denom
-    if 0.0 <= t <= 1.0 and 0.0 <= u <= 1.0:
-        return True, float(t)
-    return False, 0.0
-
-
 def _emit_beam_events(
     t: np.ndarray, xy: np.ndarray, beam: BeamSpec
 ) -> list[SyntheticEvent]:
-    """Emit one beam-break event per trajectory segment that crosses the beam."""
+    """Emit one beam-break event per trajectory crossing of the beam.
+
+    Detects a crossing as a sign-flip of the trajectory sample's signed
+    distance to the infinite line through the beam, gated to require the
+    crossing point to lie within the finite emitter-receiver segment.
+    Sign-flip detection avoids the double-counting that segment-segment
+    intersection produces when a trajectory sample lies exactly on the
+    beam line.
+    """
     events: list[SyntheticEvent] = []
     emitter = np.asarray(beam.emitter, dtype=float)
     receiver = np.asarray(beam.receiver, dtype=float)
+    s = receiver - emitter
+    seg_len_sq = float(s @ s)
+    if seg_len_sq <= 0.0:
+        return events
+    # Signed cross product (s × (xy - emitter)) for each sample. Positive
+    # on one side of the line through the beam, negative on the other.
+    delta = xy - emitter
+    side = s[0] * delta[:, 1] - s[1] * delta[:, 0]
+
     for i in range(len(t) - 1):
-        crossed, t_local = _segments_cross(xy[i], xy[i + 1], emitter, receiver)
-        if crossed:
+        s0, s1 = side[i], side[i + 1]
+        # Half-open sign-change: positive → non-positive OR negative →
+        # non-negative. A sample landing exactly on the line is counted
+        # at the segment that approaches it (s0 != 0 → s1 == 0), so the
+        # outgoing segment (s0 == 0 → s1 != 0) is not double-counted.
+        crossed = (s0 > 0 and s1 <= 0) or (s0 < 0 and s1 >= 0)
+        if not crossed:
+            continue
+        # Linear interpolation parameter along the trajectory segment.
+        denom = s0 - s1
+        t_local = float(s0 / denom) if denom != 0.0 else 0.0
+        # Crossing point along the trajectory segment.
+        crossing_xy = xy[i] + t_local * (xy[i + 1] - xy[i])
+        # Project onto the beam to test whether the crossing lies between
+        # emitter and receiver (u ∈ [0, 1]).
+        u = float((crossing_xy - emitter) @ s) / seg_len_sq
+        if 0.0 <= u <= 1.0:
             events.append(
                 SyntheticEvent(
                     time=float(t[i] + t_local * (t[i + 1] - t[i])),

@@ -59,6 +59,16 @@ def load_ttl_events(
     if t_evt.size == 0:
         return t_evt, source_id, np.zeros(0, dtype=int)
 
+    # Reject non-finite timestamps explicitly; otherwise downstream
+    # ``np.searchsorted`` quietly buckets NaN past the end and ±inf to
+    # frame 0 / n_cam, dropping the event with no diagnostic.
+    non_finite = ~np.isfinite(t_evt)
+    if non_finite.any():
+        raise ValueError(
+            f"{events_file} contains {int(non_finite.sum())} non-finite "
+            "timestamp(s); expected finite float seconds."
+        )
+
     edge = np.empty(edge_str.shape, dtype=int)
     for name, value in EDGE_NAME_TO_INT.items():
         edge[edge_str == name] = value

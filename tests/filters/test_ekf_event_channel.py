@@ -85,7 +85,16 @@ class TestEventChannelParity:
         assert np.all(np.isfinite(np.asarray(result.filtered_means)))
 
     def test_empty_events_identical_to_no_args(self, sim_data):
-        """Event args present but every slot ``-1`` ⇒ no-op equivalence."""
+        """Event args present but every slot ``-1`` ⇒ no-op equivalence.
+
+        Uses a small ``atol`` rather than ``assert_array_equal``: the no-args
+        path runs the JIT'd core with ``max_events_per_frame=1`` (the default
+        no-events fallback), while this path runs it with
+        ``max_events_per_frame=4``. ``max_events_per_frame`` is a JIT static
+        argument, so the two cases retrace and XLA can choose different but
+        equivalent floating-point orderings even though the event-update
+        contribution is exactly zero in both paths.
+        """
         ekf_config = _make_ekf_config()
         baseline = _run_baseline(sim_data, ekf_config)
 

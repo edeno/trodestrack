@@ -201,9 +201,13 @@ class TestUpdateEventLocation:
         assert float(log_lik) < 0.0  # finite Gaussian log-lik
 
     def test_stacked_two_events_equivalent_to_sequential(self):
+        # Distinct anchors and distinct sigmas pin the stacked Kalman update
+        # against sequential application non-trivially. With identical
+        # measurements the stacked information matrix is rank-deficient,
+        # which would let a buggy implementation pass.
         layout = get_layout("2d_full")
         zone1 = ZoneTriggerSpec(id=1, center=(0.5, 0.5), sigma_m=0.02)
-        zone2 = ZoneTriggerSpec(id=2, center=(0.5, 0.5), sigma_m=0.02)
+        zone2 = ZoneTriggerSpec(id=2, center=(0.7, 0.3), sigma_m=0.05)
         model = _make_model(layout, [zone1.to_event_source(), zone2.to_event_source()])
 
         # Sequential: process two events, one at a time.
