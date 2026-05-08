@@ -450,6 +450,20 @@ def test_filter_core_config_bool_fields_require_strict_bool() -> None:
     UKFConfig(use_heading_measurement=False)
 
 
+def test_filter_core_config_disables_zupt_for_vision_only() -> None:
+    """ZUPT needs IMU stationarity evidence and is not valid in vision-only mode."""
+
+    core = FilterCoreConfig(state_mode="vision_only")
+    ekf = EKFConfig(state_mode="vision_only")
+    ukf = UKFConfig(state_mode="vision_only")
+    explicit = EKFConfig(state_mode="vision_only", enable_zupt=True)
+
+    assert core.enable_zupt is False
+    assert ekf.enable_zupt is False
+    assert ukf.enable_zupt is False
+    assert explicit.enable_zupt is False
+
+
 def test_filter_core_config_rejects_invalid_zupt_visual_hold_frames() -> None:
     for bad in (-1, 1.5, "2"):
         with pytest.raises(

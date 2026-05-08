@@ -79,7 +79,7 @@ def test_vision_only_config_defaults_mahalanobis_gating_off():
     )
 
     assert config.filter.to_ekf_kwargs()["use_mahalanobis_gating"] is False
-    assert config.filter.to_ekf_kwargs()["enable_zupt"] is False
+    assert "enable_zupt" not in config.filter.to_ekf_kwargs()
 
 
 def test_vision_only_config_respects_explicit_mahalanobis_gating():
@@ -104,8 +104,8 @@ def test_vision_only_config_respects_explicit_mahalanobis_gating():
     assert config.filter.to_ekf_kwargs()["use_mahalanobis_gating"] is True
 
 
-def test_vision_only_config_respects_explicit_zupt():
-    """Users can still opt into ZUPT in camera-only configs."""
+def test_vision_only_config_passes_explicit_zupt_to_shared_filter_config():
+    """The shared filter config is the source of truth for vision-only ZUPT."""
 
     config = SessionConfig.model_validate(
         {

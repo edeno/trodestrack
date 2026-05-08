@@ -225,6 +225,9 @@ class FilterCoreConfig:
                     f"config."
                 )
 
+        if self.state_mode == "vision_only" and self.enable_zupt:
+            object.__setattr__(self, "enable_zupt", False)
+
         if self.use_mahalanobis_gating:
             prob = self.mahalanobis_threshold_prob
             supported = self._SUPPORTED_MAHALANOBIS_PROBS
