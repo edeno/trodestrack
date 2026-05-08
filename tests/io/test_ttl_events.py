@@ -292,6 +292,21 @@ def test_load_ttl_events_rejects_non_integer_source_id(tmp_path):
         load_ttl_events(events_path)
 
 
+def test_load_ttl_events_rejects_unsigned_overflow_source_id(tmp_path):
+    """Unsigned IDs above 2^63 must not silently wrap to negative int64 values."""
+    events_path = tmp_path / "events.parquet"
+    overflow_id = np.uint64(2**63)  # exceeds int64 max
+    pd.DataFrame(
+        {
+            "time": np.array([0.10], dtype=float),
+            "source_id": np.array([overflow_id], dtype=np.uint64),
+            "edge": ["fall"],
+        }
+    ).to_parquet(events_path)
+    with pytest.raises(ValueError, match="above the signed int64 range"):
+        load_ttl_events(events_path)
+
+
 def test_load_ttl_events_preserves_int64_source_id(tmp_path):
     """Integer parquet columns above 2^53 must round-trip without precision loss."""
     events_path = tmp_path / "events.parquet"

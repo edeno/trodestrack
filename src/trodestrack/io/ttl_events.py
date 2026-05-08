@@ -58,7 +58,20 @@ def load_ttl_events(
     raw_sid = df["source_id"].to_numpy()
     if np.issubdtype(raw_sid.dtype, np.integer):
         # Preserve native integer precision (int64 IDs above 2^53 lose
-        # precision via a float round-trip).
+        # precision via a float round-trip). Unsigned values above the
+        # signed int64 range would wrap to negatives; reject those
+        # explicitly rather than silently routing to a wrong source.
+        if np.issubdtype(raw_sid.dtype, np.unsignedinteger) and raw_sid.size:
+            int64_max = np.iinfo(np.int64).max
+            overflow = raw_sid > np.uint64(int64_max)
+            if overflow.any():
+                bad = sorted({int(x) for x in raw_sid[overflow][:5]})
+                raise ValueError(
+                    f"{events_file} contains source_id value(s) above the "
+                    f"signed int64 range (max {int64_max}); the trodestrack "
+                    f"event channel cannot represent them. Got entries like "
+                    f"{bad}."
+                )
         source_id = raw_sid.astype(np.int64, copy=False)
     else:
         # ``to_numpy(dtype=int)`` silently truncates floats (1.9 → 1) and
