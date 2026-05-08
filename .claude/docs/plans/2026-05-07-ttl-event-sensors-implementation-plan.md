@@ -2,26 +2,43 @@
 
 ## Status
 
-Not started. The original incremental refactor (`incremental_refactor_plan.md`)
-flagged "TTL/RFID Event Sensors" as a deferred milestone with separate
-`ttl_zone.py` / `rfid_zone.py` stubs. This plan supersedes that note —
-beam break, TTL zone triggers, and RFID readers all share the same
-underlying signal (a TTL pulse from a Trodes DIO channel). Zone triggers
-and RFID readers are point-like 2D position fixes; beam breaks are line
-constraints perpendicular to the beam. A single `EventLocationModel`
-can still cover all three by supporting both point and line event
-sources under one ingest and EKF update path.
+Implemented on `ttl-event-sensors` (Milestones 1–4 + sim/scenario tests).
+Both `extended_kalman_filter` and `unscented_kalman_filter` accept the
+event channel and share one input-validation contract via
+`sensors.event_location.resolve_event_inputs`. The original incremental refactor
+(`incremental_refactor_plan.md`) flagged "TTL/RFID Event Sensors" as a
+deferred milestone with separate `ttl_zone.py` / `rfid_zone.py` stubs.
+This plan supersedes that note — beam break, TTL zone triggers, and RFID
+readers all share the same underlying signal (a TTL pulse from a Trodes
+DIO channel). All three collapse to a single measurement model: a **2D
+point fix at a known anchor with anisotropic 2×2 covariance**. Zone
+triggers and RFID readers use isotropic covariance (the rat is somewhere within
+the zone / detection radius). Beam breaks use a Gaussian approximation
+to the finite beam segment: a tight perpendicular σ from the IR-beam
+width and an along-beam σ from the beam length. This works for very
+short beams (≈ isotropic point fix) and makes long beams line-like by
+using a much larger along-beam variance, while still remaining a finite
+Gaussian measurement rather than an exact line constraint.
 
 ## Goals
 
 - **One measurement model, three user-facing source types.**
-  `EventLocationModel` consumes resolved point or line geometry; the
-  user picks between `BeamSpec` (computes line normal / offset from
-  emitter+receiver geometry), `ZoneTriggerSpec` (anchor + isotropic σ),
+  `EventLocationModel` consumes resolved 2D anchors and covariances; the
+  user picks between `BeamSpec` (computes midpoint anchor + anisotropic
+  R from emitter+receiver geometry), `ZoneTriggerSpec` (anchor + isotropic σ),
   and `RFIDReaderSpec` (anchor + effective radius). All share the same
-  ingest pipeline and the same EKF wiring.
+  ingest pipeline and the same EKF / UKF wiring.
+- **Many sensors per session.** A session can configure any number of
+  beams, zones, and readers. The loader maps user-facing `source_id`
+  values from the events parquet into compact source indices for JAX,
+  and each camera frame can contain multiple simultaneous events up to
+  `max_events_per_frame`.
 - **Shared TTL parquet ingest** from Trodes DIO. Hardware sync is
   free because Trodes DIO timestamps live on the IMU/camera clock.
+  `trodes_to_nwb` stores these DIO channels as NWB
+  `processing["behavior"]["behavioral_events"]` TimeSeries; this PR
+  consumes the normalized parquet representation, with a small NWB
+  adapter left as a follow-up.
 - **Bound position drift during long camera dropouts.** Beam grids
   reset perpendicular position error to mm-scale on every crossing;
   zone triggers and RFID readers provide absolute 2D fixes when
@@ -29,9 +46,9 @@ sources under one ingest and EKF update path.
 - **Use the same Kalman-update math as the existing sensor wrappers**
   through a dedicated `update_event_location` helper. The current
   `MeasurementModel` protocol is frame-indexed with fixed `meas_dim`;
-  TTL events need per-frame variable source IDs and mixed 1D/2D rows,
-  so this plan intentionally uses a custom wrapper rather than claiming
-  protocol conformance.
+  TTL events need per-frame variable source IDs and a variable number
+  of events, so this plan intentionally uses a custom wrapper rather
+  than claiming protocol conformance.
 
 ## Non-Goals
 
@@ -74,100 +91,118 @@ columns: [time (s), source_id (int), edge ("rise" | "fall")]
 sensor type is determined by *which* source list the id appears in
 (beams, zones, or readers).
 
+### Trodes / NWB DIO representation
+
+`trodes_to_nwb` converts each configured DIO channel into a separate NWB
+`TimeSeries` under `processing["behavior"]["behavioral_events"]`.
+The metadata YAML maps hardware channel descriptions such as `Din13` or
+`Dout8` to semantic names such as `Arm1_poke` or `Arm1_light`; the NWB
+series keeps the semantic name in `TimeSeries.name` and the hardware
+channel in `TimeSeries.description`. Its data values are digital state
+changes: `1` for a 0-to-1/rising transition and `0` for a
+1-to-0/falling transition. A future adapter can therefore convert NWB
+DIO to the parquet schema by selecting channels by name or description,
+mapping them to configured `source_id` values, translating `1/0` to
+`"rise"`/`"fall"`, and dropping any initial state sample that is not a
+true transition.
+
 ### The unifying math
 
-Every TTL event source produces a spatial constraint at the event time.
-Zone triggers and RFID readers produce a **2D point measurement**:
+Every TTL event source produces a **2D point measurement at a known
+anchor with an anisotropic 2×2 measurement covariance**:
 
 ```
 H = position selector (2, n_state)             # via layout.pos_idx[:2]
 z = anchor (2,)                                # world meters
-R = 2×2 covariance                             # world-frame covariance
+R = R_rot · diag(σ_x², σ_y²) · R_rotᵀ          # event-local σ rotated to world
 ```
 
-Beam breaks produce a **1D line measurement**:
+The geometry of each source type determines the anchor and
+event-local σ pair:
 
-```
-h(x) = nᵀ · p - c                              # p = state position[:2]
-z = 0
-R = σ_perp²
-```
+| Source | `anchor` | `σ_x` (event-local) | `σ_y` (event-local) | `R` orientation |
+| --- | --- | --- | --- | --- |
+| **Zone trigger** | zone center | `σ_zone` | `σ_zone` | identity (covariance is isotropic) |
+| **RFID reader** | reader location | `r_eff / √2` | `r_eff / √2` | identity (covariance is isotropic) |
+| **Beam break** | beam midpoint | `σ_perp` (across beam) | `max(σ_perp, L/√12)` (along beam) | rotation that maps event-local x to the beam normal |
 
-where `n` is the unit normal to the beam line and `c = nᵀ · emitter`
-(equivalently `nᵀ · receiver`).
+`L = ‖receiver − emitter‖` is the beam length. `L/√12` is the standard
+deviation of a uniform distribution over `[−L/2, +L/2]`, used here as
+a moment-matched Gaussian approximation for the unknown along-beam
+position at trigger time. The `max(σ_perp, …)` floor handles the
+degenerate "very short beam" case (`L → 0`) where we still want
+σ_along ≥ σ_perp so R doesn't become singular.
 
-The geometry of each source type determines the measurement:
+### Why this works for both short and long beams
 
-| Source | Measurement | Noise |
-| --- | --- | --- |
-| **Zone trigger** | 2D point at zone center | `σ_zone² · I` |
-| **RFID reader** | 2D point at reader location | `(r_eff / √2)² · I` |
-| **Beam break** | 1D perpendicular line constraint | `σ_perp²` |
+| Beam length | `σ_perp` | `σ_along = L/√12` | Effective measurement |
+| --- | --- | --- | --- |
+| 1 cm (a small IR sensor) | 5 mm | 3 mm | Approximately isotropic point fix at midpoint. Reasonable because the rat is constrained to a very small segment when triggered. |
+| 10 cm | 5 mm | 29 mm | Mildly anisotropic. Perpendicular constraint dominates but along-beam information is still used. |
+| 1 m (corridor IR beam) | 5 mm | 290 mm | Strongly anisotropic. Approaches a perpendicular-line update when the along-beam variance is large relative to the filter's prior uncertainty. |
 
-### Why beam break is a line update, not a midpoint fix
-
-Intuitively a beam break feels like a **1D linear constraint**
-(perpendicular distance to the line), and the implementation should
-model it that way. A 2D anisotropic measurement anchored at the beam
-midpoint is only equivalent in the limiting case where the along-beam
-innovation is ignored. With any finite along-beam variance it still
-pulls the estimate weakly toward the beam midpoint, which is the wrong
-geometry for a long beam.
-
-The beam update should therefore use the scalar measurement:
-
-```
-z = 0
-h(x) = nᵀ · p - c
-H = nᵀ · position_selector
-R = σ_perp²
-```
-
-If a future implementation wants to express beams as a 2D pseudo-
-measurement, it must anchor the along-beam coordinate at the predicted
-state projection before the update, not at the fixed midpoint.
+The key tradeoff: beam breaks are represented by a Gaussian whose first
+two moments match a uniform prior over the finite beam segment. This is
+not the exact finite-segment likelihood: it still has Gaussian support
+outside the segment and can weakly contract or pull along the beam
+toward the midpoint. Setting `σ_along = L/√12` makes that along-beam
+effect scale with the surveyed beam length instead of with an arbitrary
+multiple of `σ_perp`. Short beams behave like point fixes; long beams
+become weak along-beam constraints, but implementations and tests
+should treat this as an approximation rather than claiming exact
+equivalence to a line-only update.
 
 ## Design Principles
 
 - **Single event update model.** `EventLocationModel.predict /
-  jacobian / meas_cov / innovation` operates on resolved point or line
-  event sources regardless of source type. It is consumed by
-  `update_event_location`, not by the existing fixed-`meas_dim`
-  `MeasurementModel` protocol. JIT trace is one shape; debugging is
-  one place.
+  jacobian / meas_cov / innovation` operates on resolved
+  `(anchor, R_2x2)` event sources regardless of source type. Every
+  event is a 2D point measurement; per-source-type differences live
+  entirely in how the anchor and R are computed at config time. It
+  is consumed by `update_event_location`, not by the existing
+  fixed-`meas_dim` `MeasurementModel` protocol (which is frame-indexed
+  and assumes a constant per-frame measurement). JIT trace is one
+  shape; debugging is one place.
 - **Per-source-type spec dataclasses for ergonomics.** Users
   write `BeamSpec(id, emitter, receiver, sigma_perp_m)`,
   `ZoneTriggerSpec(id, center, sigma_m)`,
   `RFIDReaderSpec(id, center, effective_radius_m)`. Each spec has a
-  `to_event_source()` method that yields the resolved measurement
-  fields the model consumes.
+  `to_event_source()` method that resolves the geometry into the
+  unified `(anchor, R_2x2)` pair the model consumes.
 - **Stacked update per camera frame.** All events in
   `[t_cam[k-1], t_cam[k]]` fold into one block update with
-  `H ∈ R^{M × n_state}`, where each event contributes either one
-  row for a beam line or two rows for a point source, and
-  `R = block_diag(R_1, …, R_K)`.
+  `H ∈ R^{2K × n_state}` (two rows per event since every event is a
+  2D measurement) and `R = block_diag(R_1, …, R_K)`.
   Mathematically equivalent to sequential application; cleaner JAX
   trace.
 - **Padded for `lax.scan`.** Per-frame event index is padded to
-  `MAX_EVENTS_PER_FRAME` (default 8) with sentinel `-1`. Because line
-  events contribute one H row and point events contribute two, the
-  stacked update is built at the worst-case row budget
-  `MAX_EVENT_MEAS_ROWS = 2 * MAX_EVENTS_PER_FRAME`. Within the K used
-  event slots, line events fill 1 real row + 1 sentinel-padded row,
-  point events fill 2 real rows; the remaining `(MAX_EVENTS_PER_FRAME
-  − K) * 2` rows are sentinel-padded. All sentinel rows get a large
-  `R` so the Kalman gain treats them as no-ops and they contribute
-  zero to the innovation log-likelihood.
+  `MAX_EVENTS_PER_FRAME` (default 8) with sentinel `-1`. Because every
+  event contributes exactly two rows, the stacked update is built at
+  fixed shape `(2 · MAX_EVENTS_PER_FRAME, n_state)`. Padded sentinel
+  rows are gated three ways: their `H` rows are zero, their innovation
+  rows are zero, and their `R` block is identity. The zero `H` is what
+  drives the Kalman gain on those rows to exactly zero; the well-
+  conditioned identity covariance keeps `psd_solve`'s relative diagonal boost
+  stable when the valid-event `R` blocks are tiny (a single large-`R`
+  block in the same matrix would inflate the boost and corrupt the
+  valid update). The event log-likelihood is also explicitly masked
+  over valid rows, so the "events config present but no events" case
+  is bitwise identical to the no-events-config case.
 - **Trodes DIO is the canonical source.** Hardware sync is assumed;
-  no separate clock-alignment step.
+  no separate clock-alignment step for Trodes DIO-derived events.
 - **Layout-aware indexing.** `layout.pos_idx[:2]` for all current
   layouts; 3D extension flagged but not in scope.
 - **Optional channel.** Absent config = no behavior change. Empty
   events file = short-circuit.
-- **Source-id polymorphism with resolved geometry.** Runtime lookup
-  resolves `source_id` to a fixed point or line measurement. The
-  source-type metadata lives in diagnostics for the visualization
-  layer.
+- **Source-id polymorphism with dense JAX arrays.** User-facing
+  `source_id` values can be arbitrary integers in the events parquet,
+  so the loader builds a host-side `source_id -> compact_index` map.
+  The JAX path only sees dense arrays:
+  `event_source_anchors[n_sources, 2]`,
+  `event_source_covariances[n_sources, 2, 2]`, and
+  `event_indices_per_frame[n_cam, max_events_per_frame]` containing
+  compact indices or `-1`. Source-type metadata stays in diagnostics
+  for the visualization layer.
 
 ## Architecture
 
@@ -176,14 +211,17 @@ state projection before the update, not at the fixed midpoint.
 ```python
 @dataclass(frozen=True)
 class EventLocationSource:
-    """Resolved geometry the model consumes per event."""
+    """Resolved geometry the model consumes per event.
+
+    Every TTL event source is a 2D point measurement at ``anchor``
+    with anisotropic 2x2 covariance. Per-source-type
+    distinctions (beam vs zone vs reader) live entirely in how the
+    spec class computed these two fields; the model is unaware of
+    the original source type.
+    """
     source_id: int
-    kind: Literal["point", "line"]
-    anchor: np.ndarray | None = None      # (2,) point source, world meters
-    R: np.ndarray | None = None           # (2, 2) point-source covariance
-    normal: np.ndarray | None = None      # (2,) beam-line unit normal
-    offset: float | None = None           # c in n.T @ p - c = 0
-    sigma_perp_m: float | None = None     # beam-line perpendicular sigma
+    anchor: np.ndarray         # (2,) world meters
+    covariance: np.ndarray     # (2, 2) world-frame measurement covariance, PSD
     label: str | None = None
     source_type: str = "unknown"   # for diagnostics only
 
@@ -192,23 +230,26 @@ class EventLocationModel:
     """2D-position measurement model for TTL event sources.
 
     All discrete-event spatial sensors (beam break, zone trigger,
-    RFID reader) collapse to this model: point sources contribute 2D
-    position fixes and beam breaks contribute 1D line constraints. The
-    source-type distinction lives in the resolved geometry and in
-    diagnostics; the EKF wiring is shared.
+    RFID reader) collapse to this model: a 2D position fix at the
+    source's anchor with an anisotropic 2x2 covariance. The
+    source-type distinction lives entirely in how the user's spec
+    classes compute (anchor, covariance) at config time; the EKF and
+    UKF wiring is shared via a single ``update_event_location`` call site.
     """
 
     def __init__(
         self,
-        sources: tuple[EventLocationSource, ...],
+        source_anchors: jnp.ndarray,      # (n_sources, 2)
+        source_covariances: jnp.ndarray, # (n_sources, 2, 2)
         layout: StateLayout,
         dtype=jnp.float32,
     ): ...
 
     @property
-    def max_meas_dim_per_event(self) -> int:
-        # Line sources use one row; point sources use two rows.
-        # The EKF wrapper pads to MAX_EVENTS_PER_FRAME * 2 rows.
+    def meas_dim_per_event(self) -> int:
+        # Every event contributes a 2D measurement (2 rows in the
+        # stacked H). The EKF wrapper pads to MAX_EVENTS_PER_FRAME * 2
+        # rows total.
         return 2
 
     def predict(self, state_mean, *, source_indices) -> jnp.ndarray: ...
@@ -217,16 +258,24 @@ class EventLocationModel:
     def innovation(self, *, source_indices, meas_pred) -> jnp.ndarray: ...
 ```
 
-`source_indices` is a 1D array of resolved source IDs (or `-1`
+`source_indices` is a 1D array of compact source indices (or `-1`
 sentinel) active in the current camera frame. Padded sentinel rows
-get a large `R` so the Kalman update treats them as no-ops.
+are gated by zero `H` rows, zero innovation rows, and an identity
+covariance block — the zero `H` is what drives the Kalman gain on those
+rows to exactly zero. Their log-likelihood contribution is also
+masked to zero. (See the Design Principles entry on padding for why
+identity-`R` is preferred over a large-`R` "soft gate".)
 
 ### Schema additions — `src/trodestrack/config/schemas.py`
 
 ```python
 class BeamSpec(BaseModel):
-    """A beam-break source. Computes a line normal and offset from
-    emitter/receiver geometry."""
+    """A beam-break source. Computes anchor (midpoint) and
+    anisotropic covariance from emitter/receiver geometry. ``σ_perp`` is the
+    perpendicular noise (typically the IR-beam width); ``σ_along``
+    is computed as ``max(σ_perp, ‖receiver − emitter‖ / √12)`` so
+    short beams behave like isotropic point fixes and long beams
+    behave like weak along-beam, strong perpendicular constraints."""
     id: int
     emitter: tuple[float, float]
     receiver: tuple[float, float]
@@ -250,12 +299,11 @@ class ZoneTriggerSpec(BaseModel):
 
     def to_event_source(self) -> EventLocationSource:
         anchor = np.array(self.center)
-        R = (self.sigma_m ** 2) * np.eye(2)
+        covariance = (self.sigma_m ** 2) * np.eye(2)
         return EventLocationSource(
             source_id=self.id,
-            kind="point",
             anchor=anchor,
-            R=R,
+            covariance=covariance,
             label=self.label,
             source_type="zone",
         )
@@ -274,12 +322,11 @@ class RFIDReaderSpec(BaseModel):
     def to_event_source(self) -> EventLocationSource:
         anchor = np.array(self.center)
         sigma = self.effective_radius_m / np.sqrt(2.0)
-        R = (sigma ** 2) * np.eye(2)
+        covariance = (sigma ** 2) * np.eye(2)
         return EventLocationSource(
             source_id=self.id,
-            kind="point",
             anchor=anchor,
-            R=R,
+            covariance=covariance,
             label=self.label,
             source_type="rfid",
         )
@@ -314,17 +361,23 @@ def per_frame_event_indices(
     t_cam: np.ndarray,
     *,
     source_active_edges: Mapping[int, int],     # 1=rise, 0=fall per source
+    source_id_to_index: Mapping[int, int],       # external id -> compact index
     max_events_per_frame: int,
 ) -> np.ndarray:
     """Returns ``(n_cam, max_events_per_frame)`` array of source
-    ids, padded with -1. Validates that no camera frame exceeded
-    the pad limit (raises with a clear message if it did)."""
+    compact indices, padded with -1. Validates unknown source ids and
+    that no camera frame exceeded the pad limit (raises with a clear
+    message if it did)."""
 ```
 
 The same helper handles beam, zone, and RFID events — they're
 distinguished only by which source-type list their `source_id`
 appears in. The schema's `_validate_unique_ids` guarantees no
 `source_id` appears in more than one list.
+
+`load_session_config()` must also resolve `ttl_events.events_file`
+relative to the YAML file, matching the existing behavior for
+`inputs.*` paths and `outputs.output_dir`.
 
 ### Loader wiring — `src/trodestrack/io/session.py`
 
@@ -333,37 +386,89 @@ appears in. The schema's `_validate_unique_ids` guarantees no
 - A flat list of `EventLocationSource` objects (one per
   beam / zone / reader), built by calling each Spec's
   `to_event_source()`.
-- A per-frame source-id index array.
+- Dense arrays consumed by JAX:
+  `event_source_anchors: np.ndarray` with shape `(n_sources, 2)` and
+  `event_source_covariances: np.ndarray` with shape `(n_sources, 2, 2)`.
+- A per-frame compact-index array with shape
+  `(n_cam, max_events_per_frame)`, where `-1` marks padded slots.
+- Diagnostics preserving the user-facing `source_id`, `source_type`,
+  and labels for plotting and troubleshooting.
 
-Stored on `PreparedSession` as `event_sources: tuple[EventLocationSource, ...]`
-and `event_indices_per_frame: np.ndarray | None`.
+Stored on `PreparedSession` as
+`event_sources: tuple[EventLocationSource, ...]`,
+`event_source_anchors: np.ndarray | None`,
+`event_source_covariances: np.ndarray | None`, and
+`event_indices_per_frame: np.ndarray | None`.
 
-### EKF wiring — `src/trodestrack/models/ekf.py`
+### Filter wiring — `src/trodestrack/models/ekf.py` and `src/trodestrack/models/ukf.py`
 
-In the per-camera-frame `step` body, after the LED / heading /
-ZUPT updates:
+Add the same three optional event arguments to both public APIs and
+pass dense arrays into the jitted core. The validation logic lives in
+``sensors.event_location.resolve_event_inputs`` and is shared between
+the two wrappers via a ``func_name`` argument that names the calling
+filter in error messages.
 
 ```python
-event_source_ids = event_indices_per_frame[t_idx]   # padded (MAX_EVENTS,)
+def extended_kalman_filter(
+    ...,
+    conf_cam: np.ndarray | None = None,
+    event_source_anchors: np.ndarray | None = None,
+    event_source_covariances: np.ndarray | None = None,
+    event_indices_per_frame: np.ndarray | None = None,
+) -> EKFResult: ...
+
+def unscented_kalman_filter(
+    ...,
+    conf_cam: np.ndarray | None = None,
+    event_source_anchors: np.ndarray | None = None,
+    event_source_covariances: np.ndarray | None = None,
+    event_indices_per_frame: np.ndarray | None = None,
+) -> UKFResult: ...
+```
+
+If all three event arguments are `None`, each wrapper constructs an
+empty no-op event channel (`event_indices_per_frame` filled with `-1`)
+before calling its JIT'd core. If any one is provided, all three are
+required and validated:
+
+- `event_source_anchors.shape == (n_sources, 2)`.
+- `event_source_covariances.shape == (n_sources, 2, 2)` and finite PSD.
+- `event_indices_per_frame.shape[0] == len(t_cam)`.
+- valid entries are `0 <= index < n_sources`; padded entries are `-1`.
+
+In the per-camera-frame `step` body of each filter, after the LED /
+heading / ZUPT updates (the EKF and UKF scan bodies use the same
+helper call):
+
+```python
+event_source_indices = event_indices_per_frame[t_idx]   # padded (MAX_EVENTS,)
 state_filt, log_lik_event = update_event_location(
     state_after_zupt,
     event_model,
-    event_source_ids,
-    valid_mask=event_source_ids >= 0,
+    event_source_indices,
+    valid_mask=event_source_indices >= 0,
 )
 log_lik_k = log_lik_pos + log_lik_heading + log_lik_zupt + log_lik_event
 ```
 
 `update_event_location` short-circuits via
 `lax.cond(jnp.any(valid_mask), do_update, no_update)` so frames with
-no events pay zero update cost.
+no events pay zero update cost. In the update branch, it forms the
+fixed-size stacked `H`, innovation, and block-diagonal `R`, then masks
+the log-likelihood to valid event rows only. Sentinel rows must not
+change the posterior or log-likelihood, which is what the empty-events
+parity test pins.
 
 ### Simulator extension — `src/trodestrack/sim/rat_imu.py`
 
 `RatIMUSimConfig` gains an optional `ttl_event_geometry` block
 mirroring the YAML schema. The simulator emits synthetic events
-when the trajectory crosses any configured beam, enters any zone
-(within `σ_zone`), or enters any reader's effective radius.
+when the trajectory crosses any configured beam, enters any zone, or
+enters any reader's effective radius. Zone simulation needs an explicit
+activation radius/shape separate from measurement noise if those
+concepts differ; v1 should either add `trigger_radius_m` to
+`ZoneTriggerSpec` or document that synthetic zones use `sigma_m` as
+both trigger radius and measurement uncertainty.
 
 ### Diagnostic video — `src/trodestrack/viz/`
 
@@ -379,14 +484,16 @@ when the trajectory crosses any configured beam, enters any zone
 ### Milestone 1 — Shared ingest infrastructure
 
 - TTL events parquet loader (`io/ttl_events.py`).
-- Per-frame source-id index builder with padding.
+- Per-frame compact-index builder with padding.
 - `TTLEventsConfig` + the three Spec dataclasses with
   `to_event_source()` math.
 - Schema validation: unique IDs across all source types; valid
-  edges; pad-limit enforced at load time.
+  edges; config-relative `ttl_events.events_file` path resolution;
+  dense source arrays; pad-limit enforced at load time.
 - Tests for parquet → per-frame indices; schema unique-id
   enforcement; per-spec `to_event_source()` math (point-source anchor
-  and R; beam-source normal, offset, `sigma_perp_m`, and active edge).
+  and covariance; beam-source midpoint anchor, anisotropic covariance eigenvectors /
+  eigenvalues, `sigma_perp_m`, and active edge).
 
 **Exit criteria:** all three Spec classes can produce
 `EventLocationSource` objects from YAML; `tests/io/test_ttl_events.py`
@@ -397,32 +504,53 @@ green.
 - Implement `EventLocationModel` with `predict / jacobian / meas_cov
   / innovation`.
 - Stacked-event update: K simultaneous events fold into one padded
-  `(MAX_EVENT_MEAS_ROWS, n_state)` block update.
-- Padded-sentinel handling: `source_id == -1` rows get large `R` and
-  are masked out of the innovation log-likelihood.
+  `(2 · MAX_EVENTS_PER_FRAME, n_state)` block update.
+- Padded-sentinel handling: compact index `-1` rows get zero `H`,
+  zero innovation, identity covariance blocks, and are masked out of the
+  innovation log-likelihood. (Originally specified as "large covariance";
+  switched to zero `H` plus identity covariance because the large-covariance
+  block inflates ``psd_solve``'s relative diagonal boost when valid covariance is small,
+  corrupting the valid update.)
 - Unit tests:
-  - Predict point sources on / off the anchor and beam sources on /
-    off the line.
-  - Stacked H shape with one row for beam lines and two rows for point
-    sources.
+  - Predict on / off the anchor for every source type.
+  - Stacked H shape: two rows per event for K events;
+    `H ∈ R^{2K × n_state}` (no kind-based branching).
   - Padded sentinels produce no posterior change.
-  - **Beam-break geometry**: the scalar line update leaves the
-    along-beam coordinate unchanged except through prior covariance
-    coupling and matches a manual 1D-perpendicular Kalman update to
-    numerical tolerance.
+  - **Beam short / long limits**: a short beam (`L < σ_perp`)
+    produces an approximately isotropic covariance; a long beam
+    (`L >> σ_perp`) produces highly anisotropic covariance with much weaker
+    along-beam information than perpendicular information. Parametric
+    tests should pin the covariance geometry and bound along-beam
+    posterior contraction rather than requiring exact line-update
+    equivalence.
   - JIT-compatibility smoke.
 
-**Exit criteria:** model is callable in isolation; beam-break geometry
-test green to numerical tolerance.
+**Exit criteria:** model is callable in isolation; beam short-vs-long
+limit tests green to numerical tolerance.
 
 ### Milestone 3 — Sim extension and synthetic scenario tests
 
-- `RatIMUSimConfig.ttl_event_geometry` emits synthetic beam /
-  zone / RFID events.
+- Synthetic event generator. Implemented as a standalone helper
+  ``trodestrack.sim.ttl_events.events_from_trajectory(t, xy, beams=,
+  zone_triggers=, rfid_readers=)`` that walks a sampled trajectory and
+  emits Trodes-like digital state changes: beam crossings produce an
+  active edge plus a short reset pulse, while zones/RFID readers emit
+  active edges on disc entry and reset edges on exit. The ingest path
+  then filters to each source's configured `active_edge`, matching the
+  production DIO behavior while preserving the event-channel contract.
+  Originally scoped as a ``RatIMUSimConfig.ttl_event_geometry`` field;
+  the standalone helper kept the simulator API surface unchanged and
+  is sufficient for scenario tests. Threading the geometry through
+  ``RatIMUSimConfig`` is a deferred follow-up if the YAML simulator
+  needs first-class events.
 - Property: events monotonic; source IDs valid; pad-limit honored.
 - Scenario per source type (separate tests):
-  - Beam grid (4×4) reduces position RMSE during 5s camera
-    dropout vs no-event baseline.
+  - Two beam-grid scenarios:
+    - 1D 5-beam set spanning a 2 s dropout (cheap regression test).
+    - 4×4 cell grid (5 vertical + 5 horizontal beams) over an 8 s
+      session with a 5 s camera dropout, parametrized across EKF and
+      UKF; asserts ≥30% position-RMSE reduction during the dropout
+      with a failure message reporting both RMSEs.
   - Zone trigger snaps position to feeder location within σ_zone.
   - RFID detection collapses position uncertainty to the reader's
     effective radius.
@@ -431,17 +559,30 @@ test green to numerical tolerance.
 `tests/integration/test_ttl_event_sensors_session.py` green; sim
 emits per-source-type events that cross the model's update path.
 
-### Milestone 4 — EKF wiring
+### Milestone 4 — Filter wiring (EKF and UKF)
 
-- `update_event_location` wrapper in `filter_common.py`.
-- Wire into `extended_kalman_filter` (and `_3d` if 3D EKF gets
-  event support — same model, different `pos_idx` selector).
-- Numerical parity test: with `ttl_events` config absent, filter
-  output is bitwise identical to current behavior.
-- Numerical parity test: empty events file but config present
-  produces identical output to "config absent".
+- `update_event_location` wrapper in
+  `models/sensors/event_location.py`; shared input-validation helper
+  `resolve_event_inputs` in the same module so both filter wrappers
+  enforce one dtype/shape/range/PSD contract.
+- Wire optional dense event arrays through `extended_kalman_filter` /
+  `_extended_kalman_filter_impl` and `unscented_kalman_filter` /
+  `_unscented_kalman_filter_impl`. The event update runs after the
+  camera + heading + ZUPT updates in each scan body. Using the linear
+  event update inside the UKF is consistent because the event
+  measurement is a linear 2D position selector with Gaussian noise.
+- 3D-EKF support is a follow-up unless a concrete 3D event fixture is
+  added; the same model can later use a different `pos_idx` selector.
+- Numerical parity tests for both filters: with no event arguments
+  the output is bitwise identical to the prior code path; with event
+  arguments configured but no actual events firing, the output equals
+  the no-event-arguments case (within float tolerance from the
+  different `max_events_per_frame` JIT trace).
+- Config-run parity test: `load_session(...ttl_events...)` passes the
+  dense event arrays into `extended_kalman_filter`; legacy non-config
+  calls remain unchanged.
 
-**Exit criteria:** parity tests green; full sweep
+**Exit criteria:** parity tests green for both filters; full sweep
 `pytest -m "not slow and not benchmark"` no regressions.
 
 ### Milestone 5 — Diagnostic video and CLI
@@ -463,20 +604,25 @@ bundle and a video with the events panel; documented in
 
 | Test | Layer | Asserts |
 | --- | --- | --- |
-| `BeamSpec.to_event_source()` | spec | line normal is perpendicular to the beam; offset is consistent with emitter/receiver; active edge defaults to fall |
+| `BeamSpec.to_event_source()` | spec | anchor = midpoint; R eigenvectors aligned with beam tangent / normal; eigenvalues are σ_perp² and max(σ_perp, L/√12)²; active edge defaults to fall |
 | `ZoneTriggerSpec.to_event_source()` | spec | anchor = center; R = σ²·I |
 | `RFIDReaderSpec.to_event_source()` | spec | anchor = center; R = (r/√2)²·I |
 | Schema unique IDs | config | duplicate id across source types → `ValidationError` |
-| Predict on point anchor / beam line | model | point-source innovation is zero on anchor; beam-source innovation is zero on line |
-| Stacked H shape | model | one row for beam lines, two rows for point sources, padded to static max rows |
-| Padded sentinels are no-op | model | posterior unchanged when only `-1` rows present |
-| **Beam-break geometry** | model | scalar line update matches manual 1D perpendicular update to numerical tolerance |
+| Config path resolution | config | relative `ttl_events.events_file` resolves relative to the YAML file |
+| Source-id compaction | loader | arbitrary external source ids map to dense compact indices; unknown event source id fails clearly |
+| Predict on source anchor | model | point-source innovation is zero on its anchor; beam-source innovation is zero at the beam midpoint anchor |
+| Stacked H shape | model | two rows per event; padded to `(2 · MAX_EVENTS_PER_FRAME, n_state)` |
+| Padded sentinels are no-op | model | posterior unchanged and event log-likelihood exactly zero when only `-1` rows present |
+| **Beam short/long limits** | model | short beam (`L = 0`) → isotropic update; long beam (`L >> σ_perp`) → highly anisotropic covariance and bounded along-beam posterior contraction |
 | Sim event timing | `sim/rat_imu.py` | events monotonic; source IDs valid |
 | Beam-grid scenario | EKF + sim | position RMSE during 5s dropout drops by ≥30% |
 | Zone-trigger scenario | EKF + sim | position fix at zone center within σ_zone |
 | RFID scenario | EKF + sim | position uncertainty collapses to ≤ effective_radius after detection |
-| Numerical parity (no events) | EKF | bitwise identical to current filter |
-| Empty-events parity | EKF | bitwise identical to "no ttl_events config" |
+| Numerical parity (no events) | EKF and UKF | bitwise identical to current filter |
+| Empty-events parity | EKF and UKF | identical to "no ttl_events config" within float tolerance |
+| Single-event influence | EKF and UKF | one zone trigger pulls posterior position toward anchor |
+| Validation rejects bad inputs | EKF and UKF | partial-args / non-PD R / out-of-range index errors share one message contract |
+| Multiple sensors in one frame | EKF | two or more simultaneous compact indices produce the same posterior as sequential event updates |
 | Schema: missing geometry | config | clean `ValidationError` |
 | Real-data smoke | end-to-end | NPZ bundle contains `event_triggers`; viz renders |
 
@@ -499,19 +645,23 @@ bundle and a video with the events panel; documented in
 
 | Risk | Mitigation |
 | --- | --- |
-| Beam-break line constraint is accidentally implemented as a midpoint point-fix | Unit-test the scalar line Jacobian and assert along-beam coordinate is not pulled toward the midpoint except through prior covariance coupling. |
+| `σ_along` formula regression silently over-constrains the beam tangent at long range | Parametric short/long beam tests pin both limits; the `max(σ_perp, L/√12)` floor is asserted via a unit test that constructs `BeamSpec(L=0)` and confirms the resulting R is well-conditioned isotropic. |
+| Arbitrary parquet `source_id` values break JAX indexing or collide across source types | Schema validates unique configured IDs; loader builds and tests a dense `source_id -> compact_index` map before constructing JAX arrays. |
+| Padded sentinel events perturb marginal log-likelihood | Unit tests assert sentinel-only frames leave both posterior and event log-likelihood unchanged; implementation masks log-likelihood over valid rows rather than relying on large covariance. |
 | Pad-sentinel logic in `lax.scan` triggers shape recompiles | `MAX_EVENTS_PER_FRAME` is a static config arg; load-time assertion that no camera frame exceeds it. |
 | Source-id overlap between beams / zones / readers silently maps to wrong source | Schema unique-id validator; loader cross-checks event-file source IDs against configured sources, rejects unknown IDs. |
 | Trodes DIO event stream on a clock that doesn't sync to camera/IMU | Documented assumption that DIO is on the Trodes clock; non-Trodes users responsible for pre-aligning timestamps. |
 | Hand-survey error in source coordinates (beam posts, zone centers, reader locations) | Diagnostic plot in `qa/`: per-source residual histogram at trigger time. Large mean residual flags miscalibrated geometry. |
 | RFID false-positives (stray detections at the reader's edge) | `effective_radius_m` is the user's tuning knob: tighter R inflates posterior less per false-positive. Optional debounce in the loader for known-noisy readers. |
 | Multi-beam ghost triggers from one rat pass | Optional per-source debounce window in the loader (drop triggers within `≤debounce_ms` of the previous trigger on the same source). |
+| Zone simulation confuses trigger size with measurement noise | Add `trigger_radius_m` for simulated zones if needed, or explicitly document/test that v1 synthetic zones use `sigma_m` for both activation and update uncertainty. |
 
 ## Rollout Strategy
 
 - Ship behind `ttl_events: …` config; absent config = zero
   behavior change.
-- Numerical parity test gates the EKF wiring milestone.
+- Numerical parity tests (no-args + empty-events) gate the EKF and UKF
+  wiring milestone.
 - Real-data validation against one user-supplied dataset for each
   source type (one beam-grid session, one zone-trigger session,
   one RFID session) before public announcement.
@@ -523,21 +673,29 @@ bundle and a video with the events panel; documented in
 
 - New section in `docs/TUNING.md`: "TTL event sensors for
   dropout-drift mitigation and absolute fixes" with per-source-type
-  tuning guidance (`sigma_perp_m`, `sigma_m`, `effective_radius_m`).
+  tuning guidance (`sigma_perp_m`, `sigma_m`, `effective_radius_m`)
+  — **shipped**.
 - Worked example in `docs/getting-started/python-api.md` showing a
-  YAML config with all three source types populated.
-- Sample config in `examples/session_with_ttl_events.yaml`.
+  YAML config with all three source types populated — **shipped**
+  (Python-API direct-caller example; YAML pointer to
+  `examples/session_with_ttl_events.yaml`).
+- Sample config in `examples/session_with_ttl_events.yaml` —
+  **shipped**.
 - Optional appendix in this plan's Background (or a new "Sensor
   Math" doc) explaining why the unified abstraction works
-  mathematically — useful onboarding for engineers extending to
-  new event types.
+  as a Gaussian approximation — **deferred** (the existing "The
+  unifying math" and "Why this works for both short and long beams"
+  Background sections cover the main ideas).
 
 ## Open Questions
 
-1. Does the Trodes DIO infrastructure already write DIO events to a
-   parquet, or do users hand-roll the conversion from a raw DIO
-   binary file? Drives whether we ship a one-liner ingester in
-   `io/loaders/`.
+1. Should this PR ship the optional NWB adapter from
+   `processing["behavior"]["behavioral_events"]` to the normalized
+   parquet schema? Defer for now: `trodes_to_nwb` already provides the
+   channel-level DIO state changes (`1=rise`, `0=fall`), but adding the
+   adapter would introduce `pynwb` dependency/API scope. The adapter
+   should map NWB channel name/description to `source_id`, translate
+   data values to edge strings, and skip initial state samples.
 2. For 14D / 16D experimental layouts, do events update only
    `pos_idx[:2]` (x, y) or all of `pos_idx` (including z)? Default
    to `pos_idx[:2]` since the geometry is physically 2D for all
@@ -546,13 +704,12 @@ bundle and a video with the events panel; documented in
    gating path (gate triggers whose innovation > k·σ)? Probably
    yes for robustness against false positives; flag a follow-up.
 4. Future extensibility: are there event sources that *don't* fit
-   the point-or-line spatial constraint abstraction? Acoustic /
-   ultrasonic distance sensors would be 1D range constraints
-   (different geometry);
+   the single Gaussian point-fix abstraction? Acoustic / ultrasonic
+   distance sensors would be 1D range constraints (different geometry);
    accelerometer-based fall detection is event-only with no
    spatial implication. The current abstraction covers the common
-   spatial-event cases; range and event-only sensors are separate
-   plans if hardware ever exposes them.
+   spatial-event cases; true line, range, and event-only sensors are
+   separate plans if hardware ever exposes them.
 5. Should beam sources default to `active_edge="fall"` globally?
    Default yes for common high-when-unbroken beam-break circuits, but
    require per-source override and include a diagnostic count by source

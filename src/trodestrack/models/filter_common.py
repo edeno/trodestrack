@@ -2342,6 +2342,43 @@ def gaussian_log_likelihood(
     return log_prob
 
 
+def gaussian_log_likelihood_masked(
+    innovation: jnp.ndarray,
+    covariance: jnp.ndarray,
+    active_mask: jnp.ndarray,
+) -> jnp.ndarray:
+    """Gaussian log-likelihood over a masked subset of measurement rows.
+
+    Inactive rows (where ``active_mask`` is False) get covariance replaced by
+    identity and innovation replaced by zero, contributing exactly nothing
+    to the returned log-likelihood. Used by sensor models with variable
+    per-frame measurement dimensions (camera 3D LEDs, TTL events).
+
+    Parameters
+    ----------
+    innovation : jnp.ndarray, shape (k,)
+        Stacked innovation vector.
+    covariance : jnp.ndarray, shape (k, k)
+        Stacked innovation covariance.
+    active_mask : jnp.ndarray, shape (k,)
+        Per-row activity mask. ``True`` rows contribute to the likelihood.
+    """
+    active = active_mask.astype(bool)
+    active_outer = active[:, None] & active[None, :]
+    eye = jnp.eye(covariance.shape[0], dtype=covariance.dtype)
+    covariance_masked = jnp.where(active_outer, covariance, eye)
+    innovation_masked = jnp.where(active, innovation, 0.0)
+    dim = jnp.sum(active_mask.astype(innovation.dtype))
+    solved = psd_solve(covariance_masked, innovation_masked)
+    sign, logdet = jnp.linalg.slogdet(symmetrize(covariance_masked))
+    logdet = jnp.where(sign > 0, logdet, jnp.asarray(0.0, dtype=innovation.dtype))
+    return -0.5 * (
+        dim * jnp.log(jnp.asarray(2.0 * np.pi, dtype=innovation.dtype))
+        + logdet
+        + jnp.dot(innovation_masked, solved)
+    )
+
+
 def compute_nis_and_loglik(
     innov4: jnp.ndarray,
     S4: jnp.ndarray,

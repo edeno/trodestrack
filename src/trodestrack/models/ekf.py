@@ -59,6 +59,7 @@ from trodestrack.models.filter_common import (
     compute_imu_index_arrays,
     dynamics_function,
     estimate_led_spacing,
+    gaussian_log_likelihood_masked,
     imu_stationary_zupt_gate,
     initialize_state,
     joseph_update,
@@ -80,6 +81,11 @@ from trodestrack.models.process_noise import assemble_Q
 from trodestrack.models.quaternion import rotate_vector_world_to_body
 from trodestrack.models.sensors.camera_position import CameraPositionModel
 from trodestrack.models.sensors.camera_position_3d import Camera3DPositionModel
+from trodestrack.models.sensors.event_location import (
+    EventLocationModel,
+    resolve_event_inputs,
+    update_event_location,
+)
 from trodestrack.models.sensors.heading_pseudo import HeadingPseudoModel
 from trodestrack.models.state_layout import StateLayout, get_heading_index, get_layout
 
@@ -187,7 +193,11 @@ class EKFComputationResult(NamedTuple):
     usable_vision_mask: jnp.ndarray
 
 
-EXTENDED_KALMAN_FILTER_STATIC_ARGNAMES = ("layout", "config_for_filter")
+EXTENDED_KALMAN_FILTER_STATIC_ARGNAMES = (
+    "layout",
+    "config_for_filter",
+    "max_events_per_frame",
+)
 # Buffer donation not beneficial: input shapes (N_cam, 2) don't match output shapes (N_cam, n)
 # XLA cannot reuse donated buffers when shapes differ. Donation only helps when input
 # buffers can be reused for outputs of matching shape/dtype.
@@ -206,11 +216,15 @@ def _extended_kalman_filter_impl(
     Z_cam_led2_jax: jnp.ndarray,
     mask_cam_jax: jnp.ndarray,
     conf_cam_jax: jnp.ndarray | None,
+    event_source_anchors_jax: jnp.ndarray,
+    event_source_covariances_jax: jnp.ndarray,
+    event_indices_per_frame_jax: jnp.ndarray,
     imu_index_arrays: jnp.ndarray,
     dt_imu_mean: jnp.ndarray,
     *,
     config_for_filter: EKFConfig,
     layout: StateLayout,
+    max_events_per_frame: int,
 ) -> EKFComputationResult:
     """Core EKF implementation staged under ``jax.jit``."""
     n_cam = int(t_cam_jax.shape[0])
@@ -231,6 +245,14 @@ def _extended_kalman_filter_impl(
         layout=layout,
         z_led1_all=Z_cam_led1_jax,
         z_led2_all=Z_cam_led2_jax,
+    )
+
+    event_model = EventLocationModel(
+        source_anchors=event_source_anchors_jax,
+        source_covariances=event_source_covariances_jax,
+        layout=layout,
+        max_events_per_frame=max_events_per_frame,
+        dtype=initial_state.mean.dtype,
     )
 
     def filter_step(carry, t_idx):
@@ -319,13 +341,20 @@ def _extended_kalman_filter_impl(
                 config_for_filter,
             )
         )
-        state_filt, log_lik_zupt = update_zupt(
+        state_after_zupt, log_lik_zupt = update_zupt(
             state_after_heading,
             config_for_filter,
             active=has_seen_vision_next & imu_stationary & stationary_context_next,
         )
 
-        log_lik_k = log_lik_pos + log_lik_heading + log_lik_zupt
+        event_source_indices = event_indices_per_frame_jax[t_idx]
+        state_filt, log_lik_event = update_event_location(
+            state_after_zupt,
+            event_model,
+            event_source_indices,
+        )
+
+        log_lik_k = log_lik_pos + log_lik_heading + log_lik_zupt + log_lik_event
 
         outputs = {
             "filtered_mean": state_filt.mean,
@@ -851,6 +880,9 @@ def extended_kalman_filter(
     mask_cam: np.ndarray,
     initial_state: EKFState | None = None,
     conf_cam: np.ndarray | None = None,
+    event_source_anchors: np.ndarray | None = None,
+    event_source_covariances: np.ndarray | None = None,
+    event_indices_per_frame: np.ndarray | None = None,
 ) -> EKFResult:
     """Run Extended Kalman Filter on a full trajectory.
 
@@ -952,6 +984,19 @@ def extended_kalman_filter(
         None if conf_cam is None else jnp.clip(jnp.array(conf_cam), 1e-2, 1.0)
     )
 
+    (
+        event_source_anchors_jax,
+        event_source_covariances_jax,
+        event_indices_per_frame_jax,
+        max_events_per_frame,
+    ) = resolve_event_inputs(
+        event_source_anchors,
+        event_source_covariances,
+        event_indices_per_frame,
+        n_cam=int(t_cam_jax.shape[0]),
+        func_name="extended_kalman_filter",
+    )
+
     # Auto-detect LED spacing if not specified
     # Store estimated value to return in result (immutability: do NOT mutate config)
     estimated_led_distance: float | None = None
@@ -1013,10 +1058,14 @@ def extended_kalman_filter(
         Z_cam_led2_jax,
         mask_cam_jax,
         conf_cam_jax,
+        event_source_anchors_jax,
+        event_source_covariances_jax,
+        event_indices_per_frame_jax,
         imu_index_arrays,
         dt_imu_mean,
         config_for_filter=config_for_filter,
         layout=layout,
+        max_events_per_frame=max_events_per_frame,
     )
 
     return EKFResult(
@@ -1425,7 +1474,7 @@ def _update_camera_3d_scanned(
                 layout,
             )
 
-        log_lik = _gaussian_log_likelihood_masked(innovation, S, active_mask)
+        log_lik = gaussian_log_likelihood_masked(innovation, S, active_mask)
         if config.use_mahalanobis_gating:
             nis = _mahalanobis_distance_masked(innovation, S, active_mask)
             accept_update = nis < chi2_thresholds[dof]
@@ -1503,25 +1552,3 @@ def _chi2_threshold_table(
 
     values = [0.0] + [float(chi2.ppf(prob, df=dof)) for dof in range(1, max_dof + 1)]
     return jnp.asarray(values, dtype=dtype)
-
-
-def _gaussian_log_likelihood_masked(
-    innovation: jnp.ndarray,
-    covariance: jnp.ndarray,
-    active_mask: jnp.ndarray,
-) -> jnp.ndarray:
-    """Gaussian log likelihood on active measurement coordinates using masks."""
-    innovation_masked, covariance_masked = _masked_measurement_system(
-        innovation,
-        covariance,
-        active_mask,
-    )
-    dim = jnp.sum(active_mask.astype(innovation.dtype))
-    solved = psd_solve(covariance_masked, innovation_masked)
-    sign, logdet = jnp.linalg.slogdet(symmetrize(covariance_masked))
-    logdet = jnp.where(sign > 0, logdet, jnp.asarray(0.0, dtype=innovation.dtype))
-    return -0.5 * (
-        dim * jnp.log(jnp.asarray(2.0 * np.pi, dtype=innovation.dtype))
-        + logdet
-        + jnp.dot(innovation_masked, solved)
-    )

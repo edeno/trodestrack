@@ -9,8 +9,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from trodestrack.config.schemas import SessionConfig
+from trodestrack.config.schemas import EventLocationSource, SessionConfig
 from trodestrack.io.led_identity import resolve_led_identity
+from trodestrack.io.ttl_events import (
+    EDGE_NAME_TO_INT,
+    load_ttl_events,
+    per_frame_event_indices,
+)
 from trodestrack.models.ekf import EKFConfig, EKFResult, extended_kalman_filter
 from trodestrack.models.state_layout import get_layout
 from trodestrack.qa.imu_calibration import (
@@ -38,6 +43,10 @@ class PreparedSession:
     config: SessionConfig
     gyro_z_for_led_identity: np.ndarray | None = None
     U_imu_for_calibration: np.ndarray | None = None
+    event_sources: tuple[EventLocationSource, ...] = ()
+    event_source_anchors: np.ndarray | None = None
+    event_source_covariances: np.ndarray | None = None
+    event_indices_per_frame: np.ndarray | None = None
 
     @property
     def source_format(self) -> str:
@@ -72,7 +81,8 @@ def load_session(config: SessionConfig) -> PreparedSession:
         session = _load_spikegadgets_trodes(config)
 
     session = _apply_led_identity_correction(session)
-    return _add_imu_calibration_diagnostics(session)
+    session = _add_imu_calibration_diagnostics(session)
+    return _attach_ttl_events(session)
 
 
 def write_session_diagnostics(
@@ -397,6 +407,64 @@ def _apply_led_identity_correction(session: PreparedSession) -> PreparedSession:
         Z_cam_led2=corrected.led2,
         conf_cam=corrected_conf_cam,
         diagnostics=diagnostics,
+    )
+
+
+def _attach_ttl_events(session: PreparedSession) -> PreparedSession:
+    """Resolve ``ttl_events`` config into the session's dense event arrays."""
+
+    cfg = session.config.ttl_events
+    if cfg is None:
+        return session
+
+    sources: list[EventLocationSource] = []
+    source_id_to_index: dict[int, int] = {}
+    source_active_edges: dict[int, int] = {}
+    for spec_list in (cfg.beams, cfg.zone_triggers, cfg.rfid_readers):
+        for spec in spec_list:
+            source_id_to_index[spec.id] = len(sources)
+            source_active_edges[spec.id] = EDGE_NAME_TO_INT[spec.active_edge]
+            sources.append(spec.to_event_source())
+
+    if not sources:
+        diagnostics = dict(session.diagnostics)
+        diagnostics["ttl_events"] = {
+            "n_sources": 0,
+            "events_file": str(cfg.events_file),
+        }
+        return replace(session, diagnostics=diagnostics)
+
+    anchors = np.stack([src.anchor for src in sources], axis=0)
+    covariances = np.stack([src.covariance for src in sources], axis=0)
+
+    t_evt, source_id, edge = load_ttl_events(cfg.events_file)
+    indices = per_frame_event_indices(
+        t_evt,
+        source_id,
+        edge,
+        session.t_cam,
+        source_active_edges=source_active_edges,
+        source_id_to_index=source_id_to_index,
+        max_events_per_frame=cfg.max_events_per_frame,
+    )
+
+    diagnostics = dict(session.diagnostics)
+    diagnostics["ttl_events"] = {
+        "n_sources": len(sources),
+        "events_file": str(cfg.events_file),
+        "n_events_total": int(t_evt.size),
+        "n_events_kept": int((indices >= 0).sum()),
+        "max_events_per_frame": cfg.max_events_per_frame,
+        "source_types": [src.source_type for src in sources],
+        "source_ids": [src.source_id for src in sources],
+    }
+    return replace(
+        session,
+        diagnostics=diagnostics,
+        event_sources=tuple(sources),
+        event_source_anchors=anchors,
+        event_source_covariances=covariances,
+        event_indices_per_frame=indices,
     )
 
 

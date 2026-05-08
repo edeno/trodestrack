@@ -81,6 +81,9 @@ def prepare_config_filter_run(args: argparse.Namespace) -> ConfigFilterRun:
         Z_cam_led2=session.Z_cam_led2,
         mask_cam=session.mask_cam,
         conf_cam=session.conf_cam,
+        event_source_anchors=session.event_source_anchors,
+        event_source_covariances=session.event_source_covariances,
+        event_indices_per_frame=session.event_indices_per_frame,
     )
     # ``run_real_data_safety_check`` can raise *before* returning a
     # ``SafetyReport`` (e.g. no finite dual-LED frame, or no finite
@@ -134,6 +137,15 @@ def print_config_session_summary(
                 "  LED identity warning: initial_state='auto' cannot determine "
                 "a whole-session front/back label convention."
             )
+    ttl_diag = session.diagnostics.get("ttl_events")
+    if isinstance(ttl_diag, dict):
+        print(
+            "  TTL events: "
+            f"{ttl_diag.get('n_sources', 0)} configured source(s); "
+            f"{ttl_diag.get('n_events_kept', 0)}/"
+            f"{ttl_diag.get('n_events_total', 0)} events kept "
+            f"(max {ttl_diag.get('max_events_per_frame', 0)}/frame)"
+        )
 
 
 def save_filter_outputs(run: ConfigFilterRun) -> None:
@@ -179,6 +191,16 @@ def save_filter_outputs(run: ConfigFilterRun) -> None:
     }
     if run.session.conf_cam is not None:
         bundle["conf_cam"] = run.session.conf_cam
+    if run.session.event_source_anchors is not None:
+        bundle["event_source_anchors"] = run.session.event_source_anchors
+        bundle["event_source_covariances"] = run.session.event_source_covariances
+        bundle["event_indices_per_frame"] = run.session.event_indices_per_frame
+        ttl_diag = run.session.diagnostics.get("ttl_events")
+        if isinstance(ttl_diag, dict):
+            bundle["event_source_ids"] = np.asarray(
+                ttl_diag.get("source_ids", []), dtype=np.int64
+            )
+            bundle["event_source_types"] = np.asarray(ttl_diag.get("source_types", []))
     np.savez(run.output_dir / "filter_outputs.npz", **bundle)
 
 
@@ -253,6 +275,24 @@ def write_config_metadata(
                 f.write(
                     "  Warning: initial_state='auto' resolves continuity breaks "
                     "but cannot determine a whole-session front/back convention.\n"
+                )
+            f.write("\n")
+        ttl_diag = run.session.diagnostics.get("ttl_events")
+        if isinstance(ttl_diag, dict):
+            f.write("TTL Events:\n")
+            f.write(f"  Events file: {ttl_diag.get('events_file')}\n")
+            f.write(f"  Configured sources: {ttl_diag.get('n_sources')}\n")
+            f.write(
+                f"  Events kept / total: {ttl_diag.get('n_events_kept')} / "
+                f"{ttl_diag.get('n_events_total')}\n"
+            )
+            f.write(f"  Max events per frame: {ttl_diag.get('max_events_per_frame')}\n")
+            source_ids = ttl_diag.get("source_ids")
+            source_types = ttl_diag.get("source_types")
+            if source_ids is not None and source_types is not None:
+                f.write(
+                    f"  Source ids / types: "
+                    f"{list(zip(source_ids, source_types, strict=False))}\n"
                 )
             f.write("\n")
         f.write("Safety Check:\n")

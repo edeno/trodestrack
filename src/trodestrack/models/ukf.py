@@ -55,6 +55,11 @@ from trodestrack.models.filter_common import (
 from trodestrack.models.filter_update import ukf_projected_update
 from trodestrack.models.process_noise import assemble_Q
 from trodestrack.models.sensors.camera_position import CameraPositionModel
+from trodestrack.models.sensors.event_location import (
+    EventLocationModel,
+    resolve_event_inputs,
+    update_event_location,
+)
 from trodestrack.models.sensors.heading_pseudo import HeadingPseudoModel
 from trodestrack.models.state_layout import StateLayout, get_heading_index, get_layout
 
@@ -737,7 +742,11 @@ def update_heading(
 # JIT Configuration (mirror EKF pattern)
 # =============================================================================
 
-UNSCENTED_KALMAN_FILTER_STATIC_ARGNAMES = ("layout", "config_for_filter")
+UNSCENTED_KALMAN_FILTER_STATIC_ARGNAMES = (
+    "layout",
+    "config_for_filter",
+    "max_events_per_frame",
+)
 # Buffer donation not beneficial: input shapes (N_cam, 2) don't match output shapes (N_cam, n)
 # XLA cannot reuse donated buffers when shapes differ. Donation only helps when input
 # buffers can be reused for outputs of matching shape/dtype.
@@ -754,11 +763,15 @@ def _unscented_kalman_filter_impl(
     Z_cam_led2_jax: jnp.ndarray,
     mask_cam_jax: jnp.ndarray,
     conf_cam_jax: jnp.ndarray | None,
+    event_source_anchors_jax: jnp.ndarray,
+    event_source_covariances_jax: jnp.ndarray,
+    event_indices_per_frame_jax: jnp.ndarray,
     imu_index_arrays: jnp.ndarray,
     dt_imu_mean: jnp.ndarray,
     *,
     config_for_filter: UKFConfig,
     layout: StateLayout,
+    max_events_per_frame: int,
 ) -> tuple[Array, Array, Array, Array, Array, Array]:
     """Core UKF implementation staged under ``jax.jit``."""
     n_cam = int(t_cam_jax.shape[0])
@@ -780,6 +793,14 @@ def _unscented_kalman_filter_impl(
         layout=layout,
         z_led1_all=Z_cam_led1_jax,
         z_led2_all=Z_cam_led2_jax,
+    )
+
+    event_model = EventLocationModel(
+        source_anchors=event_source_anchors_jax,
+        source_covariances=event_source_covariances_jax,
+        layout=layout,
+        max_events_per_frame=max_events_per_frame,
+        dtype=initial_state.mean.dtype,
     )
 
     def filter_step(carry, t_idx):
@@ -890,13 +911,15 @@ def _unscented_kalman_filter_impl(
             config_for_filter,
             active=has_seen_vision_next & imu_stationary & stationary_context_next,
         )
-        state_filt = UKFState(
-            mean=state_after_zupt.mean,
-            cov=state_after_zupt.cov,
+
+        event_source_indices = event_indices_per_frame_jax[t_idx]
+        state_filt, log_lik_event = update_event_location(
+            state_after_zupt,
+            event_model,
+            event_source_indices,
         )
 
-        # Total log-likelihood (position + heading + ZUPT)
-        log_lik_k = log_lik_pos + log_lik_heading + log_lik_zupt
+        log_lik_k = log_lik_pos + log_lik_heading + log_lik_zupt + log_lik_event
 
         # Store outputs
         outputs = {
@@ -965,6 +988,9 @@ def unscented_kalman_filter(
     mask_cam: np.ndarray,
     initial_state: UKFState | None = None,
     conf_cam: np.ndarray | None = None,
+    event_source_anchors: np.ndarray | None = None,
+    event_source_covariances: np.ndarray | None = None,
+    event_indices_per_frame: np.ndarray | None = None,
 ) -> UKFResult:
     """Run Unscented Kalman Filter on a full trajectory.
 
@@ -1002,6 +1028,18 @@ def unscented_kalman_filter(
     conf_cam : np.ndarray | None, optional
         Confidence scores (N_cam, 4) for [x1,y1,x2,y2] in [0, 1] for per-dimension
         R scaling.
+    event_source_anchors : np.ndarray | None, optional
+        World-frame anchors ``(n_sources, 2)`` for the configured TTL event
+        sources (beam break, zone trigger, RFID reader). Must be provided
+        together with ``event_source_covariances`` and
+        ``event_indices_per_frame`` or all three left as ``None`` (no-op).
+    event_source_covariances : np.ndarray | None, optional
+        Per-source 2x2 measurement covariance ``(n_sources, 2, 2)``.
+        Validated for finiteness, symmetry, and positive-definiteness via
+        :func:`trodestrack.models.sensors.event_location.resolve_event_inputs`.
+    event_indices_per_frame : np.ndarray | None, optional
+        Padded compact source indices ``(N_cam, max_events_per_frame)``,
+        sentinel ``-1`` for unused slots.
 
     Returns
     -------
@@ -1108,6 +1146,19 @@ def unscented_kalman_filter(
     # Precompute IMU index arrays (host-side, using shared utility)
     imu_index_arrays = compute_imu_index_arrays(t_imu, t_cam)
 
+    (
+        event_source_anchors_jax,
+        event_source_covariances_jax,
+        event_indices_per_frame_jax,
+        max_events_per_frame,
+    ) = resolve_event_inputs(
+        event_source_anchors,
+        event_source_covariances,
+        event_indices_per_frame,
+        n_cam=int(t_cam_jax.shape[0]),
+        func_name="unscented_kalman_filter",
+    )
+
     # Call JIT-compiled implementation
     (
         filtered_means,
@@ -1126,10 +1177,14 @@ def unscented_kalman_filter(
         Z_cam_led2_jax,
         mask_cam_jax,
         conf_cam_jax,
+        event_source_anchors_jax,
+        event_source_covariances_jax,
+        event_indices_per_frame_jax,
         imu_index_arrays,
         dt_imu_mean,
         config_for_filter=config_for_filter,
         layout=layout,
+        max_events_per_frame=max_events_per_frame,
     )
 
     return UKFResult(
