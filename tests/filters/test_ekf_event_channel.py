@@ -200,6 +200,24 @@ class TestEventChannelValidation:
         with pytest.raises(ValueError, match="non-integer entries"):
             _run_with_events(sim_data, ekf_config, anchors, covariances, indices)
 
+    def test_bool_index_rejected(self, sim_data):
+        ekf_config = _make_ekf_config()
+        n_cam = sim_data["t_cam_exp"].shape[0]
+        anchors = np.array([[0.5, 0.5]], dtype=float)
+        covariances = np.array([[[0.01, 0.0], [0.0, 0.01]]], dtype=float)
+        indices = np.zeros((n_cam, 1), dtype=bool)
+        with pytest.raises(ValueError, match="integer or float array"):
+            _run_with_events(sim_data, ekf_config, anchors, covariances, indices)
+
+    def test_object_index_rejected(self, sim_data):
+        ekf_config = _make_ekf_config()
+        n_cam = sim_data["t_cam_exp"].shape[0]
+        anchors = np.array([[0.5, 0.5]], dtype=float)
+        covariances = np.array([[[0.01, 0.0], [0.0, 0.01]]], dtype=float)
+        indices = np.full((n_cam, 1), "0", dtype=object)
+        with pytest.raises(ValueError, match="integer or float array"):
+            _run_with_events(sim_data, ekf_config, anchors, covariances, indices)
+
     def test_index_out_of_range_rejected(self, sim_data):
         ekf_config = _make_ekf_config()
         n_cam = sim_data["t_cam_exp"].shape[0]
