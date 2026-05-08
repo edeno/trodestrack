@@ -15,7 +15,6 @@ Design
 
 References
 ----------
-- incremental_refactor_plan.md: PR1 - MeasurementModel Protocol
 - filter_common.py: measurement_function, confidence_to_R_diagonal, make_led_selector
 """
 

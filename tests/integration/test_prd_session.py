@@ -45,7 +45,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 # =============================================================================
-# PRD Requirements (from PRD.md Section 4)
+# Acceptance Criteria
 # =============================================================================
 
 PRD_POSITION_RMSE_M = 0.02  # Position RMSE <= 0.02 m (2 cm)

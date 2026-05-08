@@ -19,7 +19,6 @@ Key differences from EKF:
     - Slightly higher computational cost but often more accurate
 
 References:
-    - PRD.md Section 6: Mathematical Model
     - Särkkä (2013) "Bayesian Filtering and Smoothing", Algorithm 5.14
     - Julier & Uhlmann (1997) "New extension of the Kalman filter"
 """

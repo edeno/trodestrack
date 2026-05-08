@@ -15,7 +15,6 @@ Design
 
 References
 ----------
-- incremental_refactor_plan.md: PR1 - MeasurementModel Protocol
 - filter_common.py: prepare_heading_measurement
 - ekf.py: update_heading
 """

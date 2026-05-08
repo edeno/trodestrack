@@ -10,9 +10,6 @@ This module validates system performance against PRD requirements:
   streaming ingest loop), so this is a throughput-style proxy for the
   forward-only "online" CLI rather than a streaming / real-time
   guarantee.
-
-References:
-    - PRD.md Section 4: Core Outcomes (Acceptance Criteria)
 """
 
 import time
@@ -67,7 +64,7 @@ def _assert_cpu_backend() -> None:
 
 
 # =============================================================================
-# PRD Performance Requirements (from PRD.md Section 4)
+# Performance Requirements (acceptance criteria)
 # =============================================================================
 
 PRD_OFFLINE_SMOOTHER_SPEEDUP_MIN = 10.0  # Offline ≥10× realtime (CPU)

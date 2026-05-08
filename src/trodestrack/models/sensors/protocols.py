@@ -21,10 +21,6 @@ Protocol Methods
 - `innovation()`: Innovation z - h(x) with sensor-specific processing (e.g., angle wrapping)
 - `subspace()`: LED validity flags and selector matrix for lifted updates
 
-References
-----------
-- incremental_refactor_plan.md: PR1 - MeasurementModel Protocol
-- PRD.md: Section 6 (Mathematical Model), Section 12 (Robustness)
 """
 
 from __future__ import annotations

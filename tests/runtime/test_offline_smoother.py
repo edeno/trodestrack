@@ -11,7 +11,6 @@ Test strategy:
     - Verify smoothed covariances are smaller than filtered
 
 References:
-    - PRD.md Section 12: Algorithms & Implementation Notes
     - Särkkä (2013) "Bayesian Filtering and Smoothing", Algorithm 8.2 (RTS)
 """
 

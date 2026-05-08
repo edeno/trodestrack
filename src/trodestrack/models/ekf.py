@@ -35,7 +35,6 @@ Key features:
     - RTS smoother for offline processing (see runtime/offline.py)
 
 References:
-    - PRD.md Section 6: Mathematical Model
     - Dynamax inference_ekf.py
     - Särkkä (2013) "Bayesian Filtering and Smoothing"
 """

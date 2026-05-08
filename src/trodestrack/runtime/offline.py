@@ -9,7 +9,6 @@ state estimates using future observations. This produces lower-variance
 estimates than forward filtering alone.
 
 References:
-    - PRD.md Section 12: Algorithms & Implementation Notes
     - Särkkä (2013) "Bayesian Filtering and Smoothing", Algorithm 8.2
     - Dynamax inference_ekf.py, inference_ukf.py
 """

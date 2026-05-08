@@ -4,10 +4,6 @@ This module provides a MeasurementModel implementation for Zero-Velocity Updates
 which apply pseudo-measurements constraining velocity to zero when the rat is
 nearly stationary. This prevents IMU drift during stationary periods.
 
-References
-----------
-- PRD.md: Section 6 (Mathematical Model - Robustness)
-- incremental_refactor_plan.md: PR4 - ZUPT as First-Class Sensor
 """
 
 from __future__ import annotations
