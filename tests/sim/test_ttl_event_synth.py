@@ -1,4 +1,4 @@
-"""Unit tests for the synthetic TTL event helper (Milestone 3)."""
+"""Unit tests for the synthetic TTL event helper."""
 
 from __future__ import annotations
 

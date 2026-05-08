@@ -1,4 +1,4 @@
-"""Tests for TTL event sensor ingest infrastructure (Milestone 1).
+"""Tests for TTL event sensor ingest infrastructure.
 
 Covers:
 - Per-spec ``to_event_source()`` math (BeamSpec / ZoneTriggerSpec / RFIDReaderSpec).

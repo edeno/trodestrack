@@ -1,4 +1,4 @@
-"""Synthetic-scenario tests for the TTL event channel (Milestone 3).
+"""Synthetic-scenario tests for the TTL event channel.
 
 These tests use a constant-velocity trajectory to keep the sim cheap, then:
 

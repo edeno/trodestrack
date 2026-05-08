@@ -1,4 +1,4 @@
-"""Unit tests for EventLocationModel (Milestone 2).
+"""Unit tests for EventLocationModel.
 
 Covers:
 - predict / jacobian / meas_cov / innovation on a single event source.
