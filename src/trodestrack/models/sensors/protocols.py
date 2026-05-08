@@ -10,10 +10,10 @@ separate ``update_event_location`` call.
 
 Design Philosophy
 -----------------
-- **Static shapes for JAX**: All measurements use fixed-size arrays (padding/masking for missing data)
-- **Explicit frame indexing**: Sensor models cache frame-specific data (observations, validity)
-- **Selector-based updates**: 2D/4D camera measurements handled via selector matrices
-- **Large-R gating**: Invalid observations gated via R=1e6 (no Python branching in JAX scan)
+- **Static shapes for JAX**: Protocol measurements use fixed-size arrays.
+- **Explicit frame indexing**: Sensor models cache frame-specific observations.
+- **Selector-based updates**: Partial observations are projected to valid rows.
+- **Model-local gating**: Missing/invalid observations are handled by each model.
 
 Protocol Methods
 ----------------
@@ -37,9 +37,10 @@ import jax.numpy as jnp
 class MeasurementModel(Protocol):
     """Protocol for sensor measurement models in Kalman filtering.
 
-    This protocol defines the interface that all measurement models must implement
-    to be compatible with both EKF and UKF filter updates. The protocol uses
-    structural subtyping (duck typing) via `@runtime_checkable`.
+    This protocol defines the interface for fixed-shape, frame-indexed
+    measurement models that are compatible with the shared EKF/UKF projected
+    update path. The protocol uses structural subtyping (duck typing) via
+    `@runtime_checkable`.
 
     Methods
     -------
@@ -66,10 +67,10 @@ class MeasurementModel(Protocol):
     -----
     - Implementations preallocate the per-frame arrays (LED positions,
       masks, confidences) at construction time and index them by
-      ``frame_idx`` inside the JIT-traced filter; there is no
-      ``set_frame_data()`` hook today.
+      ``frame_idx`` inside the JIT-traced filter.
     - All arrays use static shapes for JAX compatibility.
-    - Invalid observations gated via large R (1e6) instead of branching.
+    - Missing or invalid observations are handled inside each model without
+      Python branching in JAX scans.
     - Protocol is `@runtime_checkable` for isinstance() checks.
     - ``EventLocationModel`` (TTL beam / zone / RFID) intentionally does
       *not* implement this protocol because it has variable per-frame
@@ -173,8 +174,8 @@ class MeasurementModel(Protocol):
         -----
         - For camera: R may be confidence-scaled per dimension
         - For heading: R may be adaptively scaled by LED spacing ratio
-        - Gated observations use R = 1e6 * I (effectively disables update)
-        - Implementations cache frame data via `set_frame_data()`
+        - Missing or invalid observations are handled by the concrete model.
+        - Implementations cache frame data at construction time.
         """
         ...
 

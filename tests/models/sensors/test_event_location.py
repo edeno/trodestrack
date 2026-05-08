@@ -3,12 +3,12 @@
 Covers:
 - predict / jacobian / meas_cov / innovation on a single event source.
 - Stacked event updates: K events fold into ``(2K, n_state)`` H and a
-  block-diagonal R.
+  block-diagonal covariance.
 - Sentinel rows (compact index ``-1``) are masked out of the innovation
   log-likelihood and produce no posterior change when run through
   ``update_event_location``.
-- Beam short/long limits: short beams produce nearly isotropic R;
-  long beams produce strongly anisotropic R.
+- Beam short/long limits: short beams produce nearly isotropic covariance;
+  long beams produce strongly anisotropic covariance.
 - JIT-compatibility smoke (predict/jacobian/meas_cov under jax.jit).
 """
 

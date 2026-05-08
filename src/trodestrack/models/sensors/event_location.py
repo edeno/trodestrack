@@ -3,11 +3,12 @@
 Every TTL event sensor (beam break, zone trigger, RFID reader) collapses to
 the same measurement: a 2D point fix at a known anchor with an anisotropic
 2x2 measurement covariance. ``EventLocationModel`` consumes resolved
-``(anchor, R)`` pairs for each configured source plus a per-frame padded
-array of compact source indices. Per camera frame, ``update_event_location``
+``(anchor, covariance)`` pairs for each configured source plus a per-frame
+padded array of compact source indices. Per camera frame, ``update_event_location``
 folds the (up to ``max_events_per_frame``) active events into one block
-update; padded slots get zero H rows + identity R so they contribute
-nothing to the gain, and the log-likelihood is masked to valid rows only.
+update; padded slots get zero H rows + identity covariance blocks so they
+contribute nothing to the gain, and the log-likelihood is masked to valid
+rows only.
 
 The intentional asymmetry to the existing ``MeasurementModel`` protocol:
 that protocol is frame-indexed with a fixed ``meas_dim``, while event

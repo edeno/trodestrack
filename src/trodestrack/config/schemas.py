@@ -295,7 +295,7 @@ class EventLocationSource:
     """Resolved geometry the EKF event-update model consumes per source.
 
     Every TTL event source (beam break, zone trigger, RFID reader) collapses to
-    a 2D point measurement at ``anchor`` with anisotropic 2x2 covariance ``R``.
+    a 2D point measurement at ``anchor`` with anisotropic 2x2 covariance.
     Per-source-type distinctions (geometry math, default edge) live in the
     spec classes; the model is unaware of the original source type.
     """
@@ -327,11 +327,12 @@ def _isotropic_event_source(
 class BeamSpec(BaseModel):
     """A beam-break source.
 
-    Computes anchor (midpoint of emitter/receiver) and an anisotropic ``R``
-    aligned with the beam: ``σ_perp`` perpendicular to the beam (default the
-    IR beam-width scale) and ``σ_along = max(σ_perp, L/√12)`` along the beam,
-    where ``L`` is the emitter-receiver distance. Short beams collapse to an
-    isotropic point fix; long beams become weakly along-beam constraints.
+    Computes anchor (midpoint of emitter/receiver) and an anisotropic
+    covariance aligned with the beam: ``σ_perp`` perpendicular to the beam
+    (default the IR beam-width scale) and ``σ_along = max(σ_perp, L/√12)``
+    along the beam, where ``L`` is the emitter-receiver distance. Short beams
+    collapse to an isotropic point fix; long beams become weakly along-beam
+    constraints.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -397,8 +398,8 @@ class RFIDReaderSpec(BaseModel):
     """An RFID reader source.
 
     ``effective_radius_m`` is the detection range; treated as ``√2·σ`` of an
-    isotropic 2D Gaussian fit to a uniform disc of that radius (so
-    ``σ = r/√2`` and ``R = (r²/2)·I``).
+    isotropic 2D Gaussian fit to a uniform disc of that radius, so
+    ``σ = r/√2`` and the covariance is ``(r²/2)·I``.
     """
 
     model_config = ConfigDict(extra="forbid")

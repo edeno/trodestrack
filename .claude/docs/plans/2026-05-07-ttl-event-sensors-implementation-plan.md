@@ -12,7 +12,7 @@ This plan supersedes that note — beam break, TTL zone triggers, and RFID
 readers all share the same underlying signal (a TTL pulse from a Trodes
 DIO channel). All three collapse to a single measurement model: a **2D
 point fix at a known anchor with anisotropic 2×2 covariance**. Zone
-triggers and RFID readers use isotropic R (the rat is somewhere within
+triggers and RFID readers use isotropic covariance (the rat is somewhere within
 the zone / detection radius). Beam breaks use a Gaussian approximation
 to the finite beam segment: a tight perpendicular σ from the IR-beam
 width and an along-beam σ from the beam length. This works for very
@@ -122,8 +122,8 @@ event-local σ pair:
 
 | Source | `anchor` | `σ_x` (event-local) | `σ_y` (event-local) | `R` orientation |
 | --- | --- | --- | --- | --- |
-| **Zone trigger** | zone center | `σ_zone` | `σ_zone` | identity (R is isotropic) |
-| **RFID reader** | reader location | `r_eff / √2` | `r_eff / √2` | identity (R is isotropic) |
+| **Zone trigger** | zone center | `σ_zone` | `σ_zone` | identity (covariance is isotropic) |
+| **RFID reader** | reader location | `r_eff / √2` | `r_eff / √2` | identity (covariance is isotropic) |
 | **Beam break** | beam midpoint | `σ_perp` (across beam) | `max(σ_perp, L/√12)` (along beam) | rotation that maps event-local x to the beam normal |
 
 `L = ‖receiver − emitter‖` is the beam length. `L/√12` is the standard
@@ -182,7 +182,7 @@ equivalence to a line-only update.
   rows are gated three ways: their `H` rows are zero, their innovation
   rows are zero, and their `R` block is identity. The zero `H` is what
   drives the Kalman gain on those rows to exactly zero; the well-
-  conditioned identity `R` keeps `psd_solve`'s relative diagonal boost
+  conditioned identity covariance keeps `psd_solve`'s relative diagonal boost
   stable when the valid-event `R` blocks are tiny (a single large-`R`
   block in the same matrix would inflate the boost and corrupt the
   valid update). The event log-likelihood is also explicitly masked
@@ -214,7 +214,7 @@ class EventLocationSource:
     """Resolved geometry the model consumes per event.
 
     Every TTL event source is a 2D point measurement at ``anchor``
-    with anisotropic 2x2 covariance ``R``. Per-source-type
+    with anisotropic 2x2 covariance. Per-source-type
     distinctions (beam vs zone vs reader) live entirely in how the
     spec class computed these two fields; the model is unaware of
     the original source type.
@@ -233,8 +233,8 @@ class EventLocationModel:
     RFID reader) collapse to this model: a 2D position fix at the
     source's anchor with an anisotropic 2x2 covariance. The
     source-type distinction lives entirely in how the user's spec
-    classes compute (anchor, R) at config time; the EKF and UKF wiring
-    is shared via a single ``update_event_location`` call site.
+    classes compute (anchor, covariance) at config time; the EKF and
+    UKF wiring is shared via a single ``update_event_location`` call site.
     """
 
     def __init__(
@@ -261,7 +261,7 @@ class EventLocationModel:
 `source_indices` is a 1D array of compact source indices (or `-1`
 sentinel) active in the current camera frame. Padded sentinel rows
 are gated by zero `H` rows, zero innovation rows, and an identity
-`R` block — the zero `H` is what drives the Kalman gain on those
+covariance block — the zero `H` is what drives the Kalman gain on those
 rows to exactly zero. Their log-likelihood contribution is also
 masked to zero. (See the Design Principles entry on padding for why
 identity-`R` is preferred over a large-`R` "soft gate".)
@@ -271,7 +271,7 @@ identity-`R` is preferred over a large-`R` "soft gate".)
 ```python
 class BeamSpec(BaseModel):
     """A beam-break source. Computes anchor (midpoint) and
-    anisotropic R from emitter/receiver geometry. ``σ_perp`` is the
+    anisotropic covariance from emitter/receiver geometry. ``σ_perp`` is the
     perpendicular noise (typically the IR-beam width); ``σ_along``
     is computed as ``max(σ_perp, ‖receiver − emitter‖ / √12)`` so
     short beams behave like isotropic point fixes and long beams
@@ -492,7 +492,7 @@ both trigger radius and measurement uncertainty.
   dense source arrays; pad-limit enforced at load time.
 - Tests for parquet → per-frame indices; schema unique-id
   enforcement; per-spec `to_event_source()` math (point-source anchor
-  and R; beam-source midpoint anchor, anisotropic R eigenvectors /
+  and covariance; beam-source midpoint anchor, anisotropic covariance eigenvectors /
   eigenvalues, `sigma_perp_m`, and active edge).
 
 **Exit criteria:** all three Spec classes can produce
@@ -506,10 +506,10 @@ green.
 - Stacked-event update: K simultaneous events fold into one padded
   `(2 · MAX_EVENTS_PER_FRAME, n_state)` block update.
 - Padded-sentinel handling: compact index `-1` rows get zero `H`,
-  zero innovation, identity `R`, and are masked out of the innovation
-  log-likelihood. (Originally specified as "large `R`"; switched to
-  zero `H` plus identity `R` because the large-`R` block inflates
-  ``psd_solve``'s relative diagonal boost when valid `R` is small,
+  zero innovation, identity covariance blocks, and are masked out of the
+  innovation log-likelihood. (Originally specified as "large covariance";
+  switched to zero `H` plus identity covariance because the large-covariance
+  block inflates ``psd_solve``'s relative diagonal boost when valid covariance is small,
   corrupting the valid update.)
 - Unit tests:
   - Predict on / off the anchor for every source type.
@@ -517,8 +517,8 @@ green.
     `H ∈ R^{2K × n_state}` (no kind-based branching).
   - Padded sentinels produce no posterior change.
   - **Beam short / long limits**: a short beam (`L < σ_perp`)
-    produces an approximately isotropic R; a long beam
-    (`L >> σ_perp`) produces highly anisotropic R with much weaker
+    produces an approximately isotropic covariance; a long beam
+    (`L >> σ_perp`) produces highly anisotropic covariance with much weaker
     along-beam information than perpendicular information. Parametric
     tests should pin the covariance geometry and bound along-beam
     posterior contraction rather than requiring exact line-update
@@ -613,7 +613,7 @@ bundle and a video with the events panel; documented in
 | Predict on source anchor | model | point-source innovation is zero on its anchor; beam-source innovation is zero at the beam midpoint anchor |
 | Stacked H shape | model | two rows per event; padded to `(2 · MAX_EVENTS_PER_FRAME, n_state)` |
 | Padded sentinels are no-op | model | posterior unchanged and event log-likelihood exactly zero when only `-1` rows present |
-| **Beam short/long limits** | model | short beam (`L = 0`) → isotropic update; long beam (`L >> σ_perp`) → highly anisotropic R and bounded along-beam posterior contraction |
+| **Beam short/long limits** | model | short beam (`L = 0`) → isotropic update; long beam (`L >> σ_perp`) → highly anisotropic covariance and bounded along-beam posterior contraction |
 | Sim event timing | `sim/rat_imu.py` | events monotonic; source IDs valid |
 | Beam-grid scenario | EKF + sim | position RMSE during 5s dropout drops by ≥30% |
 | Zone-trigger scenario | EKF + sim | position fix at zone center within σ_zone |
@@ -647,7 +647,7 @@ bundle and a video with the events panel; documented in
 | --- | --- |
 | `σ_along` formula regression silently over-constrains the beam tangent at long range | Parametric short/long beam tests pin both limits; the `max(σ_perp, L/√12)` floor is asserted via a unit test that constructs `BeamSpec(L=0)` and confirms the resulting R is well-conditioned isotropic. |
 | Arbitrary parquet `source_id` values break JAX indexing or collide across source types | Schema validates unique configured IDs; loader builds and tests a dense `source_id -> compact_index` map before constructing JAX arrays. |
-| Padded sentinel events perturb marginal log-likelihood | Unit tests assert sentinel-only frames leave both posterior and event log-likelihood unchanged; implementation masks log-likelihood over valid rows rather than relying on large `R`. |
+| Padded sentinel events perturb marginal log-likelihood | Unit tests assert sentinel-only frames leave both posterior and event log-likelihood unchanged; implementation masks log-likelihood over valid rows rather than relying on large covariance. |
 | Pad-sentinel logic in `lax.scan` triggers shape recompiles | `MAX_EVENTS_PER_FRAME` is a static config arg; load-time assertion that no camera frame exceeds it. |
 | Source-id overlap between beams / zones / readers silently maps to wrong source | Schema unique-id validator; loader cross-checks event-file source IDs against configured sources, rejects unknown IDs. |
 | Trodes DIO event stream on a clock that doesn't sync to camera/IMU | Documented assumption that DIO is on the Trodes clock; non-Trodes users responsible for pre-aligning timestamps. |
