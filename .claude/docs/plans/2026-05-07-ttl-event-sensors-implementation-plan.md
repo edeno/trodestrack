@@ -3,7 +3,9 @@
 ## Status
 
 Implemented on `ttl-event-sensors` (Milestones 1–4 + sim/scenario tests).
-EKF-only; UKF wiring is open. The original incremental refactor
+Both `extended_kalman_filter` and `unscented_kalman_filter` accept the
+event channel and share one input-validation contract via
+`sensors.event_location.resolve_event_inputs`. The original incremental refactor
 (`incremental_refactor_plan.md`) flagged "TTL/RFID Event Sensors" as a
 deferred milestone with separate `ttl_zone.py` / `rfid_zone.py` stubs.
 This plan supersedes that note — beam break, TTL zone triggers, and RFID
@@ -25,7 +27,7 @@ Gaussian measurement rather than an exact line constraint.
   user picks between `BeamSpec` (computes midpoint anchor + anisotropic
   R from emitter+receiver geometry), `ZoneTriggerSpec` (anchor + isotropic σ),
   and `RFIDReaderSpec` (anchor + effective radius). All share the same
-  ingest pipeline and the same EKF wiring.
+  ingest pipeline and the same EKF / UKF wiring.
 - **Many sensors per session.** A session can configure any number of
   beams, zones, and readers. The loader maps user-facing `source_id`
   values from the events parquet into compact source indices for JAX,
@@ -212,8 +214,8 @@ class EventLocationModel:
     RFID reader) collapse to this model: a 2D position fix at the
     source's anchor with an anisotropic 2x2 covariance. The
     source-type distinction lives entirely in how the user's spec
-    classes compute (anchor, R) at config time; the EKF wiring is
-    shared.
+    classes compute (anchor, R) at config time; the EKF and UKF wiring
+    is shared via a single ``update_event_location`` call site.
     """
 
     def __init__(
@@ -379,10 +381,13 @@ Stored on `PreparedSession` as
 `event_source_covariances: np.ndarray | None`, and
 `event_indices_per_frame: np.ndarray | None`.
 
-### EKF wiring — `src/trodestrack/models/ekf.py`
+### Filter wiring — `src/trodestrack/models/ekf.py` and `src/trodestrack/models/ukf.py`
 
-Add optional event arguments to the public API and pass dense arrays into
-the jitted core:
+Add the same three optional event arguments to both public APIs and
+pass dense arrays into the jitted core. The validation logic lives in
+``sensors.event_location.resolve_event_inputs`` and is shared between
+the two wrappers via a ``func_name`` argument that names the calling
+filter in error messages.
 
 ```python
 def extended_kalman_filter(
@@ -392,20 +397,29 @@ def extended_kalman_filter(
     event_source_covariances: np.ndarray | None = None,
     event_indices_per_frame: np.ndarray | None = None,
 ) -> EKFResult: ...
+
+def unscented_kalman_filter(
+    ...,
+    conf_cam: np.ndarray | None = None,
+    event_source_anchors: np.ndarray | None = None,
+    event_source_covariances: np.ndarray | None = None,
+    event_indices_per_frame: np.ndarray | None = None,
+) -> UKFResult: ...
 ```
 
-If all three event arguments are `None`, the wrapper constructs an
+If all three event arguments are `None`, each wrapper constructs an
 empty no-op event channel (`event_indices_per_frame` filled with `-1`)
-before calling `_extended_kalman_filter_jit`. If any one is provided,
-all three are required and validated:
+before calling its JIT'd core. If any one is provided, all three are
+required and validated:
 
 - `event_source_anchors.shape == (n_sources, 2)`.
 - `event_source_covariances.shape == (n_sources, 2, 2)` and finite PSD.
 - `event_indices_per_frame.shape[0] == len(t_cam)`.
 - valid entries are `0 <= index < n_sources`; padded entries are `-1`.
 
-In the per-camera-frame `step` body, after the LED / heading /
-ZUPT updates:
+In the per-camera-frame `step` body of each filter, after the LED /
+heading / ZUPT updates (the EKF and UKF scan bodies use the same
+helper call):
 
 ```python
 event_source_indices = event_indices_per_frame[t_idx]   # padded (MAX_EVENTS,)
@@ -522,22 +536,30 @@ limit tests green to numerical tolerance.
 `tests/integration/test_ttl_event_sensors_session.py` green; sim
 emits per-source-type events that cross the model's update path.
 
-### Milestone 4 — EKF wiring
+### Milestone 4 — Filter wiring (EKF and UKF)
 
-- `update_event_location` wrapper in `filter_common.py`.
-- Wire optional dense event arrays through `extended_kalman_filter`
-  and `_extended_kalman_filter_impl`. 3D EKF support is a follow-up
-  unless a concrete 3D event fixture is added; the same model can later
-  use a different `pos_idx` selector.
-- Numerical parity test: with `ttl_events` config absent, filter
-  output is bitwise identical to current behavior.
-- Numerical parity test: empty events file but config present
-  produces identical output to "config absent".
+- `update_event_location` wrapper in
+  `models/sensors/event_location.py`; shared input-validation helper
+  `resolve_event_inputs` in the same module so both filter wrappers
+  enforce one dtype/shape/range/PSD contract.
+- Wire optional dense event arrays through `extended_kalman_filter` /
+  `_extended_kalman_filter_impl` and `unscented_kalman_filter` /
+  `_unscented_kalman_filter_impl`. The event update runs after the
+  camera + heading + ZUPT updates in each scan body. Using the linear
+  event update inside the UKF is consistent because the event
+  measurement is a linear 2D position selector with Gaussian noise.
+- 3D-EKF support is a follow-up unless a concrete 3D event fixture is
+  added; the same model can later use a different `pos_idx` selector.
+- Numerical parity tests for both filters: with no event arguments
+  the output is bitwise identical to the prior code path; with event
+  arguments configured but no actual events firing, the output equals
+  the no-event-arguments case (within float tolerance from the
+  different `max_events_per_frame` JIT trace).
 - Config-run parity test: `load_session(...ttl_events...)` passes the
   dense event arrays into `extended_kalman_filter`; legacy non-config
   calls remain unchanged.
 
-**Exit criteria:** parity tests green; full sweep
+**Exit criteria:** parity tests green for both filters; full sweep
 `pytest -m "not slow and not benchmark"` no regressions.
 
 ### Milestone 5 — Diagnostic video and CLI
@@ -573,8 +595,10 @@ bundle and a video with the events panel; documented in
 | Beam-grid scenario | EKF + sim | position RMSE during 5s dropout drops by ≥30% |
 | Zone-trigger scenario | EKF + sim | position fix at zone center within σ_zone |
 | RFID scenario | EKF + sim | position uncertainty collapses to ≤ effective_radius after detection |
-| Numerical parity (no events) | EKF | bitwise identical to current filter |
-| Empty-events parity | EKF | bitwise identical to "no ttl_events config" |
+| Numerical parity (no events) | EKF and UKF | bitwise identical to current filter |
+| Empty-events parity | EKF and UKF | identical to "no ttl_events config" within float tolerance |
+| Single-event influence | EKF and UKF | one zone trigger pulls posterior position toward anchor |
+| Validation rejects bad inputs | EKF and UKF | partial-args / non-PD R / out-of-range index errors share one message contract |
 | Multiple sensors in one frame | EKF | two or more simultaneous compact indices produce the same posterior as sequential event updates |
 | Schema: missing geometry | config | clean `ValidationError` |
 | Real-data smoke | end-to-end | NPZ bundle contains `event_triggers`; viz renders |
@@ -613,7 +637,8 @@ bundle and a video with the events panel; documented in
 
 - Ship behind `ttl_events: …` config; absent config = zero
   behavior change.
-- Numerical parity test gates the EKF wiring milestone.
+- Numerical parity tests (no-args + empty-events) gate the EKF and UKF
+  wiring milestone.
 - Real-data validation against one user-supplied dataset for each
   source type (one beam-grid session, one zone-trigger session,
   one RFID session) before public announcement.
