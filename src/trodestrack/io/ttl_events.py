@@ -23,6 +23,54 @@ import pandas as pd
 EDGE_NAME_TO_INT: dict[str, int] = {"fall": 0, "rise": 1}
 PAD_SENTINEL: int = -1
 
+_INT64_MIN: int = int(np.iinfo(np.int64).min)
+_INT64_MAX: int = int(np.iinfo(np.int64).max)
+
+
+def _coerce_source_ids(raw: np.ndarray, events_file: Path) -> np.ndarray:
+    """Validate and coerce a ``source_id`` column to ``int64``.
+
+    Rejects non-integer floats, non-finite values, and integers outside
+    the signed int64 range. Routing an out-of-range source ID would
+    silently map the event to a wrong-but-valid configured source.
+    """
+    if np.issubdtype(raw.dtype, np.integer):
+        if np.issubdtype(raw.dtype, np.unsignedinteger) and raw.size:
+            overflow = raw > np.uint64(_INT64_MAX)
+            if overflow.any():
+                bad = sorted({int(x) for x in raw[overflow][:5]})
+                raise ValueError(
+                    f"{events_file} contains source_id value(s) above the "
+                    f"signed int64 range (max {_INT64_MAX}); the "
+                    f"trodestrack event channel cannot represent them. "
+                    f"Got entries like {bad}."
+                )
+        return raw.astype(np.int64, copy=False)
+
+    raw_float = np.asarray(raw, dtype=float)
+    bad = ~np.isfinite(raw_float) | (raw_float != np.floor(raw_float))
+    if bad.any():
+        raise ValueError(
+            f"{events_file} contains non-integer source_id value(s); "
+            "expected integers but got entries like "
+            f"{sorted({float(x) for x in raw_float[bad][:5]})}."
+        )
+    # Float64 cannot represent ``_INT64_MAX = 2^63 - 1`` exactly — it
+    # rounds up to ``2^63``. Reject any float at or above ``2^63``
+    # (saturates on cast) or strictly below ``-2^63`` (== _INT64_MIN, which
+    # *is* exactly representable). Using the float bound ``2.0**63`` keeps
+    # the check consistent with what the int64 cast can actually produce.
+    upper_bound = 2.0**63
+    out_of_range = (raw_float >= upper_bound) | (raw_float < -upper_bound)
+    if out_of_range.any():
+        raise ValueError(
+            f"{events_file} contains source_id value(s) outside the signed "
+            f"int64 range [{_INT64_MIN}, {_INT64_MAX}]; the trodestrack "
+            "event channel cannot represent them. Got entries like "
+            f"{sorted({float(x) for x in raw_float[out_of_range][:5]})}."
+        )
+    return raw_float.astype(np.int64)
+
 
 def load_ttl_events(
     events_file: Path,
@@ -55,39 +103,7 @@ def load_ttl_events(
     t_evt = df["time"].to_numpy(dtype=float)
     edge_str = df["edge"].to_numpy()
 
-    raw_sid = df["source_id"].to_numpy()
-    if np.issubdtype(raw_sid.dtype, np.integer):
-        # Preserve native integer precision (int64 IDs above 2^53 lose
-        # precision via a float round-trip). Unsigned values above the
-        # signed int64 range would wrap to negatives; reject those
-        # explicitly rather than silently routing to a wrong source.
-        if np.issubdtype(raw_sid.dtype, np.unsignedinteger) and raw_sid.size:
-            int64_max = np.iinfo(np.int64).max
-            overflow = raw_sid > np.uint64(int64_max)
-            if overflow.any():
-                bad = sorted({int(x) for x in raw_sid[overflow][:5]})
-                raise ValueError(
-                    f"{events_file} contains source_id value(s) above the "
-                    f"signed int64 range (max {int64_max}); the trodestrack "
-                    f"event channel cannot represent them. Got entries like "
-                    f"{bad}."
-                )
-        source_id = raw_sid.astype(np.int64, copy=False)
-    else:
-        # ``to_numpy(dtype=int)`` silently truncates floats (1.9 → 1) and
-        # casts NaN to platform-dependent garbage. Validate integrality
-        # before casting.
-        raw_sid_float = np.asarray(raw_sid, dtype=float)
-        bad_sid = ~np.isfinite(raw_sid_float) | (
-            raw_sid_float != np.floor(raw_sid_float)
-        )
-        if bad_sid.any():
-            raise ValueError(
-                f"{events_file} contains non-integer source_id value(s); "
-                "expected integers but got entries like "
-                f"{sorted({float(x) for x in raw_sid_float[bad_sid][:5]})}."
-            )
-        source_id = raw_sid_float.astype(np.int64)
+    source_id = _coerce_source_ids(df["source_id"].to_numpy(), events_file)
 
     if t_evt.size == 0:
         return t_evt, source_id, np.zeros(0, dtype=int)

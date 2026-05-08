@@ -292,6 +292,20 @@ def test_load_ttl_events_rejects_non_integer_source_id(tmp_path):
         load_ttl_events(events_path)
 
 
+def test_load_ttl_events_rejects_float_overflow_source_id(tmp_path):
+    """Float source_id values above int64 max must reject, not silently saturate."""
+    events_path = tmp_path / "events.parquet"
+    pd.DataFrame(
+        {
+            "time": np.array([0.10], dtype=float),
+            "source_id": np.array([float(2**63)], dtype=float),
+            "edge": ["fall"],
+        }
+    ).to_parquet(events_path)
+    with pytest.raises(ValueError, match="outside the signed int64 range"):
+        load_ttl_events(events_path)
+
+
 def test_load_ttl_events_rejects_unsigned_overflow_source_id(tmp_path):
     """Unsigned IDs above 2^63 must not silently wrap to negative int64 values."""
     events_path = tmp_path / "events.parquet"
