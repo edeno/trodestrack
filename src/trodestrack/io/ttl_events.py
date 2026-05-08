@@ -47,6 +47,16 @@ def _coerce_source_ids(raw: np.ndarray, events_file: Path) -> np.ndarray:
                 )
         return raw.astype(np.int64, copy=False)
 
+    if not np.issubdtype(raw.dtype, np.floating):
+        # Strings, booleans, object, etc. would silently coerce to int via
+        # ``np.asarray(..., dtype=float)`` ("1" → 1, True → 1), violating
+        # the documented integer schema. Reject loudly.
+        raise ValueError(
+            f"{events_file} source_id column must be an integer or float "
+            f"dtype; got dtype={raw.dtype!r}. The documented schema is "
+            "``source_id (int)``."
+        )
+
     raw_float = np.asarray(raw, dtype=float)
     bad = ~np.isfinite(raw_float) | (raw_float != np.floor(raw_float))
     if bad.any():

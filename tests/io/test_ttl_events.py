@@ -292,6 +292,33 @@ def test_load_ttl_events_rejects_non_integer_source_id(tmp_path):
         load_ttl_events(events_path)
 
 
+def test_load_ttl_events_rejects_string_source_id(tmp_path):
+    """String source_id columns must reject — schema requires integer ids."""
+    events_path = tmp_path / "events.parquet"
+    pd.DataFrame(
+        {
+            "time": np.array([0.10], dtype=float),
+            "source_id": ["1"],
+            "edge": ["fall"],
+        }
+    ).to_parquet(events_path)
+    with pytest.raises(ValueError, match="must be an integer or float"):
+        load_ttl_events(events_path)
+
+
+def test_load_ttl_events_rejects_bool_source_id(tmp_path):
+    events_path = tmp_path / "events.parquet"
+    pd.DataFrame(
+        {
+            "time": np.array([0.10], dtype=float),
+            "source_id": np.array([True]),
+            "edge": ["fall"],
+        }
+    ).to_parquet(events_path)
+    with pytest.raises(ValueError, match="must be an integer or float"):
+        load_ttl_events(events_path)
+
+
 def test_load_ttl_events_rejects_float_overflow_source_id(tmp_path):
     """Float source_id values above int64 max must reject, not silently saturate."""
     events_path = tmp_path / "events.parquet"
