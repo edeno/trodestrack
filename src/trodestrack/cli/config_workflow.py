@@ -195,12 +195,12 @@ def save_filter_outputs(run: ConfigFilterRun) -> None:
         bundle["event_source_anchors"] = run.session.event_source_anchors
         bundle["event_source_covariances"] = run.session.event_source_covariances
         bundle["event_indices_per_frame"] = run.session.event_indices_per_frame
-        bundle["event_source_ids"] = np.asarray(
-            [src.source_id for src in run.session.event_sources], dtype=np.int64
-        )
-        bundle["event_source_types"] = np.asarray(
-            [src.source_type for src in run.session.event_sources]
-        )
+        ttl_diag = run.session.diagnostics.get("ttl_events")
+        if isinstance(ttl_diag, dict):
+            bundle["event_source_ids"] = np.asarray(
+                ttl_diag.get("source_ids", []), dtype=np.int64
+            )
+            bundle["event_source_types"] = np.asarray(ttl_diag.get("source_types", []))
     np.savez(run.output_dir / "filter_outputs.npz", **bundle)
 
 

@@ -20,20 +20,23 @@ edge before constructing Kalman updates.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 
 from trodestrack.config.schemas import BeamSpec, RFIDReaderSpec, ZoneTriggerSpec
+
+EdgeName = Literal["rise", "fall"]
 
 
 @dataclass(frozen=True)
 class SyntheticEvent:
     time: float
     source_id: int
-    edge: str
+    edge: EdgeName
 
 
-def _opposite_edge(edge: str) -> str:
+def _opposite_edge(edge: EdgeName) -> EdgeName:
     return "rise" if edge == "fall" else "fall"
 
 
@@ -98,7 +101,7 @@ def _emit_radius_events(
     xy: np.ndarray,
     *,
     source_id: int,
-    active_edge: str,
+    active_edge: EdgeName,
     center: tuple[float, float],
     radius: float,
 ) -> list[SyntheticEvent]:
