@@ -467,7 +467,7 @@ bundle and a video with the events panel; documented in
 | `ZoneTriggerSpec.to_event_source()` | spec | anchor = center; R = σ²·I |
 | `RFIDReaderSpec.to_event_source()` | spec | anchor = center; R = (r/√2)²·I |
 | Schema unique IDs | config | duplicate id across source types → `ValidationError` |
-| Predict on anchor | model | innovation == 0 |
+| Predict on point anchor / beam line | model | point-source innovation is zero on anchor; beam-source innovation is zero on line |
 | Stacked H shape | model | one row for beam lines, two rows for point sources, padded to static max rows |
 | Padded sentinels are no-op | model | posterior unchanged when only `-1` rows present |
 | **Beam-break geometry** | model | scalar line update matches manual 1D perpendicular update to numerical tolerance |

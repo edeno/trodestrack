@@ -153,6 +153,7 @@ Add new field groups (validated only when their format is selected):
   - `imu_file: Path`             # parquet
   - `position_file: Path`         # DLC `.h5` (or `.csv`)
   - `camera_timestamps_file: Path | None`
+  - `camera_sync_file: Path | None`
   - `fps_cam: float | None`
   - `led1_bodypart: str`
   - `led2_bodypart: str`
@@ -199,6 +200,12 @@ elif config.inputs.format == "dlc_keypoints":
 ### Shared pixel→meters helper
 
 ```python
+@dataclass(frozen=True)
+class ResolvedCameraCalibration:
+    meters_per_pixel: float | None
+    homography: Homography | None
+
+
 def pixel_to_meters_xy(
     pixels: np.ndarray,
     *,
@@ -207,8 +214,10 @@ def pixel_to_meters_xy(
     """Apply scalar OR homography. Exactly one must be set."""
 ```
 
-The homography plan owns `resolve_camera_calibration(camera,
-raw_camera_config=...)`. Call that once per loader, then pass the
+This helper owns the `ResolvedCameraCalibration` dataclass so scalar-only
+loader work can ship before the full homography feature. When the
+homography plan lands, it adds `resolve_camera_calibration(camera,
+raw_camera_config=...)`; call that once per loader, then pass the
 resolved calibration to `pixel_to_meters_xy`. Do not pass raw
 `CameraConfig` directly, because `CameraConfig.meters_per_pixel`
 retains the scalar default even when the user configured a homography.
@@ -416,5 +425,6 @@ runnable with sample fixtures.
 - Two optional runtime deps, both lazy-imported:
   `trodes-python-tools` for `trodes_native` and `tables` for DLC
   `.h5`. DLC `.csv` support has no new dependency.
-- Depends on the `geom/` plan for first-class homography support;
-  scalar `meters_per_pixel` is enough to ship without it.
+- Scalar `meters_per_pixel` support can ship before the `geom/` plan
+  because `ResolvedCameraCalibration` lives in the shared loader helper.
+  First-class homography support depends on the `geom/` plan.

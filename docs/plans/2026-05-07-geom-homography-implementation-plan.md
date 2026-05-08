@@ -182,8 +182,9 @@ homography_file: Path | None = Field(default=None, description="...")
 
 **Approach to mutual exclusion (avoids breaking existing configs):**
 keep `meters_per_pixel: float = 0.0022` as the existing scalar default.
-Add a `model_validator` that picks the active calibration based on
-which fields the user *explicitly* set:
+Use a raw-YAML precheck in `load_session_config` plus
+`resolve_camera_calibration` in the loader path to pick the active
+calibration based on which fields the user *explicitly* set:
 
 - `homography_file is None` → scalar path; `meters_per_pixel` is
   active (default or user-set).
@@ -193,10 +194,10 @@ which fields the user *explicitly* set:
   this is the only mutex-fail case. The existing default is
   silently ignored when a homography is configured.
 
-Detecting "explicitly set" requires reading the raw YAML dict in
-`load_session_config` (Pydantic's `model_fields_set` only catches
-fields set via the constructor, not deserialization). The simplest
-implementation: `load_session_config` checks the parsed YAML for the
+Pydantic validation still enforces types, finite values, and
+`extra="forbid"` after the raw-YAML precheck. It should not be the
+mechanism that detects "explicitly set" for mutual exclusion:
+`load_session_config` checks the parsed YAML for the
 `camera.meters_per_pixel` key before validation; if both
 `meters_per_pixel` and `homography_file` are present in the raw dict,
 raise. Otherwise pass through to Pydantic.
