@@ -2,7 +2,9 @@
 
 ## Status
 
-Not started. The 2025-10-13 [Variable Naming Review](../../.claude/docs/VARIABLE_NAMING_REVIEW.md)
+Not started. The 2025-10-13 Variable Naming Review (in
+`.claude/docs/VARIABLE_NAMING_REVIEW.md`, outside the published
+docs tree)
 assessed the project as "acceptable with caveats" *under the
 assumption that the audience is engineers maintaining filter
 internals*. trodestrack's actual audience is **neuroscientists
