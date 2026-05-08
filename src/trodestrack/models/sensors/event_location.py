@@ -18,6 +18,7 @@ keyword instead of forcing the protocol shape.
 
 from __future__ import annotations
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import lax
@@ -88,17 +89,20 @@ class EventLocationModel:
             )
         # Reject non-finite or non-PSD covariances at the boundary so a
         # bad spec doesn't silently poison every event update through
-        # NaN propagation in psd_solve.
-        np_cov = np.asarray(covariances)
-        if not np.all(np.isfinite(np_cov)):
-            raise ValueError("source_covariances contains non-finite values.")
-        for i, R in enumerate(np_cov):
-            eigvals = np.linalg.eigvalsh(0.5 * (R + R.T))
-            if eigvals.min() <= 0.0:
-                raise ValueError(
-                    f"source_covariances[{i}] is not positive-definite "
-                    f"(min eigenvalue {eigvals.min():.3e})."
-                )
+        # NaN propagation in psd_solve. Skip the host-side numeric
+        # checks under jax.jit (the public ``extended_kalman_filter``
+        # already validated the source arrays before tracing).
+        if not isinstance(covariances, jax.core.Tracer):
+            np_cov = np.asarray(covariances)
+            if not np.all(np.isfinite(np_cov)):
+                raise ValueError("source_covariances contains non-finite values.")
+            for i, R in enumerate(np_cov):
+                eigvals = np.linalg.eigvalsh(0.5 * (R + R.T))
+                if eigvals.min() <= 0.0:
+                    raise ValueError(
+                        f"source_covariances[{i}] is not positive-definite "
+                        f"(min eigenvalue {eigvals.min():.3e})."
+                    )
 
         self.anchors = anchors
         self.covariances = covariances

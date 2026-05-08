@@ -80,6 +80,10 @@ from trodestrack.models.process_noise import assemble_Q
 from trodestrack.models.quaternion import rotate_vector_world_to_body
 from trodestrack.models.sensors.camera_position import CameraPositionModel
 from trodestrack.models.sensors.camera_position_3d import Camera3DPositionModel
+from trodestrack.models.sensors.event_location import (
+    EventLocationModel,
+    update_event_location,
+)
 from trodestrack.models.sensors.heading_pseudo import HeadingPseudoModel
 from trodestrack.models.state_layout import StateLayout, get_heading_index, get_layout
 
@@ -187,7 +191,11 @@ class EKFComputationResult(NamedTuple):
     usable_vision_mask: jnp.ndarray
 
 
-EXTENDED_KALMAN_FILTER_STATIC_ARGNAMES = ("layout", "config_for_filter")
+EXTENDED_KALMAN_FILTER_STATIC_ARGNAMES = (
+    "layout",
+    "config_for_filter",
+    "max_events_per_frame",
+)
 # Buffer donation not beneficial: input shapes (N_cam, 2) don't match output shapes (N_cam, n)
 # XLA cannot reuse donated buffers when shapes differ. Donation only helps when input
 # buffers can be reused for outputs of matching shape/dtype.
@@ -206,11 +214,15 @@ def _extended_kalman_filter_impl(
     Z_cam_led2_jax: jnp.ndarray,
     mask_cam_jax: jnp.ndarray,
     conf_cam_jax: jnp.ndarray | None,
+    event_source_anchors_jax: jnp.ndarray,
+    event_source_covariances_jax: jnp.ndarray,
+    event_indices_per_frame_jax: jnp.ndarray,
     imu_index_arrays: jnp.ndarray,
     dt_imu_mean: jnp.ndarray,
     *,
     config_for_filter: EKFConfig,
     layout: StateLayout,
+    max_events_per_frame: int,
 ) -> EKFComputationResult:
     """Core EKF implementation staged under ``jax.jit``."""
     n_cam = int(t_cam_jax.shape[0])
@@ -231,6 +243,14 @@ def _extended_kalman_filter_impl(
         layout=layout,
         z_led1_all=Z_cam_led1_jax,
         z_led2_all=Z_cam_led2_jax,
+    )
+
+    event_model = EventLocationModel(
+        source_anchors=event_source_anchors_jax,
+        source_covariances=event_source_covariances_jax,
+        layout=layout,
+        max_events_per_frame=max_events_per_frame,
+        dtype=initial_state.mean.dtype,
     )
 
     def filter_step(carry, t_idx):
@@ -319,13 +339,20 @@ def _extended_kalman_filter_impl(
                 config_for_filter,
             )
         )
-        state_filt, log_lik_zupt = update_zupt(
+        state_after_zupt, log_lik_zupt = update_zupt(
             state_after_heading,
             config_for_filter,
             active=has_seen_vision_next & imu_stationary & stationary_context_next,
         )
 
-        log_lik_k = log_lik_pos + log_lik_heading + log_lik_zupt
+        event_source_indices = event_indices_per_frame_jax[t_idx]
+        state_filt, log_lik_event = update_event_location(
+            state_after_zupt,
+            event_model,
+            event_source_indices,
+        )
+
+        log_lik_k = log_lik_pos + log_lik_heading + log_lik_zupt + log_lik_event
 
         outputs = {
             "filtered_mean": state_filt.mean,
@@ -373,6 +400,104 @@ _extended_kalman_filter_jit = jax.jit(
     static_argnames=EXTENDED_KALMAN_FILTER_STATIC_ARGNAMES,
     donate_argnums=EXTENDED_KALMAN_FILTER_DONATE_ARGNUMS,
 )
+
+
+# Default static pad width when ``ttl_events`` is not configured. The padded
+# arrays are still threaded through the JIT'd core (filled with -1) so the
+# scan body has a single shape regardless of whether events are configured.
+_DEFAULT_NO_EVENT_MAX_PER_FRAME: int = 1
+
+
+def _resolve_event_inputs(
+    event_source_anchors: np.ndarray | None,
+    event_source_covariances: np.ndarray | None,
+    event_indices_per_frame: np.ndarray | None,
+    *,
+    n_cam: int,
+) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, int]:
+    """Validate optional event arguments and return JAX-ready dense arrays.
+
+    If all three arguments are ``None`` the wrapper builds an empty no-op
+    event channel (one padded slot per frame, all sentinel ``-1``). If any
+    one is provided, all three are required.
+    """
+    provided = [
+        event_source_anchors is not None,
+        event_source_covariances is not None,
+        event_indices_per_frame is not None,
+    ]
+    if any(provided) and not all(provided):
+        raise ValueError(
+            "extended_kalman_filter event channel: event_source_anchors, "
+            "event_source_covariances, and event_indices_per_frame must be "
+            "provided together (all None disables the channel)."
+        )
+    if not any(provided):
+        anchors_jax = jnp.zeros((1, 2), dtype=jnp.float32)
+        covariances_jax = jnp.broadcast_to(jnp.eye(2, dtype=jnp.float32), (1, 2, 2))
+        indices_jax = jnp.full(
+            (n_cam, _DEFAULT_NO_EVENT_MAX_PER_FRAME), -1, dtype=jnp.int32
+        )
+        return (
+            anchors_jax,
+            covariances_jax,
+            indices_jax,
+            _DEFAULT_NO_EVENT_MAX_PER_FRAME,
+        )
+
+    assert event_source_anchors is not None
+    assert event_source_covariances is not None
+    assert event_indices_per_frame is not None
+    anchors = np.asarray(event_source_anchors, dtype=float)
+    covariances = np.asarray(event_source_covariances, dtype=float)
+    indices = np.asarray(event_indices_per_frame, dtype=int)
+
+    if anchors.ndim != 2 or anchors.shape[1] != 2:
+        raise ValueError(
+            f"event_source_anchors must have shape (n_sources, 2); got {anchors.shape}."
+        )
+    n_sources = anchors.shape[0]
+    if covariances.shape != (n_sources, 2, 2):
+        raise ValueError(
+            "event_source_covariances must have shape (n_sources, 2, 2) "
+            f"matching event_source_anchors; got {covariances.shape} for "
+            f"n_sources={n_sources}."
+        )
+    if not np.all(np.isfinite(anchors)) or not np.all(np.isfinite(covariances)):
+        raise ValueError(
+            "event_source_anchors / event_source_covariances must be finite."
+        )
+    if indices.ndim != 2 or indices.shape[0] != n_cam:
+        raise ValueError(
+            "event_indices_per_frame must have shape (len(t_cam), "
+            f"max_events_per_frame); got {indices.shape} for n_cam={n_cam}."
+        )
+    valid_idx = indices >= 0
+    if valid_idx.any() and (indices[valid_idx].max() >= n_sources):
+        raise ValueError(
+            "event_indices_per_frame contains a compact source index out of "
+            f"range [0, {n_sources}); got max "
+            f"{int(indices[valid_idx].max())}."
+        )
+    if (indices[~valid_idx] != -1).any():
+        raise ValueError(
+            "event_indices_per_frame padded entries must be exactly -1; "
+            "negative values other than -1 are not allowed."
+        )
+    if n_sources == 0:
+        # Avoid an empty-axis ``EventLocationModel`` by collapsing to the
+        # no-events fallback (still validated above for shape consistency).
+        anchors_jax = jnp.zeros((1, 2), dtype=jnp.float32)
+        covariances_jax = jnp.broadcast_to(jnp.eye(2, dtype=jnp.float32), (1, 2, 2))
+        indices_jax = jnp.full(indices.shape, -1, dtype=jnp.int32)
+        return anchors_jax, covariances_jax, indices_jax, indices.shape[1]
+
+    return (
+        jnp.asarray(anchors, dtype=jnp.float32),
+        jnp.asarray(covariances, dtype=jnp.float32),
+        jnp.asarray(indices, dtype=jnp.int32),
+        int(indices.shape[1]),
+    )
 
 
 # =============================================================================
@@ -851,6 +976,9 @@ def extended_kalman_filter(
     mask_cam: np.ndarray,
     initial_state: EKFState | None = None,
     conf_cam: np.ndarray | None = None,
+    event_source_anchors: np.ndarray | None = None,
+    event_source_covariances: np.ndarray | None = None,
+    event_indices_per_frame: np.ndarray | None = None,
 ) -> EKFResult:
     """Run Extended Kalman Filter on a full trajectory.
 
@@ -952,6 +1080,18 @@ def extended_kalman_filter(
         None if conf_cam is None else jnp.clip(jnp.array(conf_cam), 1e-2, 1.0)
     )
 
+    (
+        event_source_anchors_jax,
+        event_source_covariances_jax,
+        event_indices_per_frame_jax,
+        max_events_per_frame,
+    ) = _resolve_event_inputs(
+        event_source_anchors,
+        event_source_covariances,
+        event_indices_per_frame,
+        n_cam=int(t_cam_jax.shape[0]),
+    )
+
     # Auto-detect LED spacing if not specified
     # Store estimated value to return in result (immutability: do NOT mutate config)
     estimated_led_distance: float | None = None
@@ -1013,10 +1153,14 @@ def extended_kalman_filter(
         Z_cam_led2_jax,
         mask_cam_jax,
         conf_cam_jax,
+        event_source_anchors_jax,
+        event_source_covariances_jax,
+        event_indices_per_frame_jax,
         imu_index_arrays,
         dt_imu_mean,
         config_for_filter=config_for_filter,
         layout=layout,
+        max_events_per_frame=max_events_per_frame,
     )
 
     return EKFResult(

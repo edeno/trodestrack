@@ -81,6 +81,9 @@ def prepare_config_filter_run(args: argparse.Namespace) -> ConfigFilterRun:
         Z_cam_led2=session.Z_cam_led2,
         mask_cam=session.mask_cam,
         conf_cam=session.conf_cam,
+        event_source_anchors=session.event_source_anchors,
+        event_source_covariances=session.event_source_covariances,
+        event_indices_per_frame=session.event_indices_per_frame,
     )
     # ``run_real_data_safety_check`` can raise *before* returning a
     # ``SafetyReport`` (e.g. no finite dual-LED frame, or no finite

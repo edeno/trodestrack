@@ -174,6 +174,53 @@ def _write_minimal_imu_camera(tmp_path):
     return t_imu, t_cam
 
 
+def test_load_session_attaches_event_arrays(tmp_path):
+    _write_minimal_imu_camera(tmp_path)
+    events_path = tmp_path / "events.parquet"
+    pd.DataFrame(
+        {"time": [0.10, 0.50], "source_id": [1, 1], "edge": ["fall", "fall"]}
+    ).to_parquet(events_path)
+
+    config_path = tmp_path / "session.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "inputs": {
+                    "format": "prepared_arrays",
+                    "imu_timestamps": "t_imu.txt",
+                    "imu_measurements": "u_imu.txt",
+                    "camera_timestamps": "t_cam.txt",
+                    "led1_positions": "led1.txt",
+                },
+                "ttl_events": {
+                    "events_file": "events.parquet",
+                    "beams": [
+                        {
+                            "id": 1,
+                            "emitter": [0.0, 0.0],
+                            "receiver": [0.1, 0.0],
+                            "sigma_perp_m": 0.005,
+                        }
+                    ],
+                    "max_events_per_frame": 4,
+                },
+            }
+        )
+    )
+    from trodestrack.io.session import load_session
+
+    config = load_session_config(config_path)
+    session = load_session(config)
+    assert len(session.event_sources) == 1
+    assert session.event_source_anchors.shape == (1, 2)
+    assert session.event_source_covariances.shape == (1, 2, 2)
+    assert session.event_indices_per_frame.shape[1] == 4
+    assert (session.event_indices_per_frame >= 0).sum() >= 1
+    diag = session.diagnostics["ttl_events"]
+    assert diag["n_sources"] == 1
+    assert diag["max_events_per_frame"] == 4
+
+
 def test_ttl_events_path_resolved_relative_to_yaml(tmp_path):
     _write_minimal_imu_camera(tmp_path)
     events_path = tmp_path / "events.parquet"
