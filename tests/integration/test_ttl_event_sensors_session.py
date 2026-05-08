@@ -148,9 +148,11 @@ def test_beam_grid_reduces_dropout_position_rmse():
         np.column_stack([sim["X_truth"][:, 0], sim["X_truth"][:, 1]]),
         beams=beams,
     )
-    # All five beams sit on the trajectory and should fire exactly once.
-    assert len(events) == len(beams), (
-        f"Expected {len(beams)} beam crossings; got {len(events)}"
+    # All five beams sit on the trajectory and should emit one active
+    # break edge each; the synthetic DIO stream also includes reset edges.
+    active_events = [event for event in events if event.edge == "fall"]
+    assert len(active_events) == len(beams), (
+        f"Expected {len(beams)} active beam crossings; got {len(active_events)}"
     )
 
     anchors, covariances, indices = _events_to_dense(events, beams, sim["t_cam_exp"])

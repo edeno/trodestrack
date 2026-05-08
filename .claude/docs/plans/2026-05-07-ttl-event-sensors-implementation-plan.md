@@ -35,6 +35,10 @@ Gaussian measurement rather than an exact line constraint.
   `max_events_per_frame`.
 - **Shared TTL parquet ingest** from Trodes DIO. Hardware sync is
   free because Trodes DIO timestamps live on the IMU/camera clock.
+  `trodes_to_nwb` stores these DIO channels as NWB
+  `processing["behavior"]["behavioral_events"]` TimeSeries; this PR
+  consumes the normalized parquet representation, with a small NWB
+  adapter left as a follow-up.
 - **Bound position drift during long camera dropouts.** Beam grids
   reset perpendicular position error to mm-scale on every crossing;
   zone triggers and RFID readers provide absolute 2D fixes when
@@ -86,6 +90,21 @@ columns: [time (s), source_id (int), edge ("rise" | "fall")]
 `source_id` maps to one of the configured sources in the YAML; the
 sensor type is determined by *which* source list the id appears in
 (beams, zones, or readers).
+
+### Trodes / NWB DIO representation
+
+`trodes_to_nwb` converts each configured DIO channel into a separate NWB
+`TimeSeries` under `processing["behavior"]["behavioral_events"]`.
+The metadata YAML maps hardware channel descriptions such as `Din13` or
+`Dout8` to semantic names such as `Arm1_poke` or `Arm1_light`; the NWB
+series keeps the semantic name in `TimeSeries.name` and the hardware
+channel in `TimeSeries.description`. Its data values are digital state
+changes: `1` for a 0-to-1/rising transition and `0` for a
+1-to-0/falling transition. A future adapter can therefore convert NWB
+DIO to the parquet schema by selecting channels by name or description,
+mapping them to configured `source_id` values, translating `1/0` to
+`"rise"`/`"fall"`, and dropping any initial state sample that is not a
+true transition.
 
 ### The unifying math
 
@@ -170,7 +189,7 @@ equivalence to a line-only update.
   over valid rows, so the "events config present but no events" case
   is bitwise identical to the no-events-config case.
 - **Trodes DIO is the canonical source.** Hardware sync is assumed;
-  no separate clock-alignment step.
+  no separate clock-alignment step for Trodes DIO-derived events.
 - **Layout-aware indexing.** `layout.pos_idx[:2]` for all current
   layouts; 3D extension flagged but not in scope.
 - **Optional channel.** Absent config = no behavior change. Empty
@@ -514,8 +533,11 @@ limit tests green to numerical tolerance.
 - Synthetic event generator. Implemented as a standalone helper
   ``trodestrack.sim.ttl_events.events_from_trajectory(t, xy, beams=,
   zone_triggers=, rfid_readers=)`` that walks a sampled trajectory and
-  emits beam crossings (sign-flip detector with half-open boundary),
-  zone-trigger entries (disc activation), and RFID detections.
+  emits Trodes-like digital state changes: beam crossings produce an
+  active edge plus a short reset pulse, while zones/RFID readers emit
+  active edges on disc entry and reset edges on exit. The ingest path
+  then filters to each source's configured `active_edge`, matching the
+  production DIO behavior while preserving the event-channel contract.
   Originally scoped as a ``RatIMUSimConfig.ttl_event_geometry`` field;
   the standalone helper kept the simulator API surface unchanged and
   is sufficient for scenario tests. Threading the geometry through
@@ -662,10 +684,13 @@ bundle and a video with the events panel; documented in
 
 ## Open Questions
 
-1. Does the Trodes DIO infrastructure already write DIO events to a
-   parquet, or do users hand-roll the conversion from a raw DIO
-   binary file? Drives whether we ship a one-liner ingester in
-   `io/loaders/`.
+1. Should this PR ship the optional NWB adapter from
+   `processing["behavior"]["behavioral_events"]` to the normalized
+   parquet schema? Defer for now: `trodes_to_nwb` already provides the
+   channel-level DIO state changes (`1=rise`, `0=fall`), but adding the
+   adapter would introduce `pynwb` dependency/API scope. The adapter
+   should map NWB channel name/description to `source_id`, translate
+   data values to edge strings, and skip initial state samples.
 2. For 14D / 16D experimental layouts, do events update only
    `pos_idx[:2]` (x, y) or all of `pos_idx` (including z)? Default
    to `pos_idx[:2]` since the geometry is physically 2D for all
