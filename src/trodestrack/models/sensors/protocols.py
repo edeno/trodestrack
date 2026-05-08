@@ -1,9 +1,12 @@
 """Measurement model protocol for sensor fusion.
 
-This module defines the MeasurementModel protocol that provides a unified
-interface for all sensor types in the Kalman filter framework. Each sensor
-(camera position, heading, ZUPT, future TTL/RFID) implements this protocol
-to enable generic filter updates.
+This module defines the MeasurementModel protocol used by sensors with a
+fixed per-frame measurement dimension: camera position, heading
+pseudo-measurements, ZUPT. TTL event sources (beam break, zone trigger,
+RFID reader) deliberately do *not* implement this protocol because their
+per-frame source count is variable; that path lives in
+``models/sensors/event_location.py`` and is wired through the EKF/UKF as a
+separate ``update_event_location`` call.
 
 Design Philosophy
 -----------------

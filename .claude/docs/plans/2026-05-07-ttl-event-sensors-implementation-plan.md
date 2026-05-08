@@ -673,14 +673,19 @@ bundle and a video with the events panel; documented in
 
 - New section in `docs/TUNING.md`: "TTL event sensors for
   dropout-drift mitigation and absolute fixes" with per-source-type
-  tuning guidance (`sigma_perp_m`, `sigma_m`, `effective_radius_m`).
+  tuning guidance (`sigma_perp_m`, `sigma_m`, `effective_radius_m`)
+  — **shipped**.
 - Worked example in `docs/getting-started/python-api.md` showing a
-  YAML config with all three source types populated.
-- Sample config in `examples/session_with_ttl_events.yaml`.
+  YAML config with all three source types populated — **shipped**
+  (Python-API direct-caller example; YAML pointer to
+  `examples/session_with_ttl_events.yaml`).
+- Sample config in `examples/session_with_ttl_events.yaml` —
+  **shipped**.
 - Optional appendix in this plan's Background (or a new "Sensor
   Math" doc) explaining why the unified abstraction works
-  as a Gaussian approximation — useful onboarding for engineers
-  extending to new event types.
+  as a Gaussian approximation — **deferred** (the existing "The
+  unifying math" and "Why this works for both short and long beams"
+  Background sections cover the main ideas).
 
 ## Open Questions
 

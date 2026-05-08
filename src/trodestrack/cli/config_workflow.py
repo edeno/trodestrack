@@ -191,6 +191,16 @@ def save_filter_outputs(run: ConfigFilterRun) -> None:
     }
     if run.session.conf_cam is not None:
         bundle["conf_cam"] = run.session.conf_cam
+    if run.session.event_source_anchors is not None:
+        bundle["event_source_anchors"] = run.session.event_source_anchors
+        bundle["event_source_covariances"] = run.session.event_source_covariances
+        bundle["event_indices_per_frame"] = run.session.event_indices_per_frame
+        bundle["event_source_ids"] = np.asarray(
+            [src.source_id for src in run.session.event_sources], dtype=np.int64
+        )
+        bundle["event_source_types"] = np.asarray(
+            [src.source_type for src in run.session.event_sources]
+        )
     np.savez(run.output_dir / "filter_outputs.npz", **bundle)
 
 
@@ -265,6 +275,24 @@ def write_config_metadata(
                 f.write(
                     "  Warning: initial_state='auto' resolves continuity breaks "
                     "but cannot determine a whole-session front/back convention.\n"
+                )
+            f.write("\n")
+        ttl_diag = run.session.diagnostics.get("ttl_events")
+        if isinstance(ttl_diag, dict):
+            f.write("TTL Events:\n")
+            f.write(f"  Events file: {ttl_diag.get('events_file')}\n")
+            f.write(f"  Configured sources: {ttl_diag.get('n_sources')}\n")
+            f.write(
+                f"  Events kept / total: {ttl_diag.get('n_events_kept')} / "
+                f"{ttl_diag.get('n_events_total')}\n"
+            )
+            f.write(f"  Max events per frame: {ttl_diag.get('max_events_per_frame')}\n")
+            source_ids = ttl_diag.get("source_ids")
+            source_types = ttl_diag.get("source_types")
+            if source_ids is not None and source_types is not None:
+                f.write(
+                    f"  Source ids / types: "
+                    f"{list(zip(source_ids, source_types, strict=False))}\n"
                 )
             f.write("\n")
         f.write("Safety Check:\n")

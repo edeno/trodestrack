@@ -493,6 +493,50 @@ cfg = EKFConfig(num_iter=3)  # DEFAULT: 1 (standard EKF)
 - Rapid rotations with sparse camera updates
 - UKF too slow but EKF linearization insufficient
 
+### TTL Event Sensors (Beam Break, Zone Trigger, RFID)
+
+**Purpose:** Bound IMU drift during long camera dropouts and snap position
+to known anchors when discrete TTL sensors fire.
+
+**Sources** (each is a 2D point measurement at a known anchor with
+anisotropic 2x2 covariance):
+
+- `BeamSpec(emitter, receiver, sigma_perp_m, active_edge="fall")` — anchor
+  is the beam midpoint; perpendicular σ is `sigma_perp_m` (typically the
+  IR-beam width); along-beam σ is `max(sigma_perp_m, L/√12)` from the
+  beam length `L`.
+- `ZoneTriggerSpec(center, sigma_m, active_edge="rise")` — isotropic R
+  with σ = `sigma_m`.
+- `RFIDReaderSpec(center, effective_radius_m, active_edge="rise")` —
+  isotropic R with σ = `effective_radius_m / √2`.
+
+**Tuning knobs:**
+
+- `sigma_perp_m` (beams): set to the physical IR-beam half-width or
+  similar uncertainty. Tighter values pull harder on the perpendicular
+  axis but also amplify any survey error.
+- `sigma_m` (zones): the activation tolerance — make it match the
+  physical zone radius so the rat is plausibly within ±σ.
+- `effective_radius_m` (RFID): the detection range. The implementation
+  treats this as √2·σ of an isotropic Gaussian fit to the uniform disc.
+- `max_events_per_frame` (config-level): static pad width for
+  per-frame events. Raise if the loader rejects with "more than
+  max_events_per_frame TTL events".
+
+**Wiring:** add a `ttl_events:` block to your YAML (see
+`examples/session_with_ttl_events.yaml`) and a parquet file with columns
+`time (s, float)`, `source_id (int)`, `edge ("rise" | "fall")`. The
+filter uses the configured `active_edge` for each source to filter the
+parquet stream before constructing Kalman updates.
+
+**When to use:**
+
+- Long camera dropouts where IMU-only drift exceeds your error budget.
+- Discrete behavioral events with known spatial anchors (feeders, gates,
+  RFID zones).
+- Corridor / arena experiments where beam-break grids cover the
+  trajectory.
+
 ---
 
 ## Parameter Reference

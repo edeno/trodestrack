@@ -268,6 +268,65 @@ smoothed_result = rts_smoother(
 )
 ```
 
+### TTL Event Sensors
+
+Both `extended_kalman_filter` and `unscented_kalman_filter` accept an
+optional event channel for beam-break, zone-trigger, and RFID sources.
+All three collapse to a single Gaussian measurement model — a 2D point
+fix at a known anchor with anisotropic 2x2 covariance — so the public
+API is uniform.
+
+**YAML:** add a `ttl_events:` block to your session config and a parquet
+file with columns `time (s, float)`, `source_id (int)`, `edge ("rise" |
+"fall")`. The session loader resolves geometry into dense arrays and the
+CLI workflow forwards them to the filter automatically. See
+`examples/session_with_ttl_events.yaml` for a worked config.
+
+**Python API (direct caller):** assemble the dense arrays yourself and
+pass them as keyword arguments:
+
+```python
+import numpy as np
+from trodestrack.config.schemas import BeamSpec, ZoneTriggerSpec
+from trodestrack.io.ttl_events import per_frame_event_indices
+from trodestrack.models.ekf import extended_kalman_filter
+
+beams = [
+    BeamSpec(
+        id=1, emitter=(0.10, 0.05), receiver=(0.10, 0.55), sigma_perp_m=0.005
+    ),
+]
+zones = [ZoneTriggerSpec(id=10, center=(0.20, 0.30), sigma_m=0.02)]
+sources = [s.to_event_source() for s in (*beams, *zones)]
+
+anchors = np.stack([s.anchor for s in sources], axis=0)
+covariances = np.stack([s.covariance for s in sources], axis=0)
+
+# Compact-index map and active-edge map.
+EDGE = {"fall": 0, "rise": 1}
+specs = [*beams, *zones]
+source_id_to_index = {s.id: i for i, s in enumerate(specs)}
+source_active_edges = {s.id: EDGE[s.active_edge] for s in specs}
+
+# t_evt / sid / edge come from your events parquet (or load_ttl_events).
+indices = per_frame_event_indices(
+    t_evt, sid, edge, t_cam,
+    source_active_edges=source_active_edges,
+    source_id_to_index=source_id_to_index,
+    max_events_per_frame=8,
+)
+
+result = extended_kalman_filter(
+    cfg, t_imu, U_imu, t_cam, Z_cam_led1, Z_cam_led2, mask_cam,
+    event_source_anchors=anchors,
+    event_source_covariances=covariances,
+    event_indices_per_frame=indices,
+)
+```
+
+Substitute `unscented_kalman_filter` for `extended_kalman_filter` to
+drive the UKF; the event-channel argument names are identical.
+
 ## State Layouts
 
 **Always use state layouts** for dimension-agnostic code:
