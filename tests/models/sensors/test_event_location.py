@@ -32,7 +32,7 @@ MAX_EVENTS = 4
 
 def _make_model(layout, sources):
     anchors = np.stack([s.anchor for s in sources], axis=0).astype(np.float32)
-    covariances = np.stack([s.R for s in sources], axis=0).astype(np.float32)
+    covariances = np.stack([s.covariance for s in sources], axis=0).astype(np.float32)
     return EventLocationModel(
         source_anchors=jnp.asarray(anchors),
         source_covariances=jnp.asarray(covariances),

@@ -302,7 +302,7 @@ class EventLocationSource:
 
     source_id: int
     anchor: np.ndarray  # (2,) world meters
-    R: np.ndarray  # (2, 2) world-frame covariance, PSD
+    covariance: np.ndarray  # (2, 2) world-frame measurement covariance, PSD
     label: str | None = None
     source_type: str = "unknown"
 
@@ -318,7 +318,7 @@ def _isotropic_event_source(
     return EventLocationSource(
         source_id=source_id,
         anchor=np.asarray(center, dtype=float),
-        R=(sigma**2) * np.eye(2, dtype=float),
+        covariance=(sigma**2) * np.eye(2, dtype=float),
         label=label,
         source_type=source_type,
     )
@@ -361,12 +361,12 @@ class BeamSpec(BaseModel):
         # Rotation matrix mapping event-local axes (perp, along) to world.
         rot = np.column_stack([normal, tangent])
         diag = np.diag([self.sigma_perp_m**2, sigma_along**2])
-        R = rot @ diag @ rot.T
+        covariance = rot @ diag @ rot.T
 
         return EventLocationSource(
             source_id=self.id,
             anchor=anchor,
-            R=R,
+            covariance=covariance,
             label=self.label,
             source_type="beam",
         )

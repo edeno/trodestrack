@@ -36,7 +36,7 @@ class TestZoneTriggerSpec:
         src = spec.to_event_source()
         assert src.source_id == 7
         np.testing.assert_allclose(src.anchor, np.array([0.5, -0.25]))
-        np.testing.assert_allclose(src.R, (0.02**2) * np.eye(2))
+        np.testing.assert_allclose(src.covariance, (0.02**2) * np.eye(2))
         assert src.source_type == "zone"
 
 
@@ -46,7 +46,7 @@ class TestRFIDReaderSpec:
         src = spec.to_event_source()
         np.testing.assert_allclose(src.anchor, np.array([1.0, 2.0]))
         # σ = r/√2  → σ² = r²/2
-        np.testing.assert_allclose(src.R, (0.06**2 / 2.0) * np.eye(2))
+        np.testing.assert_allclose(src.covariance, (0.06**2 / 2.0) * np.eye(2))
         assert src.source_type == "rfid"
 
 
@@ -71,7 +71,7 @@ class TestBeamSpec:
         src = spec.to_event_source()
 
         # Eigendecomposition: principal axes = beam tangent (along) and beam normal (perp).
-        eigvals, eigvecs = np.linalg.eigh(src.R)
+        eigvals, eigvecs = np.linalg.eigh(src.covariance)
         # Smallest eigenvalue corresponds to perpendicular axis.
         np.testing.assert_allclose(eigvals[0], sigma_perp**2, atol=1e-12)
         # Largest eigenvalue corresponds to along-beam axis: (L/√12)².
@@ -92,7 +92,7 @@ class TestBeamSpec:
             sigma_perp_m=sigma_perp,
         )
         src = spec.to_event_source()
-        eigvals = np.linalg.eigvalsh(src.R)
+        eigvals = np.linalg.eigvalsh(src.covariance)
         # Both eigenvalues equal σ_perp² (isotropic).
         np.testing.assert_allclose(eigvals, [sigma_perp**2, sigma_perp**2], atol=1e-9)
         # R well-conditioned.
@@ -118,7 +118,7 @@ class TestBeamSpec:
         )
 
         # Perpendicular direction is (-1, 1)/√2.
-        _eigvals, eigvecs = np.linalg.eigh(src.R)
+        _eigvals, eigvecs = np.linalg.eigh(src.covariance)
         perp_axis = eigvecs[:, 0]
         expected_perp = np.array([-1.0, 1.0]) / np.sqrt(2.0)
         # Either +expected or -expected is acceptable.

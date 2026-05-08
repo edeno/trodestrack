@@ -68,6 +68,11 @@ class MeasurementModel(Protocol):
     - All arrays use static shapes for JAX compatibility.
     - Invalid observations gated via large R (1e6) instead of branching.
     - Protocol is `@runtime_checkable` for isinstance() checks.
+    - ``EventLocationModel`` (TTL beam / zone / RFID) intentionally does
+      *not* implement this protocol because it has variable per-frame
+      source counts and a stacked ``(2K, n_state)`` Jacobian; the
+      EKF/UKF call ``update_event_location`` for that channel rather
+      than the protocol path. See ``models/sensors/event_location.py``.
 
     Examples
     --------

@@ -33,6 +33,9 @@ from trodestrack.models.filter_common import (
 )
 from trodestrack.models.state_layout import StateLayout
 
+# Must match ``trodestrack.io.ttl_events.PAD_SENTINEL``. Defined locally to
+# keep the model-layer free of an io-layer import dependency; the value is a
+# single -1 literal that changes only if the entire padding convention does.
 PAD_SENTINEL: int = -1
 SENTINEL_R_SCALAR: float = 1.0
 NO_EVENT_PAD_WIDTH: int = 1
@@ -245,10 +248,11 @@ class EventLocationModel:
             raise ValueError(
                 f"max_events_per_frame must be >= 1; got {max_events_per_frame}."
             )
-        # Reject non-finite or non-PSD covariances at the boundary so a bad
-        # spec does not silently poison every event update through NaN
-        # propagation in psd_solve. Skip under jax.jit (the public
-        # extended_kalman_filter validated the source arrays before tracing).
+        # Direct callers (tests, custom pipelines) skip
+        # ``resolve_event_inputs``, so guard the constructor too. Under
+        # jax.jit the inputs are tracers and this branch is skipped — the
+        # public filter wrappers run ``resolve_event_inputs`` before tracing
+        # to cover that path. The two checks together are defense-in-depth.
         if not isinstance(covariances, jax.core.Tracer):
             np_cov = np.asarray(covariances)
             if not np.all(np.isfinite(np_cov)):

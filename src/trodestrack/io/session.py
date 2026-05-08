@@ -435,7 +435,7 @@ def _attach_ttl_events(session: PreparedSession) -> PreparedSession:
         return replace(session, diagnostics=diagnostics)
 
     anchors = np.stack([src.anchor for src in sources], axis=0)
-    covariances = np.stack([src.R for src in sources], axis=0)
+    covariances = np.stack([src.covariance for src in sources], axis=0)
 
     t_evt, source_id, edge = load_ttl_events(cfg.events_file)
     indices = per_frame_event_indices(

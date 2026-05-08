@@ -89,7 +89,7 @@ def _events_to_dense(events, specs, t_cam, max_events_per_frame=4):
     """
     sources = [s.to_event_source() for s in specs]
     anchors = np.stack([s.anchor for s in sources], axis=0)
-    covariances = np.stack([s.R for s in sources], axis=0)
+    covariances = np.stack([s.covariance for s in sources], axis=0)
     source_id_to_index = {s.id: i for i, s in enumerate(specs)}
     source_active_edges = {s.id: EDGE_TO_INT[s.active_edge] for s in specs}
     t_evt = np.array([e.time for e in events])
@@ -239,7 +239,7 @@ def test_two_events_in_one_frame_match_average_anchor():
     zone2 = ZoneTriggerSpec(id=2, center=(truth_x, truth_y - 0.05), sigma_m=0.05)
     specs = [zone1, zone2]
     anchors = np.stack([z.to_event_source().anchor for z in specs], axis=0)
-    covariances = np.stack([z.to_event_source().R for z in specs], axis=0)
+    covariances = np.stack([z.to_event_source().covariance for z in specs], axis=0)
 
     indices = np.full((n_cam, 4), -1, dtype=np.int32)
     fire_frame = n_cam // 2

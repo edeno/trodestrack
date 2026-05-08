@@ -137,6 +137,15 @@ def print_config_session_summary(
                 "  LED identity warning: initial_state='auto' cannot determine "
                 "a whole-session front/back label convention."
             )
+    ttl_diag = session.diagnostics.get("ttl_events")
+    if isinstance(ttl_diag, dict):
+        print(
+            "  TTL events: "
+            f"{ttl_diag.get('n_sources', 0)} configured source(s); "
+            f"{ttl_diag.get('n_events_kept', 0)}/"
+            f"{ttl_diag.get('n_events_total', 0)} events kept "
+            f"(max {ttl_diag.get('max_events_per_frame', 0)}/frame)"
+        )
 
 
 def save_filter_outputs(run: ConfigFilterRun) -> None:
