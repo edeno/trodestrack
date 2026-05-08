@@ -169,6 +169,26 @@ class TestEventChannelValidation:
                 event_indices_per_frame=np.full((n_cam, 1), -1, dtype=np.int32),
             )
 
+    def test_negative_definite_covariance_rejected(self, sim_data):
+        """Direct callers must not be able to pass a non-PSD R into the JIT'd core."""
+        ekf_config = _make_ekf_config()
+        n_cam = sim_data["t_cam_exp"].shape[0]
+        anchors = np.array([[0.5, 0.5]], dtype=float)
+        # Negative diagonal → not positive-definite.
+        bad_cov = np.array([[[-0.0001, 0.0], [0.0, -0.0001]]], dtype=float)
+        indices = np.full((n_cam, 1), -1, dtype=np.int32)
+        with pytest.raises(ValueError, match="positive-definite"):
+            _run_with_events(sim_data, ekf_config, anchors, bad_cov, indices)
+
+    def test_asymmetric_covariance_rejected(self, sim_data):
+        ekf_config = _make_ekf_config()
+        n_cam = sim_data["t_cam_exp"].shape[0]
+        anchors = np.array([[0.5, 0.5]], dtype=float)
+        asymmetric = np.array([[[0.01, 0.005], [-0.005, 0.01]]], dtype=float)
+        indices = np.full((n_cam, 1), -1, dtype=np.int32)
+        with pytest.raises(ValueError, match="symmetric"):
+            _run_with_events(sim_data, ekf_config, anchors, asymmetric, indices)
+
     def test_index_out_of_range_rejected(self, sim_data):
         ekf_config = _make_ekf_config()
         n_cam = sim_data["t_cam_exp"].shape[0]

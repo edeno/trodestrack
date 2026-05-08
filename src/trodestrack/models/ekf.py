@@ -463,6 +463,25 @@ def _resolve_event_inputs(
         raise ValueError(
             "event_source_anchors / event_source_covariances must be finite."
         )
+    # The stricter ``EventLocationModel`` PSD check is skipped under jax.jit,
+    # so direct callers (not just YAML-driven sessions) must validate
+    # symmetry and positive-definiteness here. Otherwise an asymmetric or
+    # negative-definite R silently yields NaN log-likelihoods and posteriors.
+    sym = 0.5 * (covariances + covariances.transpose(0, 2, 1))
+    asymmetry = np.max(np.abs(covariances - sym), axis=(1, 2))
+    if asymmetry.size and asymmetry.max() > 1e-9:
+        bad = int(np.argmax(asymmetry))
+        raise ValueError(
+            f"event_source_covariances[{bad}] is not symmetric "
+            f"(asymmetry {asymmetry[bad]:.3e}); 2x2 covariances must be PSD."
+        )
+    for i, R in enumerate(sym):
+        eigvals = np.linalg.eigvalsh(R)
+        if eigvals.min() <= 0.0:
+            raise ValueError(
+                f"event_source_covariances[{i}] is not positive-definite "
+                f"(min eigenvalue {eigvals.min():.3e})."
+            )
     if indices.ndim != 2 or indices.shape[0] != n_cam:
         raise ValueError(
             "event_indices_per_frame must have shape (len(t_cam), "

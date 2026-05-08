@@ -278,6 +278,20 @@ def test_load_ttl_events_basic(tmp_path):
     np.testing.assert_array_equal(edge, [0, 1, 0])  # 0=fall, 1=rise
 
 
+def test_load_ttl_events_rejects_non_integer_source_id(tmp_path):
+    """``source_id`` must be integral; floats like 1.9 must not silently truncate."""
+    events_path = tmp_path / "events.parquet"
+    pd.DataFrame(
+        {
+            "time": [0.10, 0.20],
+            "source_id": [1.9, 2.0],
+            "edge": ["fall", "fall"],
+        }
+    ).to_parquet(events_path)
+    with pytest.raises(ValueError, match="non-integer source_id"):
+        load_ttl_events(events_path)
+
+
 def test_load_ttl_events_empty(tmp_path):
     events_path = tmp_path / "events.parquet"
     pd.DataFrame({"time": [], "source_id": [], "edge": []}).astype(

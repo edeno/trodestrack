@@ -2,19 +2,20 @@
 
 ## Status
 
-Not started. The original incremental refactor (`incremental_refactor_plan.md`)
-flagged "TTL/RFID Event Sensors" as a deferred milestone with separate
-`ttl_zone.py` / `rfid_zone.py` stubs. This plan supersedes that note —
-beam break, TTL zone triggers, and RFID readers all share the same
-underlying signal (a TTL pulse from a Trodes DIO channel). All three
-collapse to a single measurement model: a **2D point fix at a known
-anchor with anisotropic 2×2 covariance**. Zone triggers and RFID
-readers use isotropic R (the rat is somewhere within the zone /
-detection radius). Beam breaks use a Gaussian approximation to the
-finite beam segment: a tight perpendicular σ from the IR-beam width
-and an along-beam σ from the beam length. This works for very short
-beams (≈ isotropic point fix) and makes long beams line-like by using
-a much larger along-beam variance, while still remaining a finite
+Implemented on `ttl-event-sensors` (Milestones 1–4 + sim/scenario tests).
+EKF-only; UKF wiring is open. The original incremental refactor
+(`incremental_refactor_plan.md`) flagged "TTL/RFID Event Sensors" as a
+deferred milestone with separate `ttl_zone.py` / `rfid_zone.py` stubs.
+This plan supersedes that note — beam break, TTL zone triggers, and RFID
+readers all share the same underlying signal (a TTL pulse from a Trodes
+DIO channel). All three collapse to a single measurement model: a **2D
+point fix at a known anchor with anisotropic 2×2 covariance**. Zone
+triggers and RFID readers use isotropic R (the rat is somewhere within
+the zone / detection radius). Beam breaks use a Gaussian approximation
+to the finite beam segment: a tight perpendicular σ from the IR-beam
+width and an along-beam σ from the beam length. This works for very
+short beams (≈ isotropic point fix) and makes long beams line-like by
+using a much larger along-beam variance, while still remaining a finite
 Gaussian measurement rather than an exact line constraint.
 
 ## Goals
