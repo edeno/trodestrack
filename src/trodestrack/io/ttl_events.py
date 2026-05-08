@@ -55,19 +55,26 @@ def load_ttl_events(
     t_evt = df["time"].to_numpy(dtype=float)
     edge_str = df["edge"].to_numpy()
 
-    # ``to_numpy(dtype=int)`` silently truncates floats (1.9 → 1) and casts
-    # NaN to a platform-dependent garbage int, either of which can route an
-    # event to a wrong configured source. Reject non-integer values up-front.
     raw_sid = df["source_id"].to_numpy()
-    raw_sid_float = np.asarray(raw_sid, dtype=float)
-    bad_sid = ~np.isfinite(raw_sid_float) | (raw_sid_float != np.floor(raw_sid_float))
-    if bad_sid.any():
-        raise ValueError(
-            f"{events_file} contains non-integer source_id value(s); "
-            "expected integers but got entries like "
-            f"{sorted({float(x) for x in raw_sid_float[bad_sid][:5]})}."
+    if np.issubdtype(raw_sid.dtype, np.integer):
+        # Preserve native integer precision (int64 IDs above 2^53 lose
+        # precision via a float round-trip).
+        source_id = raw_sid.astype(np.int64, copy=False)
+    else:
+        # ``to_numpy(dtype=int)`` silently truncates floats (1.9 → 1) and
+        # casts NaN to platform-dependent garbage. Validate integrality
+        # before casting.
+        raw_sid_float = np.asarray(raw_sid, dtype=float)
+        bad_sid = ~np.isfinite(raw_sid_float) | (
+            raw_sid_float != np.floor(raw_sid_float)
         )
-    source_id = raw_sid_float.astype(int)
+        if bad_sid.any():
+            raise ValueError(
+                f"{events_file} contains non-integer source_id value(s); "
+                "expected integers but got entries like "
+                f"{sorted({float(x) for x in raw_sid_float[bad_sid][:5]})}."
+            )
+        source_id = raw_sid_float.astype(np.int64)
 
     if t_evt.size == 0:
         return t_evt, source_id, np.zeros(0, dtype=int)

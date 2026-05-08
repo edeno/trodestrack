@@ -189,6 +189,17 @@ class TestEventChannelValidation:
         with pytest.raises(ValueError, match="symmetric"):
             _run_with_events(sim_data, ekf_config, anchors, asymmetric, indices)
 
+    def test_fractional_index_rejected(self, sim_data):
+        """Float indices like 0.9 must not silently truncate to a valid source."""
+        ekf_config = _make_ekf_config()
+        n_cam = sim_data["t_cam_exp"].shape[0]
+        anchors = np.array([[0.5, 0.5]], dtype=float)
+        covariances = np.array([[[0.01, 0.0], [0.0, 0.01]]], dtype=float)
+        indices = np.full((n_cam, 1), -1, dtype=float)
+        indices[0, 0] = 0.9
+        with pytest.raises(ValueError, match="non-integer entries"):
+            _run_with_events(sim_data, ekf_config, anchors, covariances, indices)
+
     def test_index_out_of_range_rejected(self, sim_data):
         ekf_config = _make_ekf_config()
         n_cam = sim_data["t_cam_exp"].shape[0]

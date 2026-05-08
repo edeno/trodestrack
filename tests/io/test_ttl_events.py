@@ -292,6 +292,22 @@ def test_load_ttl_events_rejects_non_integer_source_id(tmp_path):
         load_ttl_events(events_path)
 
 
+def test_load_ttl_events_preserves_int64_source_id(tmp_path):
+    """Integer parquet columns above 2^53 must round-trip without precision loss."""
+    events_path = tmp_path / "events.parquet"
+    big_id = 9007199254740993  # 2**53 + 1, not exactly representable as float64.
+    pd.DataFrame(
+        {
+            "time": np.array([0.10], dtype=float),
+            "source_id": np.array([big_id], dtype=np.int64),
+            "edge": ["fall"],
+        }
+    ).to_parquet(events_path)
+    _, sid, _ = load_ttl_events(events_path)
+    assert sid.dtype == np.int64
+    assert int(sid[0]) == big_id
+
+
 def test_load_ttl_events_empty(tmp_path):
     events_path = tmp_path / "events.parquet"
     pd.DataFrame({"time": [], "source_id": [], "edge": []}).astype(

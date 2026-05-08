@@ -446,7 +446,26 @@ def _resolve_event_inputs(
 
     anchors = np.asarray(event_source_anchors, dtype=float)
     covariances = np.asarray(event_source_covariances, dtype=float)
-    indices = np.asarray(event_indices_per_frame, dtype=int)
+
+    # ``np.asarray(dtype=int)`` silently truncates fractional indices
+    # (0.9 → 0), which would route the row to a wrong-but-valid compact
+    # source. Preserve native integer dtypes; otherwise validate
+    # integrality before casting.
+    raw_indices = np.asarray(event_indices_per_frame)
+    if np.issubdtype(raw_indices.dtype, np.integer):
+        indices = raw_indices.astype(np.int64, copy=False)
+    else:
+        raw_idx_float = np.asarray(raw_indices, dtype=float)
+        bad_idx = ~np.isfinite(raw_idx_float) | (
+            raw_idx_float != np.floor(raw_idx_float)
+        )
+        if bad_idx.any():
+            raise ValueError(
+                "event_indices_per_frame must contain integer compact "
+                "source indices; got non-integer entries like "
+                f"{sorted({float(x) for x in raw_idx_float[bad_idx][:5]})}."
+            )
+        indices = raw_idx_float.astype(np.int64)
 
     if anchors.ndim != 2 or anchors.shape[1] != 2:
         raise ValueError(
