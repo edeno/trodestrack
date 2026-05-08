@@ -50,10 +50,10 @@ square at corners `(0, 0), (1, 0), (1, 1), (0, 1)`) and the user
 clicking those four corners in pixel space, we have a
 well-defined least-squares fit.
 
-Math:
+Math convention used by this plan:
 
 ```
-[u_i, v_i, 1] · H = λ_i · [x_i, y_i, 1]
+λ_i · [x_i, y_i, 1]ᵀ = H_px_to_world @ [u_i, v_i, 1]ᵀ
 ```
 
 stacked across N≥4 correspondences. Solve via direct linear
@@ -69,9 +69,10 @@ implementations:
   wrapping; ~10 MB; reasonable).
 - Hand-rolled DLT in NumPy (~100 LOC; zero new deps).
 
-Recommend: hand-rolled DLT for the runtime path (no dep weight),
-scikit-image for the calibration CLI (already a transitive dep
-via matplotlib for the click capture).
+Recommend: hand-rolled DLT for both the runtime path and headless CLI
+tests (no dependency weight). The interactive CLI can use matplotlib
+for click capture and image loading; do not add scikit-image unless
+implementation evidence shows the hand-rolled path is insufficient.
 
 ## Design Principles
 
@@ -87,9 +88,10 @@ via matplotlib for the click capture).
   the native-loaders plan accepts either a scalar
   `meters_per_pixel` or a 3×3 homography matrix. This plan
   populates the matrix path.
-- **Validation at config time.** Pydantic schema accepts
-  `homography_file: Path | None`; the loader reads and validates
-  it (3×3 finite, non-singular).
+- **Validation at load time.** Pydantic schema accepts
+  `homography_file: Path | None`; `load_session` reads and validates
+  it (3×3 finite, non-singular) because validation depends on file
+  contents.
 - **No OpenCV dependency.** Hand-roll DLT in NumPy / SciPy.
 
 ## Architecture
@@ -108,7 +110,7 @@ src/trodestrack/geom/
 ```python
 @dataclass(frozen=True)
 class Homography:
-    matrix: np.ndarray            # (3, 3)
+    matrix: np.ndarray            # (3, 3), pixel homogeneous column -> world
     pixel_corners: np.ndarray     # (4, 2), user-clicked
     world_corners: np.ndarray     # (4, 2), known anchors in meters
     residual_rms_pixels: float
@@ -125,6 +127,11 @@ class Homography:
         self, pixels: np.ndarray
     ) -> np.ndarray:
         """Map (n, 2) pixels to (n, 2) world meters."""
+
+    def apply_to_world(
+        self, world_xy: np.ndarray
+    ) -> np.ndarray:
+        """Map (n, 2) world meters back to (n, 2) pixels."""
 
     def to_yaml(self) -> dict[str, object]: ...
 
@@ -166,14 +173,36 @@ CI and reproducibility.
 
 ### Schema additions — `src/trodestrack/config/schemas.py`
 
-Already partly enabled by the native-loaders plan:
+Camera calibration lives on `CameraConfig`, not on individual input
+formats:
 
 ```python
 homography_file: Path | None = Field(default=None, description="...")
 ```
 
-Add a `model_validator` that rejects `meters_per_pixel` and
-`homography_file` both being non-None (mutually exclusive).
+**Approach to mutual exclusion (avoids breaking existing configs):**
+keep `meters_per_pixel: float = 0.0022` as the existing scalar default.
+Add a `model_validator` that picks the active calibration based on
+which fields the user *explicitly* set:
+
+- `homography_file is None` → scalar path; `meters_per_pixel` is
+  active (default or user-set).
+- `homography_file is not None` → homography path; `meters_per_pixel`
+  is ignored. If the user *also* explicitly sets `meters_per_pixel`
+  (i.e., the YAML contains both keys), raise `ValidationError` —
+  this is the only mutex-fail case. The existing default is
+  silently ignored when a homography is configured.
+
+Detecting "explicitly set" requires reading the raw YAML dict in
+`load_session_config` (Pydantic's `model_fields_set` only catches
+fields set via the constructor, not deserialization). The simplest
+implementation: `load_session_config` checks the parsed YAML for the
+`camera.meters_per_pixel` key before validation; if both
+`meters_per_pixel` and `homography_file` are present in the raw dict,
+raise. Otherwise pass through to Pydantic.
+
+This avoids deprecating the scalar default and keeps existing
+prepared-array / spikegadgets configs unchanged.
 
 ### Loader changes — `src/trodestrack/io/loaders/pixel_to_meters.py`
 
@@ -208,7 +237,7 @@ to the run outputs.
 - DLT fit (NumPy SVD).
 - Optional LM refinement on geometric error
   (`scipy.optimize.least_squares`).
-- `apply_to_pixels` + roundtrip helpers.
+- `apply_to_pixels`, `apply_to_world`, and roundtrip helpers.
 - `to_yaml` / `from_yaml`.
 - Unit tests:
   - DLT recovers a known homography exactly from 4
@@ -283,7 +312,7 @@ end-to-end.
 | Pixel↔world roundtrip | helper | `apply(apply_inverse(p)) == p` to tolerance |
 | Singular corners reject | helper | colinear pixel corners → `ValueError` |
 | YAML roundtrip | helper | `from_yaml(to_yaml(h)) == h` |
-| Schema mutual exclusion | config | both `meters_per_pixel` and `homography_file` set → `ValidationError` |
+| Schema mutual exclusion | config | both active `meters_per_pixel` and `homography_file` set after default resolution → `ValidationError` |
 | Loader scenario | EKF | session with homography produces no NaN/Inf, RMSE within tolerance |
 | CLI headless mode | CLI | `--pixel-corners` produces correct YAML |
 | CLI interactive smoke | CLI (mocked) | patched `ginput` produces correct YAML |

@@ -45,10 +45,11 @@ a nested `lax.scan`. The whole thing is JIT-compiled.
 Streaming breaks the outer scan. Each public method call
 processes one frame's worth of work. To stay fast we need:
 
-1. **JIT a per-frame step**, not the whole session. The
-   `_extended_kalman_filter_core` body that the batch wrapper
-   uses is already pure-functional; we just need to expose its
-   `step` signature to the streaming wrapper.
+1. **JIT a per-frame step**, not the whole session. The current 2D
+   batch path is implemented inside `_extended_kalman_filter_impl`
+   and the 3D path inside `_extended_kalman_filter_3d_core`; their
+   scan bodies need to be extracted into reusable per-camera-step
+   functions with the same interval and masking semantics.
 2. **Cache the JIT compilation across calls**. Tracer signatures
    (state shape, IMU sample shape, layout) are constant for the
    lifetime of the tracker, so the first call pays the warmup
@@ -66,9 +67,15 @@ typically adds ~1–2 ms per call. We have plenty of headroom.
 
 - **One-step JIT, not whole-session JIT.** Compile the per-frame
   scan body once; call it imperatively from Python.
-- **Same numerics as batch.** Streaming vs batch must produce
-  bitwise-identical outputs frame-for-frame given the same input
-  sequence. This is the parity contract.
+- **Same numerics as batch.** Streaming vs batch must call the same
+  extracted per-frame math. **Target: bitwise-identical parity** for
+  both replay-from-arrays and true per-call streaming. The streaming
+  wrapper has full control over IMU window padding and the JAX
+  function signature, so mirroring the batch padding scheme exactly
+  is achievable. Only relax to `assert_allclose(rtol=1e-12)` if
+  implementation evidence shows that host/device boundaries or
+  reduction ordering produce a real, unavoidable divergence —
+  pre-relaxing the contract weakens the regression guard.
 - **Explicit timestamps.** Every ingest method takes a timestamp
   in seconds; no "current time" magic.
 - **Fail fast on out-of-order timestamps.** Strictly increasing
@@ -151,10 +158,11 @@ def replay_streaming(
 This is the contract surface for the parity test: feed the same
 inputs as batch, get back an `EKFResult`.
 
-### No changes to `extended_kalman_filter`
+### No public behavior changes to `extended_kalman_filter`
 
-The batch path stays. It's the streaming wrapper's responsibility
-to call the same per-frame core function imperatively.
+The batch public API and outputs stay unchanged. Milestone 1 refactors
+the implementation to expose a shared per-frame core, and the existing
+batch wrapper continues to drive it through `lax.scan`.
 
 ## Milestones
 
@@ -163,6 +171,9 @@ to call the same per-frame core function imperatively.
 - Refactor `extended_kalman_filter`'s scan body into a standalone
   `_per_camera_step` function with a clean signature
   `(state, ekf_config, layout, imu_window, t_imu_window, frame_obs) -> (state, scan_output)`.
+- Preserve the existing `compute_imu_index_arrays` interval boundaries,
+  padded-window shape, `dt` handling, ZUPT gates, and `has_seen_vision`
+  carry semantics exactly.
 - Verify batch path still produces identical output (regression
   test: full sweep stays green).
 - Document the function's contract in the module docstring.
@@ -175,9 +186,12 @@ to call the same per-frame core function imperatively.
 - `runtime/online.py` with `OnlineTracker` class.
 - `replay_streaming` convenience that drives the tracker from
   batch arrays.
-- **Parity test**: bitwise-identical output between
-  `extended_kalman_filter` and `replay_streaming` on the synthetic
-  rat session.
+- **Parity test**: target bitwise-identical output between
+  `extended_kalman_filter` and `replay_streaming` for both
+  replay-from-arrays and the public ring-buffer streaming path. Use
+  `assert_array_equal`. Drop to `assert_allclose(rtol=1e-12)` only
+  if implementation evidence forces the relaxation; document the
+  cause in the test if so.
 - Strict-increasing timestamp + finite IMU validation at
   `push_imu` / `push_camera` boundaries.
 
@@ -227,10 +241,10 @@ script runs end-to-end and produces a result that matches
 
 | Test | Layer | Asserts |
 |---|---|---|
-| Parity: replay_streaming vs batch | runtime | bitwise identical state and log-likelihood at every camera frame |
+| Parity: replay_streaming vs batch | runtime | bitwise identical state and log-likelihood when using the same padded windows as batch |
 | Out-of-order IMU timestamp | API | `ValueError` at `push_imu` |
 | Out-of-order camera timestamp | API | `ValueError` at `push_camera` |
-| Empty IMU buffer at camera time | API | `ValueError` (or document as "no IMU pre-integration done") |
+| Empty IMU buffer at camera time | API | allowed for `vision_only`; otherwise clear `ValueError` or documented no-IMU prediction behavior |
 | Latency p95 ≤ 10 ms after warmup | benchmark | wall-clock per `push_camera` call |
 | Quaternion-layout streaming parity | runtime | identical to batch for 14D / 16D |
 | Reset preserves config | API | post-reset filter state matches a fresh tracker with same config |
@@ -241,8 +255,10 @@ script runs end-to-end and produces a result that matches
   - p50: ≤ 2 ms (batch reference: ~0.41 ms amortized mean)
   - p95: ≤ 10 ms
   - max: ≤ 33 ms (PRD floor)
-- **Numerical parity**: bitwise identical to batch; tolerance
-  asserted as `assert_array_equal`, not `assert_allclose`.
+- **Numerical parity**: target exact equality (`assert_array_equal`)
+  for both replay-from-arrays and per-call streaming. Fall back to
+  `assert_allclose(rtol=1e-12)` only if implementation evidence
+  forces it; document the cause in the test.
 - **Memory**: O(1) per-call after warmup; no allocations in the
   steady state.
 

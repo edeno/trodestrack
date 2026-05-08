@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started. The 2025-10-13 [Variable Naming Review](.claude/docs/VARIABLE_NAMING_REVIEW.md)
+Not started. The 2025-10-13 [Variable Naming Review](../../.claude/docs/VARIABLE_NAMING_REVIEW.md)
 assessed the project as "acceptable with caveats" *under the
 assumption that the audience is engineers maintaining filter
 internals*. trodestrack's actual audience is **neuroscientists
@@ -117,8 +117,9 @@ hostile to the *user*.
   `extended_kalman_filter` accepts both `t_imu=...` and
   `imu_timestamps=...`. The simulator returns a dict that
   responds to both `sim["t_imu"]` and `sim["imu_timestamps"]`.
-- **One canonical name per concept** going forward; the alias
-  is the *new* (friendly) name, the old name is deprecated.
+- **One canonical name per concept** going forward; the canonical name
+  is the new friendly spelling and the alias is the old deprecated
+  spelling.
 - **Mask polarity contract documented and asserted at the API
   boundary**, not just in tests.
 
@@ -153,7 +154,7 @@ What's "public" and needs friendly names:
 | same | `bias_accel_y` | `accel_y_bias_truth` | `bias_accel_y` |
 | same | `X_truth` | `true_states` | `X_truth` |
 | `EKFResult` field | `filtered_means` | (already friendly) | n/a |
-| same | `marginal_loglik` | `log_likelihood` | `marginal_loglik` |
+| result log-likelihood fields | `marginal_loglik` | leave unchanged in this plan | n/a |
 
 What stays internal and **does not change**:
 
@@ -194,18 +195,27 @@ def extended_kalman_filter(
         "imu_timestamps", imu_timestamps, "t_imu", t_imu
     )
     # ... same for the rest
-    return _extended_kalman_filter_core(
+    return _extended_kalman_filter_impl(
         ekf_config, imu_timestamps, imu_measurements, ...
     )
 ```
 
-`_resolve_alias` lives in `cli/utils.py` (or new `_compat.py`)
-and emits `DeprecationWarning` when only the old name is used.
+`_resolve_alias` lives in `trodestrack/_compat.py` — a freestanding
+module that imports only from the standard library (`warnings`).
+**Import discipline**: `_compat.py` must not import from `cli/`,
+`models/`, `runtime/`, `qa/`, `sim/`, `io/`, or `viz/` so that any of
+those layers can import it without a circular dependency. The helper
+is small (~30 LOC: one `_resolve_alias(canonical_name, canonical_value,
+legacy_name, legacy_value) -> value` function plus a deprecation-warning
+emitter). It emits `DeprecationWarning` when only the old name is used.
 
 ### 3. `SimOut` dict — bilingual subclass
 
-The simulator returns a `dict` today. Replace with a thin
-subclass that responds to both names without copying data:
+The simulator is annotated as returning `SimOut`, currently a
+`TypedDict` in `sim/utils.py`, and the implementation returns a plain
+dict literal. Replace or rename that `TypedDict` before introducing a
+runtime `SimOut(dict)` subclass that responds to both names without
+copying data:
 
 ```python
 class SimOut(dict):
@@ -235,8 +245,11 @@ class SimOut(dict):
         return super().__getitem__(key)
 ```
 
-`simulate_rat_imu` populates the new keys; legacy access works
-with a warning. After two minor versions, drop the alias map.
+`simulate_rat_imu` populates only the new keys; legacy access works
+through `__getitem__`, `get`, and `__contains__` alias handling with a
+warning on value access. `keys()` and serialization expose only the
+canonical keys to avoid duplicating arrays. After two minor versions,
+drop the alias map.
 
 ### 4. Mask polarity contract — explicit
 
@@ -328,8 +341,9 @@ in mkdocs autodoc.
   `extended_kalman_filter_3d`, `unscented_kalman_filter`,
   `rts_smoother` with the new-name canonical signature plus
   kw-only deprecated aliases.
-- `_resolve_alias` helper in `cli/utils.py` emits
-  `DeprecationWarning` on legacy use.
+- `_resolve_alias` helper in freestanding `trodestrack/_compat.py`
+  emits `DeprecationWarning` on legacy use; import contract documented
+  (stdlib-only deps).
 - Backward-compat tests: every existing test calling these
   functions with old names continues to pass (with a warning).
 - Forward-compat tests: same call with new names produces
@@ -340,13 +354,14 @@ exactly once per legacy call site.
 
 ### Milestone 4 — `SimOut` bilingual dict
 
-- Replace the plain dict returned by `simulate_rat_imu` with a
-  `SimOut(dict)` subclass that maps legacy keys to new keys
+- Rename or replace the existing `SimOut` `TypedDict`, then return a
+  runtime `SimOut(dict)` subclass that maps legacy keys to new keys
   with a `DeprecationWarning`.
 - `simulate_rat_imu` populates the new keys directly (no copy
   on the new path).
 - Tests: legacy access works with warning; new access is silent;
-  contains both names for one minor version.
+  `key in sim` works for old and new names; `sim.keys()` exposes only
+  canonical names.
 
 **Exit criteria:** examples that hand-wrote `sim["t_imu"]`
 continue to work with a warning; updated examples use the new
@@ -408,8 +423,8 @@ followed the migration warnings have nothing to fix.
   cross-reference.
 - **Migration friction**: zero. Every legacy call site keeps
   working with a single-line `DeprecationWarning`.
-- **Test count delta**: +5–10 tests (alias smoke + backward-compat
-  parity per filter wrapper + SimOut bilingual access).
+- **Test count delta**: +8–15 tests (alias smoke + backward-compat
+  parity per filter wrapper + SimOut bilingual access/membership).
 - **API breakage during deprecation window**: zero.
 - **API breakage post-removal**: limited to scripts that
   ignored two minor versions of `DeprecationWarning`.
@@ -465,21 +480,19 @@ followed the migration warnings have nothing to fix.
    flag to suppress legacy keys entirely? Probably not for
    v1; users wanting strict mode set
    `warnings.filterwarnings("error", category=DeprecationWarning)`.
-4. Should the `EKFResult` `marginal_loglik` field rename to
-   `log_likelihood` survive the deprecation cycle? The full
-   `marginal` qualifier is technically correct (it's the
-   marginal log-likelihood of the observations given the
-   model). Default: rename to `log_likelihood`, document the
-   "marginal" subtlety in the field docstring; users who care
-   about the distinction can read the docs.
+4. Should result objects eventually add a `log_likelihood` property
+   alias for `marginal_loglik`? Leave out of this cleanup. Result
+   objects are NamedTuple-like today, and field renames would cascade
+   through EKF, UKF, smoother, saved outputs, tests, and docs. Revisit
+   only in a separate result-object API plan.
 5. What about `compute_nees(...)` parameter `states_true`,
    `states_est`? Already descriptive; leave alone. Audit the
    QA module's signatures and rename only the cryptic ones.
 
 ## Estimated Effort
 
-- ~400 LOC source (alias shims + `SimOut` subclass + type
-  aliases) + ~150 LOC tests + ~250 lines docs (glossary +
+- ~500 LOC source (alias shims + `SimOut` subclass + type
+  aliases) + ~250 LOC tests + ~250 lines docs (glossary +
   migration guide).
 - 1–2 weeks focused work for one engineer comfortable with the
   Python warnings API and the existing test surface.

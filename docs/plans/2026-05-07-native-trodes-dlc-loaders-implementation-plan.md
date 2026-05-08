@@ -109,12 +109,21 @@ first or in parallel.
 - **Orthogonal IMU and camera loading.** Don't refactor the
   existing IMU parquet path; the new loaders only swap out the
   position side.
-- **Pixel→meters is a per-format choice.** Trodes gets scalar by
-  default (Arthur slice convention); DLC defaults to homography
-  (DLC users typically have varied camera angles).
-- **Strict per-format validation.** Use Pydantic
-  discriminated unions on `inputs.format` so each new format gets
-  its own required-fields validator.
+- **Pixel→meters is camera calibration, not input identity.** Keep the
+  scalar and homography choices under `camera` so every position loader
+  uses the same calibration fields.
+- **Strict per-format validation.** The current `InputsConfig` is a
+  single Pydantic model keyed by `inputs.format`. **Decision: extend
+  the existing format-specific `_validate_required_paths` validator
+  surgically** rather than refactor to a discriminated union.
+  Rationale: the existing validator already enumerates required
+  fields per format; adding two more `format` literals and matching
+  required-field lists is a localized change. A discriminated-union
+  refactor would touch every test in `test_session_config.py`
+  (~20 tests assert against the current single-model schema) for
+  marginal type-safety gain. Flag the discriminated-union refactor
+  as a separate milestone if a fifth or sixth input format ever
+  lands.
 - **`extra="forbid"`** stays on every config; misspelled fields
   fail at schema time, not deep in the loader.
 
@@ -122,7 +131,7 @@ first or in parallel.
 
 ### Schema additions — `src/trodestrack/config/schemas.py`
 
-Extend the `InputsConfig` discriminated union:
+Extend `InputsConfig.format`:
 
 ```python
 format: Literal[
@@ -139,20 +148,29 @@ Add new field groups (validated only when their format is selected):
   - `imu_file: Path`             # existing parquet workflow reused
   - `position_file: Path`         # `.videoPositionTracking` binary
   - `camera_sync_file: Path | None`
-  - `meters_per_pixel: float | None` (defaults to `0.0022`)
-  - `homography_file: Path | None` (mutually exclusive with scalar)
 
 - `dlc_keypoints`:
   - `imu_file: Path`             # parquet
   - `position_file: Path`         # DLC `.h5` (or `.csv`)
+  - `camera_timestamps_file: Path | None`
+  - `fps_cam: float | None`
   - `led1_bodypart: str`
   - `led2_bodypart: str`
   - `min_likelihood: float = Field(default=0.5, ge=0.0, le=1.0)`
-  - `meters_per_pixel: float | None`
-  - `homography_file: Path | None`
 
-`InputsConfig._validate_required_paths` extended to require the
-right fields per format.
+`InputsConfig._validate_required_paths` is extended to require the
+right fields per format. For `dlc_keypoints`, require exactly one of
+`camera_timestamps_file` or `fps_cam` unless a Trodes camera-sync file
+is provided. Camera calibration remains on `CameraConfig`:
+
+```python
+class CameraConfig(BaseModel):
+    meters_per_pixel: float | None = Field(default=0.0022, gt=0.0)
+    homography_file: Path | None = None
+```
+
+`meters_per_pixel` and `homography_file` are mutually exclusive after
+accounting for the scalar default; see the homography plan.
 
 ### New ingester modules — `src/trodestrack/io/loaders/`
 
@@ -184,8 +202,7 @@ elif config.inputs.format == "dlc_keypoints":
 def pixel_to_meters_xy(
     pixels: np.ndarray,
     *,
-    meters_per_pixel: float | None,
-    homography: np.ndarray | None,
+    camera: CameraConfig,
 ) -> np.ndarray:
     """Apply scalar OR homography. Exactly one must be set."""
 ```
@@ -204,8 +221,8 @@ def _load_trodes_native(config: SessionConfig) -> PreparedSession:
     # Optional: align cam clock via inputs.camera_sync_file
     if inputs.camera_sync_file is not None:
         t_cam = _apply_trodes_camera_sync(t_cam, inputs.camera_sync_file)
-    led1 = pixel_to_meters_xy(led1_px, ...)
-    led2 = pixel_to_meters_xy(led2_px, ...)
+    led1 = pixel_to_meters_xy(led1_px, camera=config.camera)
+    led2 = pixel_to_meters_xy(led2_px, camera=config.camera)
     # ... reuse the rest of _load_spikegadgets_trodes flow:
     #     IMU SI conversion, sample-and-hold removal, time alignment,
     #     mask construction, calibration diagnostics, safety check.
@@ -220,7 +237,7 @@ NaN markers for dropouts; preserve them through the conversion.
 ```python
 def _load_dlc_keypoints(config: SessionConfig) -> PreparedSession:
     inputs = config.inputs
-    df = pd.read_hdf(inputs.position_file)            # multi-index DF
+    df = _read_dlc_table(inputs.position_file)        # h5 or csv
     # Select LED1/LED2 columns by bodypart name.
     led1_px, conf1 = _extract_dlc_bodypart(df, inputs.led1_bodypart)
     led2_px, conf2 = _extract_dlc_bodypart(df, inputs.led2_bodypart)
@@ -232,16 +249,19 @@ def _load_dlc_keypoints(config: SessionConfig) -> PreparedSession:
     # Build conf_cam = [c1, c1, c2, c2] (matches the existing
     # _load_leds layout).
     conf_cam = np.column_stack([conf1, conf1, conf2, conf2])
+    # Frame times: explicit timestamps file wins; otherwise use fps_cam.
+    t_cam = _load_dlc_frame_times(inputs)
     # Pixel→meters.
-    led1 = pixel_to_meters_xy(led1_px, ...)
-    led2 = pixel_to_meters_xy(led2_px, ...)
+    led1 = pixel_to_meters_xy(led1_px, camera=config.camera)
+    led2 = pixel_to_meters_xy(led2_px, camera=config.camera)
     # ... time alignment + IMU + safety check.
     return PreparedSession(...)
 ```
 
-DLC's frame index is an integer; need a separate
-`camera_timestamps_file` if Trodes-style hardware sync isn't
-available (or fall back to `t_cam = frame_idx / fps_cam`).
+DLC's frame index is an integer; require a separate
+`camera_timestamps_file` if Trodes-style hardware sync is available,
+or fall back to `t_cam = frame_idx / fps_cam` only when `fps_cam` is
+configured explicitly.
 
 ## Milestones
 
@@ -259,8 +279,9 @@ available (or fall back to `t_cam = frame_idx / fps_cam`).
 - `_load_trodes_native` + minimal `_parse_trodes_position` +
   optional `_apply_trodes_camera_sync` (skip if no sync file).
 - Schema additions for `inputs.format == "trodes_native"`.
-- Sample fixture: a tiny `*.videoPositionTracking` file
-  (committed gitignored under `tests/fixtures/` — small, ≤10 KB).
+- Sample fixture: a tiny committed `*.videoPositionTracking` file
+  under `tests/fixtures/` (small, ≤10 KB). Do not gitignore it unless
+  the repo uses an explicit `!tests/fixtures/...` allow-list rule.
 - Unit + scenario tests: round-trip a 30-second Trodes session
   through the loader and run an EKF; verify no NaN/Inf and that
   the safety check passes.
@@ -340,7 +361,7 @@ runnable with sample fixtures.
 | DLC `.h5` schema varies (multi-animal, different scorer name) | Extract by bodypart name explicitly; fail clearly if the structure doesn't match the documented single-animal layout. |
 | Pixel→meters accuracy depends on user homography | Validate at load time that LED-pair distance after conversion is within ±20% of `led_distance` (config field); flag clearly otherwise. |
 | Camera-clock sync ambiguity in Trodes exports | Make `camera_sync_file` optional with a documented warning when absent ("camera timestamps assumed already in IMU frame"). |
-| New runtime deps for `.h5` reading | `pandas` already supports `read_hdf`; no new dep. For Trodes binary, `trodes_python_tools` adds a small dep — pin to runtime requirements only when `trodes_native` format is used (lazy import). |
+| New runtime deps for `.h5` reading | Pandas `read_hdf` requires PyTables (`tables`). Prefer CSV fixtures for mandatory CI, lazy-import `tables` for `.h5`, and raise a friendly install error when a user selects an HDF5 DLC file without the optional dependency. For Trodes binary, lazy-import and version-pin `trodes_python_tools` only when `trodes_native` is selected. |
 
 ## Rollout Strategy
 
