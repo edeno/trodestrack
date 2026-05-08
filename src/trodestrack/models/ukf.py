@@ -913,14 +913,10 @@ def _unscented_kalman_filter_impl(
         )
 
         event_source_indices = event_indices_per_frame_jax[t_idx]
-        state_after_events, log_lik_event = update_event_location(
+        state_filt, log_lik_event = update_event_location(
             state_after_zupt,
             event_model,
             event_source_indices,
-        )
-        state_filt = UKFState(
-            mean=state_after_events.mean,
-            cov=state_after_events.cov,
         )
 
         log_lik_k = log_lik_pos + log_lik_heading + log_lik_zupt + log_lik_event
@@ -1032,6 +1028,18 @@ def unscented_kalman_filter(
     conf_cam : np.ndarray | None, optional
         Confidence scores (N_cam, 4) for [x1,y1,x2,y2] in [0, 1] for per-dimension
         R scaling.
+    event_source_anchors : np.ndarray | None, optional
+        World-frame anchors ``(n_sources, 2)`` for the configured TTL event
+        sources (beam break, zone trigger, RFID reader). Must be provided
+        together with ``event_source_covariances`` and
+        ``event_indices_per_frame`` or all three left as ``None`` (no-op).
+    event_source_covariances : np.ndarray | None, optional
+        Per-source 2x2 measurement covariance ``(n_sources, 2, 2)``.
+        Validated for finiteness, symmetry, and positive-definiteness via
+        :func:`trodestrack.models.sensors.event_location.resolve_event_inputs`.
+    event_indices_per_frame : np.ndarray | None, optional
+        Padded compact source indices ``(N_cam, max_events_per_frame)``,
+        sentinel ``-1`` for unused slots.
 
     Returns
     -------

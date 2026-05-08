@@ -404,11 +404,6 @@ _extended_kalman_filter_jit = jax.jit(
 )
 
 
-# Event-channel input validation lives in
-# ``trodestrack.models.sensors.event_location.resolve_event_inputs`` so
-# both EKF and UKF can share the same dtype/shape/range contract.
-
-
 # =============================================================================
 # Utility Functions
 # =============================================================================
