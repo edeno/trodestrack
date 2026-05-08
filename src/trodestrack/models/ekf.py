@@ -406,6 +406,23 @@ _extended_kalman_filter_jit = jax.jit(
 _NO_EVENT_PAD_WIDTH: int = 1
 
 
+def _coerce_event_floats(arr, *, name: str) -> np.ndarray:
+    """Coerce a public-API event float array to ``float64``.
+
+    Rejects bool, object, string, datetime, and other non-numeric dtypes
+    that would silently coerce through ``np.asarray(..., dtype=float)``
+    (probe: bool ``True`` → ``1.0``, string ``"0.5"`` → ``0.5``).
+    """
+    raw = np.asarray(arr)
+    if not np.issubdtype(raw.dtype, np.number) or np.issubdtype(raw.dtype, np.bool_):
+        raise ValueError(
+            f"{name} must be a numeric (integer or float) array; got "
+            f"dtype={raw.dtype!r}. Bool, object, and string dtypes are "
+            "rejected to avoid silent coercion."
+        )
+    return raw.astype(float, copy=False)
+
+
 def _empty_event_channel(
     n_cam: int, pad_width: int
 ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, int]:
@@ -444,8 +461,10 @@ def _resolve_event_inputs(
     if not any(provided):
         return _empty_event_channel(n_cam, _NO_EVENT_PAD_WIDTH)
 
-    anchors = np.asarray(event_source_anchors, dtype=float)
-    covariances = np.asarray(event_source_covariances, dtype=float)
+    anchors = _coerce_event_floats(event_source_anchors, name="event_source_anchors")
+    covariances = _coerce_event_floats(
+        event_source_covariances, name="event_source_covariances"
+    )
 
     # ``np.asarray(dtype=int)`` silently truncates fractional indices
     # (0.9 → 0) and coerces strings/bools ("0", True → 0/1), routing
@@ -454,6 +473,20 @@ def _resolve_event_inputs(
     # every other dtype (object/string/bool/datetime/...) up front.
     raw_indices = np.asarray(event_indices_per_frame)
     if np.issubdtype(raw_indices.dtype, np.integer):
+        # ``np.uint64(2**64 - 1).astype(np.int64) == -1``, which would
+        # silently match the padded-sentinel convention and drop a real
+        # event row. Reject unsigned overflow before casting.
+        if np.issubdtype(raw_indices.dtype, np.unsignedinteger) and raw_indices.size:
+            int64_max = np.iinfo(np.int64).max
+            overflow = raw_indices > np.uint64(int64_max)
+            if overflow.any():
+                bad = sorted({int(x) for x in raw_indices[overflow][:5]})
+                raise ValueError(
+                    "event_indices_per_frame contains values above the "
+                    f"signed int64 range (max {int64_max}); these would "
+                    "wrap to negative ids and silently match the padded "
+                    f"sentinel. Got entries like {bad}."
+                )
         indices = raw_indices.astype(np.int64, copy=False)
     elif np.issubdtype(raw_indices.dtype, np.floating):
         bad_idx = ~np.isfinite(raw_indices) | (raw_indices != np.floor(raw_indices))

@@ -110,7 +110,16 @@ def load_ttl_events(
             f"{events_file} is missing required column(s): {', '.join(missing)}."
         )
 
-    t_evt = df["time"].to_numpy(dtype=float)
+    raw_time = df["time"].to_numpy()
+    if not np.issubdtype(raw_time.dtype, np.number) or np.issubdtype(
+        raw_time.dtype, np.bool_
+    ):
+        raise ValueError(
+            f"{events_file} time column must be a numeric (integer or "
+            f"float) dtype; got dtype={raw_time.dtype!r}. The documented "
+            "schema is ``time (s, float)``."
+        )
+    t_evt = raw_time.astype(float, copy=False)
     edge_str = df["edge"].to_numpy()
 
     source_id = _coerce_source_ids(df["source_id"].to_numpy(), events_file)

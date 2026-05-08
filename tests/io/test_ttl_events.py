@@ -292,6 +292,33 @@ def test_load_ttl_events_rejects_non_integer_source_id(tmp_path):
         load_ttl_events(events_path)
 
 
+def test_load_ttl_events_rejects_string_time(tmp_path):
+    """``time`` column must be numeric — schema requires float seconds."""
+    events_path = tmp_path / "events.parquet"
+    pd.DataFrame(
+        {
+            "time": ["0.10"],
+            "source_id": [1],
+            "edge": ["fall"],
+        }
+    ).to_parquet(events_path)
+    with pytest.raises(ValueError, match="time column must be a numeric"):
+        load_ttl_events(events_path)
+
+
+def test_load_ttl_events_rejects_bool_time(tmp_path):
+    events_path = tmp_path / "events.parquet"
+    pd.DataFrame(
+        {
+            "time": np.array([True]),
+            "source_id": [1],
+            "edge": ["fall"],
+        }
+    ).to_parquet(events_path)
+    with pytest.raises(ValueError, match="time column must be a numeric"):
+        load_ttl_events(events_path)
+
+
 def test_load_ttl_events_rejects_string_source_id(tmp_path):
     """String source_id columns must reject — schema requires integer ids."""
     events_path = tmp_path / "events.parquet"

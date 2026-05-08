@@ -200,6 +200,26 @@ class TestEventChannelValidation:
         with pytest.raises(ValueError, match="non-integer entries"):
             _run_with_events(sim_data, ekf_config, anchors, covariances, indices)
 
+    def test_unsigned_overflow_index_rejected(self, sim_data):
+        """uint64 max wraps to int64 -1 and would silently match the sentinel."""
+        ekf_config = _make_ekf_config()
+        n_cam = sim_data["t_cam_exp"].shape[0]
+        anchors = np.array([[0.5, 0.5]], dtype=float)
+        covariances = np.array([[[0.01, 0.0], [0.0, 0.01]]], dtype=float)
+        indices = np.full((n_cam, 1), 0, dtype=np.uint64)
+        indices[0, 0] = np.iinfo(np.uint64).max
+        with pytest.raises(ValueError, match="signed int64 range"):
+            _run_with_events(sim_data, ekf_config, anchors, covariances, indices)
+
+    def test_string_anchors_rejected(self, sim_data):
+        ekf_config = _make_ekf_config()
+        n_cam = sim_data["t_cam_exp"].shape[0]
+        bad_anchors = np.array([["0.0", "0.0"]], dtype=object)
+        covariances = np.array([[[0.01, 0.0], [0.0, 0.01]]], dtype=float)
+        indices = np.full((n_cam, 1), -1, dtype=np.int32)
+        with pytest.raises(ValueError, match="event_source_anchors must be"):
+            _run_with_events(sim_data, ekf_config, bad_anchors, covariances, indices)
+
     def test_bool_index_rejected(self, sim_data):
         ekf_config = _make_ekf_config()
         n_cam = sim_data["t_cam_exp"].shape[0]
