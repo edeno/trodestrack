@@ -523,11 +523,12 @@ limit tests green to numerical tolerance.
   needs first-class events.
 - Property: events monotonic; source IDs valid; pad-limit honored.
 - Scenario per source type (separate tests):
-  - Beam set along the trajectory reduces position RMSE during a
-    multi-second camera dropout vs no-event baseline. Implemented as
-    a 1D 5-beam set spanning a 2 s dropout window; the original
-    4×4 / 5 s benchmark is a stronger drift test that requires a
-    longer simulated session and is left as a follow-up.
+  - Two beam-grid scenarios:
+    - 1D 5-beam set spanning a 2 s dropout (cheap regression test).
+    - 4×4 cell grid (5 vertical + 5 horizontal beams) over an 8 s
+      session with a 5 s camera dropout, parametrized across EKF and
+      UKF; asserts ≥30% position-RMSE reduction during the dropout
+      with a failure message reporting both RMSEs.
   - Zone trigger snaps position to feeder location within σ_zone.
   - RFID detection collapses position uncertainty to the reader's
     effective radius.
