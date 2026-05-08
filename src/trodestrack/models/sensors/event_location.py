@@ -35,6 +35,172 @@ from trodestrack.models.state_layout import StateLayout
 
 PAD_SENTINEL: int = -1
 SENTINEL_R_SCALAR: float = 1.0
+NO_EVENT_PAD_WIDTH: int = 1
+
+
+def _coerce_event_floats(arr, *, name: str) -> np.ndarray:
+    """Coerce a public-API event float array to ``float64``.
+
+    Rejects bool, complex, object, string, datetime, and other dtypes
+    that would silently coerce through ``np.asarray(..., dtype=float)``
+    (probe: bool ``True`` → ``1.0``, string ``"0.5"`` → ``0.5``,
+    complex ``1+2j`` → ``1.0`` with imaginary part discarded).
+    """
+    raw = np.asarray(arr)
+    if not (
+        np.issubdtype(raw.dtype, np.integer) or np.issubdtype(raw.dtype, np.floating)
+    ):
+        raise ValueError(
+            f"{name} must be a real integer or float array; got "
+            f"dtype={raw.dtype!r}. Bool, complex, object, and string "
+            "dtypes are rejected to avoid silent coercion."
+        )
+    return raw.astype(float, copy=False)
+
+
+def _empty_event_channel(
+    n_cam: int, pad_width: int = NO_EVENT_PAD_WIDTH
+) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, int]:
+    """No-op event channel: one dummy source, all-sentinel indices."""
+    return (
+        jnp.zeros((1, 2), dtype=jnp.float32),
+        jnp.broadcast_to(jnp.eye(2, dtype=jnp.float32), (1, 2, 2)),
+        jnp.full((n_cam, pad_width), -1, dtype=jnp.int32),
+        pad_width,
+    )
+
+
+def resolve_event_inputs(
+    event_source_anchors: np.ndarray | None,
+    event_source_covariances: np.ndarray | None,
+    event_indices_per_frame: np.ndarray | None,
+    *,
+    n_cam: int,
+    func_name: str = "kalman_filter",
+) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, int]:
+    """Validate optional event arguments and return JAX-ready dense arrays.
+
+    Shared between ``extended_kalman_filter`` and
+    ``unscented_kalman_filter``. If all three arguments are ``None`` the
+    wrapper builds a no-op event channel (one dummy source, all-sentinel
+    indices). If any one is provided, all three are required, validated
+    for dtype/shape/range, and returned as JAX arrays.
+
+    The validation here is what protects the JIT'd core: ``EventLocationModel``
+    skips its host-side PSD check when arrays are JAX tracers, so this
+    function must reject malformed inputs before tracing.
+    """
+    provided = (
+        event_source_anchors is not None,
+        event_source_covariances is not None,
+        event_indices_per_frame is not None,
+    )
+    if any(provided) and not all(provided):
+        raise ValueError(
+            f"{func_name} event channel: event_source_anchors, "
+            "event_source_covariances, and event_indices_per_frame must be "
+            "provided together (all None disables the channel)."
+        )
+    if not any(provided):
+        return _empty_event_channel(n_cam)
+
+    anchors = _coerce_event_floats(event_source_anchors, name="event_source_anchors")
+    covariances = _coerce_event_floats(
+        event_source_covariances, name="event_source_covariances"
+    )
+
+    raw_indices = np.asarray(event_indices_per_frame)
+    if np.issubdtype(raw_indices.dtype, np.integer):
+        # ``np.uint64(2**64 - 1).astype(int64) == -1``, which would silently
+        # match the padded-sentinel convention and drop a real event row.
+        if np.issubdtype(raw_indices.dtype, np.unsignedinteger) and raw_indices.size:
+            int64_max = np.iinfo(np.int64).max
+            overflow = raw_indices > np.uint64(int64_max)
+            if overflow.any():
+                bad = sorted({int(x) for x in raw_indices[overflow][:5]})
+                raise ValueError(
+                    "event_indices_per_frame contains values above the "
+                    f"signed int64 range (max {int64_max}); these would "
+                    "wrap to negative ids and silently match the padded "
+                    f"sentinel. Got entries like {bad}."
+                )
+        indices = raw_indices.astype(np.int64, copy=False)
+    elif np.issubdtype(raw_indices.dtype, np.floating):
+        bad_idx = ~np.isfinite(raw_indices) | (raw_indices != np.floor(raw_indices))
+        if bad_idx.any():
+            raise ValueError(
+                "event_indices_per_frame must contain integer compact "
+                "source indices; got non-integer entries like "
+                f"{sorted({float(x) for x in raw_indices[bad_idx][:5]})}."
+            )
+        indices = raw_indices.astype(np.int64)
+    else:
+        raise ValueError(
+            "event_indices_per_frame must be an integer or float array; "
+            f"got dtype={raw_indices.dtype!r}. Bool, object, and string "
+            "dtypes are rejected to avoid silent coercion."
+        )
+
+    if anchors.ndim != 2 or anchors.shape[1] != 2:
+        raise ValueError(
+            f"event_source_anchors must have shape (n_sources, 2); got {anchors.shape}."
+        )
+    n_sources = anchors.shape[0]
+    if covariances.shape != (n_sources, 2, 2):
+        raise ValueError(
+            "event_source_covariances must have shape (n_sources, 2, 2) "
+            f"matching event_source_anchors; got {covariances.shape} for "
+            f"n_sources={n_sources}."
+        )
+    if not np.all(np.isfinite(anchors)) or not np.all(np.isfinite(covariances)):
+        raise ValueError(
+            "event_source_anchors / event_source_covariances must be finite."
+        )
+    # The stricter ``EventLocationModel`` PSD check is skipped under jax.jit,
+    # so direct callers (not just YAML-driven sessions) must validate
+    # symmetry and positive-definiteness here. Otherwise an asymmetric or
+    # negative-definite R silently yields NaN log-likelihoods and posteriors.
+    sym = 0.5 * (covariances + covariances.transpose(0, 2, 1))
+    asymmetry = np.max(np.abs(covariances - sym), axis=(1, 2))
+    if asymmetry.size and asymmetry.max() > 1e-9:
+        bad = int(np.argmax(asymmetry))
+        raise ValueError(
+            f"event_source_covariances[{bad}] is not symmetric "
+            f"(asymmetry {asymmetry[bad]:.3e}); 2x2 covariances must be PSD."
+        )
+    for i, R in enumerate(sym):
+        eigvals = np.linalg.eigvalsh(R)
+        if eigvals.min() <= 0.0:
+            raise ValueError(
+                f"event_source_covariances[{i}] is not positive-definite "
+                f"(min eigenvalue {eigvals.min():.3e})."
+            )
+    if indices.ndim != 2 or indices.shape[0] != n_cam:
+        raise ValueError(
+            "event_indices_per_frame must have shape (len(t_cam), "
+            f"max_events_per_frame); got {indices.shape} for n_cam={n_cam}."
+        )
+    valid_idx = indices >= 0
+    if valid_idx.any() and (indices[valid_idx].max() >= n_sources):
+        raise ValueError(
+            "event_indices_per_frame contains a compact source index out of "
+            f"range [0, {n_sources}); got max "
+            f"{int(indices[valid_idx].max())}."
+        )
+    if (indices[~valid_idx] != -1).any():
+        raise ValueError(
+            "event_indices_per_frame padded entries must be exactly -1; "
+            "negative values other than -1 are not allowed."
+        )
+    if n_sources == 0:
+        return _empty_event_channel(n_cam)
+
+    return (
+        jnp.asarray(anchors, dtype=jnp.float32),
+        jnp.asarray(covariances, dtype=jnp.float32),
+        jnp.asarray(indices, dtype=jnp.int32),
+        int(indices.shape[1]),
+    )
 
 
 class EventLocationModel:
