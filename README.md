@@ -420,8 +420,8 @@ trodestrack/
   qa/           # Metrics (RMSE, NEES, NIS), plots, PDF reports
   viz/          # Diagnostic videos with multi-panel state visualization
   cli/          # CLI: trodestrack online / smooth / report
-  io/           # Data loaders: Trodes, DLC, SpikeGadgets (coming soon)
-  config/       # Configuration schemas (coming soon)
+  io/           # Session loading, real-data safety checks, LED identity correction
+  config/       # YAML session configuration schemas
 ```
 
 ## Contributing
