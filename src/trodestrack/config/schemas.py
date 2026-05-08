@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+import numpy as np
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -288,6 +290,171 @@ class LedIdentityConfig(BaseModel):
     max_speed_mps: float = Field(default=3.0, gt=0.0)
 
 
+@dataclass(frozen=True)
+class EventLocationSource:
+    """Resolved geometry the EKF event-update model consumes per source.
+
+    Every TTL event source (beam break, zone trigger, RFID reader) collapses to
+    a 2D point measurement at ``anchor`` with anisotropic 2x2 covariance ``R``.
+    Per-source-type distinctions (geometry math, default edge) live in the
+    spec classes; the model is unaware of the original source type.
+    """
+
+    source_id: int
+    anchor: np.ndarray  # (2,) world meters
+    R: np.ndarray  # (2, 2) world-frame covariance, PSD
+    label: str | None = None
+    source_type: str = "unknown"
+
+
+def _isotropic_event_source(
+    *,
+    source_id: int,
+    center: tuple[float, float],
+    sigma: float,
+    label: str | None,
+    source_type: str,
+) -> EventLocationSource:
+    return EventLocationSource(
+        source_id=source_id,
+        anchor=np.asarray(center, dtype=float),
+        R=(sigma**2) * np.eye(2, dtype=float),
+        label=label,
+        source_type=source_type,
+    )
+
+
+class BeamSpec(BaseModel):
+    """A beam-break source.
+
+    Computes anchor (midpoint of emitter/receiver) and an anisotropic ``R``
+    aligned with the beam: ``σ_perp`` perpendicular to the beam (default the
+    IR beam-width scale) and ``σ_along = max(σ_perp, L/√12)`` along the beam,
+    where ``L`` is the emitter-receiver distance. Short beams collapse to an
+    isotropic point fix; long beams become weakly along-beam constraints.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: int
+    emitter: tuple[float, float]
+    receiver: tuple[float, float]
+    sigma_perp_m: float = Field(default=0.005, gt=0.0)
+    active_edge: Literal["rise", "fall"] = "fall"
+    label: str | None = None
+
+    def to_event_source(self) -> EventLocationSource:
+        emitter = np.asarray(self.emitter, dtype=float)
+        receiver = np.asarray(self.receiver, dtype=float)
+        anchor = 0.5 * (emitter + receiver)
+        delta = receiver - emitter
+        beam_length = float(np.linalg.norm(delta))
+
+        sigma_along = max(self.sigma_perp_m, beam_length / np.sqrt(12.0))
+
+        # Beam tangent (along) and normal (perp) unit vectors. Use a
+        # safe default for the degenerate L=0 case (any orthonormal basis
+        # is fine; the resulting R is isotropic).
+        tangent = delta / beam_length if beam_length > 0.0 else np.array([1.0, 0.0])
+        normal = np.array([-tangent[1], tangent[0]])
+
+        # Rotation matrix mapping event-local axes (perp, along) to world.
+        rot = np.column_stack([normal, tangent])
+        diag = np.diag([self.sigma_perp_m**2, sigma_along**2])
+        R = rot @ diag @ rot.T
+
+        return EventLocationSource(
+            source_id=self.id,
+            anchor=anchor,
+            R=R,
+            label=self.label,
+            source_type="beam",
+        )
+
+
+class ZoneTriggerSpec(BaseModel):
+    """A point-trigger source (nose poke, lever press, gate)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: int
+    center: tuple[float, float]
+    sigma_m: float = Field(default=0.02, gt=0.0)
+    active_edge: Literal["rise", "fall"] = "rise"
+    label: str | None = None
+
+    def to_event_source(self) -> EventLocationSource:
+        return _isotropic_event_source(
+            source_id=self.id,
+            center=self.center,
+            sigma=self.sigma_m,
+            label=self.label,
+            source_type="zone",
+        )
+
+
+class RFIDReaderSpec(BaseModel):
+    """An RFID reader source.
+
+    ``effective_radius_m`` is the detection range; treated as ``√2·σ`` of an
+    isotropic 2D Gaussian fit to a uniform disc of that radius (so
+    ``σ = r/√2`` and ``R = (r²/2)·I``).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: int
+    center: tuple[float, float]
+    effective_radius_m: float = Field(default=0.05, gt=0.0)
+    active_edge: Literal["rise", "fall"] = "rise"
+    label: str | None = None
+
+    def to_event_source(self) -> EventLocationSource:
+        sigma = self.effective_radius_m / np.sqrt(2.0)
+        return _isotropic_event_source(
+            source_id=self.id,
+            center=self.center,
+            sigma=sigma,
+            label=self.label,
+            source_type="rfid",
+        )
+
+
+class TTLEventsConfig(BaseModel):
+    """Configuration block for TTL event sensors (beam / zone / RFID).
+
+    Sources of all three types share an events parquet whose rows are
+    ``(time, source_id, edge)``. ``source_id`` must be unique across the
+    configured beam, zone-trigger, and RFID-reader lists.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    events_file: Path
+    beams: list[BeamSpec] = Field(default_factory=list)
+    zone_triggers: list[ZoneTriggerSpec] = Field(default_factory=list)
+    rfid_readers: list[RFIDReaderSpec] = Field(default_factory=list)
+    max_events_per_frame: int = Field(default=8, ge=1)
+
+    @model_validator(mode="after")
+    def _validate_unique_ids(self) -> TTLEventsConfig:
+        seen: dict[int, str] = {}
+        for kind, specs in (
+            ("beams", self.beams),
+            ("zone_triggers", self.zone_triggers),
+            ("rfid_readers", self.rfid_readers),
+        ):
+            for spec in specs:
+                if spec.id in seen:
+                    raise ValueError(
+                        "ttl_events source ids must be unique across beams, "
+                        f"zone_triggers, and rfid_readers; id={spec.id} appears "
+                        f"in both {seen[spec.id]} and {kind}."
+                    )
+                seen[spec.id] = kind
+        return self
+
+
 class SessionConfig(BaseModel):
     """Top-level YAML config for one trodestrack run."""
 
@@ -299,6 +466,7 @@ class SessionConfig(BaseModel):
     filter: FilterConfig = Field(default_factory=FilterConfig)
     outputs: OutputsConfig = Field(default_factory=OutputsConfig)
     led_identity: LedIdentityConfig = Field(default_factory=LedIdentityConfig)
+    ttl_events: TTLEventsConfig | None = None
 
 
 def load_session_config(path: str | Path) -> SessionConfig:
@@ -337,4 +505,9 @@ def _resolve_paths(config: SessionConfig, *, base_dir: Path) -> SessionConfig:
     outputs = config.outputs.model_copy(
         update={"output_dir": resolve(config.outputs.output_dir)}
     )
-    return config.model_copy(update={"inputs": inputs, "outputs": outputs})
+    update_fields: dict[str, object] = {"inputs": inputs, "outputs": outputs}
+    if config.ttl_events is not None:
+        update_fields["ttl_events"] = config.ttl_events.model_copy(
+            update={"events_file": resolve(config.ttl_events.events_file)}
+        )
+    return config.model_copy(update=update_fields)
