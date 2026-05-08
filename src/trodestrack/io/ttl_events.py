@@ -126,7 +126,6 @@ def per_frame_event_indices(
     if t_evt.size == 0:
         return out
 
-    # Validate sources
     unknown = sorted({int(s) for s in source_id if int(s) not in source_id_to_index})
     if unknown:
         raise ValueError(
@@ -143,24 +142,33 @@ def per_frame_event_indices(
     if t_evt.size == 0:
         return out
 
-    # Bucket events into camera-frame intervals (t_cam[k-1], t_cam[k]].
-    # np.searchsorted with side='left' gives the smallest k such that
-    # t_cam[k] >= t_evt; that frame "ends at or after the event", which
-    # matches the closed-on-right convention.
+    # searchsorted side='left' yields smallest k with t_cam[k] >= t_evt,
+    # placing each event in the (t_cam[k-1], t_cam[k]] bucket.
     frame_idx = np.searchsorted(t_cam, t_evt, side="left")
     valid = (frame_idx >= 1) & (frame_idx < n_cam)
     frame_idx = frame_idx[valid]
     source_id = source_id[valid]
+    if frame_idx.size == 0:
+        return out
 
-    counts = np.zeros(n_cam, dtype=np.int32)
-    for fr, sid in zip(frame_idx, source_id, strict=False):
-        slot = counts[fr]
-        if slot >= max_events_per_frame:
-            raise ValueError(
-                f"camera frame {fr} has more than max_events_per_frame="
-                f"{max_events_per_frame} TTL events; raise the pad limit "
-                "or debounce noisy sources."
-            )
-        out[fr, slot] = source_id_to_index[int(sid)]
-        counts[fr] += 1
+    # Compute each event's slot inside its camera frame via stable sort,
+    # then a per-frame "rank from group start" using searchsorted.
+    order = np.argsort(frame_idx, kind="stable")
+    sorted_frames = frame_idx[order]
+    sorted_sids = source_id[order]
+    group_start = np.searchsorted(sorted_frames, sorted_frames, side="left")
+    slot = np.arange(sorted_frames.size) - group_start
+    if slot.max() >= max_events_per_frame:
+        overflow_frame = int(sorted_frames[slot.argmax()])
+        raise ValueError(
+            f"camera frame {overflow_frame} has more than "
+            f"max_events_per_frame={max_events_per_frame} TTL events; "
+            "raise the pad limit or debounce noisy sources."
+        )
+    compact = np.fromiter(
+        (source_id_to_index[int(s)] for s in sorted_sids),
+        dtype=np.int32,
+        count=sorted_sids.size,
+    )
+    out[sorted_frames, slot] = compact
     return out

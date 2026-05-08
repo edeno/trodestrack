@@ -11,7 +11,11 @@ import pandas as pd
 
 from trodestrack.config.schemas import EventLocationSource, SessionConfig
 from trodestrack.io.led_identity import resolve_led_identity
-from trodestrack.io.ttl_events import load_ttl_events, per_frame_event_indices
+from trodestrack.io.ttl_events import (
+    EDGE_NAME_TO_INT,
+    load_ttl_events,
+    per_frame_event_indices,
+)
 from trodestrack.models.ekf import EKFConfig, EKFResult, extended_kalman_filter
 from trodestrack.models.state_layout import get_layout
 from trodestrack.qa.imu_calibration import (
@@ -413,7 +417,6 @@ def _attach_ttl_events(session: PreparedSession) -> PreparedSession:
     if cfg is None:
         return session
 
-    EDGE_NAME_TO_INT = {"fall": 0, "rise": 1}
     sources: list[EventLocationSource] = []
     source_id_to_index: dict[int, int] = {}
     source_active_edges: dict[int, int] = {}

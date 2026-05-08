@@ -36,12 +36,10 @@ def _emit_beam_events(
 ) -> list[SyntheticEvent]:
     """Emit one beam-break event per trajectory crossing of the beam.
 
-    Detects a crossing as a sign-flip of the trajectory sample's signed
-    distance to the infinite line through the beam, gated to require the
-    crossing point to lie within the finite emitter-receiver segment.
-    Sign-flip detection avoids the double-counting that segment-segment
-    intersection produces when a trajectory sample lies exactly on the
-    beam line.
+    Crossings are detected as sign changes of the signed cross product
+    ``(receiver - emitter) × (sample - emitter)``. Half-open sign change
+    (positive → non-positive OR negative → non-negative) counts samples
+    that land exactly on the line once, on the approaching segment.
     """
     events: list[SyntheticEvent] = []
     emitter = np.asarray(beam.emitter, dtype=float)
@@ -50,27 +48,17 @@ def _emit_beam_events(
     seg_len_sq = float(s @ s)
     if seg_len_sq <= 0.0:
         return events
-    # Signed cross product (s × (xy - emitter)) for each sample. Positive
-    # on one side of the line through the beam, negative on the other.
     delta = xy - emitter
     side = s[0] * delta[:, 1] - s[1] * delta[:, 0]
 
     for i in range(len(t) - 1):
         s0, s1 = side[i], side[i + 1]
-        # Half-open sign-change: positive → non-positive OR negative →
-        # non-negative. A sample landing exactly on the line is counted
-        # at the segment that approaches it (s0 != 0 → s1 == 0), so the
-        # outgoing segment (s0 == 0 → s1 != 0) is not double-counted.
         crossed = (s0 > 0 and s1 <= 0) or (s0 < 0 and s1 >= 0)
         if not crossed:
             continue
-        # Linear interpolation parameter along the trajectory segment.
         denom = s0 - s1
         t_local = float(s0 / denom) if denom != 0.0 else 0.0
-        # Crossing point along the trajectory segment.
         crossing_xy = xy[i] + t_local * (xy[i + 1] - xy[i])
-        # Project onto the beam to test whether the crossing lies between
-        # emitter and receiver (u ∈ [0, 1]).
         u = float((crossing_xy - emitter) @ s) / seg_len_sq
         if 0.0 <= u <= 1.0:
             events.append(

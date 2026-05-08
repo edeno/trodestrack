@@ -59,6 +59,7 @@ from trodestrack.models.filter_common import (
     compute_imu_index_arrays,
     dynamics_function,
     estimate_led_spacing,
+    gaussian_log_likelihood_masked,
     imu_stationary_zupt_gate,
     initialize_state,
     joseph_update,
@@ -402,10 +403,19 @@ _extended_kalman_filter_jit = jax.jit(
 )
 
 
-# Default static pad width when ``ttl_events`` is not configured. The padded
-# arrays are still threaded through the JIT'd core (filled with -1) so the
-# scan body has a single shape regardless of whether events are configured.
-_DEFAULT_NO_EVENT_MAX_PER_FRAME: int = 1
+_NO_EVENT_PAD_WIDTH: int = 1
+
+
+def _empty_event_channel(
+    n_cam: int, pad_width: int
+) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, int]:
+    """No-op event channel: one dummy source, all-sentinel indices."""
+    return (
+        jnp.zeros((1, 2), dtype=jnp.float32),
+        jnp.broadcast_to(jnp.eye(2, dtype=jnp.float32), (1, 2, 2)),
+        jnp.full((n_cam, pad_width), -1, dtype=jnp.int32),
+        pad_width,
+    )
 
 
 def _resolve_event_inputs(
@@ -418,14 +428,13 @@ def _resolve_event_inputs(
     """Validate optional event arguments and return JAX-ready dense arrays.
 
     If all three arguments are ``None`` the wrapper builds an empty no-op
-    event channel (one padded slot per frame, all sentinel ``-1``). If any
-    one is provided, all three are required.
+    event channel. If any one is provided, all three are required.
     """
-    provided = [
+    provided = (
         event_source_anchors is not None,
         event_source_covariances is not None,
         event_indices_per_frame is not None,
-    ]
+    )
     if any(provided) and not all(provided):
         raise ValueError(
             "extended_kalman_filter event channel: event_source_anchors, "
@@ -433,21 +442,8 @@ def _resolve_event_inputs(
             "provided together (all None disables the channel)."
         )
     if not any(provided):
-        anchors_jax = jnp.zeros((1, 2), dtype=jnp.float32)
-        covariances_jax = jnp.broadcast_to(jnp.eye(2, dtype=jnp.float32), (1, 2, 2))
-        indices_jax = jnp.full(
-            (n_cam, _DEFAULT_NO_EVENT_MAX_PER_FRAME), -1, dtype=jnp.int32
-        )
-        return (
-            anchors_jax,
-            covariances_jax,
-            indices_jax,
-            _DEFAULT_NO_EVENT_MAX_PER_FRAME,
-        )
+        return _empty_event_channel(n_cam, _NO_EVENT_PAD_WIDTH)
 
-    assert event_source_anchors is not None
-    assert event_source_covariances is not None
-    assert event_indices_per_frame is not None
     anchors = np.asarray(event_source_anchors, dtype=float)
     covariances = np.asarray(event_source_covariances, dtype=float)
     indices = np.asarray(event_indices_per_frame, dtype=int)
@@ -485,12 +481,9 @@ def _resolve_event_inputs(
             "negative values other than -1 are not allowed."
         )
     if n_sources == 0:
-        # Avoid an empty-axis ``EventLocationModel`` by collapsing to the
-        # no-events fallback (still validated above for shape consistency).
-        anchors_jax = jnp.zeros((1, 2), dtype=jnp.float32)
-        covariances_jax = jnp.broadcast_to(jnp.eye(2, dtype=jnp.float32), (1, 2, 2))
-        indices_jax = jnp.full(indices.shape, -1, dtype=jnp.int32)
-        return anchors_jax, covariances_jax, indices_jax, indices.shape[1]
+        # Empty source array would build a zero-axis EventLocationModel.
+        # Collapse to the no-op channel after shape validation succeeds.
+        return _empty_event_channel(n_cam, _NO_EVENT_PAD_WIDTH)
 
     return (
         jnp.asarray(anchors, dtype=jnp.float32),
@@ -1569,7 +1562,7 @@ def _update_camera_3d_scanned(
                 layout,
             )
 
-        log_lik = _gaussian_log_likelihood_masked(innovation, S, active_mask)
+        log_lik = gaussian_log_likelihood_masked(innovation, S, active_mask)
         if config.use_mahalanobis_gating:
             nis = _mahalanobis_distance_masked(innovation, S, active_mask)
             accept_update = nis < chi2_thresholds[dof]
@@ -1647,25 +1640,3 @@ def _chi2_threshold_table(
 
     values = [0.0] + [float(chi2.ppf(prob, df=dof)) for dof in range(1, max_dof + 1)]
     return jnp.asarray(values, dtype=dtype)
-
-
-def _gaussian_log_likelihood_masked(
-    innovation: jnp.ndarray,
-    covariance: jnp.ndarray,
-    active_mask: jnp.ndarray,
-) -> jnp.ndarray:
-    """Gaussian log likelihood on active measurement coordinates using masks."""
-    innovation_masked, covariance_masked = _masked_measurement_system(
-        innovation,
-        covariance,
-        active_mask,
-    )
-    dim = jnp.sum(active_mask.astype(innovation.dtype))
-    solved = psd_solve(covariance_masked, innovation_masked)
-    sign, logdet = jnp.linalg.slogdet(symmetrize(covariance_masked))
-    logdet = jnp.where(sign > 0, logdet, jnp.asarray(0.0, dtype=innovation.dtype))
-    return -0.5 * (
-        dim * jnp.log(jnp.asarray(2.0 * np.pi, dtype=innovation.dtype))
-        + logdet
-        + jnp.dot(innovation_masked, solved)
-    )
