@@ -13,6 +13,7 @@ from trodestrack.config.schemas import EventLocationSource, SessionConfig
 from trodestrack.io.imu_parquet import load_imu_parquet
 from trodestrack.io.led_identity import resolve_led_identity
 from trodestrack.io.loaders import PositionPixels
+from trodestrack.io.loaders._trodes_native import load_trodes_native_position
 from trodestrack.io.pixel_to_meters import pixels_to_meters
 from trodestrack.io.ttl_events import (
     EDGE_NAME_TO_INT,
@@ -96,12 +97,95 @@ def load_session(config: SessionConfig) -> PreparedSession:
 
 
 def _load_trodes_native(config: SessionConfig) -> PreparedSession:
-    """Phase 1 stub. The full loader lands in Phase 2."""
+    inputs = config.inputs
+    assert inputs.trodes_native is not None
+    cfg = inputs.trodes_native
 
-    raise NotImplementedError(
-        "inputs.format='trodes_native' is implemented in Phase 2 of the "
-        "native-loaders plan."
+    pixels = load_trodes_native_position(
+        cfg.position_tracking_file, cfg.camera_timestamps_file
     )
+    led1, led2, conf_cam = pixels_to_meters(pixels, config.camera)
+    # Native loader produces both LEDs (file format guarantees the
+    # xloc2/yloc2 columns; rows where LEDs aren't found are NaN, not
+    # absent). Single-LED native sources will revisit this assumption.
+    assert led2 is not None
+
+    t_imu, U_imu, U_full = _resolve_imu_for_native_loader(config, pixels.t_cam)
+
+    t_start = min(float(pixels.t_cam[0]), float(t_imu[0]))
+    t_imu_aligned = t_imu - t_start
+    t_cam = pixels.t_cam - t_start + config.camera.time_offset_s
+    _validate_time_vector(t_cam, "camera timestamps")
+    if t_imu_aligned.size > 1:
+        _validate_time_vector(t_imu_aligned, "IMU timestamps after preprocessing")
+
+    mask = np.isfinite(led1).all(axis=1) | np.isfinite(led2).all(axis=1)
+    led_distance = config.filter.led_distance or _median_led_distance(led1, led2, mask)
+
+    diagnostics: dict[str, object] = {
+        "loader": {
+            "format": "trodes_native",
+            **pixels.diagnostics,
+            "imu_source": "parquet" if inputs.imu_file is not None else "synthetic",
+            "imu_samples": int(t_imu.size),
+            "camera_frames": int(t_cam.size),
+            "camera_rate_hz": (
+                float(1.0 / np.median(np.diff(t_cam)))
+                if t_cam.size > 1
+                else float("nan")
+            ),
+            "led_distance_m": float(led_distance),
+        }
+    }
+    return PreparedSession(
+        t_imu=t_imu_aligned,
+        U_imu=U_imu,
+        t_cam=t_cam,
+        Z_cam_led1=led1,
+        Z_cam_led2=led2,
+        mask_cam=mask,
+        conf_cam=conf_cam,
+        led_distance=led_distance,
+        diagnostics=diagnostics,
+        config=config,
+        gyro_z_for_led_identity=(U_full[:, 2] if U_full is not None else None),
+        U_imu_for_calibration=U_full,
+    )
+
+
+def _resolve_imu_for_native_loader(
+    config: SessionConfig, t_cam_unaligned: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    """Resolve the IMU stream for ``trodes_native`` / ``dlc_keypoints``.
+
+    Returns ``(t_imu_unaligned, U_imu_filter, U_full)`` where
+    ``t_imu_unaligned`` is in the same clock as ``t_cam_unaligned``
+    (caller subtracts ``t_start``). ``U_full`` is ``None`` for the
+    synthetic vision-only stream.
+
+    Implements the IMU source resolution contract: parquet wins;
+    if no IMU source is configured, vision_only synthesizes a zero
+    stream and any IMU-consuming state_mode raises with the three-
+    option remediation message.
+    """
+
+    if config.inputs.imu_file is not None:
+        imu_data = load_imu_parquet(config.inputs.imu_file, config)
+        t_imu = imu_data.t_imu_unix + config.imu.time_offset_s
+        return t_imu, imu_data.U_filter, imu_data.U_full
+
+    if _uses_imu(config.filter.state_mode):
+        raise ValueError(
+            f"inputs.format={config.inputs.format!r} requires an IMU "
+            "source. Provide inputs.imu_file, use NWB analog IMU "
+            "(NWB only), or set filter.state_mode: vision_only."
+        )
+
+    # vision_only: synthesize a zero IMU stream sized to the camera
+    # vector (same length is convenient for the no-fusion path).
+    t_imu = t_cam_unaligned.copy()
+    U_imu = np.zeros((t_imu.size, 3), dtype=float)
+    return t_imu, U_imu, None
 
 
 def _load_dlc_keypoints(config: SessionConfig) -> PreparedSession:

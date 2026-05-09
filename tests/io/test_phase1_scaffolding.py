@@ -36,7 +36,6 @@ from trodestrack.io import load_session
 from trodestrack.io.session import (
     _load_dlc_keypoints,
     _load_nwb,
-    _load_trodes_native,
 )
 
 # ----------------------------------------------------------------------
@@ -230,24 +229,6 @@ inputs:
 # ----------------------------------------------------------------------
 
 
-def _trodes_native_config(tmp_path: Path) -> SessionConfig:
-    return SessionConfig.model_validate(
-        {
-            "inputs": {
-                "format": "trodes_native",
-                "trodes_native": {
-                    "position_tracking_file": str(
-                        tmp_path / "session.videoPositionTracking"
-                    ),
-                    "camera_timestamps_file": str(
-                        tmp_path / "session.videoTimeStamps.cameraHWSync"
-                    ),
-                },
-            },
-        },
-    )
-
-
 def _dlc_keypoints_config(tmp_path: Path) -> SessionConfig:
     return SessionConfig.model_validate(
         {
@@ -272,14 +253,6 @@ def _nwb_config(tmp_path: Path) -> SessionConfig:
             },
         },
     )
-
-
-def test_trodes_native_stub_raises_not_implemented(tmp_path: Path) -> None:
-    """Phase 2 message names the implementing phase."""
-
-    config = _trodes_native_config(tmp_path)
-    with pytest.raises(NotImplementedError, match="Phase 2"):
-        _load_trodes_native(config)
 
 
 def test_dlc_keypoints_stub_with_extra_raises_not_implemented(
@@ -328,15 +301,6 @@ def test_nwb_extra_missing_raises_import_error(
 # ----------------------------------------------------------------------
 # load_session() top-level dispatch goes through the stubs.
 # ----------------------------------------------------------------------
-
-
-def test_load_session_dispatches_to_trodes_native_stub(tmp_path: Path) -> None:
-    """``load_session`` routes ``format='trodes_native'`` to the
-    Phase 2 stub."""
-
-    config = _trodes_native_config(tmp_path)
-    with pytest.raises(NotImplementedError, match="Phase 2"):
-        load_session(config)
 
 
 def test_load_session_dispatches_to_dlc_keypoints_stub(
