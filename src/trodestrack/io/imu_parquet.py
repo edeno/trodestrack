@@ -9,9 +9,49 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from trodestrack.config.schemas import SessionConfig
+from trodestrack.config.schemas import IMUConfig, SessionConfig
 
 DEG_TO_RAD = np.pi / 180.0
+
+
+def convert_imu_columns_to_si(
+    raw_columns: dict[str, np.ndarray], imu_cfg: IMUConfig
+) -> np.ndarray:
+    """Apply axis-sign + gyro/accel scale to per-axis raw IMU columns.
+
+    Source-agnostic: callers supply ``raw_columns`` keyed by canonical
+    axis names (``gyro_x``, ``gyro_y``, ``gyro_z``, ``accel_x``,
+    ``accel_y``, ``accel_z``) and get back the same SI-converted
+    ``U_full`` the parquet path produces. Used by both
+    ``_convert_imu_to_si`` (parquet column lookup) and the NWB
+    ``from_analog_container`` (channel-id column lookup).
+
+    Output shape is ``(n, 3)`` for ``imu_cfg.mode == "2d"``
+    (``[gyro_z, accel_x, accel_y]``) and ``(n, 6)`` for ``"3d"``
+    (``[gyro_x, gyro_y, gyro_z, accel_x, accel_y, accel_z]``).
+    """
+
+    signs = imu_cfg.axis_signs
+    gyro_scale = imu_cfg.gyro_scale_dps_per_lsb * DEG_TO_RAD
+    accel_scale = imu_cfg.accel_scale_g_per_lsb * imu_cfg.gravity_mps2
+
+    def converted(axis: str) -> np.ndarray:
+        scale = gyro_scale if axis.startswith("gyro") else accel_scale
+        return signs.get(axis, 1.0) * raw_columns[axis].astype(float) * scale
+
+    values = {axis: converted(axis) for axis in _axis_names()}
+    if imu_cfg.mode == "2d":
+        return np.column_stack([values["gyro_z"], values["accel_x"], values["accel_y"]])
+    return np.column_stack(
+        [
+            values["gyro_x"],
+            values["gyro_y"],
+            values["gyro_z"],
+            values["accel_x"],
+            values["accel_y"],
+            values["accel_z"],
+        ]
+    )
 
 
 @dataclass(frozen=True)
@@ -89,41 +129,8 @@ def _remove_sample_hold(imu_df: pd.DataFrame, config: SessionConfig) -> pd.DataF
 
 def _convert_imu_to_si(imu_df: pd.DataFrame, config: SessionConfig) -> np.ndarray:
     cols = config.imu.axis_map
-    signs = config.imu.axis_signs
-    gyro_scale = config.imu.gyro_scale_dps_per_lsb * DEG_TO_RAD
-    accel_scale = config.imu.accel_scale_g_per_lsb * config.imu.gravity_mps2
-    values = {
-        "gyro_x": signs.get("gyro_x", 1.0)
-        * imu_df[cols["gyro_x"]].to_numpy()
-        * gyro_scale,
-        "gyro_y": signs.get("gyro_y", 1.0)
-        * imu_df[cols["gyro_y"]].to_numpy()
-        * gyro_scale,
-        "gyro_z": signs.get("gyro_z", 1.0)
-        * imu_df[cols["gyro_z"]].to_numpy()
-        * gyro_scale,
-        "accel_x": signs.get("accel_x", 1.0)
-        * imu_df[cols["accel_x"]].to_numpy()
-        * accel_scale,
-        "accel_y": signs.get("accel_y", 1.0)
-        * imu_df[cols["accel_y"]].to_numpy()
-        * accel_scale,
-        "accel_z": signs.get("accel_z", 1.0)
-        * imu_df[cols["accel_z"]].to_numpy()
-        * accel_scale,
-    }
-    if config.imu.mode == "2d":
-        return np.column_stack([values["gyro_z"], values["accel_x"], values["accel_y"]])
-    return np.column_stack(
-        [
-            values["gyro_x"],
-            values["gyro_y"],
-            values["gyro_z"],
-            values["accel_x"],
-            values["accel_y"],
-            values["accel_z"],
-        ]
-    )
+    raw = {axis: imu_df[cols[axis]].to_numpy() for axis in _axis_names()}
+    return convert_imu_columns_to_si(raw, config.imu)
 
 
 def _project_imu_for_filter(U_full: np.ndarray, state_mode: str) -> np.ndarray:

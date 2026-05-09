@@ -29,7 +29,8 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from trodestrack.config.schemas import NWBConfig, NWBLEDSourceConfig
+from trodestrack.config.schemas import IMUConfig, NWBConfig, NWBLEDSourceConfig
+from trodestrack.io.imu_parquet import convert_imu_columns_to_si
 from trodestrack.io.loaders._shared import PositionPixels
 
 if TYPE_CHECKING:
@@ -39,6 +40,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "NWBSessionExtras",
+    "from_analog_container",
     "from_pose_estimation_container",
     "from_position_container",
     "load_nwb_session",
@@ -191,14 +193,106 @@ def from_pose_estimation_container(
     )
 
 
+def from_analog_container(
+    analog_ts: Any,
+    imu_cfg: IMUConfig,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Convert a Trodes-style analog ``TimeSeries`` to ``(t_imu, U_full)``.
+
+    The TimeSeries is the one ``trodes_to_nwb.convert_analog`` writes
+    at ``processing/analog/analog/analog`` — channel ids live in the
+    ``description`` attribute as a triple-space-separated string
+    (per ``trodes_to_nwb.convert_analog.__merge_row_description``);
+    data is ``(n_samples, n_channels)`` int16-stacked ECU + headstage
+    columns.
+
+    Channel selection: each ``imu_cfg.axis_map`` value (e.g.
+    ``"Headstage_GyroX"``) must resolve to exactly one column. SI
+    conversion shares ``convert_imu_columns_to_si`` with the parquet
+    path, guaranteeing bit-identical output for matched inputs.
+
+    Eager numpy materialization: the returned arrays are independent
+    of the source ``TimeSeries`` so the caller may close the
+    underlying ``NWBHDF5IO`` (or let ``fetch_nwb``'s file close)
+    after this returns.
+    """
+
+    timestamps = _eager_array(analog_ts.timestamps, dtype=float)
+    data = _eager_array(analog_ts.data)
+    if data.ndim != 2:
+        raise ValueError(
+            f"Analog TimeSeries data must be 2-D (n_samples, n_channels); "
+            f"got shape {data.shape}."
+        )
+    if timestamps.shape != (data.shape[0],):
+        raise ValueError(
+            f"Analog TimeSeries timestamps shape {timestamps.shape} does "
+            f"not match data length {data.shape[0]}."
+        )
+
+    description = str(getattr(analog_ts, "description", "") or "")
+    channel_ids = _parse_channel_ids(description)
+    if len(channel_ids) != data.shape[1]:
+        raise ValueError(
+            f"Analog TimeSeries channel-id count from description "
+            f"({len(channel_ids)}: {channel_ids}) does not match data "
+            f"shape {data.shape}. The description must list exactly one "
+            "id per data column "
+            "(per trodes_to_nwb.convert_analog.__merge_row_description)."
+        )
+
+    name_to_col = {name: i for i, name in enumerate(channel_ids)}
+    raw_columns: dict[str, np.ndarray] = {}
+    missing: list[tuple[str, str]] = []
+    for axis, mapped_name in imu_cfg.axis_map.items():
+        if mapped_name not in name_to_col:
+            missing.append((axis, mapped_name))
+            continue
+        raw_columns[axis] = data[:, name_to_col[mapped_name]]
+    if missing:
+        raise ValueError(
+            f"NWB analog channel IDs missing axis_map entries: "
+            f"{missing}. Available channel IDs: {channel_ids}. "
+            "Update inputs.imu (axis_map) to match the channel names "
+            "the writer recorded."
+        )
+
+    U_full = convert_imu_columns_to_si(raw_columns, imu_cfg)
+    return timestamps, U_full
+
+
+def _parse_channel_ids(description: str) -> list[str]:
+    """Split a channel-id description string back into a list.
+
+    ``trodes_to_nwb.convert_analog.__merge_row_description`` writes
+    ``"   ".join(ids) + "   "`` (triple-space separator with a
+    trailing ``"   "``). Splitting on the triple-space yields the
+    original ids plus a trailing empty string; filter empties.
+    """
+
+    return [part for part in description.split("   ") if part]
+
+
 # ---------------------------------------------------------------------
 # Path-based wrapper (lazy-imports pynwb).
 # ---------------------------------------------------------------------
 
 
-def load_nwb_session(cfg: NWBConfig) -> tuple[PositionPixels, NWBSessionExtras]:
+def load_nwb_session(
+    cfg: NWBConfig,
+    *,
+    imu_cfg: IMUConfig | None = None,
+) -> tuple[PositionPixels, NWBSessionExtras]:
     """Open an NWB file at ``cfg.nwb_file``, pick LED container by
     neurodata type, and delegate to a container-layer entry.
+
+    When ``imu_cfg`` is provided and the file has the standard
+    ``processing/analog/analog/analog`` TimeSeries (per
+    ``trodes_to_nwb.convert_analog._NWB_ANALOG_DATA_PATH``), the
+    extras include the SI-converted ``(t_imu, U_full)`` pair via
+    ``from_analog_container``. Without ``imu_cfg`` we don't know
+    which channels to select, so the analog container is left
+    unread.
 
     Lazy-imports ``pynwb`` so ``import trodestrack.io.nwb`` does not
     force the ``[nwb]`` extra to be installed.
@@ -225,11 +319,51 @@ def load_nwb_session(cfg: NWBConfig) -> tuple[PositionPixels, NWBSessionExtras]:
                 f"Detected LED container has unsupported neurodata_type "
                 f"{ndt!r}. Expected 'Position' or 'PoseEstimation'."
             )
-        # Phase 4b/4c populate IMU / DIO; Phase 4a returns the empty
-        # placeholder.
-        extras = NWBSessionExtras()
+        imu_pair: tuple[np.ndarray, np.ndarray] | None = None
+        imu_diagnostics: dict[str, Any] = {}
+        if imu_cfg is not None:
+            analog_ts = _find_analog_timeseries(nwbfile)
+            if analog_ts is not None:
+                t_imu, U_full = from_analog_container(analog_ts, imu_cfg)
+                imu_pair = (t_imu, U_full)
+                imu_diagnostics = {
+                    "imu_source": "nwb_analog",
+                    "imu_samples": int(t_imu.size),
+                    "imu_channel_count": int(U_full.shape[1]),
+                }
+            else:
+                imu_diagnostics = {"imu_source": None}
+        # Phase 4c populates dio_events.
+        extras = NWBSessionExtras(imu=imu_pair, diagnostics=imu_diagnostics)
         return pixels, extras
     # NWBHDF5IO closed here; pixels/extras hold numpy arrays only.
+
+
+def _find_analog_timeseries(nwbfile: Any) -> Any | None:
+    """Locate ``processing/analog/analog/analog`` if present.
+
+    The Trodes writer creates a ``processing["analog"]`` module with a
+    ``BehavioralEvents`` container named ``"analog"`` whose
+    ``time_series`` dict has a single entry also named ``"analog"``
+    (per ``trodes_to_nwb.convert_analog.add_analog_data``). The full
+    HDF5 path is ``processing/analog/analog/analog/data``.
+
+    Returns the TimeSeries or ``None`` when the file has no analog
+    group.
+    """
+
+    processing = getattr(nwbfile, "processing", None) or {}
+    if "analog" not in processing:
+        return None
+    module = processing["analog"]
+    interfaces = getattr(module, "data_interfaces", {})
+    if "analog" not in interfaces:
+        return None
+    container = interfaces["analog"]
+    time_series = getattr(container, "time_series", None)
+    if time_series is None or "analog" not in time_series:
+        return None
+    return time_series["analog"]
 
 
 # ---------------------------------------------------------------------

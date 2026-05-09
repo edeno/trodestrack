@@ -110,8 +110,8 @@ def _load_trodes_native(config: SessionConfig) -> PreparedSession:
     # absent). Single-LED native sources will revisit this assumption.
     assert led2 is not None
 
-    t_imu_raw, U_imu, U_full, imu_is_synthetic = _resolve_imu_for_native_loader(
-        config, pixels.t_cam
+    t_imu_raw, U_imu, U_full, imu_is_synthetic, imu_source = (
+        _resolve_imu_for_native_loader(config, pixels.t_cam)
     )
 
     # Match the parquet path's t_start ordering (session.py:449): pick
@@ -138,7 +138,7 @@ def _load_trodes_native(config: SessionConfig) -> PreparedSession:
         "loader": {
             "format": "trodes_native",
             **pixels.diagnostics,
-            "imu_source": "parquet" if inputs.imu_file is not None else "synthetic",
+            "imu_source": imu_source,
             "imu_samples": int(t_imu_aligned.size),
             "camera_frames": int(t_cam.size),
             "camera_rate_hz": (
@@ -237,26 +237,45 @@ def _check_imu_camera_overlap(
 
 
 def _resolve_imu_for_native_loader(
-    config: SessionConfig, t_cam_unaligned: np.ndarray
-) -> tuple[np.ndarray, np.ndarray, np.ndarray | None, bool]:
-    """Resolve the IMU stream for ``trodes_native`` / ``dlc_keypoints``.
+    config: SessionConfig,
+    t_cam_unaligned: np.ndarray,
+    *,
+    nwb_analog: tuple[np.ndarray, np.ndarray] | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None, bool, str]:
+    """Resolve the IMU stream for ``trodes_native`` / ``dlc_keypoints`` / ``nwb``.
 
-    Returns ``(t_imu_raw, U_imu_filter, U_full, is_synthetic)`` where
-    ``t_imu_raw`` is the IMU clock **before** ``imu.time_offset_s``
-    is added — the caller picks ``t_start`` from raw clocks first
-    (matching ``_load_spikegadgets_trodes`` at session.py:449) and
-    only then applies the offset. ``U_full`` is ``None`` and
-    ``is_synthetic=True`` for the no-IMU vision_only fallback.
+    Returns ``(t_imu_raw, U_imu_filter, U_full, is_synthetic, source)``
+    where ``t_imu_raw`` is the IMU clock **before**
+    ``imu.time_offset_s`` is added — the caller picks ``t_start``
+    from raw clocks first (matching ``_load_spikegadgets_trodes`` at
+    session.py:449) and only then applies the offset. ``U_full`` is
+    ``None`` and ``is_synthetic=True`` for the no-IMU vision_only
+    fallback. ``source`` is one of ``"parquet"``, ``"nwb_analog"``,
+    ``"synthetic"`` for diagnostics.
 
-    Implements the IMU source resolution contract: parquet wins;
-    if no IMU source is configured, vision_only synthesizes a zero
-    stream and any IMU-consuming state_mode raises with the three-
-    option remediation message.
+    Implements the IMU source resolution contract: parquet wins; the
+    NWB analog group is the second-priority real source; if no real
+    IMU source is available, vision_only synthesizes a zero stream
+    and any IMU-consuming state_mode raises with the three-option
+    remediation message.
     """
 
     if config.inputs.imu_file is not None:
         imu_data = load_imu_parquet(config.inputs.imu_file, config)
-        return imu_data.t_imu_unix, imu_data.U_filter, imu_data.U_full, False
+        return (
+            imu_data.t_imu_unix,
+            imu_data.U_filter,
+            imu_data.U_full,
+            False,
+            "parquet",
+        )
+
+    if nwb_analog is not None:
+        from trodestrack.io.imu_parquet import _project_imu_for_filter
+
+        t_imu, U_full = nwb_analog
+        U_filter = _project_imu_for_filter(U_full, config.filter.state_mode)
+        return t_imu, U_filter, U_full, False, "nwb_analog"
 
     if _uses_imu(config.filter.state_mode):
         raise ValueError(
@@ -269,7 +288,7 @@ def _resolve_imu_for_native_loader(
     # vector (same length is convenient for the no-fusion path).
     t_imu = t_cam_unaligned.copy()
     U_imu = np.zeros((t_imu.size, 3), dtype=float)
-    return t_imu, U_imu, None, True
+    return t_imu, U_imu, None, True, "synthetic"
 
 
 def _load_dlc_keypoints(config: SessionConfig) -> PreparedSession:
@@ -302,8 +321,8 @@ def _load_dlc_keypoints(config: SessionConfig) -> PreparedSession:
     led1, led2, conf_cam = pixels_to_meters(pixels, config.camera)
     assert led2 is not None  # DLC always returns both bodyparts
 
-    t_imu_raw, U_imu, U_full, imu_is_synthetic = _resolve_imu_for_native_loader(
-        config, pixels.t_cam
+    t_imu_raw, U_imu, U_full, imu_is_synthetic, imu_source = (
+        _resolve_imu_for_native_loader(config, pixels.t_cam)
     )
 
     t_start = min(float(pixels.t_cam[0]), float(t_imu_raw[0]))
@@ -323,7 +342,7 @@ def _load_dlc_keypoints(config: SessionConfig) -> PreparedSession:
         "loader": {
             "format": "dlc_keypoints",
             **pixels.diagnostics,
-            "imu_source": "parquet" if inputs.imu_file is not None else "synthetic",
+            "imu_source": imu_source,
             "imu_samples": int(t_imu_aligned.size),
             "camera_frames": int(t_cam.size),
             "camera_rate_hz": (
@@ -357,7 +376,11 @@ def _load_nwb(config: SessionConfig) -> PreparedSession:
 
     from trodestrack.io.nwb import load_nwb_session
 
-    pixels, _extras = load_nwb_session(cfg)
+    # Pass IMUConfig only when no parquet override is configured —
+    # ``inputs.imu_file`` wins per the IMU resolution contract, so
+    # reading the analog group when it'll be discarded is wasted IO.
+    nwb_imu_cfg = config.imu if inputs.imu_file is None else None
+    pixels, extras = load_nwb_session(cfg, imu_cfg=nwb_imu_cfg)
     led1, led2, conf_cam = pixels_to_meters(
         pixels,
         config.camera,
@@ -365,8 +388,8 @@ def _load_nwb(config: SessionConfig) -> PreparedSession:
     )
     assert led2 is not None  # NWB Position / PoseEstimation always pairs LEDs
 
-    t_imu_raw, U_imu, U_full, imu_is_synthetic = _resolve_imu_for_native_loader(
-        config, pixels.t_cam
+    t_imu_raw, U_imu, U_full, imu_is_synthetic, imu_source = (
+        _resolve_imu_for_native_loader(config, pixels.t_cam, nwb_analog=extras.imu)
     )
 
     t_start = min(float(pixels.t_cam[0]), float(t_imu_raw[0]))
@@ -386,7 +409,7 @@ def _load_nwb(config: SessionConfig) -> PreparedSession:
         "loader": {
             "format": "nwb",
             **pixels.diagnostics,
-            "imu_source": "parquet" if inputs.imu_file is not None else "synthetic",
+            "imu_source": imu_source,
             "imu_samples": int(t_imu_aligned.size),
             "camera_frames": int(t_cam.size),
             "camera_rate_hz": (
