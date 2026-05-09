@@ -664,6 +664,53 @@ def test_imu_calibration_diagnostics_run_for_native_loader(tmp_path: Path) -> No
     )
 
 
+def test_overlap_error_remediation_is_native_specific(tmp_path: Path) -> None:
+    """When ``trodes_native`` hits the IMU/camera overlap guard, the
+    error message must use trodes_native-relevant remediation (not
+    DLC-specific advice about ``timestamps_source: meta_pickle``).
+    """
+
+    n = 6
+    ts_path, info = _make_ptp_timestamps_file(tmp_path, n_pre_pause=2, n_post_pause=n)
+    pos_path = _make_position_tracking_file(tmp_path, info["pos_timestamps"])
+
+    # IMU on a Unix-like clock far away from the PTP camera clock.
+    imu_path = tmp_path / "imu.parquet"
+    imu_t = np.linspace(2_000_000_000.0, 2_000_000_001.0, 30)
+    pd.DataFrame(
+        {
+            "time": imu_t,
+            "Headstage_GyroX": np.zeros(30, dtype=int),
+            "Headstage_GyroY": np.zeros(30, dtype=int),
+            "Headstage_GyroZ": np.arange(30, dtype=int),
+            "Headstage_AccelX": np.zeros(30, dtype=int),
+            "Headstage_AccelY": np.zeros(30, dtype=int),
+            "Headstage_AccelZ": np.zeros(30, dtype=int),
+        }
+    ).to_parquet(imu_path)
+
+    config = _build_session_config(
+        tmp_path,
+        pos_path,
+        ts_path,
+        state_mode="2d_cam_3d_imu",
+        imu_path=imu_path,
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        load_session(config)
+    msg = str(excinfo.value)
+    assert "do not overlap" in msg
+    # Native-specific remediation surface — the DLC-specific
+    # ``timestamps_source: meta_pickle`` / ``trodes_hw_sync`` /
+    # ``timestamp_file`` strings must not appear here.
+    assert "PTP camera timestamps" in msg
+    assert "different recording" in msg
+    assert "meta_pickle" not in msg
+    assert "trodes_hw_sync" not in msg
+    assert "timestamp_file" not in msg
+
+
 def test_pixel_to_meter_scaling_matches_camera_config(tmp_path: Path) -> None:
     """``camera.meters_per_pixel`` is applied to the loaded pixels
     before they reach ``PreparedSession``."""

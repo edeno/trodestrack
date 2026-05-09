@@ -170,9 +170,10 @@ def _check_imu_camera_overlap(
 ) -> None:
     """Raise if IMU and camera time ranges don't overlap after alignment.
 
-    Catches the silent-failure mode where DLC ``meta_pickle``
-    (relative seconds starting at 0) is paired with a parquet IMU on
-    a Unix-like clock (~1.7e9 s): the EKF then sees zero IMU samples
+    Catches the silent-failure mode where the camera clock and the
+    parquet IMU clock are mismatched (e.g., DLC ``meta_pickle``
+    synthesizes relative seconds starting at 0 while ``inputs.imu_file``
+    carries Unix-like timestamps): the EKF then sees zero IMU samples
     per camera interval and produces an IMU-configured but
     IMU-empty fused trajectory.
 
@@ -183,23 +184,56 @@ def _check_imu_camera_overlap(
 
     imu_lo, imu_hi = float(t_imu[0]), float(t_imu[-1])
     cam_lo, cam_hi = float(t_cam[0]), float(t_cam[-1])
-    if imu_hi < cam_lo or imu_lo > cam_hi:
-        raise ValueError(
-            f"inputs.format={format_name!r}: IMU and camera streams do "
-            "not overlap after alignment "
-            f"(IMU: [{imu_lo:.3f}, {imu_hi:.3f}] s; "
-            f"camera: [{cam_lo:.3f}, {cam_hi:.3f}] s). The EKF would "
-            "see zero IMU samples per camera interval and produce a "
-            "fused-but-empty trajectory. The two clocks differ — for "
-            "DLC, ``timestamps_source: meta_pickle`` synthesizes "
-            "relative seconds starting at 0 while ``inputs.imu_file`` "
-            "carries Unix-like timestamps. Fix by using "
-            "``timestamps_source: trodes_hw_sync`` (with a Trodes "
-            "*.videoTimeStamps.cameraHWSync), ``timestamps_source: "
-            "timestamp_file`` with absolute seconds, or ``imu.time_offset_s`` / "
+    if imu_hi >= cam_lo and imu_lo <= cam_hi:
+        return
+
+    if format_name == "dlc_keypoints":
+        # Most common cause: meta_pickle (relative seconds starting at
+        # 0) paired with a Unix-like inputs.imu_file. The two
+        # alternative timestamps_source values fix the camera clock;
+        # imu.time_offset_s / camera.time_offset_s let the user nudge
+        # the existing source.
+        remediation = (
+            "The two clocks differ — for DLC, ``timestamps_source: "
+            "meta_pickle`` synthesizes relative seconds starting at 0 "
+            "while ``inputs.imu_file`` carries Unix-like timestamps. "
+            "Fix by using ``timestamps_source: trodes_hw_sync`` (with "
+            "a Trodes *.videoTimeStamps.cameraHWSync), "
+            "``timestamps_source: timestamp_file`` with absolute "
+            "seconds, or ``imu.time_offset_s`` / "
             "``camera.time_offset_s`` to bring the clocks into "
             "agreement."
         )
+    elif format_name == "trodes_native":
+        # PTP camera and parquet IMU should already share a Unix-like
+        # clock; non-overlap usually means the two were recorded in
+        # separate sessions or one of the time_offset_s knobs is set
+        # to a wrong value.
+        remediation = (
+            "The PTP camera timestamps and ``inputs.imu_file`` should "
+            "share a Unix-like clock; mismatched ranges typically "
+            "mean the two files come from different recording "
+            "sessions, or that ``imu.time_offset_s`` / "
+            "``camera.time_offset_s`` is set to a value that pushes "
+            "the streams apart."
+        )
+    else:
+        # Generic fallback for future native formats.
+        remediation = (
+            "Check that ``inputs.imu_file`` and the camera timestamps "
+            "share the same clock, and adjust ``imu.time_offset_s`` / "
+            "``camera.time_offset_s`` if they need to be nudged into "
+            "agreement."
+        )
+
+    raise ValueError(
+        f"inputs.format={format_name!r}: IMU and camera streams do "
+        "not overlap after alignment "
+        f"(IMU: [{imu_lo:.3f}, {imu_hi:.3f}] s; "
+        f"camera: [{cam_lo:.3f}, {cam_hi:.3f}] s). The EKF would "
+        "see zero IMU samples per camera interval and produce a "
+        f"fused-but-empty trajectory. {remediation}"
+    )
 
 
 def _resolve_imu_for_native_loader(
