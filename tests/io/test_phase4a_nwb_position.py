@@ -391,6 +391,141 @@ def test_auto_detect_handles_non_default_series_names(tmp_path: Path) -> None:
     assert pixels.led1_pixels.shape == (30, 2)
 
 
+def test_auto_detect_handles_renamed_position_container(tmp_path: Path) -> None:
+    """``container='auto'`` matches a ``Position`` container by
+    ``neurodata_type`` even when the container itself has a
+    non-default name (writers may rename it ``custom_position`` or
+    ``RawPosition`` per their schema)."""
+
+    nwbfile = _make_nwb_skeleton()
+    n_frames = 30
+    timestamps = np.arange(n_frames, dtype=float) / 30.0
+    led1_data = np.column_stack([100.0 + np.arange(n_frames), np.full(n_frames, 200.0)])
+    led2_data = np.column_stack([110.0 + np.arange(n_frames), np.full(n_frames, 210.0)])
+
+    # Construct a Position container with a non-default name. The
+    # neurodata_type is still "Position" — the auto-detect pathway
+    # must match on type, not name.
+    position = Position(name="custom_position_container")
+    position.create_spatial_series(
+        name="led_0_series_0",
+        description="LED1",
+        data=led1_data,
+        unit="pixels",
+        conversion=1.0,
+        reference_frame="upper-left",
+        timestamps=timestamps,
+    )
+    position.create_spatial_series(
+        name="led_1_series_0",
+        description="LED2",
+        data=led2_data,
+        unit="pixels",
+        conversion=1.0,
+        reference_frame="upper-left",
+        timestamps=timestamps,
+    )
+    behavior = nwbfile.create_processing_module(name="behavior", description="behavior")
+    behavior.add(position)
+
+    nwb_path = tmp_path / "renamed_position.nwb"
+    _write_nwb(nwbfile, nwb_path)
+    pixels, _ = load_nwb_session(NWBConfig(nwb_file=nwb_path))
+
+    assert pixels.led1_pixels.shape == (30, 2)
+
+
+# ---------------------------------------------------------------------
+# Pair-validation guards.
+# ---------------------------------------------------------------------
+
+
+def test_paired_led_timestamps_must_match(tmp_path: Path) -> None:
+    """LED1 and LED2 SpatialSeries must share a clock — silently
+    pairing LED2 samples with LED1's time base would let a mis-paired
+    write produce a fused-but-misaligned trajectory."""
+
+    nwbfile = _make_nwb_skeleton()
+    n = 5
+    led1_data = np.column_stack([100.0 + np.arange(n), np.full(n, 200.0)])
+    led2_data = np.column_stack([110.0 + np.arange(n), np.full(n, 210.0)])
+    t1 = np.arange(n, dtype=float)
+    t2 = t1 + 10.0  # offset by 10s — same shape, different clock
+
+    position = Position()
+    position.create_spatial_series(
+        name="led_0_series_0",
+        description="LED1",
+        data=led1_data,
+        unit="pixels",
+        conversion=1.0,
+        reference_frame="upper-left",
+        timestamps=t1,
+    )
+    position.create_spatial_series(
+        name="led_1_series_0",
+        description="LED2",
+        data=led2_data,
+        unit="pixels",
+        conversion=1.0,
+        reference_frame="upper-left",
+        timestamps=t2,
+    )
+    behavior = nwbfile.create_processing_module(name="behavior", description="behavior")
+    behavior.add(position)
+
+    nwb_path = tmp_path / "mismatched_timestamps.nwb"
+    _write_nwb(nwbfile, nwb_path)
+
+    with pytest.raises(ValueError, match="timestamps differ"):
+        load_nwb_session(NWBConfig(nwb_file=nwb_path))
+
+
+def test_paired_led_conversion_mismatch_rejected(tmp_path: Path) -> None:
+    """Per-series ``conversion`` mismatches are rejected up front.
+
+    Silently picking LED1's calibration would produce a fused-but-
+    miscalibrated trajectory at the same fault surface as the
+    timestamp-mismatch guard.
+    """
+
+    nwbfile = _make_nwb_skeleton()
+    n = 5
+    led1_data = np.column_stack([100.0 + np.arange(n), np.full(n, 200.0)])
+    led2_data = np.column_stack([110.0 + np.arange(n), np.full(n, 210.0)])
+    timestamps = np.arange(n, dtype=float)
+
+    position = Position()
+    # LED1 is the sentinel "no calibration baked in".
+    position.create_spatial_series(
+        name="led_0_series_0",
+        description="LED1",
+        data=led1_data,
+        unit="pixels",
+        conversion=1.0,
+        reference_frame="upper-left",
+        timestamps=timestamps,
+    )
+    # LED2 is calibrated — different scalar from LED1.
+    position.create_spatial_series(
+        name="led_1_series_0",
+        description="LED2",
+        data=led2_data,
+        unit="meters",
+        conversion=0.005,
+        reference_frame="upper-left",
+        timestamps=timestamps,
+    )
+    behavior = nwbfile.create_processing_module(name="behavior", description="behavior")
+    behavior.add(position)
+
+    nwb_path = tmp_path / "mismatched_conversion.nwb"
+    _write_nwb(nwbfile, nwb_path)
+
+    with pytest.raises(ValueError, match="calibration mismatch"):
+        load_nwb_session(NWBConfig(nwb_file=nwb_path))
+
+
 # ---------------------------------------------------------------------
 # ndx-pose v0.1.x compatibility.
 # ---------------------------------------------------------------------

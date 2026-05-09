@@ -258,11 +258,17 @@ def _read_trodes_pair(
 
     Returns ``(led1_xy, led2_xy, t_cam_seconds, conv1, conv2)`` where
     LED arrays are ``(n, 2)``.
+
+    Both SpatialSeries' timestamps must agree (1:1 in length and
+    bitwise equal); silently using LED1's clock for LED2 samples
+    would let a mis-paired write surface as a fused-but-misaligned
+    trajectory.
     """
 
     led1 = _eager_array(series1.data, dtype=float)
     led2 = _eager_array(series2.data, dtype=float)
-    t_cam = _eager_array(series1.timestamps, dtype=float)
+    t1 = _eager_array(series1.timestamps, dtype=float)
+    t2 = _eager_array(series2.timestamps, dtype=float)
     if led1.ndim != 2 or led1.shape[1] != 2:
         raise ValueError(
             f"SpatialSeries {series1.name!r} data shape {led1.shape} is "
@@ -275,14 +281,30 @@ def _read_trodes_pair(
             f"({led1.shape} vs {led2.shape}); the writer should keep "
             "them aligned 1:1."
         )
-    if t_cam.shape != (led1.shape[0],):
+    if t1.shape != (led1.shape[0],):
         raise ValueError(
             f"SpatialSeries {series1.name!r} timestamps shape "
-            f"{t_cam.shape} does not match data length {led1.shape[0]}."
+            f"{t1.shape} does not match data length {led1.shape[0]}."
+        )
+    if t2.shape != t1.shape:
+        raise ValueError(
+            f"LED1 / LED2 timestamps length mismatch "
+            f"({series1.name!r}: {t1.shape}; "
+            f"{series2.name!r}: {t2.shape}). The writer must align "
+            "the two series 1:1 — re-export the session or supply the "
+            "two SpatialSeries that actually share a clock."
+        )
+    if not np.array_equal(t1, t2):
+        max_diff = float(np.max(np.abs(t1 - t2)))
+        raise ValueError(
+            f"LED1 / LED2 timestamps differ between {series1.name!r} "
+            f"and {series2.name!r} (max abs difference: {max_diff:.6g} "
+            "s). The two series must share a clock; the loader will "
+            "not silently pair LED2 samples with LED1's time base."
         )
     conv1 = float(getattr(series1, "conversion", 1.0))
     conv2 = float(getattr(series2, "conversion", 1.0))
-    return led1, led2, t_cam, conv1, conv2
+    return led1, led2, t1, conv1, conv2
 
 
 def _resolve_coords_mpp(serieses: list[Any], conversions: list[float]) -> float | None:
@@ -294,8 +316,12 @@ def _resolve_coords_mpp(serieses: list[Any], conversions: list[float]) -> float 
     - Otherwise (e.g., ``unit == "pixels"`` with ``conversion != 1.0``):
       use the conversion. Treat as already-calibrated to meters.
 
-    When the two series disagree on the resolved scalar, take the
-    LED1 value (writer keeps them aligned).
+    Both series must resolve to the same scalar. Disagreement (one
+    LED is the sentinel "no calibration", the other is calibrated; or
+    both are calibrated with different scales) is rejected — silently
+    picking LED1 would let a mis-paired write produce a fused-but-
+    miscalibrated trajectory at the same fault surface as the
+    timestamp-mismatch guard above.
     """
 
     def resolve_one(series: Any, conversion: float) -> float | None:
@@ -305,6 +331,19 @@ def _resolve_coords_mpp(serieses: list[Any], conversions: list[float]) -> float 
         return conversion
 
     resolved1 = resolve_one(serieses[0], conversions[0])
+    resolved2 = resolve_one(serieses[1], conversions[1])
+    if resolved1 != resolved2:
+        raise ValueError(
+            f"LED1 / LED2 calibration mismatch: {serieses[0].name!r} "
+            f"resolves to coords_meters_per_pixel={resolved1!r} "
+            f"(unit={getattr(serieses[0], 'unit', 'pixels')!r}, "
+            f"conversion={conversions[0]}); "
+            f"{serieses[1].name!r} resolves to {resolved2!r} "
+            f"(unit={getattr(serieses[1], 'unit', 'pixels')!r}, "
+            f"conversion={conversions[1]}). The two series must share "
+            "a calibration — silently picking one would produce a "
+            "fused-but-miscalibrated trajectory."
+        )
     return resolved1
 
 
