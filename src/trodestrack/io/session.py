@@ -110,10 +110,20 @@ def _load_trodes_native(config: SessionConfig) -> PreparedSession:
     # absent). Single-LED native sources will revisit this assumption.
     assert led2 is not None
 
-    t_imu, U_imu, U_full = _resolve_imu_for_native_loader(config, pixels.t_cam)
+    t_imu_raw, U_imu, U_full, imu_is_synthetic = _resolve_imu_for_native_loader(
+        config, pixels.t_cam
+    )
 
-    t_start = min(float(pixels.t_cam[0]), float(t_imu[0]))
-    t_imu_aligned = t_imu - t_start
+    # Match the parquet path's t_start ordering (session.py:449): pick
+    # ``t_start`` from raw clocks first, *then* add ``imu.time_offset_s``
+    # to the IMU stream after the subtraction. Adding the offset to
+    # ``t_imu_raw`` before computing ``t_start`` would let the offset
+    # be absorbed when the IMU clock starts before the camera clock,
+    # producing a ``t_start`` that depends on the offset itself.
+    # Synthetic IMU isn't a real clock, so its offset is treated as 0.
+    t_start = min(float(pixels.t_cam[0]), float(t_imu_raw[0]))
+    imu_offset_s = 0.0 if imu_is_synthetic else config.imu.time_offset_s
+    t_imu_aligned = t_imu_raw - t_start + imu_offset_s
     t_cam = pixels.t_cam - t_start + config.camera.time_offset_s
     _validate_time_vector(t_cam, "camera timestamps")
     if t_imu_aligned.size > 1:
@@ -127,7 +137,7 @@ def _load_trodes_native(config: SessionConfig) -> PreparedSession:
             "format": "trodes_native",
             **pixels.diagnostics,
             "imu_source": "parquet" if inputs.imu_file is not None else "synthetic",
-            "imu_samples": int(t_imu.size),
+            "imu_samples": int(t_imu_aligned.size),
             "camera_frames": int(t_cam.size),
             "camera_rate_hz": (
                 float(1.0 / np.median(np.diff(t_cam)))
@@ -155,13 +165,15 @@ def _load_trodes_native(config: SessionConfig) -> PreparedSession:
 
 def _resolve_imu_for_native_loader(
     config: SessionConfig, t_cam_unaligned: np.ndarray
-) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None, bool]:
     """Resolve the IMU stream for ``trodes_native`` / ``dlc_keypoints``.
 
-    Returns ``(t_imu_unaligned, U_imu_filter, U_full)`` where
-    ``t_imu_unaligned`` is in the same clock as ``t_cam_unaligned``
-    (caller subtracts ``t_start``). ``U_full`` is ``None`` for the
-    synthetic vision-only stream.
+    Returns ``(t_imu_raw, U_imu_filter, U_full, is_synthetic)`` where
+    ``t_imu_raw`` is the IMU clock **before** ``imu.time_offset_s``
+    is added — the caller picks ``t_start`` from raw clocks first
+    (matching ``_load_spikegadgets_trodes`` at session.py:449) and
+    only then applies the offset. ``U_full`` is ``None`` and
+    ``is_synthetic=True`` for the no-IMU vision_only fallback.
 
     Implements the IMU source resolution contract: parquet wins;
     if no IMU source is configured, vision_only synthesizes a zero
@@ -171,8 +183,7 @@ def _resolve_imu_for_native_loader(
 
     if config.inputs.imu_file is not None:
         imu_data = load_imu_parquet(config.inputs.imu_file, config)
-        t_imu = imu_data.t_imu_unix + config.imu.time_offset_s
-        return t_imu, imu_data.U_filter, imu_data.U_full
+        return imu_data.t_imu_unix, imu_data.U_filter, imu_data.U_full, False
 
     if _uses_imu(config.filter.state_mode):
         raise ValueError(
@@ -185,7 +196,7 @@ def _resolve_imu_for_native_loader(
     # vector (same length is convenient for the no-fusion path).
     t_imu = t_cam_unaligned.copy()
     U_imu = np.zeros((t_imu.size, 3), dtype=float)
-    return t_imu, U_imu, None
+    return t_imu, U_imu, None, True
 
 
 def _load_dlc_keypoints(config: SessionConfig) -> PreparedSession:
@@ -263,8 +274,12 @@ def run_real_data_safety_check(
     """Compare fused real-data output against the camera/vision-only envelope."""
 
     config = session.config.outputs
+    # Run on every real-data format (spikegadgets_trodes parquet, the
+    # native loaders) — skip only the txt-file ``prepared_arrays``
+    # test/debug path. ``vision_only`` runs already short-circuit
+    # because there's no fused-vs-vision comparison to make.
     if (
-        session.source_format != "spikegadgets_trodes"
+        session.source_format == "prepared_arrays"
         or not config.run_safety_checks
         or ekf_config.state_mode == "vision_only"
     ):
@@ -604,8 +619,11 @@ def _attach_ttl_events(session: PreparedSession) -> PreparedSession:
 def _add_imu_calibration_diagnostics(session: PreparedSession) -> PreparedSession:
     config = session.config
     U_full = session.U_imu_for_calibration
+    # Run for every real-data format that loaded a 6-channel IMU stream
+    # (parquet path: spikegadgets_trodes; native loaders that consume
+    # inputs.imu_file). Skip the txt-file prepared_arrays test path.
     if (
-        session.source_format != "spikegadgets_trodes"
+        session.source_format == "prepared_arrays"
         or not config.imu.run_calibration
         or U_full is None
         or U_full.shape[1] != 6

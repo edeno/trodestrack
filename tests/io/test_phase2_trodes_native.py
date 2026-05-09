@@ -524,6 +524,146 @@ def test_filtered_means_parity_with_spikegadgets_trodes(tmp_path: Path) -> None:
     np.testing.assert_allclose(means_native, means_parquet, atol=1e-6, rtol=1e-6)
 
 
+def test_imu_time_offset_matches_parquet_path(tmp_path: Path) -> None:
+    """``imu.time_offset_s`` is applied *after* ``t_start`` is chosen
+    from raw clocks (matching the parquet path).
+
+    Without this fix, when the IMU clock starts before the camera
+    clock, the offset is silently absorbed by the ``min(...)`` choice,
+    so a session with the same raw IMU+camera timestamps and a
+    non-zero ``imu.time_offset_s`` would diverge between the two
+    formats.
+    """
+
+    from trodestrack.config.schemas import OutputsConfig
+
+    n_pre = 2
+    n_post = 8
+    base_hw_ns = 1_700_000_000_000_000_000
+    ts_path, info = _make_ptp_timestamps_file(
+        tmp_path, n_pre_pause=n_pre, n_post_pause=n_post, base_hw_ns=base_hw_ns
+    )
+    pos_path_native = _make_position_tracking_file(tmp_path, info["pos_timestamps"])
+
+    hw_post_seconds = (
+        np.asarray(info["hw_timestamps_ns"][n_pre:], dtype=np.int64) / NS_PER_S
+    )
+    parquet_dir = tmp_path / "parquet"
+    parquet_dir.mkdir()
+    pos_parquet = parquet_dir / "position.parquet"
+    pd.DataFrame(
+        {
+            "time": hw_post_seconds,
+            "xloc": [100 + i for i in range(n_pre, n_pre + n_post)],
+            "yloc": [200] * n_post,
+            "xloc2": [110 + i for i in range(n_pre, n_pre + n_post)],
+            "yloc2": [210] * n_post,
+        }
+    ).to_parquet(pos_parquet)
+
+    # IMU starts a full second before camera so an erroneously
+    # pre-applied offset would shift t_start.
+    imu_t = np.linspace(hw_post_seconds[0] - 1.0, hw_post_seconds[-1] + 1.0, 60)
+    imu_parquet = parquet_dir / "imu.parquet"
+    pd.DataFrame(
+        {
+            "time": imu_t,
+            "Headstage_GyroX": np.zeros(60, dtype=int),
+            "Headstage_GyroY": np.zeros(60, dtype=int),
+            "Headstage_GyroZ": np.arange(60, dtype=int),
+            "Headstage_AccelX": np.zeros(60, dtype=int),
+            "Headstage_AccelY": np.zeros(60, dtype=int),
+            "Headstage_AccelZ": np.zeros(60, dtype=int),
+        }
+    ).to_parquet(imu_parquet)
+
+    common_kwargs: dict[str, Any] = dict(
+        imu=IMUConfig(run_calibration=False, time_offset_s=0.5),
+        camera=CameraConfig(meters_per_pixel=0.01),
+        filter=FilterConfig(state_mode="2d_cam_3d_imu"),
+        outputs=OutputsConfig(run_safety_checks=False),
+    )
+
+    config_native = SessionConfig(
+        inputs=InputsConfig(
+            format="trodes_native",
+            imu_file=imu_parquet,
+            trodes_native=TrodesNativeConfig(
+                position_tracking_file=pos_path_native,
+                camera_timestamps_file=ts_path,
+            ),
+        ),
+        **common_kwargs,
+    )
+    config_parquet = SessionConfig(
+        inputs=InputsConfig(
+            format="spikegadgets_trodes",
+            imu_file=imu_parquet,
+            position_file=pos_parquet,
+        ),
+        **common_kwargs,
+    )
+
+    session_native = load_session(config_native)
+    session_parquet = load_session(config_parquet)
+
+    np.testing.assert_allclose(session_native.t_imu, session_parquet.t_imu, atol=1e-12)
+    np.testing.assert_allclose(session_native.t_cam, session_parquet.t_cam, atol=1e-12)
+
+
+def test_imu_calibration_diagnostics_run_for_native_loader(tmp_path: Path) -> None:
+    """The IMU calibration diagnostics block runs for ``trodes_native +
+    parquet IMU`` (matching the existing ``spikegadgets_trodes`` path).
+    """
+
+    from trodestrack.config.schemas import OutputsConfig
+
+    ts_path, info = _make_ptp_timestamps_file(tmp_path)
+    pos_path = _make_position_tracking_file(tmp_path, info["pos_timestamps"])
+
+    hw_post_seconds = (
+        np.asarray(info["hw_timestamps_ns"][info["n_pre_pause"] :], dtype=np.int64)
+        / NS_PER_S
+    )
+    imu_t = np.linspace(hw_post_seconds[0] - 0.05, hw_post_seconds[-1] + 0.05, 60)
+    imu_path = tmp_path / "imu.parquet"
+    pd.DataFrame(
+        {
+            "time": imu_t,
+            "Headstage_GyroX": np.arange(60, dtype=int),
+            "Headstage_GyroY": np.arange(60, dtype=int),
+            "Headstage_GyroZ": np.arange(60, dtype=int),
+            "Headstage_AccelX": np.arange(60, 120, dtype=int),
+            "Headstage_AccelY": np.arange(120, 180, dtype=int),
+            "Headstage_AccelZ": np.arange(180, 240, dtype=int),
+        }
+    ).to_parquet(imu_path)
+
+    config = SessionConfig(
+        inputs=InputsConfig(
+            format="trodes_native",
+            imu_file=imu_path,
+            trodes_native=TrodesNativeConfig(
+                position_tracking_file=pos_path,
+                camera_timestamps_file=ts_path,
+            ),
+        ),
+        imu=IMUConfig(run_calibration=True),
+        camera=CameraConfig(meters_per_pixel=0.01),
+        filter=FilterConfig(state_mode="2d_cam_3d_imu"),
+        outputs=OutputsConfig(run_safety_checks=False),
+    )
+
+    session = load_session(config)
+
+    # An IMU calibration entry exists. Whether it's a successful report
+    # or a calibration error, the format-name guard no longer skips it.
+    assert (
+        "imu_calibration" in session.diagnostics
+        or "imu_calibration_error" in session.diagnostics
+    )
+
+
 def test_pixel_to_meter_scaling_matches_camera_config(tmp_path: Path) -> None:
     """``camera.meters_per_pixel`` is applied to the loaded pixels
     before they reach ``PreparedSession``."""
