@@ -288,11 +288,15 @@ def from_behavioral_events(
       for row in ...}``) before calling here. trodestrack's API is
       Spyglass-agnostic.
 
-    DIO encoding (per
-    ``trodes_to_nwb/spike_gadgets_raw_io.py:953``): ``data`` is
-    ``int8`` 0/1 where each value is a transition (``1`` = rising,
-    ``0`` = falling). The very first sample is the initial level,
-    not a transition; it's dropped before edge detection.
+    DIO encoding: ``data`` is ``int8`` 0/1 where each value is
+    already a transition (``1`` = rising, ``0`` = falling). The
+    ``trodes_to_nwb`` writer strips the initial level on the write
+    side
+    (``trodes_to_nwb/spike_gadgets_raw_io.py:1348`` returns
+    ``dio_change_times[1:], change_dir_trim[1:]`` and
+    ``trodes_to_nwb/convert_dios.py:97`` writes those directly into
+    the NWB ``TimeSeries``), so the loader must NOT drop ``data[0]``
+    again — every sample on disk is a real edge.
 
     Eager numpy materialization: the returned arrays are independent
     of the source IO so the caller may close it (or let
@@ -333,23 +337,19 @@ def from_behavioral_events(
                 f"DIO TimeSeries {name!r} data shape {data.shape} does "
                 f"not match timestamps shape {timestamps.shape}."
             )
-        if data.size < 2:
-            # Fewer than 2 samples means no transitions to extract
-            # (the first sample is the initial-level drop).
+        if data.size == 0:
             continue
-        # Drop the first sample (initial level, not a transition).
-        edges = data[1:].astype(int, copy=False)
-        times = timestamps[1:]
-        # Validate the int8 0/1 encoding documented in
-        # spike_gadgets_raw_io.py:953.
+        edges = data.astype(int, copy=False)
+        # Validate the int8 0/1 transition encoding.
         if not np.isin(edges, (0, 1)).all():
             unique = sorted({int(x) for x in edges.tolist()})
             raise ValueError(
                 f"DIO TimeSeries {name!r} contains non-{{0, 1}} values "
-                f"{unique}; the int8 0/1 encoding documented at "
-                "trodes_to_nwb/spike_gadgets_raw_io.py:953 is required."
+                f"{unique}; the writer encoding documented at "
+                "trodes_to_nwb/convert_dios.py:97 is int8 0/1 "
+                "transitions only."
             )
-        t_parts.append(times)
+        t_parts.append(timestamps)
         edge_parts.append(edges)
         sid_parts.append(np.full(edges.size, source_id, dtype=np.int64))
 

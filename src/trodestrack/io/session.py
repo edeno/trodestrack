@@ -408,6 +408,22 @@ def _load_nwb(config: SessionConfig) -> PreparedSession:
     if not imu_is_synthetic:
         _check_imu_camera_overlap(t_imu_aligned, t_cam, format_name="nwb")
 
+    # NWB DIO timestamps come from the same systime clock as the
+    # SpatialSeries, so they need the same ``t_start`` shift the
+    # camera and IMU streams already got. Without this, downstream
+    # ``per_frame_event_indices`` buckets the unshifted DIO times
+    # against the shifted ``t_cam`` and silently produces zero
+    # events kept (the events end up beyond ``t_cam[-1]`` and get
+    # discarded).
+    nwb_dio_events_aligned = extras.dio_events
+    if extras.dio_events is not None:
+        t_dio_raw, dio_source_id, dio_edge = extras.dio_events
+        nwb_dio_events_aligned = (
+            t_dio_raw - t_start,
+            dio_source_id,
+            dio_edge,
+        )
+
     mask = np.isfinite(led1).all(axis=1) | np.isfinite(led2).all(axis=1)
     led_distance = config.filter.led_distance or _median_led_distance(led1, led2, mask)
 
@@ -440,7 +456,7 @@ def _load_nwb(config: SessionConfig) -> PreparedSession:
         config=config,
         gyro_z_for_led_identity=(U_full[:, 2] if U_full is not None else None),
         U_imu_for_calibration=U_full,
-        nwb_dio_events=extras.dio_events,
+        nwb_dio_events=nwb_dio_events_aligned,
     )
 
 

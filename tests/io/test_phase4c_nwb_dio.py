@@ -53,12 +53,15 @@ def _make_nwb_with_position_and_dio(
     include_dio: bool = True,
     dio_event_names: tuple[str, ...] = ("beam_1", "zone_a"),
     base_systime_s: float = 0.5,
+    camera_t0_s: float = 0.0,
 ) -> Path:
     """Build a Phase-4a-style NWB with optional DIO TimeSeries.
 
-    DIO encoding follows ``trodes_to_nwb/spike_gadgets_raw_io.py:953``:
-    int8 0/1 where each value is a transition (1 = rising, 0 = falling)
-    and the very first sample is the initial level.
+    DIO encoding (per ``trodes_to_nwb/convert_dios.py:97`` +
+    ``spike_gadgets_raw_io.py:1348``): int8 0/1 transitions only.
+    The writer strips the initial level (``dio_change_times[1:]``)
+    on the write side, so every sample stored on disk is a real
+    edge — the loader must NOT drop ``data[0]`` again.
     """
 
     nwbfile = pynwb.NWBFile(
@@ -70,7 +73,7 @@ def _make_nwb_with_position_and_dio(
 
     # Position: same Trodes-style two-LED layout as Phase 4a/4b.
     behavior = nwbfile.create_processing_module(name="behavior", description="behavior")
-    timestamps = np.arange(n_frames, dtype=float) / 30.0
+    timestamps = camera_t0_s + np.arange(n_frames, dtype=float) / 30.0
     led1_data = np.column_stack([100.0 + np.arange(n_frames), np.full(n_frames, 200.0)])
     led2_data = np.column_stack([110.0 + np.arange(n_frames), np.full(n_frames, 210.0)])
     position = Position()
@@ -95,13 +98,13 @@ def _make_nwb_with_position_and_dio(
     behavior.add(position)
 
     if include_dio:
-        # Each DIO TimeSeries: 6 samples, first is initial level
-        # (dropped by the loader), then 5 alternating transitions.
+        # Each DIO TimeSeries: 6 transition samples (no initial-level
+        # row — the trodes_to_nwb writer strips it on the way out).
         # Distinguishable per-channel timing so a parity test can
         # tell them apart in the merged output.
         events_container = BehavioralEvents(name="behavioral_events")
         for i, name in enumerate(dio_event_names):
-            data = np.array([0, 1, 0, 1, 0, 1], dtype=np.int8)
+            data = np.array([1, 0, 1, 0, 1, 0], dtype=np.int8)
             ts = np.asarray(
                 [base_systime_s + i * 0.01 + j * 0.05 for j in range(6)],
                 dtype=float,
@@ -297,12 +300,15 @@ def test_from_behavioral_events_eager_after_io_close(tmp_path: Path) -> None:
     assert edge.size == t_evt.size
 
 
-def test_from_behavioral_events_drops_initial_level_and_decodes_edges(
+def test_from_behavioral_events_decodes_int8_stream_as_transitions(
     tmp_path: Path,
 ) -> None:
-    """The first sample (initial level) is dropped; remaining ``int8``
-    0/1 values decode to ``edge`` per the EDGE_NAME_TO_INT mapping
-    (0=fall, 1=rise)."""
+    """Every ``data[i]`` is a transition (1=rise, 0=fall). The
+    ``trodes_to_nwb`` writer strips the initial level on the write
+    side (``spike_gadgets_raw_io.py:1348`` returns
+    ``dio_change_times[1:], change_dir_trim[1:]``), so the loader
+    must NOT drop ``data[0]`` — that would lose the first real edge.
+    """
 
     nwb_path = _make_nwb_with_position_and_dio(tmp_path, dio_event_names=("beam_1",))
     dio_cfg = NWBDIOToTTLConfig(name_to_source_id={"beam_1": 1})
@@ -312,11 +318,11 @@ def test_from_behavioral_events_drops_initial_level_and_decodes_edges(
         events = nwbfile.processing["behavior"].data_interfaces["behavioral_events"]
         t_evt, source_id, edge = from_behavioral_events(events, dio_cfg)
 
-    # Fixture wrote [0, 1, 0, 1, 0, 1] for beam_1 — drop first sample
-    # → 5 transitions [1, 0, 1, 0, 1].
-    assert t_evt.shape == (5,)
-    np.testing.assert_array_equal(edge, np.array([1, 0, 1, 0, 1], dtype=int))
-    np.testing.assert_array_equal(source_id, np.full(5, 1, dtype=np.int64))
+    # Fixture wrote [1, 0, 1, 0, 1, 0] for beam_1 — all 6 are
+    # transitions (no initial-level drop).
+    assert t_evt.shape == (6,)
+    np.testing.assert_array_equal(edge, np.array([1, 0, 1, 0, 1, 0], dtype=int))
+    np.testing.assert_array_equal(source_id, np.full(6, 1, dtype=np.int64))
 
 
 # ---------------------------------------------------------------------
@@ -339,8 +345,43 @@ def test_load_session_populates_event_arrays(tmp_path: Path) -> None:
     diag = session.diagnostics["ttl_events"]
     assert diag["event_source"] == "nwb_behavioral_events"
     assert diag["nwb_dio_present"] is True
-    # 5 transitions × 2 channels = 10 events total.
-    assert diag["n_events_total"] == 10
+    # 6 transitions × 2 channels = 12 events total.
+    assert diag["n_events_total"] == 12
+
+
+def test_load_session_shifts_dio_times_into_t_cam_base(tmp_path: Path) -> None:
+    """NWB DIO timestamps share the systime clock with the
+    SpatialSeries timestamps; the loader must apply the same
+    ``t_start`` shift it gives the camera/IMU streams. Without the
+    shift, ``per_frame_event_indices`` buckets unshifted DIO times
+    against shifted ``t_cam`` and silently drops every event.
+
+    Reviewer repro: camera/DIO timestamps starting at 100 s →
+    ``session.t_cam`` becomes ``[0.0, ..., 0.967]`` after shift;
+    DIO transitions at ``[100.5, 100.55, ...]`` must be shifted to
+    ``[0.5, 0.55, ...]`` to land within the camera span.
+    """
+
+    nwb_path = _make_nwb_with_position_and_dio(
+        tmp_path,
+        camera_t0_s=100.0,
+        base_systime_s=100.5,  # DIO transitions inside the camera span
+    )
+    config = _make_dio_session_config(nwb_path)
+
+    session = load_session(config)
+
+    diag = session.diagnostics["ttl_events"]
+    assert diag["event_source"] == "nwb_behavioral_events"
+    assert diag["n_events_total"] == 12
+    # Crucially, events were actually bucketed into camera frames
+    # (this is the reviewer's failure mode: unshifted times → 0 kept).
+    assert diag["n_events_kept"] > 0
+    # Confirm the session-level DIO array is in the shifted clock.
+    assert session.nwb_dio_events is not None
+    t_dio_aligned = session.nwb_dio_events[0]
+    assert float(t_dio_aligned[0]) < float(session.t_cam[-1])
+    assert float(t_dio_aligned[-1]) > float(session.t_cam[0])
 
 
 def test_load_session_no_dio_config_skips_event_arrays(tmp_path: Path) -> None:
@@ -432,6 +473,6 @@ def test_load_nwb_session_extras_dio_events_populated(tmp_path: Path) -> None:
 
     assert extras.dio_events is not None
     t_evt, _source_id, _edge = extras.dio_events
-    assert t_evt.size == 10  # 5 transitions × 2 channels
+    assert t_evt.size == 12  # 6 transitions × 2 channels
     assert extras.diagnostics["dio_source"] == "nwb_behavioral_events"
-    assert extras.diagnostics["dio_event_count"] == 10
+    assert extras.diagnostics["dio_event_count"] == 12
