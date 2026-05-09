@@ -85,10 +85,19 @@ def from_position_container(
     each series' ``conversion`` attribute under the conversion=1.0
     sentinel rule.
 
+    For ``cfg.tracking_geometry`` of ``single_led1`` / ``single_led2``
+    the container must hold exactly one SpatialSeries (or the
+    matching ``led{1,2}_series_name`` must be set). The unobserved
+    LED is filled with NaN so the EKF/UKF observation model still
+    sees an LED-pair-shaped input.
+
     Eager numpy materialization: the returned arrays are independent
     of the source ``Position`` container, so the caller may close the
     underlying ``NWBHDF5IO`` after this returns.
     """
+
+    if cfg.tracking_geometry != "dual_led":
+        return _from_position_container_single(position, cfg)
 
     series1, series2 = _resolve_trodes_series(position, cfg)
 
@@ -109,6 +118,7 @@ def from_position_container(
         diagnostics={
             "format": "nwb",
             "container": "trodes_position",
+            "tracking_geometry": "dual_led",
             "led1_series_name": series1.name,
             "led2_series_name": series2.name,
             "reference_frame": getattr(series1, "reference_frame", None),
@@ -116,6 +126,52 @@ def from_position_container(
             "led2_unit": getattr(series2, "unit", None),
             "led1_conversion": float(getattr(series1, "conversion", 1.0)),
             "led2_conversion": float(getattr(series2, "conversion", 1.0)),
+        },
+    )
+
+
+def _from_position_container_single(
+    position: Any, cfg: NWBLEDSourceConfig
+) -> PositionPixels:
+    """Single-LED Trodes-Position branch of ``from_position_container``."""
+
+    series = _resolve_single_trodes_series(position, cfg)
+    data = _eager_array(series.data, dtype=float)
+    t_cam = _eager_array(series.timestamps, dtype=float)
+    if data.ndim != 2 or data.shape[1] != 2:
+        raise ValueError(
+            f"SpatialSeries {series.name!r} data shape {data.shape} is "
+            "not (n, 2). Native 3-D coordinates are not supported in "
+            "v1 of the NWB loader."
+        )
+    if t_cam.shape != (data.shape[0],):
+        raise ValueError(
+            f"SpatialSeries {series.name!r} timestamps shape "
+            f"{t_cam.shape} does not match data length {data.shape[0]}."
+        )
+
+    conversion = float(getattr(series, "conversion", 1.0))
+    coords_mpp = _resolve_coords_mpp_single(series, conversion)
+    missing = np.full_like(data, np.nan)
+    if cfg.tracking_geometry == "single_led1":
+        led1, led2 = data, missing
+    else:
+        led1, led2 = missing, data
+
+    return PositionPixels(
+        led1_pixels=led1,
+        led2_pixels=led2,
+        t_cam=t_cam,
+        confidence=None,
+        coords_meters_per_pixel=coords_mpp,
+        diagnostics={
+            "format": "nwb",
+            "container": "trodes_position",
+            "tracking_geometry": cfg.tracking_geometry,
+            "observed_series_name": series.name,
+            "reference_frame": getattr(series, "reference_frame", None),
+            "observed_unit": getattr(series, "unit", None),
+            "observed_conversion": conversion,
         },
     )
 
@@ -136,12 +192,22 @@ def from_pose_estimation_container(
     read without ``ndx-pose`` (on-disk names ``definition`` /
     ``version``) both work.
 
+    For ``cfg.tracking_geometry`` of ``single_led1`` / ``single_led2``
+    only the matching ``led{1,2}_bodypart`` is required; the
+    unobserved LED is filled with NaN and its confidence column is
+    set to a finite neutral value (the all-NaN coordinates already
+    drop those frames out of the EKF observation, so the confidence
+    value is informational only).
+
     The Skeleton chain (v0.2.x ``processing["behavior"]["Skeletons"]``
     vs v0.1.x inline ``nodes`` on the ``PoseEstimation``) affects
     diagnostics only — position data comes from
     ``pose.pose_estimation_series[bodypart]`` which works in both
     schemas.
     """
+
+    if cfg.tracking_geometry != "dual_led":
+        return _from_pose_estimation_container_single(pose, cfg)
 
     if cfg.led1_bodypart is None or cfg.led2_bodypart is None:
         raise ValueError(
@@ -187,6 +253,7 @@ def from_pose_estimation_container(
         diagnostics={
             "format": "nwb",
             "container": "ndx_pose",
+            "tracking_geometry": "dual_led",
             "led1_bodypart": cfg.led1_bodypart,
             "led2_bodypart": cfg.led2_bodypart,
             "ndx_pose_schema_version": schema_version,
@@ -196,6 +263,88 @@ def from_pose_estimation_container(
             "scorer": getattr(pose, "scorer", None),
             "led1_kept_fraction": float(np.mean(conf1 >= cfg.likelihood_threshold)),
             "led2_kept_fraction": float(np.mean(conf2 >= cfg.likelihood_threshold)),
+        },
+    )
+
+
+def _from_pose_estimation_container_single(
+    pose: Any, cfg: NWBLEDSourceConfig
+) -> PositionPixels:
+    """Single-LED PoseEstimation branch of ``from_pose_estimation_container``."""
+
+    if cfg.tracking_geometry == "single_led1":
+        observed_name = cfg.led1_bodypart
+        observed_field = "led1_bodypart"
+    else:
+        observed_name = cfg.led2_bodypart
+        observed_field = "led2_bodypart"
+    if observed_name is None:
+        raise ValueError(
+            f"inputs.nwb.led_source.{observed_field} is required when "
+            f"tracking_geometry={cfg.tracking_geometry!r}."
+        )
+
+    series_dict = pose.pose_estimation_series
+    if observed_name not in series_dict:
+        raise ValueError(
+            f"PoseEstimation series {observed_name!r} not found. "
+            f"Available: {list(series_dict.keys())}."
+        )
+    series = series_dict[observed_name]
+
+    data = _eager_array(series.data, dtype=float)
+    t_cam = _eager_array(series.timestamps, dtype=float)
+    if data.ndim != 2 or data.shape[1] != 2:
+        raise ValueError(
+            f"PoseEstimationSeries {series.name!r} data shape {data.shape} is "
+            "not (n, 2). Native 3-D coordinates are not supported in "
+            "v1 of the NWB loader."
+        )
+    if t_cam.shape != (data.shape[0],):
+        raise ValueError(
+            f"PoseEstimationSeries {series.name!r} timestamps shape "
+            f"{t_cam.shape} does not match data length {data.shape[0]}."
+        )
+
+    conf = _eager_array(series.confidence, dtype=float)
+    data[conf < cfg.likelihood_threshold] = np.nan
+
+    missing = np.full_like(data, np.nan)
+    neutral_conf = np.ones_like(conf)
+    if cfg.tracking_geometry == "single_led1":
+        led1, led2 = data, missing
+        confidence = np.column_stack([conf, conf, neutral_conf, neutral_conf])
+    else:
+        led1, led2 = missing, data
+        confidence = np.column_stack([neutral_conf, neutral_conf, conf, conf])
+
+    conversion = float(getattr(series, "conversion", 1.0))
+    coords_mpp = _resolve_coords_mpp_single(series, conversion)
+    schema_version = _detect_pose_schema_version(pose)
+    confidence_definition = getattr(series, "confidence_definition", None) or getattr(
+        series, "definition", None
+    )
+    source_software_version = getattr(pose, "source_software_version", None) or getattr(
+        pose, "version", None
+    )
+
+    return PositionPixels(
+        led1_pixels=led1,
+        led2_pixels=led2,
+        t_cam=t_cam,
+        confidence=confidence,
+        coords_meters_per_pixel=coords_mpp,
+        diagnostics={
+            "format": "nwb",
+            "container": "ndx_pose",
+            "tracking_geometry": cfg.tracking_geometry,
+            "observed_bodypart": observed_name,
+            "ndx_pose_schema_version": schema_version,
+            "source_software": getattr(pose, "source_software", None),
+            "source_software_version": source_software_version,
+            "confidence_definition": confidence_definition,
+            "scorer": getattr(pose, "scorer", None),
+            "observed_kept_fraction": float(np.mean(conf >= cfg.likelihood_threshold)),
         },
     )
 
@@ -658,6 +807,60 @@ def _resolve_coords_mpp(serieses: list[Any], conversions: list[float]) -> float 
             "fused-but-miscalibrated trajectory."
         )
     return resolved1
+
+
+def _resolve_coords_mpp_single(series: Any, conversion: float) -> float | None:
+    """Single-series counterpart to ``_resolve_coords_mpp``.
+
+    Same conversion=1.0 / ``unit`` sentinel rule applied to one
+    SpatialSeries; no pair-mismatch check because there is no pair.
+    """
+
+    unit = getattr(series, "unit", "pixels")
+    if unit == "pixels" and conversion == 1.0:
+        return None
+    return conversion
+
+
+def _resolve_single_trodes_series(position: Any, cfg: NWBLEDSourceConfig) -> Any:
+    """Pick the single observed SpatialSeries for ``single_led1`` /
+    ``single_led2`` from a ``Position`` container.
+
+    Resolution order:
+
+    1. If ``cfg.led{1,2}_series_name`` (matching ``tracking_geometry``)
+       is set, use it by name.
+    2. Otherwise auto-detect: the container must hold exactly one
+       SpatialSeries — ambiguity (two or more) is rejected because
+       the loader cannot know which point is the physical LED.
+    """
+
+    series_dict = position.spatial_series
+    available = list(series_dict.keys())
+
+    if cfg.tracking_geometry == "single_led1":
+        named = cfg.led1_series_name
+        named_field = "led1_series_name"
+    else:
+        named = cfg.led2_series_name
+        named_field = "led2_series_name"
+
+    if named is not None:
+        if named not in series_dict:
+            raise ValueError(
+                f"SpatialSeries {named!r} not found in Position "
+                f"container. Available: {available}."
+            )
+        return series_dict[named]
+
+    if len(available) == 1:
+        return series_dict[available[0]]
+
+    raise ValueError(
+        f"tracking_geometry={cfg.tracking_geometry!r} requires the "
+        "Position container to hold exactly one SpatialSeries (or "
+        f"set inputs.nwb.led_source.{named_field}). Found {available!r}."
+    )
 
 
 def _resolve_trodes_series(position: Any, cfg: NWBLEDSourceConfig) -> tuple[Any, Any]:

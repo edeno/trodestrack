@@ -67,6 +67,14 @@ class NWBLEDSourceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     container: Literal["auto", "trodes_position", "ndx_pose"] = "auto"
+    # ``dual_led`` (default): the file carries both physical LEDs.
+    # ``single_led1`` / ``single_led2``: the file carries one tracked
+    # point that *is* physical LED1 or LED2 respectively (not a body
+    # centroid). The unobserved LED is filled with NaN downstream so
+    # the EKF/UKF observation model still sees an LED-pair-shaped
+    # input. Centroid / body-center sources are out of scope here —
+    # they need a different observation-model wiring.
+    tracking_geometry: Literal["dual_led", "single_led1", "single_led2"] = "dual_led"
     # For ``trodes_position``: SpatialSeries names under the Position
     # container. For ``ndx_pose``: bodypart names under PoseEstimation.
     # Loader-time auto-detection picks defaults when None.
@@ -78,25 +86,43 @@ class NWBLEDSourceConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_paired_names(self) -> NWBLEDSourceConfig:
-        # Series names and bodypart names are pairs: the loader needs
-        # both halves to address the pair, and a half-set config used
-        # to silently fall through to auto-detect on the missing side
-        # (so ``led1_series_name="x"`` paired with the writer-default
-        # LED2 quietly loaded the wrong second series).
-        for name1, name2 in (
-            ("led1_series_name", "led2_series_name"),
-            ("led1_bodypart", "led2_bodypart"),
-        ):
-            v1, v2 = getattr(self, name1), getattr(self, name2)
-            if (v1 is None) != (v2 is None):
-                raise ValueError(
-                    f"NWBLEDSourceConfig: {name1} and {name2} must both "
-                    f"be set or both be None (got {name1}={v1!r}, "
-                    f"{name2}={v2!r}); the loader resolves the LED "
-                    "pair atomically and a half-set config used to "
-                    "silently fall back to auto-detect on the missing "
-                    "side."
-                )
+        if self.tracking_geometry == "dual_led":
+            # Series names and bodypart names are pairs: the loader
+            # needs both halves to address the pair, and a half-set
+            # config used to silently fall through to auto-detect on
+            # the missing side (so ``led1_series_name="x"`` paired
+            # with the writer-default LED2 quietly loaded the wrong
+            # second series).
+            for name1, name2 in (
+                ("led1_series_name", "led2_series_name"),
+                ("led1_bodypart", "led2_bodypart"),
+            ):
+                v1, v2 = getattr(self, name1), getattr(self, name2)
+                if (v1 is None) != (v2 is None):
+                    raise ValueError(
+                        f"NWBLEDSourceConfig: {name1} and {name2} must both "
+                        f"be set or both be None (got {name1}={v1!r}, "
+                        f"{name2}={v2!r}); the loader resolves the LED "
+                        "pair atomically and a half-set config used to "
+                        "silently fall back to auto-detect on the missing "
+                        "side."
+                    )
+            return self
+
+        # single_led{1,2}: the *other* LED's name fields must be
+        # unset, otherwise the user is implicitly asking for a pair
+        # the loader cannot honor. The matching half is optional —
+        # the loader auto-detects the single SpatialSeries / bodypart
+        # when it is None.
+        unobserved = "2" if self.tracking_geometry == "single_led1" else "1"
+        forbidden = (f"led{unobserved}_series_name", f"led{unobserved}_bodypart")
+        bad = [name for name in forbidden if getattr(self, name) is not None]
+        if bad:
+            raise ValueError(
+                f"NWBLEDSourceConfig: tracking_geometry="
+                f"{self.tracking_geometry!r} forbids {bad} (only the "
+                f"observed LED's name fields may be set)."
+            )
         return self
 
 
@@ -683,6 +709,26 @@ class SessionConfig(BaseModel):
                     "set (the NWB DIO bridge is the only configured "
                     "alternative event source)."
                 )
+
+        # Single-LED NWB sessions must declare ``filter.led_distance``
+        # explicitly. The filter's camera model interprets LED1/LED2
+        # as body-offset points, not generic center points; with one
+        # tracked LED there are no paired observations to estimate
+        # the offset from, so the median fallback in the loader would
+        # silently use its 0.04 m default instead of a real value.
+        if (
+            self.inputs.format == "nwb"
+            and nwb is not None
+            and nwb.led_source.tracking_geometry != "dual_led"
+            and self.filter.led_distance is None
+        ):
+            raise ValueError(
+                "inputs.nwb.led_source.tracking_geometry="
+                f"{nwb.led_source.tracking_geometry!r} requires "
+                "filter.led_distance to be set explicitly: with one "
+                "tracked LED the loader cannot infer the LED1↔LED2 "
+                "spacing from the data."
+            )
 
         return self
 

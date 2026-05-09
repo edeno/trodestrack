@@ -719,6 +719,391 @@ def test_pose_estimation_likelihood_gate(tmp_path: Path) -> None:
     assert pixels.confidence[5, 2] == pytest.approx(0.05)
 
 
+# ---------------------------------------------------------------------
+# Single-LED tracking_geometry: Position container.
+# ---------------------------------------------------------------------
+
+
+def _add_single_trodes_position(
+    nwbfile: pynwb.NWBFile,
+    *,
+    n_frames: int = 30,
+    series_name: str = "led_0_series_0",
+    extra_series_names: tuple[str, ...] = (),
+) -> Position:
+    """Position container with one or more SpatialSeries (single-LED).
+
+    The first series traces ``(100+i, 200)``. ``extra_series_names``
+    add additional series so the auto-detect-rejects-multiple path
+    can be exercised.
+    """
+
+    timestamps = np.arange(n_frames, dtype=float) / 30.0
+    main_data = np.column_stack([100.0 + np.arange(n_frames), np.full(n_frames, 200.0)])
+
+    position = Position()
+    position.create_spatial_series(
+        name=series_name,
+        description="Single LED",
+        data=main_data,
+        unit="pixels",
+        conversion=1.0,
+        reference_frame="upper-left",
+        timestamps=timestamps,
+    )
+    for i, name in enumerate(extra_series_names, start=1):
+        position.create_spatial_series(
+            name=name,
+            description=f"Extra series {i}",
+            data=main_data + i,
+            unit="pixels",
+            conversion=1.0,
+            reference_frame="upper-left",
+            timestamps=timestamps,
+        )
+
+    behavior = nwbfile.create_processing_module(name="behavior", description="behavior")
+    behavior.add(position)
+    return position
+
+
+def _single_trodes_position_fixture(
+    tmp_path: Path,
+    *,
+    series_name: str = "led_0_series_0",
+    extra_series_names: tuple[str, ...] = (),
+) -> Path:
+    nwbfile = _make_nwb_skeleton()
+    _add_single_trodes_position(
+        nwbfile, series_name=series_name, extra_series_names=extra_series_names
+    )
+    path = tmp_path / "single_trodes_position.nwb"
+    _write_nwb(nwbfile, path)
+    return path
+
+
+def test_single_led1_position_auto_detects_one_spatial_series(tmp_path: Path) -> None:
+    """With ``tracking_geometry='single_led1'`` and one SpatialSeries,
+    the loader pulls it as LED1 and fills LED2 with NaN."""
+
+    nwb_path = _single_trodes_position_fixture(tmp_path)
+    cfg = NWBConfig(
+        nwb_file=nwb_path,
+        led_source=NWBLEDSourceConfig(tracking_geometry="single_led1"),
+    )
+
+    pixels, _ = load_nwb_session(cfg)
+
+    assert pixels.led1_pixels.shape == (30, 2)
+    assert pixels.led2_pixels is not None
+    assert pixels.led2_pixels.shape == (30, 2)
+    # Observed LED has the (100+i, 200) trace; missing LED is all NaN.
+    np.testing.assert_array_equal(pixels.led1_pixels[:, 1], np.full(30, 200.0))
+    assert np.isnan(pixels.led2_pixels).all()
+    assert pixels.diagnostics["tracking_geometry"] == "single_led1"
+    assert pixels.diagnostics["observed_series_name"] == "led_0_series_0"
+
+
+def test_single_led2_position_swaps_observed_and_missing_arrays(tmp_path: Path) -> None:
+    """``tracking_geometry='single_led2'`` puts observation in LED2."""
+
+    nwb_path = _single_trodes_position_fixture(tmp_path, series_name="anything")
+    cfg = NWBConfig(
+        nwb_file=nwb_path,
+        led_source=NWBLEDSourceConfig(tracking_geometry="single_led2"),
+    )
+
+    pixels, _ = load_nwb_session(cfg)
+
+    assert pixels.led2_pixels is not None
+    np.testing.assert_array_equal(pixels.led2_pixels[:, 1], np.full(30, 200.0))
+    assert np.isnan(pixels.led1_pixels).all()
+
+
+def test_single_led_position_named_series_disambiguates_multiple(
+    tmp_path: Path,
+) -> None:
+    """When the container holds >1 SpatialSeries, ``led1_series_name``
+    is required to pick which one is the physical LED."""
+
+    nwb_path = _single_trodes_position_fixture(
+        tmp_path, series_name="primary", extra_series_names=("secondary",)
+    )
+    cfg = NWBConfig(
+        nwb_file=nwb_path,
+        led_source=NWBLEDSourceConfig(
+            tracking_geometry="single_led1", led1_series_name="primary"
+        ),
+    )
+
+    pixels, _ = load_nwb_session(cfg)
+    assert pixels.diagnostics["observed_series_name"] == "primary"
+
+
+def test_single_led_position_with_multiple_series_and_no_name_raises(
+    tmp_path: Path,
+) -> None:
+    """Multiple series + no name in config → loader cannot pick one."""
+
+    nwb_path = _single_trodes_position_fixture(
+        tmp_path, series_name="a", extra_series_names=("b",)
+    )
+    cfg = NWBConfig(
+        nwb_file=nwb_path,
+        led_source=NWBLEDSourceConfig(tracking_geometry="single_led1"),
+    )
+    with pytest.raises(ValueError, match="exactly one SpatialSeries"):
+        load_nwb_session(cfg)
+
+
+def test_dual_led_with_only_one_series_still_raises(tmp_path: Path) -> None:
+    """Backward compat: default ``tracking_geometry='dual_led'`` still
+    rejects a Position container that holds only one SpatialSeries."""
+
+    nwb_path = _single_trodes_position_fixture(tmp_path)
+    cfg = NWBConfig(nwb_file=nwb_path)
+    with pytest.raises(ValueError, match="auto-detect"):
+        load_nwb_session(cfg)
+
+
+# ---------------------------------------------------------------------
+# Single-LED tracking_geometry: PoseEstimation container.
+# ---------------------------------------------------------------------
+
+
+def _single_pose_estimation_fixture(
+    tmp_path: Path,
+    *,
+    bodypart: str = "led_green",
+    likelihood: float = 0.9,
+) -> Path:
+    """ndx-pose v0.2.x PoseEstimation with one bodypart."""
+
+    from ndx_pose import PoseEstimation, PoseEstimationSeries, Skeleton, Skeletons
+
+    nwbfile = _make_nwb_skeleton()
+    n_frames = 30
+    timestamps = np.arange(n_frames, dtype=float) / 30.0
+    data = np.column_stack(
+        [100.0 + np.arange(n_frames), np.full(n_frames, 200.0)]
+    ).astype(np.float32)
+    confidence = np.full(n_frames, likelihood, dtype=np.float32)
+    series = PoseEstimationSeries(
+        name=bodypart,
+        description=f"Single bodypart {bodypart}",
+        data=data,
+        unit="pixels",
+        conversion=1.0,
+        reference_frame="upper-left",
+        timestamps=timestamps,
+        confidence=confidence,
+        confidence_definition="Softmax output of the deep neural network",
+    )
+    skeleton = Skeleton(
+        name="rat_skeleton",
+        nodes=[bodypart],
+        edges=np.zeros((0, 2), dtype=np.uint8),
+    )
+    skeletons = Skeletons(skeletons=[skeleton])
+    pose = PoseEstimation(
+        pose_estimation_series=[series],
+        description="Single-LED pose estimation (test)",
+        original_videos=["video.mp4"],
+        labeled_videos=["video_labeled.mp4"],
+        source_software="DeepLabCut",
+        source_software_version="2.3.0",
+        scorer="DLC_resnet50",
+        skeleton=skeleton,
+    )
+    behavior = nwbfile.create_processing_module(name="behavior", description="behavior")
+    behavior.add(skeletons)
+    behavior.add(pose)
+    path = tmp_path / "single_pose_estimation.nwb"
+    _write_nwb(nwbfile, path)
+    return path
+
+
+def test_single_led1_pose_estimation_loads_with_one_bodypart(tmp_path: Path) -> None:
+    nwb_path = _single_pose_estimation_fixture(tmp_path, bodypart="led_green")
+    cfg = NWBConfig(
+        nwb_file=nwb_path,
+        led_source=NWBLEDSourceConfig(
+            tracking_geometry="single_led1", led1_bodypart="led_green"
+        ),
+    )
+
+    pixels, _ = load_nwb_session(cfg)
+
+    assert pixels.led1_pixels.shape == (30, 2)
+    assert pixels.led2_pixels is not None
+    assert np.isnan(pixels.led2_pixels).all()
+    assert pixels.diagnostics["observed_bodypart"] == "led_green"
+    # Confidence layout: observed columns get real values, missing
+    # columns get neutral 1.0.
+    assert pixels.confidence is not None
+    assert pixels.confidence.shape == (30, 4)
+    np.testing.assert_allclose(pixels.confidence[:, 0], np.full(30, 0.9), rtol=1e-6)
+    np.testing.assert_array_equal(pixels.confidence[:, 2], np.full(30, 1.0))
+
+
+def test_single_led_pose_estimation_missing_bodypart_raises(tmp_path: Path) -> None:
+    """Required bodypart name not present → clear error with the
+    available names."""
+
+    nwb_path = _single_pose_estimation_fixture(tmp_path, bodypart="led_green")
+    cfg = NWBConfig(
+        nwb_file=nwb_path,
+        led_source=NWBLEDSourceConfig(
+            tracking_geometry="single_led1", led1_bodypart="not_present"
+        ),
+    )
+    with pytest.raises(ValueError, match="not_present"):
+        load_nwb_session(cfg)
+
+
+def test_single_led_pose_estimation_likelihood_gate_applies_to_observed(
+    tmp_path: Path,
+) -> None:
+    """Below-threshold frames in the observed bodypart get NaN'd while
+    the missing-LED column stays NaN throughout."""
+
+    from ndx_pose import PoseEstimation, PoseEstimationSeries, Skeleton, Skeletons
+
+    nwbfile = _make_nwb_skeleton()
+    n = 10
+    timestamps = np.arange(n, dtype=float) / 30.0
+    data = np.column_stack([100.0 + np.arange(n), np.full(n, 200.0)]).astype(np.float32)
+    confidence = np.full(n, 0.9, dtype=np.float32)
+    confidence[3] = 0.1
+    series = PoseEstimationSeries(
+        name="led_green",
+        description="single",
+        data=data,
+        unit="pixels",
+        conversion=1.0,
+        reference_frame="upper-left",
+        timestamps=timestamps,
+        confidence=confidence,
+        confidence_definition="softmax",
+    )
+    skeleton = Skeleton(
+        name="rat",
+        nodes=["led_green"],
+        edges=np.zeros((0, 2), dtype=np.uint8),
+    )
+    pose = PoseEstimation(
+        pose_estimation_series=[series],
+        description="",
+        original_videos=["v.mp4"],
+        labeled_videos=["vl.mp4"],
+        source_software="DLC",
+        source_software_version="2",
+        scorer="x",
+        skeleton=skeleton,
+    )
+    behavior = nwbfile.create_processing_module("behavior", "behavior")
+    behavior.add(Skeletons(skeletons=[skeleton]))
+    behavior.add(pose)
+    nwb_path = tmp_path / "single_drop.nwb"
+    _write_nwb(nwbfile, nwb_path)
+
+    cfg = NWBConfig(
+        nwb_file=nwb_path,
+        led_source=NWBLEDSourceConfig(
+            tracking_geometry="single_led1",
+            led1_bodypart="led_green",
+            likelihood_threshold=0.6,
+        ),
+    )
+    pixels, _ = load_nwb_session(cfg)
+
+    assert np.isnan(pixels.led1_pixels[3]).all()
+    assert pixels.led2_pixels is not None
+    assert np.isnan(pixels.led2_pixels).all()
+
+
+# ---------------------------------------------------------------------
+# End-to-end load_session: mask reflects observed-LED finiteness only.
+# ---------------------------------------------------------------------
+
+
+def test_single_led_session_mask_cam_only_tracks_observed_led(tmp_path: Path) -> None:
+    """``mask_cam`` for a single-LED session is true exactly where the
+    observed LED is finite (the missing LED is all-NaN, so the OR'd
+    mask collapses to the observed LED's finiteness)."""
+
+    nwb_path = _single_trodes_position_fixture(tmp_path)
+    config = SessionConfig(
+        inputs=InputsConfig(
+            format="nwb",
+            nwb=NWBConfig(
+                nwb_file=nwb_path,
+                led_source=NWBLEDSourceConfig(tracking_geometry="single_led1"),
+            ),
+        ),
+        imu=IMUConfig(run_calibration=False),
+        camera=CameraConfig(meters_per_pixel=0.01),
+        filter=FilterConfig(state_mode="vision_only", led_distance=0.05),
+    )
+
+    session = load_session(config)
+
+    assert session.Z_cam_led1.shape == (30, 2)
+    assert session.Z_cam_led2.shape == (30, 2)
+    assert np.isnan(session.Z_cam_led2).all()
+    np.testing.assert_array_equal(
+        session.mask_cam, np.isfinite(session.Z_cam_led1).all(axis=1)
+    )
+    assert session.led_distance == pytest.approx(0.05)
+
+
+# ---------------------------------------------------------------------
+# Camera envelope helper (safety-check unit test).
+# ---------------------------------------------------------------------
+
+
+def test_camera_envelope_dual_led_returns_midpoint() -> None:
+    from trodestrack.io.session import _camera_envelope
+
+    n = 10
+    led1 = np.column_stack([np.arange(n, dtype=float), np.zeros(n)])
+    led2 = np.column_stack([np.arange(n, dtype=float) + 4.0, np.zeros(n)])
+    mask = np.ones(n, dtype=bool)
+
+    envelope, valid, source = _camera_envelope(led1, led2, mask)
+    assert source == "dual_led_midpoint"
+    np.testing.assert_array_equal(envelope[:, 0], np.arange(n, dtype=float) + 2.0)
+    assert valid.all()
+
+
+def test_camera_envelope_single_led1_uses_led1_directly() -> None:
+    from trodestrack.io.session import _camera_envelope
+
+    n = 10
+    led1 = np.column_stack([np.arange(n, dtype=float), np.zeros(n)])
+    led2 = np.full((n, 2), np.nan)
+    mask = np.ones(n, dtype=bool)
+
+    envelope, valid, source = _camera_envelope(led1, led2, mask)
+    assert source == "single_led1"
+    np.testing.assert_array_equal(envelope, led1)
+    assert valid.all()
+
+
+def test_camera_envelope_single_led2_uses_led2_directly() -> None:
+    from trodestrack.io.session import _camera_envelope
+
+    n = 10
+    led1 = np.full((n, 2), np.nan)
+    led2 = np.column_stack([np.arange(n, dtype=float), np.zeros(n)])
+    mask = np.ones(n, dtype=bool)
+
+    envelope, valid, source = _camera_envelope(led1, led2, mask)
+    assert source == "single_led2"
+    np.testing.assert_array_equal(envelope, led2)
+    assert valid.all()
+
+
 # Touch ``VectorData`` to silence unused-import lints when only some
 # of the optional helpers above need it.
 _ = VectorData

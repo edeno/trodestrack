@@ -399,7 +399,11 @@ def _load_nwb(config: SessionConfig) -> PreparedSession:
         config.camera,
         meters_per_pixel_override=cfg.meters_per_pixel_override,
     )
-    assert led2 is not None  # NWB Position / PoseEstimation always pairs LEDs
+    # The NWB loader always emits an LED2 array (NaN-filled for
+    # ``single_led{1,2}``) so the EKF/UKF observation model sees a
+    # uniform LED-pair-shaped input. ``mask_cam`` (computed below)
+    # is what filters frames where the observed LED is missing.
+    assert led2 is not None
 
     t_imu_raw, U_imu, U_full, imu_is_synthetic, imu_source = (
         _resolve_imu_for_native_loader(config, pixels.t_cam, nwb_analog=extras.imu)
@@ -536,25 +540,30 @@ def run_real_data_safety_check(
     means = np.asarray(filter_result.filtered_means)
     pos = means[:, list(layout.pos_idx)]
 
-    # Dual-LED frames are needed only to estimate the camera midpoint
-    # envelope (LED midpoint requires both LEDs). The fused-vs-vision
-    # deviation gate, by contrast, must consider every frame the EKF
-    # actually consumed — both EKFs see single-LED frames via the
-    # OR'd ``mask_cam``, so excluding them used to let "mostly
-    # single-LED" sessions silently bypass the deviation check while
-    # the fused trajectory drifted.
-    cam_mid = 0.5 * (session.Z_cam_led1 + session.Z_cam_led2)
-    dual_valid = session.mask_cam & np.isfinite(cam_mid).all(axis=1)
+    # The camera envelope estimates the bounding box of the observed
+    # camera trajectory. For dual-LED sessions we use the LED
+    # midpoint; for single-LED NWB sessions we use the observed LED
+    # directly (the missing one is all-NaN and the midpoint would be
+    # NaN everywhere). The fused-vs-vision deviation gate, by
+    # contrast, considers every frame the EKF actually consumed —
+    # both EKFs see partially-observed frames via the OR'd
+    # ``mask_cam``, so excluding them used to let "mostly single-LED"
+    # sessions silently bypass the deviation check while the fused
+    # trajectory drifted.
+    envelope, dual_valid, envelope_source = _camera_envelope(
+        session.Z_cam_led1, session.Z_cam_led2, session.mask_cam
+    )
     dual_led_frame_count = int(dual_valid.sum())
     if dual_led_frame_count < config.safety_min_dual_led_frames:
         raise ValueError(
             "Safety check requires at least "
-            f"{config.safety_min_dual_led_frames} finite dual-LED frame(s) "
-            f"to estimate the camera envelope; got {dual_led_frame_count}. "
-            "Lower outputs.safety_min_dual_led_frames or use "
-            "state_mode: vision_only if dual-LED coverage is too sparse."
+            f"{config.safety_min_dual_led_frames} finite "
+            f"{envelope_source} frame(s) to estimate the camera "
+            f"envelope; got {dual_led_frame_count}. Lower "
+            "outputs.safety_min_dual_led_frames or use "
+            "state_mode: vision_only if observed-LED coverage is too sparse."
         )
-    camera_range = tuple(float(x) for x in np.ptp(cam_mid[dual_valid], axis=0))
+    camera_range = tuple(float(x) for x in np.ptp(envelope[dual_valid], axis=0))
     fused_range = tuple(float(x) for x in np.ptp(pos, axis=0))
 
     vision_config = replace(
@@ -968,6 +977,37 @@ def _median_led_distance(led1: np.ndarray, led2: np.ndarray, mask: np.ndarray) -
     if not np.any(valid):
         return 0.04
     return float(np.nanmedian(np.linalg.norm(led2[valid] - led1[valid], axis=1)))
+
+
+def _camera_envelope(
+    led1: np.ndarray, led2: np.ndarray, mask_cam: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, str]:
+    """Pick the camera trajectory used as the safety-check envelope.
+
+    Returns ``(envelope, valid, source_label)``. ``valid`` is the
+    subset of ``mask_cam`` where the chosen envelope coordinates are
+    finite.
+
+    Selection rule: if exactly one LED array is all-NaN (single-LED
+    NWB sessions populate the unobserved LED with NaN), use the
+    other LED directly. Otherwise use the LED midpoint. The midpoint
+    case requires both LEDs to be finite per row, which is the
+    pre-single-LED behavior.
+    """
+
+    led1_observed = bool(np.isfinite(led1).any())
+    led2_observed = bool(np.isfinite(led2).any())
+    if led1_observed and not led2_observed:
+        envelope = led1
+        source = "single_led1"
+    elif led2_observed and not led1_observed:
+        envelope = led2
+        source = "single_led2"
+    else:
+        envelope = 0.5 * (led1 + led2)
+        source = "dual_led_midpoint"
+    valid = mask_cam & np.isfinite(envelope).all(axis=1)
+    return envelope, valid, source
 
 
 def _validate_calibration_for_fusion(

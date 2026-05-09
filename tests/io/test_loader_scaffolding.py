@@ -177,6 +177,88 @@ def test_nwb_meters_per_pixel_override_rejects_non_positive(bad: float) -> None:
 
 
 # ----------------------------------------------------------------------
+# NWBLEDSourceConfig: tracking_geometry validators.
+# ----------------------------------------------------------------------
+
+
+def test_tracking_geometry_default_is_dual_led() -> None:
+    from trodestrack.config import NWBLEDSourceConfig
+
+    assert NWBLEDSourceConfig().tracking_geometry == "dual_led"
+
+
+@pytest.mark.parametrize(
+    "geometry,forbidden_field,value",
+    [
+        ("single_led1", "led2_series_name", "x"),
+        ("single_led1", "led2_bodypart", "y"),
+        ("single_led2", "led1_series_name", "x"),
+        ("single_led2", "led1_bodypart", "y"),
+    ],
+)
+def test_tracking_geometry_single_led_rejects_other_led_name_fields(
+    geometry: str, forbidden_field: str, value: str
+) -> None:
+    from trodestrack.config import NWBLEDSourceConfig
+
+    with pytest.raises(ValidationError, match=forbidden_field):
+        NWBLEDSourceConfig.model_validate(
+            {"tracking_geometry": geometry, forbidden_field: value},
+        )
+
+
+@pytest.mark.parametrize("geometry", ["single_led1", "single_led2"])
+def test_single_led_session_requires_filter_led_distance(geometry: str) -> None:
+    """Without ``filter.led_distance``, single-LED sessions would fall
+    back to ``_median_led_distance``'s 0.04 default (no row pairs both
+    LEDs). Reject at config time."""
+
+    with pytest.raises(ValidationError, match="led_distance"):
+        SessionConfig.model_validate(
+            {
+                "inputs": {
+                    "format": "nwb",
+                    "nwb": {
+                        "nwb_file": "session.nwb",
+                        "led_source": {"tracking_geometry": geometry},
+                    },
+                },
+            },
+        )
+
+
+def test_single_led_session_with_filter_led_distance_succeeds() -> None:
+    """Setting ``filter.led_distance`` lifts the validator."""
+
+    SessionConfig.model_validate(
+        {
+            "inputs": {
+                "format": "nwb",
+                "nwb": {
+                    "nwb_file": "session.nwb",
+                    "led_source": {"tracking_geometry": "single_led1"},
+                },
+            },
+            "filter": {"state_mode": "vision_only", "led_distance": 0.05},
+        },
+    )
+
+
+def test_dual_led_session_does_not_require_filter_led_distance() -> None:
+    """Default ``tracking_geometry='dual_led'`` keeps led_distance
+    optional (loader falls back to ``_median_led_distance``)."""
+
+    SessionConfig.model_validate(
+        {
+            "inputs": {
+                "format": "nwb",
+                "nwb": {"nwb_file": "session.nwb"},
+            },
+        },
+    )
+
+
+# ----------------------------------------------------------------------
 # Path resolution: nested-block Paths resolve from the YAML directory.
 # ----------------------------------------------------------------------
 
