@@ -111,9 +111,12 @@ class NWBLEDSourceConfig(BaseModel):
 
         # single_led{1,2}: the *other* LED's name fields must be
         # unset, otherwise the user is implicitly asking for a pair
-        # the loader cannot honor. The matching half is optional —
-        # the loader auto-detects the single SpatialSeries / bodypart
-        # when it is None.
+        # the loader cannot honor. The matching half is optional for
+        # SpatialSeries (the Position-container loader auto-detects
+        # when exactly one series is present) but required for
+        # PoseEstimation — the bodypart name has no canonical
+        # writer-default and the loader has no way to guess which
+        # bodypart is the physical LED.
         unobserved = "2" if self.tracking_geometry == "single_led1" else "1"
         forbidden = (f"led{unobserved}_series_name", f"led{unobserved}_bodypart")
         bad = [name for name in forbidden if getattr(self, name) is not None]
@@ -385,7 +388,12 @@ class FilterConfig(BaseModel):
         "2d_cam_3d_imu",
         "2d_cam_6dof_imu_orientation",
     ] = "2d_cam_3d_imu"
-    led_distance: float | None = None
+    # The EKF/UKF camera model places LED1 / LED2 a fixed offset apart;
+    # zero collapses the offset (LEDs become indistinguishable) and a
+    # negative value mirrors the offset direction. ``None`` is the
+    # documented "infer from data" sentinel — the loader falls back to
+    # ``_median_led_distance`` (or rejects, for single-LED NWB sessions).
+    led_distance: float | None = Field(default=None, gt=0.0)
     use_heading_measurement: bool | None = None
     process_noise_pos: float | None = None
     process_noise_vel: float | None = None

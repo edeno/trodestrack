@@ -142,7 +142,11 @@ def _load_trodes_native(config: SessionConfig) -> PreparedSession:
         _check_imu_camera_overlap(t_imu_aligned, t_cam, format_name="trodes_native")
 
     mask = np.isfinite(led1).all(axis=1) | np.isfinite(led2).all(axis=1)
-    led_distance = config.filter.led_distance or _median_led_distance(led1, led2, mask)
+    led_distance = (
+        config.filter.led_distance
+        if config.filter.led_distance is not None
+        else _median_led_distance(led1, led2, mask)
+    )
 
     diagnostics: dict[str, object] = {
         "loader": {
@@ -347,7 +351,11 @@ def _load_dlc_keypoints(config: SessionConfig) -> PreparedSession:
         _check_imu_camera_overlap(t_imu_aligned, t_cam, format_name="dlc_keypoints")
 
     mask = np.isfinite(led1).all(axis=1) | np.isfinite(led2).all(axis=1)
-    led_distance = config.filter.led_distance or _median_led_distance(led1, led2, mask)
+    led_distance = (
+        config.filter.led_distance
+        if config.filter.led_distance is not None
+        else _median_led_distance(led1, led2, mask)
+    )
 
     diagnostics: dict[str, object] = {
         "loader": {
@@ -435,7 +443,11 @@ def _load_nwb(config: SessionConfig) -> PreparedSession:
         )
 
     mask = np.isfinite(led1).all(axis=1) | np.isfinite(led2).all(axis=1)
-    led_distance = config.filter.led_distance or _median_led_distance(led1, led2, mask)
+    led_distance = (
+        config.filter.led_distance
+        if config.filter.led_distance is not None
+        else _median_led_distance(led1, led2, mask)
+    )
 
     diagnostics: dict[str, object] = {
         "loader": {
@@ -662,7 +674,11 @@ def _load_prepared_arrays(config: SessionConfig) -> PreparedSession:
         # configured at all, ``led2`` is all-NaN and the OR collapses
         # back to ``finite(led1)`` as before.
         mask = np.isfinite(led1).all(axis=1) | np.isfinite(led2).all(axis=1)
-    led_distance = config.filter.led_distance or _median_led_distance(led1, led2, mask)
+    led_distance = (
+        config.filter.led_distance
+        if config.filter.led_distance is not None
+        else _median_led_distance(led1, led2, mask)
+    )
     _validate_time_vector(t_imu, "IMU timestamps")
     _validate_time_vector(t_cam, "camera timestamps")
     U_arr = np.asarray(U_imu, dtype=float)
@@ -724,7 +740,11 @@ def _load_spikegadgets_trodes(config: SessionConfig) -> PreparedSession:
     # ``_median_led_distance``, the camera-midpoint safety check)
     # already gate independently with their own ``isfinite`` checks.
     mask = np.isfinite(led1).all(axis=1) | np.isfinite(led2).all(axis=1)
-    led_distance = config.filter.led_distance or _median_led_distance(led1, led2, mask)
+    led_distance = (
+        config.filter.led_distance
+        if config.filter.led_distance is not None
+        else _median_led_distance(led1, led2, mask)
+    )
 
     diagnostics: dict[str, object] = {
         "loader": {

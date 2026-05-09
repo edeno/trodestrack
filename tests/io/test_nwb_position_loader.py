@@ -1057,6 +1057,110 @@ def test_single_led_session_mask_cam_only_tracks_observed_led(tmp_path: Path) ->
     assert session.led_distance == pytest.approx(0.05)
 
 
+def _single_led_with_analog_fixture(
+    tmp_path: Path,
+    *,
+    n_frames: int = 60,
+    n_imu_samples: int = 120,
+) -> Path:
+    """Single-LED Position container plus a Trodes-shaped analog IMU
+    TimeSeries (6 headstage channels)."""
+
+    from pynwb.behavior import BehavioralEvents
+
+    nwbfile = _make_nwb_skeleton()
+    behavior = nwbfile.create_processing_module(name="behavior", description="behavior")
+    timestamps = np.arange(n_frames, dtype=float) / 30.0
+    led_data = np.column_stack([100.0 + np.arange(n_frames), np.full(n_frames, 200.0)])
+    position = Position()
+    position.create_spatial_series(
+        name="led_0_series_0",
+        description="single LED",
+        data=led_data,
+        unit="pixels",
+        conversion=1.0,
+        reference_frame="upper-left",
+        timestamps=timestamps,
+    )
+    behavior.add(position)
+
+    analog_module = nwbfile.create_processing_module(
+        name="analog", description="analog data"
+    )
+    imu_channels = [
+        "Headstage_GyroX",
+        "Headstage_GyroY",
+        "Headstage_GyroZ",
+        "Headstage_AccelX",
+        "Headstage_AccelY",
+        "Headstage_AccelZ",
+    ]
+    description = "   ".join(imu_channels) + "   "
+    # All-zero IMU keeps the EKF stable for a smoke test (no synthetic
+    # gyro/accel that the filter would have to integrate through).
+    analog_t = np.linspace(timestamps[0], timestamps[-1], n_imu_samples)
+    data = np.zeros((n_imu_samples, len(imu_channels)), dtype=np.int16)
+    analog_events = BehavioralEvents(name="analog")
+    analog_events.add_timeseries(
+        pynwb.TimeSeries(
+            name="analog",
+            description=description,
+            data=data,
+            timestamps=analog_t,
+            unit="-1",
+        )
+    )
+    analog_module.add(analog_events)
+
+    path = tmp_path / "single_led_with_analog.nwb"
+    _write_nwb(nwbfile, path)
+    return path
+
+
+def test_single_led_fused_mode_runs_end_to_end(tmp_path: Path) -> None:
+    """``state_mode='2d_cam_3d_imu'`` with single-LED NWB + analog
+    IMU runs the full loader → EKF pipeline. Catches wiring
+    regressions in the loader, the LED-pair-shaped observation
+    handoff, and the safety-check envelope path."""
+
+    from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
+
+    nwb_path = _single_led_with_analog_fixture(tmp_path)
+    config = SessionConfig(
+        inputs=InputsConfig(
+            format="nwb",
+            nwb=NWBConfig(
+                nwb_file=nwb_path,
+                led_source=NWBLEDSourceConfig(tracking_geometry="single_led1"),
+            ),
+        ),
+        imu=IMUConfig(run_calibration=False),
+        camera=CameraConfig(meters_per_pixel=0.01),
+        filter=FilterConfig(state_mode="2d_cam_3d_imu", led_distance=0.05),
+    )
+
+    session = load_session(config)
+    assert session.led_distance == pytest.approx(0.05)
+    assert session.diagnostics["loader"]["imu_source"] == "nwb_analog"
+    assert np.isnan(session.Z_cam_led2).all()
+
+    ekf_config = EKFConfig(
+        state_mode="2d_cam_3d_imu", led_distance=session.led_distance
+    )
+    result = extended_kalman_filter(
+        ekf_config=ekf_config,
+        t_imu=session.t_imu,
+        U_imu=session.U_imu,
+        t_cam=session.t_cam,
+        Z_cam_led1=session.Z_cam_led1,
+        Z_cam_led2=session.Z_cam_led2,
+        mask_cam=session.mask_cam,
+    )
+    means = np.asarray(result.filtered_means)
+    assert means.shape[0] == session.t_cam.shape[0]
+    assert np.isfinite(means).all()
+
+
 # ---------------------------------------------------------------------
 # Camera envelope helper (safety-check unit test).
 # ---------------------------------------------------------------------
