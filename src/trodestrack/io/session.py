@@ -128,6 +128,8 @@ def _load_trodes_native(config: SessionConfig) -> PreparedSession:
     _validate_time_vector(t_cam, "camera timestamps")
     if t_imu_aligned.size > 1:
         _validate_time_vector(t_imu_aligned, "IMU timestamps after preprocessing")
+    if not imu_is_synthetic:
+        _check_imu_camera_overlap(t_imu_aligned, t_cam, format_name="trodes_native")
 
     mask = np.isfinite(led1).all(axis=1) | np.isfinite(led2).all(axis=1)
     led_distance = config.filter.led_distance or _median_led_distance(led1, led2, mask)
@@ -161,6 +163,43 @@ def _load_trodes_native(config: SessionConfig) -> PreparedSession:
         gyro_z_for_led_identity=(U_full[:, 2] if U_full is not None else None),
         U_imu_for_calibration=U_full,
     )
+
+
+def _check_imu_camera_overlap(
+    t_imu: np.ndarray, t_cam: np.ndarray, *, format_name: str
+) -> None:
+    """Raise if IMU and camera time ranges don't overlap after alignment.
+
+    Catches the silent-failure mode where DLC ``meta_pickle``
+    (relative seconds starting at 0) is paired with a parquet IMU on
+    a Unix-like clock (~1.7e9 s): the EKF then sees zero IMU samples
+    per camera interval and produces an IMU-configured but
+    IMU-empty fused trajectory.
+
+    Skip this check for synthetic IMU streams (vision_only) — those
+    are constructed to share the camera clock so overlap is
+    guaranteed.
+    """
+
+    imu_lo, imu_hi = float(t_imu[0]), float(t_imu[-1])
+    cam_lo, cam_hi = float(t_cam[0]), float(t_cam[-1])
+    if imu_hi < cam_lo or imu_lo > cam_hi:
+        raise ValueError(
+            f"inputs.format={format_name!r}: IMU and camera streams do "
+            "not overlap after alignment "
+            f"(IMU: [{imu_lo:.3f}, {imu_hi:.3f}] s; "
+            f"camera: [{cam_lo:.3f}, {cam_hi:.3f}] s). The EKF would "
+            "see zero IMU samples per camera interval and produce a "
+            "fused-but-empty trajectory. The two clocks differ — for "
+            "DLC, ``timestamps_source: meta_pickle`` synthesizes "
+            "relative seconds starting at 0 while ``inputs.imu_file`` "
+            "carries Unix-like timestamps. Fix by using "
+            "``timestamps_source: trodes_hw_sync`` (with a Trodes "
+            "*.videoTimeStamps.cameraHWSync), ``timestamps_source: "
+            "timestamp_file`` with absolute seconds, or ``imu.time_offset_s`` / "
+            "``camera.time_offset_s`` to bring the clocks into "
+            "agreement."
+        )
 
 
 def _resolve_imu_for_native_loader(
@@ -240,6 +279,8 @@ def _load_dlc_keypoints(config: SessionConfig) -> PreparedSession:
     _validate_time_vector(t_cam, "camera timestamps")
     if t_imu_aligned.size > 1:
         _validate_time_vector(t_imu_aligned, "IMU timestamps after preprocessing")
+    if not imu_is_synthetic:
+        _check_imu_camera_overlap(t_imu_aligned, t_cam, format_name="dlc_keypoints")
 
     mask = np.isfinite(led1).all(axis=1) | np.isfinite(led2).all(axis=1)
     led_distance = config.filter.led_distance or _median_led_distance(led1, led2, mask)

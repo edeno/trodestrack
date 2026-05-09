@@ -506,6 +506,55 @@ def test_load_session_dlc_keypoints_imu_consuming_raises(tmp_path: Path) -> None
     assert "vision_only" in msg
 
 
+def test_meta_pickle_with_unix_imu_raises_overlap_error(tmp_path: Path) -> None:
+    """``timestamps_source='meta_pickle'`` synthesizes relative seconds
+    starting at 0; pairing it with a Unix-like ``inputs.imu_file``
+    (typically ~1.7e9 s) used to silently produce an IMU-configured
+    fused trajectory with zero IMU samples per camera interval. The
+    loader-level overlap check now raises with a remediation message."""
+
+    h5_path = _write_h5_and_meta(tmp_path, n_frames=5)
+
+    # IMU parquet on a Unix-like clock (~2023-11-14).
+    imu_path = tmp_path / "imu.parquet"
+    n_imu = 30
+    imu_t = np.linspace(1_700_000_000.0, 1_700_000_001.0, n_imu)
+    pd.DataFrame(
+        {
+            "time": imu_t,
+            "Headstage_GyroX": np.zeros(n_imu, dtype=int),
+            "Headstage_GyroY": np.zeros(n_imu, dtype=int),
+            "Headstage_GyroZ": np.arange(n_imu, dtype=int),
+            "Headstage_AccelX": np.zeros(n_imu, dtype=int),
+            "Headstage_AccelY": np.zeros(n_imu, dtype=int),
+            "Headstage_AccelZ": np.zeros(n_imu, dtype=int),
+        }
+    ).to_parquet(imu_path)
+
+    config = SessionConfig(
+        inputs=InputsConfig(
+            format="dlc_keypoints",
+            imu_file=imu_path,
+            dlc_keypoints=DLCKeypointsConfig(
+                h5_file=h5_path,
+                led1_bodypart="led_green",
+                led2_bodypart="led_red",
+            ),
+        ),
+        imu=IMUConfig(run_calibration=False),
+        camera=CameraConfig(meters_per_pixel=0.01),
+        filter=FilterConfig(state_mode="2d_cam_3d_imu"),
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        load_session(config)
+    msg = str(excinfo.value)
+    assert "do not overlap" in msg
+    assert "trodes_hw_sync" in msg
+    assert "timestamp_file" in msg
+    assert "time_offset_s" in msg
+
+
 def test_dlc_extra_missing_raises_import_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
