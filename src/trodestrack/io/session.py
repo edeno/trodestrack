@@ -76,14 +76,65 @@ class SafetyReport:
 def load_session(config: SessionConfig) -> PreparedSession:
     """Load a YAML-configured session into filter-ready arrays."""
 
-    if config.inputs.format == "prepared_arrays":
+    fmt = config.inputs.format
+    if fmt == "prepared_arrays":
         session = _load_prepared_arrays(config)
-    else:
+    elif fmt == "spikegadgets_trodes":
         session = _load_spikegadgets_trodes(config)
+    elif fmt == "trodes_native":
+        session = _load_trodes_native(config)
+    elif fmt == "dlc_keypoints":
+        session = _load_dlc_keypoints(config)
+    elif fmt == "nwb":
+        session = _load_nwb(config)
+    else:  # pragma: no cover — exhaustive over Literal
+        raise ValueError(f"Unsupported inputs.format={fmt!r}.")
 
     session = _apply_led_identity_correction(session)
     session = _add_imu_calibration_diagnostics(session)
     return _attach_ttl_events(session)
+
+
+def _load_trodes_native(config: SessionConfig) -> PreparedSession:
+    """Phase 1 stub. The full loader lands in Phase 2."""
+
+    raise NotImplementedError(
+        "inputs.format='trodes_native' is implemented in Phase 2 of the "
+        "native-loaders plan."
+    )
+
+
+def _load_dlc_keypoints(config: SessionConfig) -> PreparedSession:
+    """Phase 1 stub. Verifies the [dlc] extra is installed; the full
+    loader lands in Phase 3."""
+
+    try:
+        import tables  # type: ignore[import-not-found] # noqa: F401  # PyTables backs ``pandas.read_hdf``
+    except ImportError as e:
+        raise ImportError(
+            "inputs.format='dlc_keypoints' requires the [dlc] extra. "
+            "Install with: uv pip install 'trodestrack[dlc]'."
+        ) from e
+    raise NotImplementedError(
+        "inputs.format='dlc_keypoints' is implemented in Phase 3 of the "
+        "native-loaders plan."
+    )
+
+
+def _load_nwb(config: SessionConfig) -> PreparedSession:
+    """Phase 1 stub. Verifies the [nwb] extra is installed; the full
+    loader lands in Phase 4a."""
+
+    try:
+        import pynwb  # noqa: F401
+    except ImportError as e:
+        raise ImportError(
+            "inputs.format='nwb' requires the [nwb] extra. "
+            "Install with: uv pip install 'trodestrack[nwb]'."
+        ) from e
+    raise NotImplementedError(
+        "inputs.format='nwb' is implemented in Phase 4a of the native-loaders plan."
+    )
 
 
 def write_session_diagnostics(

@@ -11,12 +11,112 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
+class TrodesNativeConfig(BaseModel):
+    """Native Trodes ``.videoPositionTracking`` + PTP timestamps inputs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    position_tracking_file: Path
+    # PTP-synced per-frame timestamps. v1 supports PTP only; the loader
+    # rejects ``cameraHWFrameCount`` and plain ``videoTimeStamps``
+    # variants because clock-stitching them needs sample-rate logic
+    # that's out of scope.
+    camera_timestamps_file: Path
+
+
+class DLCKeypointsConfig(BaseModel):
+    """DeepLabCut HDF5 keypoint inputs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    h5_file: Path
+    led1_bodypart: str
+    led2_bodypart: str
+    likelihood_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
+    # ``meta_pickle`` synthesizes camera timestamps from the sibling
+    # DLC ``_meta.pickle`` (``fps``, ``nframes``); ``trodes_hw_sync``
+    # joins against an external ``*.videoTimeStamps.cameraHWSync``;
+    # ``timestamp_file`` reads a 1-D float array.
+    timestamps_source: Literal["meta_pickle", "trodes_hw_sync", "timestamp_file"] = (
+        "meta_pickle"
+    )
+    camera_timestamps_file: Path | None = None
+    timestamp_file: Path | None = None
+    apply_crop_offset: bool = True
+
+    @model_validator(mode="after")
+    def _validate_timestamps_source(self) -> DLCKeypointsConfig:
+        if self.timestamps_source == "trodes_hw_sync" and (
+            self.camera_timestamps_file is None
+        ):
+            raise ValueError(
+                "dlc_keypoints.timestamps_source='trodes_hw_sync' requires "
+                "camera_timestamps_file."
+            )
+        if self.timestamps_source == "timestamp_file" and self.timestamp_file is None:
+            raise ValueError(
+                "dlc_keypoints.timestamps_source='timestamp_file' requires "
+                "timestamp_file."
+            )
+        return self
+
+
+class NWBLEDSourceConfig(BaseModel):
+    """How to locate the LED position container inside an NWB file."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    container: Literal["auto", "trodes_position", "ndx_pose"] = "auto"
+    # For ``trodes_position``: SpatialSeries names under the Position
+    # container. For ``ndx_pose``: bodypart names under PoseEstimation.
+    # Loader-time auto-detection picks defaults when None.
+    led1_series_name: str | None = None
+    led2_series_name: str | None = None
+    led1_bodypart: str | None = None
+    led2_bodypart: str | None = None
+    likelihood_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
+
+
+class NWBDIOToTTLConfig(BaseModel):
+    """Map NWB ``behavioral_events`` TimeSeries names to TTL source ids."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Edges come straight from the int8 0/1 stream — 1 → "rise",
+    # 0 → "fall". The first sample is the initial level (not a
+    # transition); the loader drops it.
+    name_to_source_id: dict[str, int]
+
+
+class NWBConfig(BaseModel):
+    """NWB file + auto-detected position container + optional extras."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    nwb_file: Path
+    led_source: NWBLEDSourceConfig = Field(default_factory=NWBLEDSourceConfig)
+    # Post-hoc re-calibration. Wins over file-stored ``conversion``
+    # and over ``camera.meters_per_pixel`` per the
+    # ``pixels_to_meters`` precedence ladder.
+    meters_per_pixel_override: float | None = None
+    # When set, the NWB ``processing["behavior"]["behavioral_events"]``
+    # TimeSeries are assembled into the EKF/UKF event channel.
+    # Phase 1 schema hook only; the loader lands in Phase 4c.
+    dio_to_ttl: NWBDIOToTTLConfig | None = None
+
+
 class InputsConfig(BaseModel):
     """Input file locations and format selection."""
 
     model_config = ConfigDict(extra="forbid")
 
-    format: Literal["prepared_arrays", "spikegadgets_trodes"] = "prepared_arrays"
+    format: Literal[
+        "prepared_arrays",
+        "spikegadgets_trodes",
+        "trodes_native",
+        "dlc_keypoints",
+        "nwb",
+    ] = "prepared_arrays"
 
     # Existing prepared-array workflow.
     imu_timestamps: Path | None = None
@@ -29,6 +129,12 @@ class InputsConfig(BaseModel):
     # Real-data parquet workflow.
     imu_file: Path | None = None
     position_file: Path | None = None
+
+    # Native-loader workflows. Each format is selected via
+    # ``format=...`` and configured by the matching nested block.
+    trodes_native: TrodesNativeConfig | None = None
+    dlc_keypoints: DLCKeypointsConfig | None = None
+    nwb: NWBConfig | None = None
 
     @model_validator(mode="after")
     def _validate_required_paths(self) -> InputsConfig:
@@ -43,17 +149,30 @@ class InputsConfig(BaseModel):
                 )
                 if getattr(self, name) is None
             ]
-        else:
+            if missing:
+                raise ValueError(
+                    f"inputs.format='prepared_arrays' is missing required "
+                    f"path(s): {', '.join(missing)}."
+                )
+        elif self.format == "spikegadgets_trodes":
             missing = [
                 name
                 for name in ("imu_file", "position_file")
                 if getattr(self, name) is None
             ]
-        if missing:
-            raise ValueError(
-                f"inputs.format={self.format!r} is missing required path(s): "
-                f"{', '.join(missing)}."
-            )
+            if missing:
+                raise ValueError(
+                    f"inputs.format='spikegadgets_trodes' is missing "
+                    f"required path(s): {', '.join(missing)}."
+                )
+        else:
+            # Native loaders: ``format`` value matches the nested
+            # config attribute name on InputsConfig.
+            if getattr(self, self.format) is None:
+                raise ValueError(
+                    f"inputs.format={self.format!r} is missing the required "
+                    f"'inputs.{self.format}' configuration block."
+                )
         return self
 
 
@@ -488,21 +607,47 @@ def _resolve_paths(config: SessionConfig, *, base_dir: Path) -> SessionConfig:
             return path
         return base_dir / path
 
-    inputs = config.inputs.model_copy(
-        update={
-            name: resolve(getattr(config.inputs, name))
-            for name in (
-                "imu_timestamps",
-                "imu_measurements",
-                "camera_timestamps",
-                "led1_positions",
-                "led2_positions",
-                "camera_mask",
-                "imu_file",
-                "position_file",
-            )
-        }
+    flat_path_fields = (
+        "imu_timestamps",
+        "imu_measurements",
+        "camera_timestamps",
+        "led1_positions",
+        "led2_positions",
+        "camera_mask",
+        "imu_file",
+        "position_file",
     )
+    inputs_update: dict[str, object] = {
+        name: resolve(getattr(config.inputs, name)) for name in flat_path_fields
+    }
+    if config.inputs.trodes_native is not None:
+        block = config.inputs.trodes_native
+        resolved_pos = resolve(block.position_tracking_file)
+        resolved_ts = resolve(block.camera_timestamps_file)
+        assert resolved_pos is not None and resolved_ts is not None
+        inputs_update["trodes_native"] = block.model_copy(
+            update={
+                "position_tracking_file": resolved_pos,
+                "camera_timestamps_file": resolved_ts,
+            }
+        )
+    if config.inputs.dlc_keypoints is not None:
+        block = config.inputs.dlc_keypoints
+        resolved_h5 = resolve(block.h5_file)
+        assert resolved_h5 is not None
+        inputs_update["dlc_keypoints"] = block.model_copy(
+            update={
+                "h5_file": resolved_h5,
+                "camera_timestamps_file": resolve(block.camera_timestamps_file),
+                "timestamp_file": resolve(block.timestamp_file),
+            }
+        )
+    if config.inputs.nwb is not None:
+        block = config.inputs.nwb
+        resolved_nwb = resolve(block.nwb_file)
+        assert resolved_nwb is not None
+        inputs_update["nwb"] = block.model_copy(update={"nwb_file": resolved_nwb})
+    inputs = config.inputs.model_copy(update=inputs_update)
     outputs = config.outputs.model_copy(
         update={"output_dir": resolve(config.outputs.output_dir)}
     )

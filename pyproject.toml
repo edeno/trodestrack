@@ -79,6 +79,13 @@ notebooks = [
     "jupytext>=1.16.0",
 ]
 video = ["opencv-python>=4.8.0", "python-pptx>=1.0.0"]
+# DeepLabCut HDF5 reader. ``pandas.read_hdf(..., format="table")``
+# (which is what DLC writes) requires PyTables.
+dlc = ["tables>=3.8"]
+# NWB position / IMU / DIO reader. ``pynwb`` reads ndx-pose and
+# ndx-franklab-novela extensions via dynamic-spec loading; no need to
+# install those packages separately.
+nwb = ["pynwb>=2.5"]
 
 [project.scripts]
 trodestrack = "trodestrack:main"
