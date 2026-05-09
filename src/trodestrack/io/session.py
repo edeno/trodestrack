@@ -351,18 +351,66 @@ def _load_dlc_keypoints(config: SessionConfig) -> PreparedSession:
 
 
 def _load_nwb(config: SessionConfig) -> PreparedSession:
-    """Phase 1 stub. Verifies the [nwb] extra is installed; the full
-    loader lands in Phase 4a."""
+    inputs = config.inputs
+    assert inputs.nwb is not None
+    cfg = inputs.nwb
 
-    try:
-        import pynwb  # noqa: F401
-    except ImportError as e:
-        raise ImportError(
-            "inputs.format='nwb' requires the [nwb] extra. "
-            "Install with: uv pip install 'trodestrack[nwb]'."
-        ) from e
-    raise NotImplementedError(
-        "inputs.format='nwb' is implemented in Phase 4a of the native-loaders plan."
+    from trodestrack.io.nwb import load_nwb_session
+
+    pixels, _extras = load_nwb_session(cfg)
+    led1, led2, conf_cam = pixels_to_meters(
+        pixels,
+        config.camera,
+        meters_per_pixel_override=cfg.meters_per_pixel_override,
+    )
+    assert led2 is not None  # NWB Position / PoseEstimation always pairs LEDs
+
+    t_imu_raw, U_imu, U_full, imu_is_synthetic = _resolve_imu_for_native_loader(
+        config, pixels.t_cam
+    )
+
+    t_start = min(float(pixels.t_cam[0]), float(t_imu_raw[0]))
+    imu_offset_s = 0.0 if imu_is_synthetic else config.imu.time_offset_s
+    t_imu_aligned = t_imu_raw - t_start + imu_offset_s
+    t_cam = pixels.t_cam - t_start + config.camera.time_offset_s
+    _validate_time_vector(t_cam, "camera timestamps")
+    if t_imu_aligned.size > 1:
+        _validate_time_vector(t_imu_aligned, "IMU timestamps after preprocessing")
+    if not imu_is_synthetic:
+        _check_imu_camera_overlap(t_imu_aligned, t_cam, format_name="nwb")
+
+    mask = np.isfinite(led1).all(axis=1) | np.isfinite(led2).all(axis=1)
+    led_distance = config.filter.led_distance or _median_led_distance(led1, led2, mask)
+
+    diagnostics: dict[str, object] = {
+        "loader": {
+            "format": "nwb",
+            **pixels.diagnostics,
+            "imu_source": "parquet" if inputs.imu_file is not None else "synthetic",
+            "imu_samples": int(t_imu_aligned.size),
+            "camera_frames": int(t_cam.size),
+            "camera_rate_hz": (
+                float(1.0 / np.median(np.diff(t_cam)))
+                if t_cam.size > 1
+                else float("nan")
+            ),
+            "led_distance_m": float(led_distance),
+            "meters_per_pixel_override": cfg.meters_per_pixel_override,
+        }
+    }
+    return PreparedSession(
+        t_imu=t_imu_aligned,
+        U_imu=U_imu,
+        t_cam=t_cam,
+        Z_cam_led1=led1,
+        Z_cam_led2=led2,
+        mask_cam=mask,
+        conf_cam=conf_cam,
+        led_distance=led_distance,
+        diagnostics=diagnostics,
+        config=config,
+        gyro_z_for_led_identity=(U_full[:, 2] if U_full is not None else None),
+        U_imu_for_calibration=U_full,
     )
 
 

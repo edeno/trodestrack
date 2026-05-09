@@ -61,6 +61,10 @@ dev = [
     "pandas-stubs>=2.0.0",
     "types-pyyaml>=6.0.0",
     "pyarrow>=15.0.0",
+    # NWB extension package needed only for *writing* test fixtures
+    # in tests/io/test_phase4a_nwb_position.py. Runtime ndx-pose
+    # reads still go through pynwb's dynamic-spec loading.
+    "ndx-pose>=0.2.0",
 ]
 docs = [
     "mkdocs>=1.6.0",

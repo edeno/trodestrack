@@ -2161,6 +2161,19 @@ wheels = [
 ]
 
 [[package]]
+name = "ndx-pose"
+version = "0.2.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "hdmf" },
+    { name = "pynwb" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/49/9a/137b1334efc99d8e044948b7d1c52b3ef0f6c44d39654ced1d5236a2af14/ndx_pose-0.2.2.tar.gz", hash = "sha256:69a9a139363ccf8406f36752146d345914330e69921b9734db2425fc9808a0a1", size = 99404, upload-time = "2025-05-08T15:34:38.925Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ff/0d/14e1242b3776a06ad6f93107f147e0d0630221c13a1f5e328fba62d95adf/ndx_pose-0.2.2-py3-none-any.whl", hash = "sha256:76d55ec5d363673b66cd9540dac87c92cba16f5def9836874fd4d96b29a94b90", size = 15045, upload-time = "2025-05-08T15:34:37.396Z" },
+]
+
+[[package]]
 name = "nest-asyncio"
 version = "1.6.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3508,6 +3521,7 @@ dev = [
     { name = "coverage" },
     { name = "hypothesis" },
     { name = "mypy" },
+    { name = "ndx-pose" },
     { name = "pandas-stubs" },
     { name = "pre-commit" },
     { name = "pyarrow" },
@@ -3565,6 +3579,7 @@ requires-dist = [
     { name = "mkdocstrings", extras = ["python"], marker = "extra == 'docs'", specifier = ">=0.26.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8.0" },
     { name = "nbconvert", marker = "extra == 'notebooks'", specifier = ">=7.0.0" },
+    { name = "ndx-pose", marker = "extra == 'dev'", specifier = ">=0.2.0" },
     { name = "numpy", specifier = ">=2.0.0" },
     { name = "opencv-python", marker = "extra == 'video'", specifier = ">=4.8.0" },
     { name = "optax", specifier = ">=0.2.0" },

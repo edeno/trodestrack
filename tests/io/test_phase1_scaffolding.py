@@ -255,16 +255,6 @@ def _nwb_config(tmp_path: Path) -> SessionConfig:
     )
 
 
-def test_nwb_stub_with_extra_raises_not_implemented(tmp_path: Path) -> None:
-    """When ``[nwb]`` (pynwb) is installed, the stub falls through to
-    ``NotImplementedError`` naming Phase 4a."""
-
-    pytest.importorskip("pynwb")
-    config = _nwb_config(tmp_path)
-    with pytest.raises(NotImplementedError, match="Phase 4a"):
-        _load_nwb(config)
-
-
 def test_dlc_keypoints_extra_missing_raises_import_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
