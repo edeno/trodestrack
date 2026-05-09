@@ -122,6 +122,42 @@ def test_dlc_timestamp_file_source_requires_timestamp_file() -> None:
 
 
 # ----------------------------------------------------------------------
+# NWBLEDSourceConfig: paired-name validator.
+# ----------------------------------------------------------------------
+
+
+def test_nwb_led_source_partial_series_pair_raises() -> None:
+    """Half-set ``led1_series_name`` without ``led2_series_name`` used
+    to silently fall through to auto-detect for the missing side; now
+    the schema rejects it at config-load time."""
+
+    from trodestrack.config import NWBLEDSourceConfig
+
+    with pytest.raises(ValidationError, match=r"led1_series_name"):
+        NWBLEDSourceConfig.model_validate({"led1_series_name": "custom_led1"})
+
+
+def test_nwb_led_source_partial_bodypart_pair_raises() -> None:
+    """Same pair guard applies to the ndx-pose bodypart fields."""
+
+    from trodestrack.config import NWBLEDSourceConfig
+
+    with pytest.raises(ValidationError, match=r"led1_bodypart"):
+        NWBLEDSourceConfig.model_validate({"led1_bodypart": "led_green"})
+
+
+def test_nwb_led_source_both_series_names_or_neither() -> None:
+    """Setting both halves succeeds; setting neither succeeds."""
+
+    from trodestrack.config import NWBLEDSourceConfig
+
+    NWBLEDSourceConfig.model_validate(
+        {"led1_series_name": "a", "led2_series_name": "b"}
+    )
+    NWBLEDSourceConfig.model_validate({})
+
+
+# ----------------------------------------------------------------------
 # Path resolution: nested-block Paths resolve from the YAML directory.
 # ----------------------------------------------------------------------
 

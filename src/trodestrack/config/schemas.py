@@ -76,6 +76,29 @@ class NWBLEDSourceConfig(BaseModel):
     led2_bodypart: str | None = None
     likelihood_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
 
+    @model_validator(mode="after")
+    def _validate_paired_names(self) -> NWBLEDSourceConfig:
+        # Series names and bodypart names are pairs: the loader needs
+        # both halves to address the pair, and a half-set config used
+        # to silently fall through to auto-detect on the missing side
+        # (so ``led1_series_name="x"`` paired with the writer-default
+        # LED2 quietly loaded the wrong second series).
+        for name1, name2 in (
+            ("led1_series_name", "led2_series_name"),
+            ("led1_bodypart", "led2_bodypart"),
+        ):
+            v1, v2 = getattr(self, name1), getattr(self, name2)
+            if (v1 is None) != (v2 is None):
+                raise ValueError(
+                    f"NWBLEDSourceConfig: {name1} and {name2} must both "
+                    f"be set or both be None (got {name1}={v1!r}, "
+                    f"{name2}={v2!r}); the loader resolves the LED "
+                    "pair atomically and a half-set config used to "
+                    "silently fall back to auto-detect on the missing "
+                    "side."
+                )
+        return self
+
 
 class NWBDIOToTTLConfig(BaseModel):
     """Map NWB ``behavioral_events`` TimeSeries names to TTL source ids."""
