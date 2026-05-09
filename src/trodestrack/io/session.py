@@ -200,19 +200,78 @@ def _resolve_imu_for_native_loader(
 
 
 def _load_dlc_keypoints(config: SessionConfig) -> PreparedSession:
-    """Phase 1 stub. Verifies the [dlc] extra is installed; the full
-    loader lands in Phase 3."""
+    inputs = config.inputs
+    assert inputs.dlc_keypoints is not None
+    cfg = inputs.dlc_keypoints
 
+    # Verify ``[dlc]`` extra up front so the failure message is the
+    # install command rather than the pandas/PyTables traceback.
     try:
-        import tables  # type: ignore[import-not-found] # noqa: F401  # PyTables backs ``pandas.read_hdf``
+        import tables  # type: ignore[import-not-found] # noqa: F401  # PyTables backs pandas.read_hdf
     except ImportError as e:
         raise ImportError(
             "inputs.format='dlc_keypoints' requires the [dlc] extra. "
             "Install with: uv pip install 'trodestrack[dlc]'."
         ) from e
-    raise NotImplementedError(
-        "inputs.format='dlc_keypoints' is implemented in Phase 3 of the "
-        "native-loaders plan."
+
+    from trodestrack.io.loaders._dlc_keypoints import load_dlc_keypoints_position
+
+    pixels = load_dlc_keypoints_position(
+        cfg.h5_file,
+        cfg.led1_bodypart,
+        cfg.led2_bodypart,
+        likelihood_threshold=cfg.likelihood_threshold,
+        timestamps_source=cfg.timestamps_source,
+        camera_timestamps_file=cfg.camera_timestamps_file,
+        timestamp_file=cfg.timestamp_file,
+        apply_crop_offset=cfg.apply_crop_offset,
+    )
+    led1, led2, conf_cam = pixels_to_meters(pixels, config.camera)
+    assert led2 is not None  # DLC always returns both bodyparts
+
+    t_imu_raw, U_imu, U_full, imu_is_synthetic = _resolve_imu_for_native_loader(
+        config, pixels.t_cam
+    )
+
+    t_start = min(float(pixels.t_cam[0]), float(t_imu_raw[0]))
+    imu_offset_s = 0.0 if imu_is_synthetic else config.imu.time_offset_s
+    t_imu_aligned = t_imu_raw - t_start + imu_offset_s
+    t_cam = pixels.t_cam - t_start + config.camera.time_offset_s
+    _validate_time_vector(t_cam, "camera timestamps")
+    if t_imu_aligned.size > 1:
+        _validate_time_vector(t_imu_aligned, "IMU timestamps after preprocessing")
+
+    mask = np.isfinite(led1).all(axis=1) | np.isfinite(led2).all(axis=1)
+    led_distance = config.filter.led_distance or _median_led_distance(led1, led2, mask)
+
+    diagnostics: dict[str, object] = {
+        "loader": {
+            "format": "dlc_keypoints",
+            **pixels.diagnostics,
+            "imu_source": "parquet" if inputs.imu_file is not None else "synthetic",
+            "imu_samples": int(t_imu_aligned.size),
+            "camera_frames": int(t_cam.size),
+            "camera_rate_hz": (
+                float(1.0 / np.median(np.diff(t_cam)))
+                if t_cam.size > 1
+                else float("nan")
+            ),
+            "led_distance_m": float(led_distance),
+        }
+    }
+    return PreparedSession(
+        t_imu=t_imu_aligned,
+        U_imu=U_imu,
+        t_cam=t_cam,
+        Z_cam_led1=led1,
+        Z_cam_led2=led2,
+        mask_cam=mask,
+        conf_cam=conf_cam,
+        led_distance=led_distance,
+        diagnostics=diagnostics,
+        config=config,
+        gyro_z_for_led_identity=(U_full[:, 2] if U_full is not None else None),
+        U_imu_for_calibration=U_full,
     )
 
 

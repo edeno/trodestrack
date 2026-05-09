@@ -255,18 +255,6 @@ def _nwb_config(tmp_path: Path) -> SessionConfig:
     )
 
 
-def test_dlc_keypoints_stub_with_extra_raises_not_implemented(
-    tmp_path: Path,
-) -> None:
-    """When ``[dlc]`` (PyTables) is installed, the stub falls through to
-    ``NotImplementedError`` naming Phase 3."""
-
-    pytest.importorskip("tables")
-    config = _dlc_keypoints_config(tmp_path)
-    with pytest.raises(NotImplementedError, match="Phase 3"):
-        _load_dlc_keypoints(config)
-
-
 def test_nwb_stub_with_extra_raises_not_implemented(tmp_path: Path) -> None:
     """When ``[nwb]`` (pynwb) is installed, the stub falls through to
     ``NotImplementedError`` naming Phase 4a."""
