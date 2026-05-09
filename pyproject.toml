@@ -62,7 +62,7 @@ dev = [
     "types-pyyaml>=6.0.0",
     "pyarrow>=15.0.0",
     # NWB extension package needed only for *writing* test fixtures
-    # in tests/io/test_phase4a_nwb_position.py. Runtime ndx-pose
+    # in tests/io/test_nwb_position_loader.py. Runtime ndx-pose
     # reads still go through pynwb's dynamic-spec loading.
     "ndx-pose>=0.2.0",
 ]

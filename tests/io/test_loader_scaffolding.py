@@ -1,4 +1,4 @@
-"""schema and loader-stub validation slice.
+"""Schema and loader-dispatch validation for the native-format loaders.
 
 These tests cover:
 
@@ -7,14 +7,14 @@ These tests cover:
 - Path resolution: relative paths inside the new blocks resolve from
   the YAML's parent directory (matching the existing flat-paths
   contract).
-- TTL events behavior unchanged: ``TTLEventsConfig.events_file`` is
-  still required (the NWB DIO bridge relaxes it).
-- Stub dispatch: missing extras raise ``ImportError`` naming the
-  install command; with extras present, stubs raise
-  ``NotImplementedError`` until the loader is wired up.
+- TTL events behavior: ``TTLEventsConfig.events_file`` remains
+  required (the NWB DIO bridge relaxes it).
+- Loader dispatch: missing extras raise ``ImportError`` naming the
+  install command before any loader work begins.
 
-Loader stubs only verify the import surface; full ingest lives in the
-per-format loader modules.
+Per-format ingest is exercised in the dedicated loader test modules
+(``test_trodes_native_loader.py``, ``test_dlc_keypoints_loader.py``,
+``test_nwb_position_loader.py``, etc.).
 """
 
 from __future__ import annotations
@@ -73,7 +73,8 @@ def test_format_nwb_requires_block() -> None:
 
 
 def test_ttl_events_file_still_required() -> None:
-    """``TTLEventsConfig.events_file`` remains required in the schema-only PR."""
+    """``TTLEventsConfig.events_file`` remains required at the schema
+    level; the NWB DIO bridge relaxes it at the loader level."""
 
     with pytest.raises(ValidationError, match="events_file"):
         SessionConfig.model_validate(
@@ -279,7 +280,8 @@ inputs:
 
 
 # ----------------------------------------------------------------------
-# Stub loader dispatch.
+# Missing-extra dispatch: loaders surface a clear install-hint
+# ImportError before doing any file work.
 # ----------------------------------------------------------------------
 
 
@@ -313,7 +315,8 @@ def test_dlc_keypoints_extra_missing_raises_import_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """With ``tables`` removed from ``sys.modules`` and import blocked,
-    the stub raises ``ImportError`` naming the install command."""
+    the loader raises ``ImportError`` naming the install command
+    before any file work begins."""
 
     monkeypatch.setitem(sys.modules, "tables", None)
     config = _dlc_keypoints_config(tmp_path)
@@ -331,14 +334,15 @@ def test_nwb_extra_missing_raises_import_error(
 
 
 # ----------------------------------------------------------------------
-# load_session() top-level dispatch goes through the stubs.
+# load_session() top-level dispatch reaches each per-format loader.
 # ----------------------------------------------------------------------
 
 
-def test_load_session_dispatches_to_dlc_keypoints_stub(
+def test_load_session_dispatches_to_dlc_keypoints_loader(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``load_session`` routes ``format='dlc_keypoints'`` to the stub.
+    """``load_session`` routes ``format='dlc_keypoints'`` to
+    ``_load_dlc_keypoints``.
 
     Uses the missing-extra path for deterministic coverage regardless
     of whether ``[dlc]`` is installed in the test environment.
@@ -350,10 +354,10 @@ def test_load_session_dispatches_to_dlc_keypoints_stub(
         load_session(config)
 
 
-def test_load_session_dispatches_to_nwb_stub(
+def test_load_session_dispatches_to_nwb_loader(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``load_session`` routes ``format='nwb'`` to the stub.
+    """``load_session`` routes ``format='nwb'`` to ``_load_nwb``.
 
     Uses the missing-extra path for deterministic coverage regardless
     of whether ``[nwb]`` is installed in the test environment.
