@@ -269,7 +269,7 @@ inputs:
     #   name_to_source_id: {beam_1: 1, zone_a: 2}
 ```
 
-IMU resolution precedence: `inputs.imu_file` (parquet) wins → NWB analog group → synthetic vision-only fallback. The DIO bridge is mutually exclusive with `ttl_events.events_file` (parquet wins when both are configured); the NWB-DIO path is opt-in via `inputs.nwb.dio_to_ttl`. See [`examples/session_nwb.yaml`](https://github.com/edeno/trodestrack/blob/master/examples/session_nwb.yaml).
+IMU resolution precedence: `inputs.imu_file` (parquet) wins → NWB analog group → synthetic vision-only fallback. The same precedence applies to TTL events — both `ttl_events.events_file` (parquet) and `inputs.nwb.dio_to_ttl` (NWB DIO bridge) may be configured together; the parquet `events_file` wins, the NWB DIO is loaded but ignored, and both sources are recorded in diagnostics. The NWB-DIO path is opt-in via `inputs.nwb.dio_to_ttl`. See [`examples/session_nwb.yaml`](https://github.com/edeno/trodestrack/blob/master/examples/session_nwb.yaml).
 
 #### Spyglass integration
 

@@ -283,10 +283,59 @@ def _build_session(config: SessionConfig) -> tuple[np.ndarray, np.ndarray]:
     return session.t_cam, np.asarray(result.filtered_means)
 
 
+def _write_spikegadgets_parquet(
+    tmp_path: Path,
+    led1_post_pause: np.ndarray,
+    led2_post_pause: np.ndarray,
+    hw_ns_post_pause: np.ndarray,
+) -> tuple[Path, Path]:
+    """Write the parquet pair the existing ``spikegadgets_trodes``
+    loader consumes (one IMU parquet, one position parquet) for the
+    post-pause frames. The IMU parquet is a no-op stream — gyro_z is
+    monotonic so ``sample_hold_strategy='gyro_z_change'`` keeps every
+    row but the EKF runs ``vision_only`` so values don't matter."""
+
+    timestamps_s = np.asarray(hw_ns_post_pause, dtype=np.int64) / NS_PER_S
+
+    pos_parquet = tmp_path / "position.parquet"
+    pd.DataFrame(
+        {
+            "time": timestamps_s,
+            "xloc": led1_post_pause[:, 0].astype(np.int32),
+            "yloc": led1_post_pause[:, 1].astype(np.int32),
+            "xloc2": led2_post_pause[:, 0].astype(np.int32),
+            "yloc2": led2_post_pause[:, 1].astype(np.int32),
+        }
+    ).to_parquet(pos_parquet)
+
+    # IMU parquet aligned 1:1 with the camera samples — the native
+    # loaders' synthetic-IMU path (vision_only) builds ``t_imu`` by
+    # copying ``t_cam``, so matching that here makes the EKF
+    # prediction-step structure identical across all four formats.
+    # gyro_z is monotone so ``gyro_z_change`` dedup keeps every row.
+    imu_t = timestamps_s.copy()
+    imu_parquet = tmp_path / "imu.parquet"
+    pd.DataFrame(
+        {
+            "time": imu_t,
+            "Headstage_GyroX": np.zeros(imu_t.size, dtype=int),
+            "Headstage_GyroY": np.zeros(imu_t.size, dtype=int),
+            "Headstage_GyroZ": np.arange(imu_t.size, dtype=int),
+            "Headstage_AccelX": np.zeros(imu_t.size, dtype=int),
+            "Headstage_AccelY": np.zeros(imu_t.size, dtype=int),
+            "Headstage_AccelZ": np.zeros(imu_t.size, dtype=int),
+        }
+    ).to_parquet(imu_parquet)
+    return pos_parquet, imu_parquet
+
+
 def test_filtered_means_within_1e_3_across_formats(tmp_path: Path) -> None:
-    """Same camera trajectory loaded via Trodes binaries, DLC HDF5,
-    and NWB Position yields filtered means within 1e-3 m of each
-    other (the plan's Phase 5 gate)."""
+    """Same camera trajectory loaded via the existing
+    ``spikegadgets_trodes`` parquet path AND the three native loaders
+    (Trodes binaries, DLC HDF5, NWB Position) yields filtered means
+    within 1e-3 m across every pair (the plan's Phase 5 gate). The
+    parquet baseline confirms the new loaders remain
+    parity-compatible with the established workflow."""
 
     n_frames = 30
     led1_full, led2_full, hw_ns_full = _ground_truth_pixels(n_frames)
@@ -298,6 +347,9 @@ def test_filtered_means_within_1e_3_across_formats(tmp_path: Path) -> None:
     h5_path = _write_dlc_keypoints(tmp_path, led1_post, led2_post, hw_ns_post)
     dlc_ts_path = _write_dlc_timestamps(tmp_path, hw_ns_post)
     nwb_path = _write_nwb_position(tmp_path, led1_post, led2_post, hw_ns_post)
+    pos_parquet, imu_parquet = _write_spikegadgets_parquet(
+        tmp_path, led1_post, led2_post, hw_ns_post
+    )
 
     common_kwargs = dict(
         imu=IMUConfig(run_calibration=False),
@@ -306,6 +358,14 @@ def test_filtered_means_within_1e_3_across_formats(tmp_path: Path) -> None:
         outputs=OutputsConfig(run_safety_checks=False),
     )
 
+    config_parquet = SessionConfig(
+        inputs=InputsConfig(
+            format="spikegadgets_trodes",
+            imu_file=imu_parquet,
+            position_file=pos_parquet,
+        ),
+        **common_kwargs,
+    )
     config_native = SessionConfig(
         inputs=InputsConfig(
             format="trodes_native",
@@ -335,24 +395,30 @@ def test_filtered_means_within_1e_3_across_formats(tmp_path: Path) -> None:
         **common_kwargs,
     )
 
+    t_cam_parquet, means_parquet = _build_session(config_parquet)
     t_cam_native, means_native = _build_session(config_native)
     t_cam_dlc, means_dlc = _build_session(config_dlc)
     t_cam_nwb, means_nwb = _build_session(config_nwb)
 
-    # The three formats should land on the same camera clock after
+    # The four formats should land on the same camera clock after
     # alignment (each path subtracts its own ``t_start``, all
     # equal here since the data shares a Unix-like systime).
-    np.testing.assert_allclose(t_cam_native, t_cam_dlc, atol=1e-12)
-    np.testing.assert_allclose(t_cam_native, t_cam_nwb, atol=1e-12)
+    np.testing.assert_allclose(t_cam_parquet, t_cam_native, atol=1e-12)
+    np.testing.assert_allclose(t_cam_parquet, t_cam_dlc, atol=1e-12)
+    np.testing.assert_allclose(t_cam_parquet, t_cam_nwb, atol=1e-12)
 
-    # The plan's gate: filtered means within 1e-3 m across all pairs.
+    # The plan's gate: filtered means within 1e-3 m across every
+    # pair of (parquet, trodes_native, dlc_keypoints, nwb).
+    np.testing.assert_allclose(means_parquet, means_native, atol=1e-3, rtol=1e-3)
+    np.testing.assert_allclose(means_parquet, means_dlc, atol=1e-3, rtol=1e-3)
+    np.testing.assert_allclose(means_parquet, means_nwb, atol=1e-3, rtol=1e-3)
     np.testing.assert_allclose(means_native, means_dlc, atol=1e-3, rtol=1e-3)
     np.testing.assert_allclose(means_native, means_nwb, atol=1e-3, rtol=1e-3)
     np.testing.assert_allclose(means_dlc, means_nwb, atol=1e-3, rtol=1e-3)
 
 
 # ---------------------------------------------------------------------
-# Examples runnable: each example YAML parses cleanly via load_session_config.
+# Examples valid: each example YAML parses cleanly via load_session_config.
 # ---------------------------------------------------------------------
 
 
@@ -369,9 +435,14 @@ def test_example_yaml_parses_to_session_config(yaml_name: str) -> None:
     ``SessionConfig`` via ``load_session_config`` — schema valid,
     paths resolved relative to the YAML.
 
-    This stops short of actually loading the session (the example
-    paths point at user-supplied placeholders) but catches schema
-    drift and YAML-syntax breakage at CI time.
+    The example YAMLs are template configs (matching the convention
+    of the existing ``examples/session_spikegadgets_trodes.yaml``);
+    paths point at user-supplied placeholders so the examples don't
+    ship with bundled data fixtures. End-to-end load + EKF for
+    every format is already exercised by
+    ``test_filtered_means_within_1e_3_across_formats`` against an
+    in-process ground truth; this test is a schema-validity gate to
+    catch drift / YAML breakage in the example templates themselves.
     """
 
     examples_dir = Path(__file__).resolve().parents[2] / "examples"

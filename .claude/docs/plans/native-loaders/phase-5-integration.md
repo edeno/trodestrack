@@ -15,10 +15,21 @@ prior phases established.
 
 ## Tasks
 
-- Cross-format parity test: same session loaded via parquet, native,
-  and NWB yields filtered means within 1e-3 m of each other.
-- `examples/session_trodes_native.yaml`,
-  `examples/session_dlc_keypoints.yaml`, `examples/session_nwb.yaml`.
+- Cross-format parity test: same session loaded via the existing
+  `spikegadgets_trodes` parquet path AND the three native loaders
+  (`trodes_native`, `dlc_keypoints`, `nwb`) yields filtered means
+  within 1e-3 m across every pair. The parquet baseline confirms
+  the new loaders remain parity-compatible with the established
+  workflow.
+- Three example YAMLs in `examples/` —
+  `session_trodes_native.yaml`, `session_dlc_keypoints.yaml`,
+  `session_nwb.yaml`. These are **template configs** following the
+  same convention as the existing
+  `examples/session_spikegadgets_trodes.yaml`: paths point at
+  user-supplied placeholders so the examples don't ship with bundled
+  data fixtures. The "examples valid" test parses each via
+  `load_session_config` to catch schema drift / YAML breakage at CI
+  time without requiring a load against checked-in data.
 - New "Loading native formats" section in
   `docs/getting-started/python-api.md`.
 - Cross-references in `docs/TUNING.md`.
@@ -27,14 +38,15 @@ prior phases established.
 
 | Test | Asserts |
 | --- | --- |
-| Cross-format parity | three loader paths within tolerance for the same underlying session. |
-| Examples runnable | each example YAML parses and loads its (committed-fixture) session. |
+| Cross-format parity | parquet, trodes_native, dlc_keypoints, and nwb loader paths produce filtered means within 1e-3 m across every pair for the same in-memory ground-truth. |
+| Examples valid | each example YAML parses cleanly via `load_session_config` (schema-valid + paths resolve). Loading against placeholder paths is intentionally deferred — the parity test above already exercises end-to-end load + EKF for every format. |
 
 ## Fixtures
 
-A single committed minimal session converted to all three formats —
-Trodes binaries, DLC HDF5 (synthesized from the same ground-truth
-pixel trajectory), and an NWB file with both Position and ndx-pose
-containers. The shared ground-truth lives in `conftest.py`; each
-format adapter writes it out in the matching layout. This is the
-authoritative cross-format-parity fixture.
+The cross-format-parity test synthesizes a single ground-truth pixel
+trajectory in-process and writes it into all four format layouts
+(parquet pair, Trodes binaries, DLC HDF5, NWB Position) at test
+time. No checked-in binary fixtures — every byte the test reads is
+generated from numpy arrays via `struct.pack` / `pandas.to_hdf` /
+`pynwb`. This matches the no-checked-in-binaries policy the earlier
+phases (2 / 3 / 4a / 4b / 4c) established.
