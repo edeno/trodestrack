@@ -49,6 +49,12 @@ class PreparedSession:
     event_source_anchors: np.ndarray | None = None
     event_source_covariances: np.ndarray | None = None
     event_indices_per_frame: np.ndarray | None = None
+    # NWB DIO bridge: ``(t_evt, source_id, edge)`` populated by
+    # ``_load_nwb`` when ``inputs.nwb.dio_to_ttl`` is configured.
+    # ``_attach_ttl_events`` consumes this in place of the parquet
+    # ``events_file`` when no parquet is configured (parquet wins
+    # when both are set per the schema contract).
+    nwb_dio_events: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None
 
     @property
     def source_format(self) -> str:
@@ -434,6 +440,7 @@ def _load_nwb(config: SessionConfig) -> PreparedSession:
         config=config,
         gyro_z_for_led_identity=(U_full[:, 2] if U_full is not None else None),
         U_imu_for_calibration=U_full,
+        nwb_dio_events=extras.dio_events,
     )
 
 
@@ -764,7 +771,19 @@ def _apply_led_identity_correction(session: PreparedSession) -> PreparedSession:
 
 
 def _attach_ttl_events(session: PreparedSession) -> PreparedSession:
-    """Resolve ``ttl_events`` config into the session's dense event arrays."""
+    """Resolve ``ttl_events`` config into the session's dense event arrays.
+
+    Event source precedence (per the Phase 4c schema contract):
+
+    1. ``ttl_events.events_file`` (parquet) wins when set — the
+       per-LED parquet is the authoritative pre-computed source and
+       any NWB DIO bridge is treated as redundant input.
+    2. Otherwise, the NWB DIO bridge's pre-built table (placed on
+       the session by ``_load_nwb`` when
+       ``inputs.nwb.dio_to_ttl`` is configured) is consumed in place.
+    3. With neither, no events are attached (the schema validator
+       only allows this when ``ttl_events`` itself is ``None``).
+    """
 
     cfg = session.config.ttl_events
     if cfg is None:
@@ -779,18 +798,34 @@ def _attach_ttl_events(session: PreparedSession) -> PreparedSession:
             source_active_edges[spec.id] = EDGE_NAME_TO_INT[spec.active_edge]
             sources.append(spec.to_event_source())
 
+    has_parquet = cfg.events_file is not None
+    has_nwb_dio = session.nwb_dio_events is not None
+    event_source = (
+        "parquet"
+        if has_parquet
+        else ("nwb_behavioral_events" if has_nwb_dio else "none")
+    )
+
     if not sources:
         diagnostics = dict(session.diagnostics)
         diagnostics["ttl_events"] = {
             "n_sources": 0,
-            "events_file": str(cfg.events_file),
+            "events_file": str(cfg.events_file) if cfg.events_file else None,
+            "event_source": event_source,
+            "nwb_dio_present": has_nwb_dio,
         }
         return replace(session, diagnostics=diagnostics)
 
     anchors = np.stack([src.anchor for src in sources], axis=0)
     covariances = np.stack([src.covariance for src in sources], axis=0)
 
-    t_evt, source_id, edge = load_ttl_events(cfg.events_file)
+    if has_parquet:
+        assert cfg.events_file is not None
+        t_evt, source_id, edge = load_ttl_events(cfg.events_file)
+    else:
+        assert session.nwb_dio_events is not None
+        t_evt, source_id, edge = session.nwb_dio_events
+
     indices = per_frame_event_indices(
         t_evt,
         source_id,
@@ -804,7 +839,9 @@ def _attach_ttl_events(session: PreparedSession) -> PreparedSession:
     diagnostics = dict(session.diagnostics)
     diagnostics["ttl_events"] = {
         "n_sources": len(sources),
-        "events_file": str(cfg.events_file),
+        "events_file": str(cfg.events_file) if cfg.events_file else None,
+        "event_source": event_source,
+        "nwb_dio_present": has_nwb_dio,
         "n_events_total": int(t_evt.size),
         "n_events_kept": int((indices >= 0).sum()),
         "max_events_per_frame": cfg.max_events_per_frame,

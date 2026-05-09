@@ -569,11 +569,15 @@ class TTLEventsConfig(BaseModel):
     Sources of all three types share an events parquet whose rows are
     ``(time, source_id, edge)``. ``source_id`` must be unique across the
     configured beam, zone-trigger, and RFID-reader lists.
+
+    ``events_file`` is optional and may be omitted when the events
+    come from the NWB DIO bridge — see the SessionConfig validator
+    (``_validate_dio_consistency``) for the conditional-required rule.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    events_file: Path
+    events_file: Path | None = None
     beams: list[BeamSpec] = Field(default_factory=list)
     zone_triggers: list[ZoneTriggerSpec] = Field(default_factory=list)
     rfid_readers: list[RFIDReaderSpec] = Field(default_factory=list)
@@ -610,6 +614,74 @@ class SessionConfig(BaseModel):
     outputs: OutputsConfig = Field(default_factory=OutputsConfig)
     led_identity: LedIdentityConfig = Field(default_factory=LedIdentityConfig)
     ttl_events: TTLEventsConfig | None = None
+
+    @model_validator(mode="after")
+    def _validate_dio_consistency(self) -> SessionConfig:
+        """Enforce the NWB DIO → TTL events bridge schema contract.
+
+        Phase 4c moves these from "deferred" to "required" — without
+        them, a user could configure an NWB+DIO session with no
+        ``events_file`` (loader-runnable) or a DIO bridge whose
+        ``name_to_source_id`` referenced unknown geometry ids
+        (loader-time KeyError far from the YAML).
+        """
+
+        nwb = self.inputs.nwb
+        has_dio_bridge = (
+            self.inputs.format == "nwb"
+            and nwb is not None
+            and nwb.dio_to_ttl is not None
+        )
+
+        if has_dio_bridge:
+            # The geometry block is required because the EKF/UKF
+            # event channel needs source positions, covariances, and
+            # ids — DIO without ttl_events would be loader-runnable
+            # but produce a fused trajectory with no event updates.
+            if self.ttl_events is None:
+                raise ValueError(
+                    "inputs.nwb.dio_to_ttl is configured but ttl_events "
+                    "is missing — the EKF/UKF event channel needs the "
+                    "geometry block (beams/zone_triggers/rfid_readers) "
+                    "to recover source positions and covariances. Add a "
+                    "ttl_events block matching the DIO TimeSeries names."
+                )
+            assert nwb is not None and nwb.dio_to_ttl is not None
+            known_ids = {
+                spec.id
+                for spec_list in (
+                    self.ttl_events.beams,
+                    self.ttl_events.zone_triggers,
+                    self.ttl_events.rfid_readers,
+                )
+                for spec in spec_list
+            }
+            unknown = [
+                (name, sid)
+                for name, sid in nwb.dio_to_ttl.name_to_source_id.items()
+                if sid not in known_ids
+            ]
+            if unknown:
+                raise ValueError(
+                    "inputs.nwb.dio_to_ttl.name_to_source_id values "
+                    f"{unknown} reference source ids not configured in "
+                    f"ttl_events (known ids: {sorted(known_ids)}). "
+                    "Update the geometry block or the DIO mapping so "
+                    "every TimeSeries name lands on a known source."
+                )
+
+        # ``events_file`` is required unless the DIO bridge is providing
+        # the events from the NWB file itself.
+        if self.ttl_events is not None and self.ttl_events.events_file is None:
+            if not has_dio_bridge:
+                raise ValueError(
+                    "ttl_events.events_file is required unless "
+                    "inputs.format='nwb' and inputs.nwb.dio_to_ttl is "
+                    "set (the NWB DIO bridge is the only configured "
+                    "alternative event source)."
+                )
+
+        return self
 
 
 def load_session_config(path: str | Path) -> SessionConfig:

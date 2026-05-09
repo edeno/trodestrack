@@ -29,7 +29,12 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from trodestrack.config.schemas import IMUConfig, NWBConfig, NWBLEDSourceConfig
+from trodestrack.config.schemas import (
+    IMUConfig,
+    NWBConfig,
+    NWBDIOToTTLConfig,
+    NWBLEDSourceConfig,
+)
 from trodestrack.io.imu_parquet import convert_imu_columns_to_si
 from trodestrack.io.loaders._shared import PositionPixels
 
@@ -41,6 +46,7 @@ if TYPE_CHECKING:
 __all__ = [
     "NWBSessionExtras",
     "from_analog_container",
+    "from_behavioral_events",
     "from_pose_estimation_container",
     "from_position_container",
     "load_nwb_session",
@@ -51,12 +57,16 @@ __all__ = [
 class NWBSessionExtras:
     """Optional extras the NWB loader pulls alongside position data.
 
-    Phase 4a is position-only; the extras are placeholders that
-    Phase 4b (``imu``) and Phase 4c (``dio_events``) will populate.
+    ``imu`` is a ``(t_imu_unix, U_full)`` pair from Phase 4b's NWB
+    analog reader. ``dio_events`` is a ``(t_evt, source_id, edge)``
+    triple from Phase 4c's DIO bridge — same shape as
+    ``trodestrack.io.ttl_events.load_ttl_events`` returns, so the
+    downstream ``per_frame_event_indices`` indexer accepts it
+    unchanged.
     """
 
     imu: tuple[np.ndarray, np.ndarray] | None = None
-    dio_events: object | None = None
+    dio_events: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None
     diagnostics: dict[str, Any] = field(default_factory=dict)
 
 
@@ -261,6 +271,104 @@ def from_analog_container(
     return timestamps, U_full
 
 
+def from_behavioral_events(
+    events: Any,
+    dio_cfg: NWBDIOToTTLConfig,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Build ``(t_evt, source_id, edge)`` arrays from NWB DIO TimeSeries.
+
+    Accepts trodestrack-canonical input shapes:
+
+    - A ``BehavioralEvents`` container (path-loader source — pulled
+      from ``processing["behavior"]["behavioral_events"]``).
+    - A ``dict[str, TimeSeries]`` keyed by the event-name. Spyglass's
+      ``(DIOEvents & key).fetch_nwb()`` returns a ``list[dict]`` with
+      ``dio_event_name`` / ``dio`` columns; Spyglass's ``make()``
+      assembles the dict shape (``{row["dio_event_name"]: row["dio"]
+      for row in ...}``) before calling here. trodestrack's API is
+      Spyglass-agnostic.
+
+    DIO encoding (per
+    ``trodes_to_nwb/spike_gadgets_raw_io.py:953``): ``data`` is
+    ``int8`` 0/1 where each value is a transition (``1`` = rising,
+    ``0`` = falling). The very first sample is the initial level,
+    not a transition; it's dropped before edge detection.
+
+    Eager numpy materialization: the returned arrays are independent
+    of the source IO so the caller may close it (or let
+    ``fetch_nwb``'s underlying file close) without breaking
+    downstream code. The result is sorted by ``t_evt`` so it satisfies
+    the same monotonic-time contract ``load_ttl_events`` produces.
+    """
+
+    # Normalize input: BehavioralEvents has ``time_series``;
+    # raw dict is direct.
+    ts_dict = getattr(events, "time_series", None)
+    if ts_dict is None:
+        if not isinstance(events, dict):
+            raise TypeError(
+                "from_behavioral_events expected a BehavioralEvents "
+                "container or dict[str, TimeSeries]; got "
+                f"{type(events).__name__}."
+            )
+        ts_dict = events
+
+    available = list(ts_dict.keys())
+    missing = [name for name in dio_cfg.name_to_source_id if name not in ts_dict]
+    if missing:
+        raise ValueError(
+            f"NWB DIO TimeSeries missing for name_to_source_id keys "
+            f"{missing}. Available TimeSeries names: {available}."
+        )
+
+    t_parts: list[np.ndarray] = []
+    sid_parts: list[np.ndarray] = []
+    edge_parts: list[np.ndarray] = []
+    for name, source_id in dio_cfg.name_to_source_id.items():
+        ts = ts_dict[name]
+        data = _eager_array(ts.data)
+        timestamps = _eager_array(ts.timestamps, dtype=float)
+        if data.shape != timestamps.shape:
+            raise ValueError(
+                f"DIO TimeSeries {name!r} data shape {data.shape} does "
+                f"not match timestamps shape {timestamps.shape}."
+            )
+        if data.size < 2:
+            # Fewer than 2 samples means no transitions to extract
+            # (the first sample is the initial-level drop).
+            continue
+        # Drop the first sample (initial level, not a transition).
+        edges = data[1:].astype(int, copy=False)
+        times = timestamps[1:]
+        # Validate the int8 0/1 encoding documented in
+        # spike_gadgets_raw_io.py:953.
+        if not np.isin(edges, (0, 1)).all():
+            unique = sorted({int(x) for x in edges.tolist()})
+            raise ValueError(
+                f"DIO TimeSeries {name!r} contains non-{{0, 1}} values "
+                f"{unique}; the int8 0/1 encoding documented at "
+                "trodes_to_nwb/spike_gadgets_raw_io.py:953 is required."
+            )
+        t_parts.append(times)
+        edge_parts.append(edges)
+        sid_parts.append(np.full(edges.size, source_id, dtype=np.int64))
+
+    if not t_parts:
+        return (
+            np.zeros(0, dtype=float),
+            np.zeros(0, dtype=np.int64),
+            np.zeros(0, dtype=int),
+        )
+
+    t_evt = np.concatenate(t_parts)
+    source_id = np.concatenate(sid_parts)
+    edge = np.concatenate(edge_parts)
+    # Sort by time so ``per_frame_event_indices`` sees the same
+    # monotonic ordering ``load_ttl_events`` produces from a parquet.
+    order = np.argsort(t_evt, kind="stable")
+    return t_evt[order], source_id[order], edge[order]
+
+
 def _parse_channel_ids(description: str) -> list[str]:
     """Split a channel-id description string back into a list.
 
@@ -320,23 +428,53 @@ def load_nwb_session(
                 f"{ndt!r}. Expected 'Position' or 'PoseEstimation'."
             )
         imu_pair: tuple[np.ndarray, np.ndarray] | None = None
-        imu_diagnostics: dict[str, Any] = {}
+        diagnostics: dict[str, Any] = {}
         if imu_cfg is not None:
             analog_ts = _find_analog_timeseries(nwbfile)
             if analog_ts is not None:
                 t_imu, U_full = from_analog_container(analog_ts, imu_cfg)
                 imu_pair = (t_imu, U_full)
-                imu_diagnostics = {
-                    "imu_source": "nwb_analog",
-                    "imu_samples": int(t_imu.size),
-                    "imu_channel_count": int(U_full.shape[1]),
-                }
+                diagnostics["imu_source"] = "nwb_analog"
+                diagnostics["imu_samples"] = int(t_imu.size)
+                diagnostics["imu_channel_count"] = int(U_full.shape[1])
             else:
-                imu_diagnostics = {"imu_source": None}
-        # Phase 4c populates dio_events.
-        extras = NWBSessionExtras(imu=imu_pair, diagnostics=imu_diagnostics)
+                diagnostics["imu_source"] = None
+        dio_events: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None
+        if cfg.dio_to_ttl is not None:
+            events_container = _find_behavioral_events(nwbfile)
+            if events_container is None:
+                raise ValueError(
+                    f"inputs.nwb.dio_to_ttl is configured but "
+                    f"{cfg.nwb_file} has no "
+                    "processing['behavior']['behavioral_events'] container."
+                )
+            dio_events = from_behavioral_events(events_container, cfg.dio_to_ttl)
+            diagnostics["dio_event_count"] = int(dio_events[0].size)
+            diagnostics["dio_source"] = "nwb_behavioral_events"
+        extras = NWBSessionExtras(
+            imu=imu_pair, dio_events=dio_events, diagnostics=diagnostics
+        )
         return pixels, extras
     # NWBHDF5IO closed here; pixels/extras hold numpy arrays only.
+
+
+def _find_behavioral_events(nwbfile: Any) -> Any | None:
+    """Locate ``processing/behavior/behavioral_events`` if present.
+
+    The Trodes writer creates a ``BehavioralEvents`` container named
+    ``"behavioral_events"`` under ``processing["behavior"]`` (per
+    ``trodes_to_nwb/convert_dios.py``). Returns the container or
+    ``None`` when absent.
+    """
+
+    processing = getattr(nwbfile, "processing", None) or {}
+    if "behavior" not in processing:
+        return None
+    behavior = processing["behavior"]
+    interfaces = getattr(behavior, "data_interfaces", {})
+    if "behavioral_events" not in interfaces:
+        return None
+    return interfaces["behavioral_events"]
 
 
 def _find_analog_timeseries(nwbfile: Any) -> Any | None:
