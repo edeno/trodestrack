@@ -339,16 +339,38 @@ def from_behavioral_events(
             )
         if data.size == 0:
             continue
-        edges = data.astype(int, copy=False)
-        # Validate the int8 0/1 transition encoding.
-        if not np.isin(edges, (0, 1)).all():
-            unique = sorted({int(x) for x in edges.tolist()})
+        # Validate dtype *before* casting — otherwise float values
+        # like ``[0.2, 1.8]`` silently truncate to ``[0, 1]`` and
+        # pass the 0/1 membership check.
+        if not np.issubdtype(data.dtype, np.integer):
+            raise ValueError(
+                f"DIO TimeSeries {name!r} has non-integer dtype "
+                f"{data.dtype!r}; the writer encoding "
+                "(trodes_to_nwb/convert_dios.py:97) is int8 0/1 "
+                "transitions only. Float / object / bool inputs are "
+                "rejected to avoid silent coercion."
+            )
+        if not np.isin(data, (0, 1)).all():
+            unique = sorted({int(x) for x in data.tolist()})
             raise ValueError(
                 f"DIO TimeSeries {name!r} contains non-{{0, 1}} values "
                 f"{unique}; the writer encoding documented at "
                 "trodes_to_nwb/convert_dios.py:97 is int8 0/1 "
                 "transitions only."
             )
+        # Reject non-finite timestamps (matching the parquet TTL
+        # path at ``ttl_events.py:132``); NaN/inf would otherwise
+        # propagate into ``t_evt`` and confuse the downstream
+        # ``np.searchsorted`` bucketing.
+        if not np.all(np.isfinite(timestamps)):
+            n_bad = int((~np.isfinite(timestamps)).sum())
+            raise ValueError(
+                f"DIO TimeSeries {name!r} contains {n_bad} non-finite "
+                "timestamp(s); expected finite float seconds (parity "
+                "with the parquet TTL events validation at "
+                "ttl_events.py:132)."
+            )
+        edges = data.astype(int, copy=False)
         t_parts.append(timestamps)
         edge_parts.append(edges)
         sid_parts.append(np.full(edges.size, source_id, dtype=np.int64))

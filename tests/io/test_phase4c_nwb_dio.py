@@ -330,6 +330,50 @@ def test_from_behavioral_events_decodes_int8_stream_as_transitions(
 # ---------------------------------------------------------------------
 
 
+def test_from_behavioral_events_rejects_non_integer_dtype() -> None:
+    """Float DIO values must not silently truncate. ``[0.2, 1.8]``
+    cast through ``astype(int)`` would pass a 0/1 membership check
+    while losing real signal — reject the dtype before casting."""
+
+    class _FakeTS:
+        def __init__(self, data: np.ndarray, ts: np.ndarray) -> None:
+            self.data = data
+            self.timestamps = ts
+
+    fake_dict = {
+        "beam_1": _FakeTS(
+            np.array([0.2, 1.8], dtype=np.float64),
+            np.array([0.5, 0.6], dtype=float),
+        ),
+    }
+    dio_cfg = NWBDIOToTTLConfig(name_to_source_id={"beam_1": 1})
+
+    with pytest.raises(ValueError, match=r"non-integer dtype"):
+        from_behavioral_events(fake_dict, dio_cfg)
+
+
+def test_from_behavioral_events_rejects_non_finite_timestamps() -> None:
+    """NaN / inf timestamps fail fast with the same surface the
+    parquet path uses (``ttl_events.py:132``); silently propagating
+    them would confuse downstream ``np.searchsorted`` bucketing."""
+
+    class _FakeTS:
+        def __init__(self, data: np.ndarray, ts: np.ndarray) -> None:
+            self.data = data
+            self.timestamps = ts
+
+    fake_dict = {
+        "beam_1": _FakeTS(
+            np.array([1, 0], dtype=np.int8),
+            np.array([0.1, np.nan], dtype=float),
+        ),
+    }
+    dio_cfg = NWBDIOToTTLConfig(name_to_source_id={"beam_1": 1})
+
+    with pytest.raises(ValueError, match=r"non-finite timestamp"):
+        from_behavioral_events(fake_dict, dio_cfg)
+
+
 def test_load_session_populates_event_arrays(tmp_path: Path) -> None:
     """End-to-end: ``inputs.nwb.dio_to_ttl`` configured + matching
     ``ttl_events`` geometry → ``session.event_indices_per_frame``
