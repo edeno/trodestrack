@@ -46,10 +46,12 @@ from trodestrack.qa.report import generate_qa_report
 
 # Load your data into the dict shape this guide uses below: keys
 # ``t_imu``, ``U_imu``, ``t_cam_exp``, ``Z_cam_led1``, ``Z_cam_led2``,
-# ``mask_cam`` (and ``X_truth`` if available). Native loaders for Trodes,
-# DeepLabCut, and SpikeGadgets are tracked under "In Progress" in
-# README.md; until they ship, build the dict yourself from your own
-# pipeline, e.g. via ``simulate_rat_imu`` for synthetic data.
+# ``mask_cam`` (and ``X_truth`` if available). For real-data sessions
+# use ``trodestrack.io.load_session`` with one of the supported
+# ``inputs.format`` values (``prepared_arrays``, ``spikegadgets_trodes``,
+# ``trodes_native``, ``dlc_keypoints``, ``nwb``); see "Loading Native
+# Formats" in ``docs/getting-started/python-api.md`` for the
+# format-specific YAMLs. For synthetic data, use ``simulate_rat_imu``.
 # sim = load_my_data(...)
 
 cfg = EKFConfig()

@@ -1,0 +1,44 @@
+# Example YAML config for a DeepLabCut HDF5 + sibling _meta.pickle.
+#
+# Run:
+#   uv run trodestrack online --config examples/session_dlc_keypoints.yaml
+#   uv run trodestrack smooth --config examples/session_dlc_keypoints.yaml
+#
+# Paths are resolved relative to this YAML file. Requires the [dlc]
+# extra (``uv pip install 'trodestrack[dlc]'`` for PyTables).
+
+inputs:
+  format: dlc_keypoints
+  dlc_keypoints:
+    h5_file: ../data/videoDLC_resnet50_session.h5
+    led1_bodypart: led_green
+    led2_bodypart: led_red
+    likelihood_threshold: 0.6  # DLC pcutoff default
+    # Camera timestamps source. ``meta_pickle`` synthesizes from
+    # the sibling _meta.pickle (fps, nframes); ``trodes_hw_sync``
+    # reads HWTimestamp from a Trodes *.videoTimeStamps.cameraHWSync
+    # binary; ``timestamp_file`` reads a 1-D float-seconds array
+    # via np.loadtxt. ``meta_pickle`` is relative-to-recording-start
+    # — pair it with explicit ``imu.time_offset_s`` /
+    # ``camera.time_offset_s`` if you also configure
+    # ``inputs.imu_file`` (the loader rejects a Unix-clock IMU
+    # paired with relative camera time).
+    timestamps_source: meta_pickle
+    apply_crop_offset: true
+  # Optional parquet IMU. Without this, ``filter.state_mode`` must
+  # be ``vision_only``.
+  # imu_file: ../data/session_imu.parquet
+
+camera:
+  meters_per_pixel: 0.0022
+
+filter:
+  state_mode: vision_only
+
+led_identity:
+  mode: auto
+
+outputs:
+  output_dir: ../runs/session_dlc_keypoints
+  write_diagnostics: true
+  run_safety_checks: true

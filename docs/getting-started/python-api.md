@@ -215,6 +215,66 @@ Enable accelerometer-driven translation only after that fused configuration pass
 
 For config-driven `state_mode: vision_only`, Mahalanobis gating defaults off unless you explicitly set `filter.use_mahalanobis_gating: true`. This avoids rejecting large but valid camera motion in camera-only real-data runs.
 
+### Loading Native Formats (Trodes / DLC / NWB)
+
+Beyond the parquet workflow, `SessionConfig` accepts three additional `inputs.format` values that read raw acquisition files directly. The same `load_session(...)` call serves all of them — only the YAML changes.
+
+#### `trodes_native` — Trodes binaries
+
+Reads the SpikeGadgets `.videoPositionTracking` + PTP-synced `.videoTimeStamps.cameraHWSync` pair without going through parquet conversion. v1 supports PTP only; non-PTP variants need [`trodes_to_nwb`](https://github.com/LorenFrankLab/trodes_to_nwb) and the `nwb` format.
+
+```yaml
+inputs:
+  format: trodes_native
+  trodes_native:
+    position_tracking_file: data/session.videoPositionTracking
+    camera_timestamps_file: data/session.videoTimeStamps.cameraHWSync
+  # Optional: parquet IMU to fuse with binary camera. Without it,
+  # filter.state_mode must be vision_only.
+  # imu_file: data/session_imu.parquet
+```
+
+See [`examples/session_trodes_native.yaml`](https://github.com/edeno/trodestrack/blob/master/examples/session_trodes_native.yaml).
+
+#### `dlc_keypoints` — DeepLabCut HDF5
+
+Reads `<video>DLC_*.h5` (key `df_with_missing`) plus the sibling `_meta.pickle`. Single-animal projects only; multi-animal MultiIndex layouts are rejected up front. Requires `pip install 'trodestrack[dlc]'` (PyTables).
+
+```yaml
+inputs:
+  format: dlc_keypoints
+  dlc_keypoints:
+    h5_file: data/videoDLC_resnet50_session.h5
+    led1_bodypart: led_green
+    led2_bodypart: led_red
+    likelihood_threshold: 0.6      # DLC pcutoff default
+    timestamps_source: meta_pickle # or trodes_hw_sync / timestamp_file
+```
+
+The `timestamps_source` choice matters when an `inputs.imu_file` is also configured: `meta_pickle` synthesizes relative seconds starting at 0, which won't overlap a Unix-clock parquet IMU. The loader catches that mismatch and points at the three remediation options. See [`examples/session_dlc_keypoints.yaml`](https://github.com/edeno/trodestrack/blob/master/examples/session_dlc_keypoints.yaml).
+
+#### `nwb` — NWB files
+
+Auto-detects the position container by neurodata type — Trodes-style `Position` (two SpatialSeries) and ndx-pose `PoseEstimation` (per-bodypart series) both work. The loader can also read the Trodes analog group (`processing/analog/...`) for IMU and the `behavioral_events` container for DIO → TTL events. Requires `pip install 'trodestrack[nwb]'` (pynwb).
+
+```yaml
+inputs:
+  format: nwb
+  nwb:
+    nwb_file: data/session.nwb
+    led_source:
+      container: auto  # trodes_position / ndx_pose to disambiguate
+    # Optional NWB DIO bridge — pair with a ttl_events block below.
+    # dio_to_ttl:
+    #   name_to_source_id: {beam_1: 1, zone_a: 2}
+```
+
+IMU resolution precedence: `inputs.imu_file` (parquet) wins → NWB analog group → synthetic vision-only fallback. The DIO bridge is mutually exclusive with `ttl_events.events_file` (parquet wins when both are configured); the NWB-DIO path is opt-in via `inputs.nwb.dio_to_ttl`. See [`examples/session_nwb.yaml`](https://github.com/edeno/trodestrack/blob/master/examples/session_nwb.yaml).
+
+#### Spyglass integration
+
+The NWB container-layer API (`from_position_container`, `from_pose_estimation_container`, `from_analog_container`, `from_behavioral_events`) is public and pynwb-free at module load — a Spyglass `make()` that already has `pynwb` imported (via `fetch_nwb`) can call those functions directly with the returned container objects. trodestrack does not import `spyglass` or `datajoint`; the dependency direction is one-way. See `src/trodestrack/io/nwb/__init__.py` for the per-function contracts.
+
 ### Extended Kalman Filter
 
 ```python
