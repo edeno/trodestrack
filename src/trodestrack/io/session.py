@@ -10,7 +10,10 @@ import numpy as np
 import pandas as pd
 
 from trodestrack.config.schemas import EventLocationSource, SessionConfig
+from trodestrack.io.imu_parquet import load_imu_parquet
 from trodestrack.io.led_identity import resolve_led_identity
+from trodestrack.io.loaders import PositionPixels
+from trodestrack.io.pixel_to_meters import pixels_to_meters
 from trodestrack.io.ttl_events import (
     EDGE_NAME_TO_INT,
     load_ttl_events,
@@ -23,8 +26,6 @@ from trodestrack.qa.imu_calibration import (
     format_imu_calibration_report,
     run_imu_calibration_diagnostics,
 )
-
-DEG_TO_RAD = np.pi / 180.0
 
 
 @dataclass(frozen=True)
@@ -289,9 +290,10 @@ def _load_spikegadgets_trodes(config: SessionConfig) -> PreparedSession:
     inputs = config.inputs
     assert inputs.imu_file is not None
     assert inputs.position_file is not None
+
+    imu_data = load_imu_parquet(inputs.imu_file, config)
+
     pos_df = pd.read_parquet(inputs.position_file)
-    imu_df = pd.read_parquet(inputs.imu_file)
-    _require_columns(imu_df, config.imu.axis_map.values(), source=str(inputs.imu_file))
     pos_columns: list[str] = [
         config.camera.led1_x_column,
         config.camera.led1_y_column,
@@ -308,18 +310,14 @@ def _load_spikegadgets_trodes(config: SessionConfig) -> PreparedSession:
         pos_columns.append(config.camera.confidence_led2_column)
     _require_columns(pos_df, pos_columns, source=str(inputs.position_file))
 
-    imu_unique = _remove_sample_hold(imu_df, config)
-    t_imu_unix = _index_or_time_column(imu_unique)
     t_cam_unix = _index_or_time_column(pos_df)
-    t_start = min(float(t_imu_unix[0]), float(t_cam_unix[0]))
-    t_imu = t_imu_unix - t_start + config.imu.time_offset_s
+    t_start = min(float(imu_data.t_imu_unix[0]), float(t_cam_unix[0]))
+    t_imu = imu_data.t_imu_unix - t_start + config.imu.time_offset_s
     t_cam = t_cam_unix - t_start + config.camera.time_offset_s
     _validate_time_vector(t_imu, "IMU timestamps after preprocessing")
     _validate_time_vector(t_cam, "camera timestamps")
 
-    U_full = _convert_imu_to_si(imu_unique, config)
-    U_filter = _project_imu_for_filter(U_full, config.filter.state_mode)
-    led1, led2, conf_cam = _load_leds(pos_df, config)
+    led1, led2, conf_cam = _load_leds(pos_df, t_cam, config)
     # ``mask_cam`` advertises "frame is usable" to the EKF, which
     # supports partial single-LED updates (see
     # ``test_ekf_partial_observations.py``). Requiring *both* LEDs
@@ -336,8 +334,8 @@ def _load_spikegadgets_trodes(config: SessionConfig) -> PreparedSession:
     diagnostics: dict[str, object] = {
         "loader": {
             "format": "spikegadgets_trodes",
-            "imu_raw_samples": len(imu_df),
-            "imu_unique_samples": len(imu_unique),
+            "imu_raw_samples": imu_data.raw_samples,
+            "imu_unique_samples": imu_data.unique_samples,
             "camera_frames": len(pos_df),
             "sample_hold_strategy": config.imu.sample_hold_strategy,
             "effective_imu_rate_hz": float(1.0 / np.median(np.diff(t_imu))),
@@ -348,7 +346,7 @@ def _load_spikegadgets_trodes(config: SessionConfig) -> PreparedSession:
 
     return PreparedSession(
         t_imu=t_imu,
-        U_imu=U_filter,
+        U_imu=imu_data.U_filter,
         t_cam=t_cam,
         Z_cam_led1=led1,
         Z_cam_led2=led2,
@@ -357,8 +355,8 @@ def _load_spikegadgets_trodes(config: SessionConfig) -> PreparedSession:
         led_distance=led_distance,
         diagnostics=diagnostics,
         config=config,
-        gyro_z_for_led_identity=U_full[:, 2],
-        U_imu_for_calibration=U_full,
+        gyro_z_for_led_identity=imu_data.U_full[:, 2],
+        U_imu_for_calibration=imu_data.U_full,
     )
 
 
@@ -499,21 +497,6 @@ def _add_imu_calibration_diagnostics(session: PreparedSession) -> PreparedSessio
     return replace(session, diagnostics=diagnostics)
 
 
-def _remove_sample_hold(imu_df: pd.DataFrame, config: SessionConfig) -> pd.DataFrame:
-    strategy = config.imu.sample_hold_strategy
-    if strategy == "none":
-        return imu_df.copy()
-    if strategy == "gyro_z_change":
-        col = config.imu.axis_map["gyro_z"]
-        values = imu_df[col].to_numpy()
-        keep = np.concatenate([[True], np.diff(values) != 0])
-    else:
-        cols = [config.imu.axis_map[name] for name in _axis_names()]
-        values = imu_df[cols].to_numpy()
-        keep = np.concatenate([[True], np.any(np.diff(values, axis=0) != 0, axis=1)])
-    return imu_df.loc[keep].copy()
-
-
 def _require_columns(df: pd.DataFrame, columns: object, *, source: str) -> None:
     required = tuple(dict.fromkeys(str(col) for col in columns))
     missing = [col for col in required if col not in df.columns]
@@ -535,67 +518,6 @@ def _validate_time_vector(t: np.ndarray, name: str) -> None:
         raise ValueError(f"{name} must be strictly increasing.")
 
 
-def _convert_imu_to_si(imu_df: pd.DataFrame, config: SessionConfig) -> np.ndarray:
-    cols = config.imu.axis_map
-    signs = config.imu.axis_signs
-    gyro_scale = config.imu.gyro_scale_dps_per_lsb * DEG_TO_RAD
-    accel_scale = config.imu.accel_scale_g_per_lsb * config.imu.gravity_mps2
-    values = {
-        "gyro_x": signs.get("gyro_x", 1.0)
-        * imu_df[cols["gyro_x"]].to_numpy()
-        * gyro_scale,
-        "gyro_y": signs.get("gyro_y", 1.0)
-        * imu_df[cols["gyro_y"]].to_numpy()
-        * gyro_scale,
-        "gyro_z": signs.get("gyro_z", 1.0)
-        * imu_df[cols["gyro_z"]].to_numpy()
-        * gyro_scale,
-        "accel_x": signs.get("accel_x", 1.0)
-        * imu_df[cols["accel_x"]].to_numpy()
-        * accel_scale,
-        "accel_y": signs.get("accel_y", 1.0)
-        * imu_df[cols["accel_y"]].to_numpy()
-        * accel_scale,
-        "accel_z": signs.get("accel_z", 1.0)
-        * imu_df[cols["accel_z"]].to_numpy()
-        * accel_scale,
-    }
-    if config.imu.mode == "2d":
-        return np.column_stack([values["gyro_z"], values["accel_x"], values["accel_y"]])
-    return np.column_stack(
-        [
-            values["gyro_x"],
-            values["gyro_y"],
-            values["gyro_z"],
-            values["accel_x"],
-            values["accel_y"],
-            values["accel_z"],
-        ]
-    )
-
-
-def _project_imu_for_filter(U_full: np.ndarray, state_mode: str) -> np.ndarray:
-    if state_mode == "vision_only":
-        return np.zeros((U_full.shape[0], 3))
-    if U_full.shape[1] == 3:
-        if state_mode == "2d_cam_6dof_imu_orientation":
-            raise ValueError(
-                "state_mode='2d_cam_6dof_imu_orientation' requires 6-channel "
-                "IMU input [gyro_x, gyro_y, gyro_z, accel_x, accel_y, accel_z]; "
-                "set imu.mode: 3d or provide prepared 6-channel arrays."
-            )
-        if state_mode == "2d_cam_3d_imu":
-            return U_full
-        return U_full
-    if U_full.shape[1] != 6:
-        raise ValueError(f"Unsupported IMU shape {U_full.shape}.")
-    if state_mode == "2d_cam_6dof_imu_orientation":
-        return U_full
-    if state_mode == "2d_cam_3d_imu":
-        return U_full[:, [2, 3, 4, 5]]
-    return U_full[:, [2, 3, 4]]
-
-
 def _gyro_z_for_led_identity(U_imu: np.ndarray) -> np.ndarray | None:
     if U_imu.ndim != 2:
         return None
@@ -607,23 +529,28 @@ def _gyro_z_for_led_identity(U_imu: np.ndarray) -> np.ndarray | None:
 
 
 def _load_leds(
-    pos_df: pd.DataFrame, config: SessionConfig
+    pos_df: pd.DataFrame, t_cam: np.ndarray, config: SessionConfig
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
     cam = config.camera
-    led1 = (
-        pos_df[[cam.led1_x_column, cam.led1_y_column]].to_numpy(dtype=float)
-        * cam.meters_per_pixel
-    )
-    led2 = (
-        pos_df[[cam.led2_x_column, cam.led2_y_column]].to_numpy(dtype=float)
-        * cam.meters_per_pixel
-    )
-    conf_cam = None
+    led1_pixels = pos_df[[cam.led1_x_column, cam.led1_y_column]].to_numpy(dtype=float)
+    led2_pixels = pos_df[[cam.led2_x_column, cam.led2_y_column]].to_numpy(dtype=float)
+    conf_cam: np.ndarray | None = None
     if cam.confidence_led1_column and cam.confidence_led2_column:
         c1 = pos_df[cam.confidence_led1_column].to_numpy(dtype=float)
         c2 = pos_df[cam.confidence_led2_column].to_numpy(dtype=float)
         conf_cam = np.column_stack([c1, c1, c2, c2])
-    return led1, led2, conf_cam
+    pixels = PositionPixels(
+        led1_pixels=led1_pixels,
+        led2_pixels=led2_pixels,
+        t_cam=t_cam,
+        confidence=conf_cam,
+    )
+    led1, led2, conf = pixels_to_meters(pixels, cam)
+    # Parquet workflow always provides both LEDs (schema requires
+    # led1/led2 columns); ``led2`` is only ``None`` for single-LED
+    # native loaders.
+    assert led2 is not None
+    return led1, led2, conf
 
 
 def _index_or_time_column(df: pd.DataFrame) -> np.ndarray:
@@ -716,10 +643,6 @@ def _uses_accel_translation(config: SessionConfig) -> bool:
         config.filter.state_mode == "2d_cam_6dof_imu_orientation"
         and config.filter.enable_experimental_accel_translation is True
     )
-
-
-def _axis_names() -> tuple[str, ...]:
-    return ("gyro_x", "gyro_y", "gyro_z", "accel_x", "accel_y", "accel_z")
 
 
 def _json_ready(obj: object) -> object:
