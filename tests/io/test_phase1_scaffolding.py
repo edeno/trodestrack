@@ -339,6 +339,59 @@ def test_load_session_dispatches_to_trodes_native_stub(tmp_path: Path) -> None:
         load_session(config)
 
 
+def test_load_session_dispatches_to_dlc_keypoints_stub(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``load_session`` routes ``format='dlc_keypoints'`` to the stub.
+
+    Uses the missing-extra path for deterministic coverage regardless
+    of whether ``[dlc]`` is installed in the test environment.
+    """
+
+    monkeypatch.setitem(sys.modules, "tables", None)
+    config = _dlc_keypoints_config(tmp_path)
+    with pytest.raises(ImportError, match=r"trodestrack\[dlc\]"):
+        load_session(config)
+
+
+def test_load_session_dispatches_to_nwb_stub(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``load_session`` routes ``format='nwb'`` to the stub.
+
+    Uses the missing-extra path for deterministic coverage regardless
+    of whether ``[nwb]`` is installed in the test environment.
+    """
+
+    monkeypatch.setitem(sys.modules, "pynwb", None)
+    config = _nwb_config(tmp_path)
+    with pytest.raises(ImportError, match=r"trodestrack\[nwb\]"):
+        load_session(config)
+
+
+# ----------------------------------------------------------------------
+# Public API: new schema classes are importable from trodestrack.config.
+# ----------------------------------------------------------------------
+
+
+def test_new_schemas_are_in_public_config_api() -> None:
+    """``from trodestrack.config import <NewConfig>`` works for every
+    Phase 1 schema, matching the existing ``SessionConfig`` /
+    ``LedIdentityConfig`` re-export convention."""
+
+    import trodestrack.config as cfg
+
+    for name in (
+        "TrodesNativeConfig",
+        "DLCKeypointsConfig",
+        "NWBConfig",
+        "NWBLEDSourceConfig",
+        "NWBDIOToTTLConfig",
+    ):
+        assert hasattr(cfg, name), f"trodestrack.config does not export {name}"
+        assert name in cfg.__all__, f"trodestrack.config.__all__ does not list {name}"
+
+
 # ----------------------------------------------------------------------
 # Sanity: nested block dataclasses construct standalone.
 # ----------------------------------------------------------------------
