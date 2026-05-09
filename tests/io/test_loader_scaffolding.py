@@ -258,12 +258,15 @@ def test_dual_led_session_does_not_require_filter_led_distance() -> None:
     )
 
 
-@pytest.mark.parametrize("bad", [0.0, -0.001, -1.0])
-def test_filter_led_distance_must_be_strictly_positive(bad: float) -> None:
+@pytest.mark.parametrize(
+    "bad", [0.0, -0.001, -1.0, float("inf"), float("-inf"), float("nan")]
+)
+def test_filter_led_distance_must_be_strictly_positive_and_finite(bad: float) -> None:
     """``led_distance=0.0`` collapses LED1/LED2 in the EKF camera
     model (they become indistinguishable); negatives mirror the
-    offset direction. ``None`` remains the documented "infer from
-    data" sentinel."""
+    offset direction; inf/nan would surface later as an EKFConfig
+    rejection far from the YAML. ``None`` remains the documented
+    "infer from data" sentinel."""
 
     from trodestrack.config import FilterConfig
 

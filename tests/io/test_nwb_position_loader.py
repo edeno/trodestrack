@@ -1119,10 +1119,12 @@ def _single_led_with_analog_fixture(
 
 def test_single_led_fused_mode_runs_end_to_end(tmp_path: Path) -> None:
     """``state_mode='2d_cam_3d_imu'`` with single-LED NWB + analog
-    IMU runs the full loader → EKF pipeline. Catches wiring
-    regressions in the loader, the LED-pair-shaped observation
-    handoff, and the safety-check envelope path."""
+    IMU runs the full loader → EKF → safety-check pipeline. Catches
+    wiring regressions in the loader, the LED-pair-shaped observation
+    handoff, and the safety-check envelope path (which must use the
+    observed LED's trajectory, not the all-NaN midpoint)."""
 
+    from trodestrack.io.session import run_real_data_safety_check
     from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
 
     nwb_path = _single_led_with_analog_fixture(tmp_path)
@@ -1159,6 +1161,13 @@ def test_single_led_fused_mode_runs_end_to_end(tmp_path: Path) -> None:
     means = np.asarray(result.filtered_means)
     assert means.shape[0] == session.t_cam.shape[0]
     assert np.isfinite(means).all()
+
+    # Safety check: the envelope path must read from LED1 (LED2 is
+    # all-NaN); without the single-LED branch in ``_camera_envelope``
+    # the dual-LED midpoint would be NaN everywhere and this would
+    # raise "requires at least N finite ... frame(s)".
+    safety = run_real_data_safety_check(session, ekf_config, result)
+    assert safety.dual_led_frame_count == session.t_cam.shape[0]
 
 
 # ---------------------------------------------------------------------

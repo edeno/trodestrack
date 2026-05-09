@@ -389,11 +389,13 @@ class FilterConfig(BaseModel):
         "2d_cam_6dof_imu_orientation",
     ] = "2d_cam_3d_imu"
     # The EKF/UKF camera model places LED1 / LED2 a fixed offset apart;
-    # zero collapses the offset (LEDs become indistinguishable) and a
-    # negative value mirrors the offset direction. ``None`` is the
-    # documented "infer from data" sentinel — the loader falls back to
-    # ``_median_led_distance`` (or rejects, for single-LED NWB sessions).
-    led_distance: float | None = Field(default=None, gt=0.0)
+    # zero collapses the offset (LEDs become indistinguishable), a
+    # negative value mirrors the offset direction, and ``inf`` / NaN
+    # would surface later as an EKFConfig rejection far from the
+    # YAML. ``None`` is the documented "infer from data" sentinel —
+    # the loader falls back to ``_median_led_distance`` (or rejects,
+    # for single-LED NWB sessions).
+    led_distance: float | None = Field(default=None, gt=0.0, allow_inf_nan=False)
     use_heading_measurement: bool | None = None
     process_noise_pos: float | None = None
     process_noise_vel: float | None = None
