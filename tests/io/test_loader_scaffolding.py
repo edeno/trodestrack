@@ -1,4 +1,4 @@
-"""Phase 1 — schema and loader-stub validation slice.
+"""schema and loader-stub validation slice.
 
 These tests cover:
 
@@ -8,13 +8,13 @@ These tests cover:
   the YAML's parent directory (matching the existing flat-paths
   contract).
 - TTL events behavior unchanged: ``TTLEventsConfig.events_file`` is
-  still required (Phase 4c relaxes it).
+  still required (the NWB DIO bridge relaxes it).
 - Stub dispatch: missing extras raise ``ImportError`` naming the
   install command; with extras present, stubs raise
-  ``NotImplementedError`` naming the implementing phase.
+  ``NotImplementedError`` until the loader is wired up.
 
-Loader stubs only verify the import surface; full ingest lands in
-Phases 2 / 3 / 4a / 4c.
+Loader stubs only verify the import surface; full ingest lives in the
+per-format loader modules.
 """
 
 from __future__ import annotations
@@ -68,12 +68,12 @@ def test_format_nwb_requires_block() -> None:
 
 
 # ----------------------------------------------------------------------
-# Schema: existing TTL behavior unchanged (Phase 4c will relax this).
+# Schema: existing TTL behavior unchanged (the NWB DIO bridge relaxes this).
 # ----------------------------------------------------------------------
 
 
 def test_ttl_events_file_still_required() -> None:
-    """``TTLEventsConfig.events_file`` remains required in Phase 1."""
+    """``TTLEventsConfig.events_file`` remains required in the schema-only PR."""
 
     with pytest.raises(ValidationError, match="events_file"):
         SessionConfig.model_validate(
@@ -354,7 +354,7 @@ def test_load_session_dispatches_to_nwb_stub(
 
 def test_new_schemas_are_in_public_config_api() -> None:
     """``from trodestrack.config import <NewConfig>`` works for every
-    Phase 1 schema, matching the existing ``SessionConfig`` /
+    new format schema, matching the existing ``SessionConfig`` /
     ``LedIdentityConfig`` re-export convention."""
 
     import trodestrack.config as cfg

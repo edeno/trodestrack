@@ -1,4 +1,4 @@
-"""Phase 4a — NWB position loader validation slice.
+"""NWB position loader validation slice.
 
 Fixtures are synthesized in-process via ``pynwb`` itself (one
 Trodes-style ``Position``, one ndx-pose v0.2.x ``PoseEstimation`` with
@@ -53,7 +53,7 @@ def _make_nwb_skeleton(
     """Construct a minimal NWBFile with a behavior processing module."""
 
     return pynwb.NWBFile(
-        session_description="Phase 4a test session",
+        session_description="test session",
         identifier=str(uuid4()),
         session_start_time=datetime.datetime(2024, 1, 1, tzinfo=datetime.UTC),
         session_id=session_id,

@@ -1,4 +1,4 @@
-"""Unit tests for the parquet IMU loader extracted in Phase 0."""
+"""Unit tests for the parquet IMU loader extracted helper."""
 
 from __future__ import annotations
 

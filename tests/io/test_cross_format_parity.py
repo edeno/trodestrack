@@ -1,4 +1,4 @@
-"""Phase 5 — cross-format integration test.
+"""cross-format integration test.
 
 A single ground-truth pixel-space LED trajectory is written into all
 three native formats (Trodes binaries, DLC HDF5, NWB Position).
@@ -333,7 +333,7 @@ def test_filtered_means_within_1e_3_across_formats(tmp_path: Path) -> None:
     """Same camera trajectory loaded via the existing
     ``spikegadgets_trodes`` parquet path AND the three native loaders
     (Trodes binaries, DLC HDF5, NWB Position) yields filtered means
-    within 1e-3 m across every pair (the plan's Phase 5 gate). The
+    within 1e-3 m across every pair (the cross-format parity gate). The
     parquet baseline confirms the new loaders remain
     parity-compatible with the established workflow."""
 

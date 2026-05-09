@@ -1,9 +1,9 @@
-"""Phase 3 — ``dlc_keypoints`` loader validation slice.
+"""``dlc_keypoints`` loader validation slice.
 
 Fixtures are synthesized in-process: a single-animal DLC HDF5 via
 ``DataFrame.to_hdf(..., key="df_with_missing")`` plus a sibling
 ``_meta.pickle``. A multi-animal variant is built separately for the
-rejection test. Trodes-PTP timestamps are reused from the Phase 2
+rejection test. Trodes-PTP timestamps are reused from the trodes_native
 fixture builders.
 """
 
@@ -358,7 +358,7 @@ def test_timestamps_trodes_hw_sync(tmp_path: Path) -> None:
     h5_path = _write_h5_and_meta(tmp_path, n_frames=n)
 
     # Synthesize a Trodes cameraHWSync binary aligned 1:1 with the DLC
-    # frames. Reuse the same byte layout as Phase 2.
+    # frames. Reuse the same byte layout as the trodes_native fixtures.
     ts_path = tmp_path / "session.videoTimeStamps.cameraHWSync"
     ns_per_s = 1_000_000_000
     base_ns = 1_700_000_000_000_000_000

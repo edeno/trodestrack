@@ -14,6 +14,29 @@ from trodestrack.config.schemas import IMUConfig, SessionConfig
 DEG_TO_RAD = np.pi / 180.0
 
 
+def project_imu_for_filter(U_full: np.ndarray, state_mode: str) -> np.ndarray:
+    """Public alias for the state-mode IMU projection.
+
+    Native loaders that get U_full from a non-parquet source (NWB
+    analog group, future raw-rec readers) still need the same
+    projection the parquet path applies after ``convert_imu_columns_to_si``.
+    """
+
+    return _project_imu_for_filter(U_full, state_mode)
+
+
+def require_columns(df: pd.DataFrame, columns: Iterable[str], *, source: str) -> None:
+    """Public alias for the missing-column raise used across loaders."""
+
+    _require_columns(df, columns, source=source)
+
+
+def index_or_time_column(df: pd.DataFrame) -> np.ndarray:
+    """Public alias for the parquet ``time`` / index extractor."""
+
+    return _index_or_time_column(df)
+
+
 def convert_imu_columns_to_si(
     raw_columns: dict[str, np.ndarray], imu_cfg: IMUConfig
 ) -> np.ndarray:

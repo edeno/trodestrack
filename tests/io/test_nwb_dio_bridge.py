@@ -1,4 +1,4 @@
-"""Phase 4c — NWB DIO → TTL bridge validation slice.
+"""NWB DIO → TTL bridge validation slice.
 
 Schema-side tests cover the conditional ``events_file`` requirement,
 the geometry-block requirement when DIO is configured, and the
@@ -55,7 +55,7 @@ def _make_nwb_with_position_and_dio(
     base_systime_s: float = 0.5,
     camera_t0_s: float = 0.0,
 ) -> Path:
-    """Build a Phase-4a-style NWB with optional DIO TimeSeries.
+    """Build a position-bearing NWB with optional DIO TimeSeries.
 
     DIO encoding (per ``trodes_to_nwb/convert_dios.py:97`` +
     ``spike_gadgets_raw_io.py:1348``): int8 0/1 transitions only.
@@ -65,13 +65,13 @@ def _make_nwb_with_position_and_dio(
     """
 
     nwbfile = pynwb.NWBFile(
-        session_description="Phase 4c test session",
+        session_description="test session",
         identifier=str(uuid4()),
         session_start_time=datetime.datetime(2024, 1, 1, tzinfo=datetime.UTC),
         session_id="session_0",
     )
 
-    # Position: same Trodes-style two-LED layout as Phase 4a/4b.
+    # Position: same Trodes-style two-LED layout as the NWB position fixtures.
     behavior = nwbfile.create_processing_module(name="behavior", description="behavior")
     timestamps = camera_t0_s + np.arange(n_frames, dtype=float) / 30.0
     led1_data = np.column_stack([100.0 + np.arange(n_frames), np.full(n_frames, 200.0)])

@@ -1,6 +1,6 @@
-"""Phase 4b — NWB analog IMU validation slice.
+"""NWB analog IMU validation slice.
 
-Fixtures extend the Phase 4a Trodes-style NWB by attaching the
+Fixtures extend the Trodes-style NWB by attaching the
 ``processing/analog/analog/analog`` TimeSeries the
 ``trodes_to_nwb.convert_analog`` writer produces (channel ids in the
 description string, triple-space separator).
@@ -50,7 +50,7 @@ def _make_nwb_with_position_and_analog(
     base_systime_s: float = 0.0,
     extra_ecu_channels: int = 4,
 ) -> Path:
-    """Build a Phase-4a-style NWB plus an optional analog TimeSeries.
+    """Build a position-bearing NWB plus an optional analog TimeSeries.
 
     Channel order in the analog TimeSeries: a few ECU channels
     followed by the six headstage IMU channels in the order
@@ -58,7 +58,7 @@ def _make_nwb_with_position_and_analog(
     """
 
     nwbfile = pynwb.NWBFile(
-        session_description="Phase 4b test session",
+        session_description="test session",
         identifier=str(uuid4()),
         session_start_time=datetime.datetime(2024, 1, 1, tzinfo=datetime.UTC),
         session_id="session_0",

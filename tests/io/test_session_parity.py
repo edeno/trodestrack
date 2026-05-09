@@ -1,7 +1,7 @@
-"""Phase 0 parity gate: pin post-refactor session-loading output.
+"""Parity gate: pin post-refactor session-loading output.
 
 These tests lock in the exact numerical content of ``PreparedSession``
-fields produced by ``load_session`` for both supported pre-Phase-1
+fields produced by ``load_session`` for both legacy
 formats (``spikegadgets_trodes`` and ``prepared_arrays``). A future
 refactor that drifts the loader's numerics — pixel→meter scaling, IMU
 SI conversion, sample-hold dedup, clock alignment, or state-mode
@@ -125,7 +125,7 @@ outputs:
 def test_prepared_arrays_parity(tmp_path) -> None:
     """``prepared_arrays`` loader passes inputs through verbatim.
 
-    Phase 0's pixel→meter / IMU helpers don't touch this path; this
+    The pixel→meter / IMU helpers don't touch this path; this
     test confirms it.
     """
 

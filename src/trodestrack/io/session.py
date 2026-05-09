@@ -10,7 +10,12 @@ import numpy as np
 import pandas as pd
 
 from trodestrack.config.schemas import EventLocationSource, SessionConfig
-from trodestrack.io.imu_parquet import load_imu_parquet
+from trodestrack.io.imu_parquet import (
+    index_or_time_column,
+    load_imu_parquet,
+    project_imu_for_filter,
+    require_columns,
+)
 from trodestrack.io.led_identity import resolve_led_identity
 from trodestrack.io.loaders import PositionPixels
 from trodestrack.io.loaders._trodes_native import load_trodes_native_position
@@ -166,7 +171,9 @@ def _load_trodes_native(config: SessionConfig) -> PreparedSession:
         led_distance=led_distance,
         diagnostics=diagnostics,
         config=config,
-        gyro_z_for_led_identity=(U_full[:, 2] if U_full is not None else None),
+        gyro_z_for_led_identity=(
+            _gyro_z_for_led_identity(U_full) if U_full is not None else None
+        ),
         U_imu_for_calibration=U_full,
     )
 
@@ -277,10 +284,8 @@ def _resolve_imu_for_native_loader(
         )
 
     if nwb_analog is not None:
-        from trodestrack.io.imu_parquet import _project_imu_for_filter
-
         t_imu, U_full = nwb_analog
-        U_filter = _project_imu_for_filter(U_full, config.filter.state_mode)
+        U_filter = project_imu_for_filter(U_full, config.filter.state_mode)
         return t_imu, U_filter, U_full, False, "nwb_analog"
 
     if _uses_imu(config.filter.state_mode):
@@ -302,10 +307,12 @@ def _load_dlc_keypoints(config: SessionConfig) -> PreparedSession:
     assert inputs.dlc_keypoints is not None
     cfg = inputs.dlc_keypoints
 
-    # Verify ``[dlc]`` extra up front so the failure message is the
-    # install command rather than the pandas/PyTables traceback.
+    # ``pd.read_hdf`` only attempts to import PyTables after opening the
+    # file, so a missing ``[dlc]`` extra surfaces as ``FileNotFoundError``
+    # instead of the install hint when the path is invalid. Probing
+    # ``tables`` upfront keeps the install-hint path deterministic.
     try:
-        import tables  # type: ignore[import-not-found] # noqa: F401  # PyTables backs pandas.read_hdf
+        import tables  # noqa: F401
     except ImportError as e:
         raise ImportError(
             "inputs.format='dlc_keypoints' requires the [dlc] extra. "
@@ -370,7 +377,9 @@ def _load_dlc_keypoints(config: SessionConfig) -> PreparedSession:
         led_distance=led_distance,
         diagnostics=diagnostics,
         config=config,
-        gyro_z_for_led_identity=(U_full[:, 2] if U_full is not None else None),
+        gyro_z_for_led_identity=(
+            _gyro_z_for_led_identity(U_full) if U_full is not None else None
+        ),
         U_imu_for_calibration=U_full,
     )
 
@@ -454,7 +463,9 @@ def _load_nwb(config: SessionConfig) -> PreparedSession:
         led_distance=led_distance,
         diagnostics=diagnostics,
         config=config,
-        gyro_z_for_led_identity=(U_full[:, 2] if U_full is not None else None),
+        gyro_z_for_led_identity=(
+            _gyro_z_for_led_identity(U_full) if U_full is not None else None
+        ),
         U_imu_for_calibration=U_full,
         nwb_dio_events=nwb_dio_events_aligned,
     )
@@ -686,9 +697,9 @@ def _load_spikegadgets_trodes(config: SessionConfig) -> PreparedSession:
         pos_columns.append(config.camera.confidence_led1_column)
     if config.camera.confidence_led2_column is not None:
         pos_columns.append(config.camera.confidence_led2_column)
-    _require_columns(pos_df, pos_columns, source=str(inputs.position_file))
+    require_columns(pos_df, pos_columns, source=str(inputs.position_file))
 
-    t_cam_unix = _index_or_time_column(pos_df)
+    t_cam_unix = index_or_time_column(pos_df)
     t_start = min(float(imu_data.t_imu_unix[0]), float(t_cam_unix[0]))
     t_imu = imu_data.t_imu_unix - t_start + config.imu.time_offset_s
     t_cam = t_cam_unix - t_start + config.camera.time_offset_s
@@ -789,7 +800,7 @@ def _apply_led_identity_correction(session: PreparedSession) -> PreparedSession:
 def _attach_ttl_events(session: PreparedSession) -> PreparedSession:
     """Resolve ``ttl_events`` config into the session's dense event arrays.
 
-    Event source precedence (per the Phase 4c schema contract):
+    Event source precedence:
 
     1. ``ttl_events.events_file`` (parquet) wins when set — the
        per-LED parquet is the authoritative pre-computed source and
@@ -908,15 +919,6 @@ def _add_imu_calibration_diagnostics(session: PreparedSession) -> PreparedSessio
     return replace(session, diagnostics=diagnostics)
 
 
-def _require_columns(df: pd.DataFrame, columns: object, *, source: str) -> None:
-    required = tuple(dict.fromkeys(str(col) for col in columns))
-    missing = [col for col in required if col not in df.columns]
-    if missing:
-        raise ValueError(
-            f"{source} is missing required column(s): {', '.join(missing)}."
-        )
-
-
 def _validate_time_vector(t: np.ndarray, name: str) -> None:
     arr = np.asarray(t, dtype=float)
     if arr.ndim != 1:
@@ -962,12 +964,6 @@ def _load_leds(
     # native loaders.
     assert led2 is not None
     return led1, led2, conf
-
-
-def _index_or_time_column(df: pd.DataFrame) -> np.ndarray:
-    if "time" in df.columns:
-        return df["time"].to_numpy(dtype=float)
-    return df.index.to_numpy(dtype=float)
 
 
 def _median_led_distance(led1: np.ndarray, led2: np.ndarray, mask: np.ndarray) -> float:

@@ -1,8 +1,5 @@
 """Public NWB position / IMU / DIO loader.
 
-Phase 4a covers position only — Phase 4b adds ``from_analog_container``
-(IMU) and Phase 4c adds ``from_behavioral_events`` (DIO bridge).
-
 Two-layer design (Spyglass integration seam):
 
 - **Container layer**: ``from_position_container`` /
@@ -24,7 +21,6 @@ file close) without breaking downstream code.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -37,6 +33,7 @@ from trodestrack.config.schemas import (
 )
 from trodestrack.io.imu_parquet import convert_imu_columns_to_si
 from trodestrack.io.loaders._shared import PositionPixels
+from trodestrack.io.ttl_events import EDGE_NAME_TO_INT
 
 if TYPE_CHECKING:
     # Imported for type-checking only; runtime never hits this branch.
@@ -57,9 +54,9 @@ __all__ = [
 class NWBSessionExtras:
     """Optional extras the NWB loader pulls alongside position data.
 
-    ``imu`` is a ``(t_imu_unix, U_full)`` pair from Phase 4b's NWB
-    analog reader. ``dio_events`` is a ``(t_evt, source_id, edge)``
-    triple from Phase 4c's DIO bridge — same shape as
+    ``imu`` is a ``(t_imu_unix, U_full)`` pair from the NWB analog
+    group. ``dio_events`` is a ``(t_evt, source_id, edge)`` triple
+    from the NWB DIO bridge — same shape as
     ``trodestrack.io.ttl_events.load_ttl_events`` returns, so the
     downstream ``per_frame_event_indices`` indexer accepts it
     unchanged.
@@ -227,38 +224,22 @@ def from_analog_container(
     after this returns.
     """
 
-    timestamps = _eager_array(analog_ts.timestamps, dtype=float)
-    data = _eager_array(analog_ts.data)
-    if data.ndim != 2:
-        raise ValueError(
-            f"Analog TimeSeries data must be 2-D (n_samples, n_channels); "
-            f"got shape {data.shape}."
-        )
-    if timestamps.shape != (data.shape[0],):
-        raise ValueError(
-            f"Analog TimeSeries timestamps shape {timestamps.shape} does "
-            f"not match data length {data.shape[0]}."
-        )
-
+    # Resolve channel ids from description before any data read so we
+    # can column-slice the underlying h5py dataset to just the IMU
+    # axes we need. The Trodes analog group can hold tens of channels
+    # (ECU + headstage) at the recording sample rate; eagerly reading
+    # the whole array would balloon to GB-scale for long sessions
+    # only to discard ~94% of it.
     description = str(getattr(analog_ts, "description", "") or "")
     channel_ids = _parse_channel_ids(description)
-    if len(channel_ids) != data.shape[1]:
-        raise ValueError(
-            f"Analog TimeSeries channel-id count from description "
-            f"({len(channel_ids)}: {channel_ids}) does not match data "
-            f"shape {data.shape}. The description must list exactly one "
-            "id per data column "
-            "(per trodes_to_nwb.convert_analog.__merge_row_description)."
-        )
-
     name_to_col = {name: i for i, name in enumerate(channel_ids)}
-    raw_columns: dict[str, np.ndarray] = {}
     missing: list[tuple[str, str]] = []
+    axis_to_col: dict[str, int] = {}
     for axis, mapped_name in imu_cfg.axis_map.items():
         if mapped_name not in name_to_col:
             missing.append((axis, mapped_name))
             continue
-        raw_columns[axis] = data[:, name_to_col[mapped_name]]
+        axis_to_col[axis] = name_to_col[mapped_name]
     if missing:
         raise ValueError(
             f"NWB analog channel IDs missing axis_map entries: "
@@ -267,6 +248,36 @@ def from_analog_container(
             "the writer recorded."
         )
 
+    timestamps = _eager_array(analog_ts.timestamps, dtype=float)
+    # Slice only the columns we need. h5py supports sorted-int fancy
+    # indexing on the second axis; sort the unique columns, slice,
+    # then unscramble per axis.
+    unique_cols = sorted(set(axis_to_col.values()))
+    col_to_local = {col: i for i, col in enumerate(unique_cols)}
+    raw_dataset = analog_ts.data
+    if hasattr(raw_dataset, "shape") and len(raw_dataset.shape) != 2:
+        raise ValueError(
+            f"Analog TimeSeries data must be 2-D (n_samples, n_channels); "
+            f"got shape {raw_dataset.shape}."
+        )
+    if hasattr(raw_dataset, "shape") and raw_dataset.shape[1] != len(channel_ids):
+        raise ValueError(
+            f"Analog TimeSeries channel-id count from description "
+            f"({len(channel_ids)}: {channel_ids}) does not match data "
+            f"shape {raw_dataset.shape}. The description must list "
+            "exactly one id per data column (per "
+            "trodes_to_nwb.convert_analog.__merge_row_description)."
+        )
+    sliced = np.asarray(raw_dataset[:, unique_cols])
+    if timestamps.shape != (sliced.shape[0],):
+        raise ValueError(
+            f"Analog TimeSeries timestamps shape {timestamps.shape} does "
+            f"not match data length {sliced.shape[0]}."
+        )
+
+    raw_columns = {
+        axis: sliced[:, col_to_local[col]] for axis, col in axis_to_col.items()
+    }
     U_full = convert_imu_columns_to_si(raw_columns, imu_cfg)
     return timestamps, U_full
 
@@ -289,11 +300,14 @@ def from_behavioral_events(
       Spyglass-agnostic.
 
     DIO encoding: ``data`` is ``int8`` 0/1 where each value is
-    already a transition (``1`` = rising, ``0`` = falling). The
-    ``trodes_to_nwb`` writer strips the initial level on the write
-    side
-    (``trodes_to_nwb/spike_gadgets_raw_io.py:1348`` returns
-    ``dio_change_times[1:], change_dir_trim[1:]`` and
+    already a transition. The integer values match the parquet
+    path's ``EDGE_NAME_TO_INT`` mapping (``1`` = rise, ``0`` = fall),
+    so the array can flow into ``per_frame_event_indices`` unchanged
+    — see the assert below for the explicit pinning.
+
+    The ``trodes_to_nwb`` writer strips the initial level on the
+    write side (``trodes_to_nwb/spike_gadgets_raw_io.py:1348``
+    returns ``dio_change_times[1:], change_dir_trim[1:]`` and
     ``trodes_to_nwb/convert_dios.py:97`` writes those directly into
     the NWB ``TimeSeries``), so the loader must NOT drop ``data[0]``
     again — every sample on disk is a real edge.
@@ -304,6 +318,11 @@ def from_behavioral_events(
     downstream code. The result is sorted by ``t_evt`` so it satisfies
     the same monotonic-time contract ``load_ttl_events`` produces.
     """
+
+    # The on-disk int8 values must match the trodestrack-canonical
+    # edge encoding the parquet path produces; pin it so a future
+    # ``EDGE_NAME_TO_INT`` flip can't silently mis-interpret NWB DIO.
+    assert EDGE_NAME_TO_INT == {"fall": 0, "rise": 1}
 
     # Normalize input: BehavioralEvents has ``time_series``;
     # raw dict is direct.
@@ -789,9 +808,3 @@ def _detect_pose_schema_version(pose: Any) -> str:
     if inline_nodes is not None and len(np.asarray(inline_nodes)) > 0:
         return "v0.1.x"
     return "unknown"
-
-
-# Path-only helpers used by load_nwb_session import nothing from
-# pynwb at module load — see lazy import inside the function body.
-_ = Path  # silence unused-import lints when Path is referenced only
-# in load_nwb_session's signature (NWBConfig.nwb_file is a Path).

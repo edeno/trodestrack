@@ -1,4 +1,4 @@
-"""Phase 2 — ``trodes_native`` loader validation slice.
+"""``trodes_native`` loader validation slice.
 
 Fixtures are synthesized in-process via the same byte layout the
 vendored Trodes parser reads, so no checked-in binaries are needed.

@@ -123,8 +123,8 @@ class NWBConfig(BaseModel):
     # ``pixels_to_meters`` precedence ladder.
     meters_per_pixel_override: float | None = None
     # When set, the NWB ``processing["behavior"]["behavioral_events"]``
-    # TimeSeries are assembled into the EKF/UKF event channel.
-    # Phase 1 schema hook only; the loader lands in Phase 4c.
+    # TimeSeries are assembled into the EKF/UKF event channel via the
+    # NWB DIO bridge.
     dio_to_ttl: NWBDIOToTTLConfig | None = None
 
 
@@ -619,11 +619,11 @@ class SessionConfig(BaseModel):
     def _validate_dio_consistency(self) -> SessionConfig:
         """Enforce the NWB DIO → TTL events bridge schema contract.
 
-        Phase 4c moves these from "deferred" to "required" — without
-        them, a user could configure an NWB+DIO session with no
-        ``events_file`` (loader-runnable) or a DIO bridge whose
-        ``name_to_source_id`` referenced unknown geometry ids
-        (loader-time KeyError far from the YAML).
+        Without these, an NWB+DIO session with no ``events_file``
+        would be loader-runnable but produce a fused trajectory with
+        no event updates, and a DIO bridge whose ``name_to_source_id``
+        referenced unknown geometry ids would surface as a loader-time
+        KeyError far from the YAML.
         """
 
         nwb = self.inputs.nwb
