@@ -137,8 +137,7 @@ def _load_trodes_native(config: SessionConfig) -> PreparedSession:
     t_imu_aligned = t_imu_raw - t_start + imu_offset_s
     t_cam = pixels.t_cam - t_start + config.camera.time_offset_s
     _validate_time_vector(t_cam, "camera timestamps")
-    if t_imu_aligned.size > 1:
-        _validate_time_vector(t_imu_aligned, "IMU timestamps after preprocessing")
+    _validate_time_vector(t_imu_aligned, "IMU timestamps after preprocessing")
     if not imu_is_synthetic:
         _check_imu_camera_overlap(t_imu_aligned, t_cam, format_name="trodes_native")
 
@@ -343,8 +342,7 @@ def _load_dlc_keypoints(config: SessionConfig) -> PreparedSession:
     t_imu_aligned = t_imu_raw - t_start + imu_offset_s
     t_cam = pixels.t_cam - t_start + config.camera.time_offset_s
     _validate_time_vector(t_cam, "camera timestamps")
-    if t_imu_aligned.size > 1:
-        _validate_time_vector(t_imu_aligned, "IMU timestamps after preprocessing")
+    _validate_time_vector(t_imu_aligned, "IMU timestamps after preprocessing")
     if not imu_is_synthetic:
         _check_imu_camera_overlap(t_imu_aligned, t_cam, format_name="dlc_keypoints")
 
@@ -412,8 +410,7 @@ def _load_nwb(config: SessionConfig) -> PreparedSession:
     t_imu_aligned = t_imu_raw - t_start + imu_offset_s
     t_cam = pixels.t_cam - t_start + config.camera.time_offset_s
     _validate_time_vector(t_cam, "camera timestamps")
-    if t_imu_aligned.size > 1:
-        _validate_time_vector(t_imu_aligned, "IMU timestamps after preprocessing")
+    _validate_time_vector(t_imu_aligned, "IMU timestamps after preprocessing")
     if not imu_is_synthetic:
         _check_imu_camera_overlap(t_imu_aligned, t_cam, format_name="nwb")
 

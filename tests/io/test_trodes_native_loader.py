@@ -397,6 +397,35 @@ def test_imu_parquet_overrides_when_provided(tmp_path: Path) -> None:
     assert session.diagnostics["loader"]["format"] == "trodes_native"
 
 
+def test_one_sample_imu_rejected_at_loader_time(tmp_path: Path) -> None:
+    """A one-row IMU parquet must fail at the loader (matching the
+    parquet workflow), not silently flow through to the EKF where
+    ``mean(diff(t_imu))`` is undefined."""
+
+    ts_path, info = _make_ptp_timestamps_file(tmp_path)
+    pos_path = _make_position_tracking_file(tmp_path, info["pos_timestamps"])
+
+    hw_post = np.asarray(info["hw_timestamps_ns"][info["n_pre_pause"] :]) / NS_PER_S
+    imu_path = tmp_path / "imu.parquet"
+    pd.DataFrame(
+        {
+            "time": [hw_post[0]],
+            "Headstage_GyroX": [0],
+            "Headstage_GyroY": [0],
+            "Headstage_GyroZ": [0],
+            "Headstage_AccelX": [0],
+            "Headstage_AccelY": [0],
+            "Headstage_AccelZ": [0],
+        }
+    ).to_parquet(imu_path)
+
+    config = _build_session_config(
+        tmp_path, pos_path, ts_path, state_mode="2d_cam_3d_imu", imu_path=imu_path
+    )
+    with pytest.raises(ValueError, match="at least two samples"):
+        load_session(config)
+
+
 # ----------------------------------------------------------------------
 # Pixel→meter scaling parity with the parquet path.
 # ----------------------------------------------------------------------

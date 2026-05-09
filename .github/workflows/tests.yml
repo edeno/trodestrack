@@ -31,8 +31,12 @@ jobs:
           version: "latest"
 
       - name: Install dependencies
+        # ``dlc`` and ``nwb`` extras are required: several DLC and
+        # cross-format parity tests use ``pytest.importorskip("tables")``
+        # / ``pytest.importorskip("pynwb")`` and would silently skip
+        # without them, masking loader regressions.
         run: |
-          uv sync --extra dev
+          uv sync --extra dev --extra dlc --extra nwb
         env:
           UV_PYTHON: python${{ matrix.python-version }}
 

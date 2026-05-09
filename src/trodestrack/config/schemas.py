@@ -120,8 +120,11 @@ class NWBConfig(BaseModel):
     led_source: NWBLEDSourceConfig = Field(default_factory=NWBLEDSourceConfig)
     # Post-hoc re-calibration. Wins over file-stored ``conversion``
     # and over ``camera.meters_per_pixel`` per the
-    # ``pixels_to_meters`` precedence ladder.
-    meters_per_pixel_override: float | None = None
+    # ``pixels_to_meters`` precedence ladder. Must be strictly
+    # positive: zero collapses every coordinate to the origin and
+    # negative values silently mirror the trajectory while leaving
+    # ``axis_signs`` reading +1.
+    meters_per_pixel_override: float | None = Field(default=None, gt=0.0)
     # When set, the NWB ``processing["behavior"]["behavioral_events"]``
     # TimeSeries are assembled into the EKF/UKF event channel via the
     # NWB DIO bridge.

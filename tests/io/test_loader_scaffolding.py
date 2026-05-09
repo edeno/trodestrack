@@ -158,6 +158,24 @@ def test_nwb_led_source_both_series_names_or_neither() -> None:
 
 
 # ----------------------------------------------------------------------
+# NWBConfig: meters_per_pixel_override must be strictly positive.
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad", [0.0, -1e-3, -1.0])
+def test_nwb_meters_per_pixel_override_rejects_non_positive(bad: float) -> None:
+    """Zero collapses every coordinate to the origin; a negative scale
+    silently mirrors the trajectory while ``axis_signs`` reads +1.
+    The override must be strictly positive, mirroring
+    ``CameraConfig.meters_per_pixel``."""
+
+    with pytest.raises(ValidationError, match="meters_per_pixel_override"):
+        NWBConfig.model_validate(
+            {"nwb_file": "session.nwb", "meters_per_pixel_override": bad},
+        )
+
+
+# ----------------------------------------------------------------------
 # Path resolution: nested-block Paths resolve from the YAML directory.
 # ----------------------------------------------------------------------
 
