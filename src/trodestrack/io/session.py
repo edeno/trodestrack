@@ -10,7 +10,16 @@ import numpy as np
 import pandas as pd
 
 from trodestrack.config.schemas import EventLocationSource, SessionConfig
+from trodestrack.io.imu_parquet import (
+    index_or_time_column,
+    load_imu_parquet,
+    project_imu_for_filter,
+    require_columns,
+)
 from trodestrack.io.led_identity import resolve_led_identity
+from trodestrack.io.loaders import PositionPixels
+from trodestrack.io.loaders._trodes_native import load_trodes_native_position
+from trodestrack.io.pixel_to_meters import pixels_to_meters
 from trodestrack.io.ttl_events import (
     EDGE_NAME_TO_INT,
     load_ttl_events,
@@ -23,8 +32,6 @@ from trodestrack.qa.imu_calibration import (
     format_imu_calibration_report,
     run_imu_calibration_diagnostics,
 )
-
-DEG_TO_RAD = np.pi / 180.0
 
 
 @dataclass(frozen=True)
@@ -47,6 +54,12 @@ class PreparedSession:
     event_source_anchors: np.ndarray | None = None
     event_source_covariances: np.ndarray | None = None
     event_indices_per_frame: np.ndarray | None = None
+    # NWB DIO bridge: ``(t_evt, source_id, edge)`` populated by
+    # ``_load_nwb`` when ``inputs.nwb.dio_to_ttl`` is configured.
+    # ``_attach_ttl_events`` consumes this in place of the parquet
+    # ``events_file`` when no parquet is configured (parquet wins
+    # when both are set per the schema contract).
+    nwb_dio_events: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None
 
     @property
     def source_format(self) -> str:
@@ -75,14 +88,426 @@ class SafetyReport:
 def load_session(config: SessionConfig) -> PreparedSession:
     """Load a YAML-configured session into filter-ready arrays."""
 
-    if config.inputs.format == "prepared_arrays":
+    fmt = config.inputs.format
+    if fmt == "prepared_arrays":
         session = _load_prepared_arrays(config)
-    else:
+    elif fmt == "spikegadgets_trodes":
         session = _load_spikegadgets_trodes(config)
+    elif fmt == "trodes_native":
+        session = _load_trodes_native(config)
+    elif fmt == "dlc_keypoints":
+        session = _load_dlc_keypoints(config)
+    elif fmt == "nwb":
+        session = _load_nwb(config)
+    else:  # pragma: no cover — exhaustive over Literal
+        raise ValueError(f"Unsupported inputs.format={fmt!r}.")
 
     session = _apply_led_identity_correction(session)
     session = _add_imu_calibration_diagnostics(session)
     return _attach_ttl_events(session)
+
+
+def _load_trodes_native(config: SessionConfig) -> PreparedSession:
+    inputs = config.inputs
+    assert inputs.trodes_native is not None
+    cfg = inputs.trodes_native
+
+    pixels = load_trodes_native_position(
+        cfg.position_tracking_file,
+        cfg.camera_timestamps_file,
+        tracking_geometry=cfg.tracking_geometry,
+    )
+    led1, led2, conf_cam = pixels_to_meters(pixels, config.camera)
+    # Loader always emits an LED2 array (NaN-filled for single_led{1,2})
+    # so the EKF/UKF observation model sees a uniform LED-pair shape.
+    # ``mask_cam`` (computed below) is what filters frames where the
+    # observed LED is missing.
+    assert led2 is not None
+
+    t_imu_raw, U_imu, U_full, imu_is_synthetic, imu_source = (
+        _resolve_imu_for_native_loader(config, pixels.t_cam)
+    )
+
+    # Match the parquet path's t_start ordering (session.py:449): pick
+    # ``t_start`` from raw clocks first, *then* add ``imu.time_offset_s``
+    # to the IMU stream after the subtraction. Adding the offset to
+    # ``t_imu_raw`` before computing ``t_start`` would let the offset
+    # be absorbed when the IMU clock starts before the camera clock,
+    # producing a ``t_start`` that depends on the offset itself.
+    # Synthetic IMU isn't a real clock, so its offset is treated as 0.
+    t_start = min(float(pixels.t_cam[0]), float(t_imu_raw[0]))
+    imu_offset_s = 0.0 if imu_is_synthetic else config.imu.time_offset_s
+    t_imu_aligned = t_imu_raw - t_start + imu_offset_s
+    t_cam = pixels.t_cam - t_start + config.camera.time_offset_s
+    _validate_time_vector(t_cam, "camera timestamps")
+    _validate_time_vector(t_imu_aligned, "IMU timestamps after preprocessing")
+    if not imu_is_synthetic:
+        _check_imu_camera_overlap(t_imu_aligned, t_cam, format_name="trodes_native")
+
+    mask = np.isfinite(led1).all(axis=1) | np.isfinite(led2).all(axis=1)
+    led_distance = (
+        config.filter.led_distance
+        if config.filter.led_distance is not None
+        else _median_led_distance(led1, led2, mask)
+    )
+
+    diagnostics: dict[str, object] = {
+        "loader": {
+            "format": "trodes_native",
+            **pixels.diagnostics,
+            "imu_source": imu_source,
+            "imu_samples": int(t_imu_aligned.size),
+            "camera_frames": int(t_cam.size),
+            "camera_rate_hz": (
+                float(1.0 / np.median(np.diff(t_cam)))
+                if t_cam.size > 1
+                else float("nan")
+            ),
+            "led_distance_m": float(led_distance),
+        }
+    }
+    return PreparedSession(
+        t_imu=t_imu_aligned,
+        U_imu=U_imu,
+        t_cam=t_cam,
+        Z_cam_led1=led1,
+        Z_cam_led2=led2,
+        mask_cam=mask,
+        conf_cam=conf_cam,
+        led_distance=led_distance,
+        diagnostics=diagnostics,
+        config=config,
+        gyro_z_for_led_identity=(
+            _gyro_z_for_led_identity(U_full) if U_full is not None else None
+        ),
+        U_imu_for_calibration=U_full,
+    )
+
+
+def _check_imu_camera_overlap(
+    t_imu: np.ndarray, t_cam: np.ndarray, *, format_name: str
+) -> None:
+    """Raise if IMU and camera time ranges don't overlap after alignment.
+
+    Catches the silent-failure mode where the camera clock and the
+    parquet IMU clock are mismatched (e.g., DLC ``meta_pickle``
+    synthesizes relative seconds starting at 0 while ``inputs.imu_file``
+    carries Unix-like timestamps): the EKF then sees zero IMU samples
+    per camera interval and produces an IMU-configured but
+    IMU-empty fused trajectory.
+
+    Skip this check for synthetic IMU streams (vision_only) — those
+    are constructed to share the camera clock so overlap is
+    guaranteed.
+    """
+
+    imu_lo, imu_hi = float(t_imu[0]), float(t_imu[-1])
+    cam_lo, cam_hi = float(t_cam[0]), float(t_cam[-1])
+    if imu_hi >= cam_lo and imu_lo <= cam_hi:
+        return
+
+    if format_name == "dlc_keypoints":
+        # Most common cause: meta_pickle (relative seconds starting at
+        # 0) paired with a Unix-like inputs.imu_file. The two
+        # alternative timestamps_source values fix the camera clock;
+        # imu.time_offset_s / camera.time_offset_s let the user nudge
+        # the existing source.
+        remediation = (
+            "The two clocks differ — for DLC, ``timestamps_source: "
+            "meta_pickle`` synthesizes relative seconds starting at 0 "
+            "while ``inputs.imu_file`` carries Unix-like timestamps. "
+            "Fix by using ``timestamps_source: trodes_hw_sync`` (with "
+            "a Trodes *.videoTimeStamps.cameraHWSync), "
+            "``timestamps_source: timestamp_file`` with absolute "
+            "seconds, or ``imu.time_offset_s`` / "
+            "``camera.time_offset_s`` to bring the clocks into "
+            "agreement."
+        )
+    elif format_name == "trodes_native":
+        # PTP camera and parquet IMU should already share a Unix-like
+        # clock; non-overlap usually means the two were recorded in
+        # separate sessions or one of the time_offset_s knobs is set
+        # to a wrong value.
+        remediation = (
+            "The PTP camera timestamps and ``inputs.imu_file`` should "
+            "share a Unix-like clock; mismatched ranges typically "
+            "mean the two files come from different recording "
+            "sessions, or that ``imu.time_offset_s`` / "
+            "``camera.time_offset_s`` is set to a value that pushes "
+            "the streams apart."
+        )
+    else:
+        # Generic fallback for future native formats.
+        remediation = (
+            "Check that ``inputs.imu_file`` and the camera timestamps "
+            "share the same clock, and adjust ``imu.time_offset_s`` / "
+            "``camera.time_offset_s`` if they need to be nudged into "
+            "agreement."
+        )
+
+    raise ValueError(
+        f"inputs.format={format_name!r}: IMU and camera streams do "
+        "not overlap after alignment "
+        f"(IMU: [{imu_lo:.3f}, {imu_hi:.3f}] s; "
+        f"camera: [{cam_lo:.3f}, {cam_hi:.3f}] s). The EKF would "
+        "see zero IMU samples per camera interval and produce a "
+        f"fused-but-empty trajectory. {remediation}"
+    )
+
+
+def _resolve_imu_for_native_loader(
+    config: SessionConfig,
+    t_cam_unaligned: np.ndarray,
+    *,
+    nwb_analog: tuple[np.ndarray, np.ndarray] | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None, bool, str]:
+    """Resolve the IMU stream for ``trodes_native`` / ``dlc_keypoints`` / ``nwb``.
+
+    Returns ``(t_imu_raw, U_imu_filter, U_full, is_synthetic, source)``
+    where ``t_imu_raw`` is the IMU clock **before**
+    ``imu.time_offset_s`` is added — the caller picks ``t_start``
+    from raw clocks first (matching ``_load_spikegadgets_trodes`` at
+    session.py:449) and only then applies the offset. ``U_full`` is
+    ``None`` and ``is_synthetic=True`` for the no-IMU vision_only
+    fallback. ``source`` is one of ``"parquet"``, ``"nwb_analog"``,
+    ``"synthetic"`` for diagnostics.
+
+    Implements the IMU source resolution contract: parquet wins; the
+    NWB analog group is the second-priority real source; if no real
+    IMU source is available, vision_only synthesizes a zero stream
+    and any IMU-consuming state_mode raises with the three-option
+    remediation message.
+    """
+
+    if config.inputs.imu_file is not None:
+        imu_data = load_imu_parquet(config.inputs.imu_file, config)
+        return (
+            imu_data.t_imu_unix,
+            imu_data.U_filter,
+            imu_data.U_full,
+            False,
+            "parquet",
+        )
+
+    if nwb_analog is not None:
+        t_imu, U_full = nwb_analog
+        U_filter = project_imu_for_filter(U_full, config.filter.state_mode)
+        return t_imu, U_filter, U_full, False, "nwb_analog"
+
+    if _uses_imu(config.filter.state_mode):
+        fmt = config.inputs.format
+        msg = (
+            f"inputs.format={fmt!r} requires an IMU source. "
+            "Provide inputs.imu_file (parquet) or set "
+            "filter.state_mode: vision_only."
+        )
+        if fmt == "trodes_native":
+            # Direct-Trodes users with a ``.rec`` file are the most
+            # common case to hit this branch. The native loader is
+            # camera-only in v1; route them at the canonical
+            # conversion path that gets IMU + DIO end-to-end.
+            msg += (
+                " For a Trodes ``.rec`` file: convert via "
+                "``trodes_to_nwb path/to/session.rec`` (see "
+                "https://github.com/LorenFrankLab/trodes_to_nwb) and "
+                "use ``inputs.format: nwb`` — the NWB loader reads "
+                "analog IMU and DIO TTLs natively."
+            )
+        elif fmt == "nwb":
+            msg += (
+                " For NWB: the loader auto-detects "
+                "``processing/analog/...`` when present; if your file "
+                "lacks an analog group, populate ``inputs.imu_file``."
+            )
+        raise ValueError(msg)
+
+    # vision_only: synthesize a zero IMU stream sized to the camera
+    # vector (same length is convenient for the no-fusion path).
+    t_imu = t_cam_unaligned.copy()
+    U_imu = np.zeros((t_imu.size, 3), dtype=float)
+    return t_imu, U_imu, None, True, "synthetic"
+
+
+def _load_dlc_keypoints(config: SessionConfig) -> PreparedSession:
+    inputs = config.inputs
+    assert inputs.dlc_keypoints is not None
+    cfg = inputs.dlc_keypoints
+
+    # ``pd.read_hdf`` only attempts to import PyTables after opening the
+    # file, so a missing ``[dlc]`` extra surfaces as ``FileNotFoundError``
+    # instead of the install hint when the path is invalid. Probing
+    # ``tables`` upfront keeps the install-hint path deterministic.
+    try:
+        import tables  # noqa: F401
+    except ImportError as e:
+        raise ImportError(
+            "inputs.format='dlc_keypoints' requires the [dlc] extra. "
+            "Install with: uv pip install 'trodestrack[dlc]'."
+        ) from e
+
+    from trodestrack.io.loaders._dlc_keypoints import load_dlc_keypoints_position
+
+    pixels = load_dlc_keypoints_position(
+        cfg.h5_file,
+        cfg.led1_bodypart,
+        cfg.led2_bodypart,
+        likelihood_threshold=cfg.likelihood_threshold,
+        timestamps_source=cfg.timestamps_source,
+        camera_timestamps_file=cfg.camera_timestamps_file,
+        timestamp_file=cfg.timestamp_file,
+        apply_crop_offset=cfg.apply_crop_offset,
+        tracking_geometry=cfg.tracking_geometry,
+    )
+    led1, led2, conf_cam = pixels_to_meters(pixels, config.camera)
+    # Loader always returns LED2 (NaN-filled for single_led{1,2}); the
+    # mask below collapses correctly to "observed-LED finite".
+    assert led2 is not None
+
+    t_imu_raw, U_imu, U_full, imu_is_synthetic, imu_source = (
+        _resolve_imu_for_native_loader(config, pixels.t_cam)
+    )
+
+    t_start = min(float(pixels.t_cam[0]), float(t_imu_raw[0]))
+    imu_offset_s = 0.0 if imu_is_synthetic else config.imu.time_offset_s
+    t_imu_aligned = t_imu_raw - t_start + imu_offset_s
+    t_cam = pixels.t_cam - t_start + config.camera.time_offset_s
+    _validate_time_vector(t_cam, "camera timestamps")
+    _validate_time_vector(t_imu_aligned, "IMU timestamps after preprocessing")
+    if not imu_is_synthetic:
+        _check_imu_camera_overlap(t_imu_aligned, t_cam, format_name="dlc_keypoints")
+
+    mask = np.isfinite(led1).all(axis=1) | np.isfinite(led2).all(axis=1)
+    led_distance = (
+        config.filter.led_distance
+        if config.filter.led_distance is not None
+        else _median_led_distance(led1, led2, mask)
+    )
+
+    diagnostics: dict[str, object] = {
+        "loader": {
+            "format": "dlc_keypoints",
+            **pixels.diagnostics,
+            "imu_source": imu_source,
+            "imu_samples": int(t_imu_aligned.size),
+            "camera_frames": int(t_cam.size),
+            "camera_rate_hz": (
+                float(1.0 / np.median(np.diff(t_cam)))
+                if t_cam.size > 1
+                else float("nan")
+            ),
+            "led_distance_m": float(led_distance),
+        }
+    }
+    return PreparedSession(
+        t_imu=t_imu_aligned,
+        U_imu=U_imu,
+        t_cam=t_cam,
+        Z_cam_led1=led1,
+        Z_cam_led2=led2,
+        mask_cam=mask,
+        conf_cam=conf_cam,
+        led_distance=led_distance,
+        diagnostics=diagnostics,
+        config=config,
+        gyro_z_for_led_identity=(
+            _gyro_z_for_led_identity(U_full) if U_full is not None else None
+        ),
+        U_imu_for_calibration=U_full,
+    )
+
+
+def _load_nwb(config: SessionConfig) -> PreparedSession:
+    inputs = config.inputs
+    assert inputs.nwb is not None
+    cfg = inputs.nwb
+
+    from trodestrack.io.nwb import load_nwb_session
+
+    # Pass IMUConfig only when no parquet override is configured —
+    # ``inputs.imu_file`` wins per the IMU resolution contract, so
+    # reading the analog group when it'll be discarded is wasted IO.
+    nwb_imu_cfg = config.imu if inputs.imu_file is None else None
+    pixels, extras = load_nwb_session(cfg, imu_cfg=nwb_imu_cfg)
+    led1, led2, conf_cam = pixels_to_meters(
+        pixels,
+        config.camera,
+        meters_per_pixel_override=cfg.meters_per_pixel_override,
+    )
+    # The NWB loader always emits an LED2 array (NaN-filled for
+    # ``single_led{1,2}``) so the EKF/UKF observation model sees a
+    # uniform LED-pair-shaped input. ``mask_cam`` (computed below)
+    # is what filters frames where the observed LED is missing.
+    assert led2 is not None
+
+    t_imu_raw, U_imu, U_full, imu_is_synthetic, imu_source = (
+        _resolve_imu_for_native_loader(config, pixels.t_cam, nwb_analog=extras.imu)
+    )
+
+    t_start = min(float(pixels.t_cam[0]), float(t_imu_raw[0]))
+    imu_offset_s = 0.0 if imu_is_synthetic else config.imu.time_offset_s
+    t_imu_aligned = t_imu_raw - t_start + imu_offset_s
+    t_cam = pixels.t_cam - t_start + config.camera.time_offset_s
+    _validate_time_vector(t_cam, "camera timestamps")
+    _validate_time_vector(t_imu_aligned, "IMU timestamps after preprocessing")
+    if not imu_is_synthetic:
+        _check_imu_camera_overlap(t_imu_aligned, t_cam, format_name="nwb")
+
+    # NWB DIO timestamps come from the same systime clock as the
+    # SpatialSeries, so they need the same ``t_start`` shift the
+    # camera and IMU streams already got. Without this, downstream
+    # ``per_frame_event_indices`` buckets the unshifted DIO times
+    # against the shifted ``t_cam`` and silently produces zero
+    # events kept (the events end up beyond ``t_cam[-1]`` and get
+    # discarded).
+    nwb_dio_events_aligned = extras.dio_events
+    if extras.dio_events is not None:
+        t_dio_raw, dio_source_id, dio_edge = extras.dio_events
+        nwb_dio_events_aligned = (
+            t_dio_raw - t_start,
+            dio_source_id,
+            dio_edge,
+        )
+
+    mask = np.isfinite(led1).all(axis=1) | np.isfinite(led2).all(axis=1)
+    led_distance = (
+        config.filter.led_distance
+        if config.filter.led_distance is not None
+        else _median_led_distance(led1, led2, mask)
+    )
+
+    diagnostics: dict[str, object] = {
+        "loader": {
+            "format": "nwb",
+            **pixels.diagnostics,
+            "imu_source": imu_source,
+            "imu_samples": int(t_imu_aligned.size),
+            "camera_frames": int(t_cam.size),
+            "camera_rate_hz": (
+                float(1.0 / np.median(np.diff(t_cam)))
+                if t_cam.size > 1
+                else float("nan")
+            ),
+            "led_distance_m": float(led_distance),
+            "meters_per_pixel_override": cfg.meters_per_pixel_override,
+        }
+    }
+    return PreparedSession(
+        t_imu=t_imu_aligned,
+        U_imu=U_imu,
+        t_cam=t_cam,
+        Z_cam_led1=led1,
+        Z_cam_led2=led2,
+        mask_cam=mask,
+        conf_cam=conf_cam,
+        led_distance=led_distance,
+        diagnostics=diagnostics,
+        config=config,
+        gyro_z_for_led_identity=(
+            _gyro_z_for_led_identity(U_full) if U_full is not None else None
+        ),
+        U_imu_for_calibration=U_full,
+        nwb_dio_events=nwb_dio_events_aligned,
+    )
 
 
 def write_session_diagnostics(
@@ -127,8 +552,12 @@ def run_real_data_safety_check(
     """Compare fused real-data output against the camera/vision-only envelope."""
 
     config = session.config.outputs
+    # Run on every real-data format (spikegadgets_trodes parquet, the
+    # native loaders) — skip only the txt-file ``prepared_arrays``
+    # test/debug path. ``vision_only`` runs already short-circuit
+    # because there's no fused-vs-vision comparison to make.
     if (
-        session.source_format != "spikegadgets_trodes"
+        session.source_format == "prepared_arrays"
         or not config.run_safety_checks
         or ekf_config.state_mode == "vision_only"
     ):
@@ -149,25 +578,30 @@ def run_real_data_safety_check(
     means = np.asarray(filter_result.filtered_means)
     pos = means[:, list(layout.pos_idx)]
 
-    # Dual-LED frames are needed only to estimate the camera midpoint
-    # envelope (LED midpoint requires both LEDs). The fused-vs-vision
-    # deviation gate, by contrast, must consider every frame the EKF
-    # actually consumed — both EKFs see single-LED frames via the
-    # OR'd ``mask_cam``, so excluding them used to let "mostly
-    # single-LED" sessions silently bypass the deviation check while
-    # the fused trajectory drifted.
-    cam_mid = 0.5 * (session.Z_cam_led1 + session.Z_cam_led2)
-    dual_valid = session.mask_cam & np.isfinite(cam_mid).all(axis=1)
+    # The camera envelope estimates the bounding box of the observed
+    # camera trajectory. For dual-LED sessions we use the LED
+    # midpoint; for single-LED NWB sessions we use the observed LED
+    # directly (the missing one is all-NaN and the midpoint would be
+    # NaN everywhere). The fused-vs-vision deviation gate, by
+    # contrast, considers every frame the EKF actually consumed —
+    # both EKFs see partially-observed frames via the OR'd
+    # ``mask_cam``, so excluding them used to let "mostly single-LED"
+    # sessions silently bypass the deviation check while the fused
+    # trajectory drifted.
+    envelope, dual_valid, envelope_source = _camera_envelope(
+        session.Z_cam_led1, session.Z_cam_led2, session.mask_cam
+    )
     dual_led_frame_count = int(dual_valid.sum())
     if dual_led_frame_count < config.safety_min_dual_led_frames:
         raise ValueError(
             "Safety check requires at least "
-            f"{config.safety_min_dual_led_frames} finite dual-LED frame(s) "
-            f"to estimate the camera envelope; got {dual_led_frame_count}. "
-            "Lower outputs.safety_min_dual_led_frames or use "
-            "state_mode: vision_only if dual-LED coverage is too sparse."
+            f"{config.safety_min_dual_led_frames} finite "
+            f"{envelope_source} frame(s) to estimate the camera "
+            f"envelope; got {dual_led_frame_count}. Lower "
+            "outputs.safety_min_dual_led_frames or use "
+            "state_mode: vision_only if observed-LED coverage is too sparse."
         )
-    camera_range = tuple(float(x) for x in np.ptp(cam_mid[dual_valid], axis=0))
+    camera_range = tuple(float(x) for x in np.ptp(envelope[dual_valid], axis=0))
     fused_range = tuple(float(x) for x in np.ptp(pos, axis=0))
 
     vision_config = replace(
@@ -266,7 +700,11 @@ def _load_prepared_arrays(config: SessionConfig) -> PreparedSession:
         # configured at all, ``led2`` is all-NaN and the OR collapses
         # back to ``finite(led1)`` as before.
         mask = np.isfinite(led1).all(axis=1) | np.isfinite(led2).all(axis=1)
-    led_distance = config.filter.led_distance or _median_led_distance(led1, led2, mask)
+    led_distance = (
+        config.filter.led_distance
+        if config.filter.led_distance is not None
+        else _median_led_distance(led1, led2, mask)
+    )
     _validate_time_vector(t_imu, "IMU timestamps")
     _validate_time_vector(t_cam, "camera timestamps")
     U_arr = np.asarray(U_imu, dtype=float)
@@ -289,9 +727,10 @@ def _load_spikegadgets_trodes(config: SessionConfig) -> PreparedSession:
     inputs = config.inputs
     assert inputs.imu_file is not None
     assert inputs.position_file is not None
+
+    imu_data = load_imu_parquet(inputs.imu_file, config)
+
     pos_df = pd.read_parquet(inputs.position_file)
-    imu_df = pd.read_parquet(inputs.imu_file)
-    _require_columns(imu_df, config.imu.axis_map.values(), source=str(inputs.imu_file))
     pos_columns: list[str] = [
         config.camera.led1_x_column,
         config.camera.led1_y_column,
@@ -306,20 +745,16 @@ def _load_spikegadgets_trodes(config: SessionConfig) -> PreparedSession:
         pos_columns.append(config.camera.confidence_led1_column)
     if config.camera.confidence_led2_column is not None:
         pos_columns.append(config.camera.confidence_led2_column)
-    _require_columns(pos_df, pos_columns, source=str(inputs.position_file))
+    require_columns(pos_df, pos_columns, source=str(inputs.position_file))
 
-    imu_unique = _remove_sample_hold(imu_df, config)
-    t_imu_unix = _index_or_time_column(imu_unique)
-    t_cam_unix = _index_or_time_column(pos_df)
-    t_start = min(float(t_imu_unix[0]), float(t_cam_unix[0]))
-    t_imu = t_imu_unix - t_start + config.imu.time_offset_s
+    t_cam_unix = index_or_time_column(pos_df)
+    t_start = min(float(imu_data.t_imu_unix[0]), float(t_cam_unix[0]))
+    t_imu = imu_data.t_imu_unix - t_start + config.imu.time_offset_s
     t_cam = t_cam_unix - t_start + config.camera.time_offset_s
     _validate_time_vector(t_imu, "IMU timestamps after preprocessing")
     _validate_time_vector(t_cam, "camera timestamps")
 
-    U_full = _convert_imu_to_si(imu_unique, config)
-    U_filter = _project_imu_for_filter(U_full, config.filter.state_mode)
-    led1, led2, conf_cam = _load_leds(pos_df, config)
+    led1, led2, conf_cam = _load_leds(pos_df, t_cam, config)
     # ``mask_cam`` advertises "frame is usable" to the EKF, which
     # supports partial single-LED updates (see
     # ``test_ekf_partial_observations.py``). Requiring *both* LEDs
@@ -331,13 +766,17 @@ def _load_spikegadgets_trodes(config: SessionConfig) -> PreparedSession:
     # ``_median_led_distance``, the camera-midpoint safety check)
     # already gate independently with their own ``isfinite`` checks.
     mask = np.isfinite(led1).all(axis=1) | np.isfinite(led2).all(axis=1)
-    led_distance = config.filter.led_distance or _median_led_distance(led1, led2, mask)
+    led_distance = (
+        config.filter.led_distance
+        if config.filter.led_distance is not None
+        else _median_led_distance(led1, led2, mask)
+    )
 
     diagnostics: dict[str, object] = {
         "loader": {
             "format": "spikegadgets_trodes",
-            "imu_raw_samples": len(imu_df),
-            "imu_unique_samples": len(imu_unique),
+            "imu_raw_samples": imu_data.raw_samples,
+            "imu_unique_samples": imu_data.unique_samples,
             "camera_frames": len(pos_df),
             "sample_hold_strategy": config.imu.sample_hold_strategy,
             "effective_imu_rate_hz": float(1.0 / np.median(np.diff(t_imu))),
@@ -348,7 +787,7 @@ def _load_spikegadgets_trodes(config: SessionConfig) -> PreparedSession:
 
     return PreparedSession(
         t_imu=t_imu,
-        U_imu=U_filter,
+        U_imu=imu_data.U_filter,
         t_cam=t_cam,
         Z_cam_led1=led1,
         Z_cam_led2=led2,
@@ -357,8 +796,8 @@ def _load_spikegadgets_trodes(config: SessionConfig) -> PreparedSession:
         led_distance=led_distance,
         diagnostics=diagnostics,
         config=config,
-        gyro_z_for_led_identity=U_full[:, 2],
-        U_imu_for_calibration=U_full,
+        gyro_z_for_led_identity=imu_data.U_full[:, 2],
+        U_imu_for_calibration=imu_data.U_full,
     )
 
 
@@ -411,7 +850,19 @@ def _apply_led_identity_correction(session: PreparedSession) -> PreparedSession:
 
 
 def _attach_ttl_events(session: PreparedSession) -> PreparedSession:
-    """Resolve ``ttl_events`` config into the session's dense event arrays."""
+    """Resolve ``ttl_events`` config into the session's dense event arrays.
+
+    Event source precedence:
+
+    1. ``ttl_events.events_file`` (parquet) wins when set — the
+       per-LED parquet is the authoritative pre-computed source and
+       any NWB DIO bridge is treated as redundant input.
+    2. Otherwise, the NWB DIO bridge's pre-built table (placed on
+       the session by ``_load_nwb`` when
+       ``inputs.nwb.dio_to_ttl`` is configured) is consumed in place.
+    3. With neither, no events are attached (the schema validator
+       only allows this when ``ttl_events`` itself is ``None``).
+    """
 
     cfg = session.config.ttl_events
     if cfg is None:
@@ -426,18 +877,34 @@ def _attach_ttl_events(session: PreparedSession) -> PreparedSession:
             source_active_edges[spec.id] = EDGE_NAME_TO_INT[spec.active_edge]
             sources.append(spec.to_event_source())
 
+    has_parquet = cfg.events_file is not None
+    has_nwb_dio = session.nwb_dio_events is not None
+    event_source = (
+        "parquet"
+        if has_parquet
+        else ("nwb_behavioral_events" if has_nwb_dio else "none")
+    )
+
     if not sources:
         diagnostics = dict(session.diagnostics)
         diagnostics["ttl_events"] = {
             "n_sources": 0,
-            "events_file": str(cfg.events_file),
+            "events_file": str(cfg.events_file) if cfg.events_file else None,
+            "event_source": event_source,
+            "nwb_dio_present": has_nwb_dio,
         }
         return replace(session, diagnostics=diagnostics)
 
     anchors = np.stack([src.anchor for src in sources], axis=0)
     covariances = np.stack([src.covariance for src in sources], axis=0)
 
-    t_evt, source_id, edge = load_ttl_events(cfg.events_file)
+    if has_parquet:
+        assert cfg.events_file is not None
+        t_evt, source_id, edge = load_ttl_events(cfg.events_file)
+    else:
+        assert session.nwb_dio_events is not None
+        t_evt, source_id, edge = session.nwb_dio_events
+
     indices = per_frame_event_indices(
         t_evt,
         source_id,
@@ -451,7 +918,9 @@ def _attach_ttl_events(session: PreparedSession) -> PreparedSession:
     diagnostics = dict(session.diagnostics)
     diagnostics["ttl_events"] = {
         "n_sources": len(sources),
-        "events_file": str(cfg.events_file),
+        "events_file": str(cfg.events_file) if cfg.events_file else None,
+        "event_source": event_source,
+        "nwb_dio_present": has_nwb_dio,
         "n_events_total": int(t_evt.size),
         "n_events_kept": int((indices >= 0).sum()),
         "max_events_per_frame": cfg.max_events_per_frame,
@@ -471,8 +940,11 @@ def _attach_ttl_events(session: PreparedSession) -> PreparedSession:
 def _add_imu_calibration_diagnostics(session: PreparedSession) -> PreparedSession:
     config = session.config
     U_full = session.U_imu_for_calibration
+    # Run for every real-data format that loaded a 6-channel IMU stream
+    # (parquet path: spikegadgets_trodes; native loaders that consume
+    # inputs.imu_file). Skip the txt-file prepared_arrays test path.
     if (
-        session.source_format != "spikegadgets_trodes"
+        session.source_format == "prepared_arrays"
         or not config.imu.run_calibration
         or U_full is None
         or U_full.shape[1] != 6
@@ -499,30 +971,6 @@ def _add_imu_calibration_diagnostics(session: PreparedSession) -> PreparedSessio
     return replace(session, diagnostics=diagnostics)
 
 
-def _remove_sample_hold(imu_df: pd.DataFrame, config: SessionConfig) -> pd.DataFrame:
-    strategy = config.imu.sample_hold_strategy
-    if strategy == "none":
-        return imu_df.copy()
-    if strategy == "gyro_z_change":
-        col = config.imu.axis_map["gyro_z"]
-        values = imu_df[col].to_numpy()
-        keep = np.concatenate([[True], np.diff(values) != 0])
-    else:
-        cols = [config.imu.axis_map[name] for name in _axis_names()]
-        values = imu_df[cols].to_numpy()
-        keep = np.concatenate([[True], np.any(np.diff(values, axis=0) != 0, axis=1)])
-    return imu_df.loc[keep].copy()
-
-
-def _require_columns(df: pd.DataFrame, columns: object, *, source: str) -> None:
-    required = tuple(dict.fromkeys(str(col) for col in columns))
-    missing = [col for col in required if col not in df.columns]
-    if missing:
-        raise ValueError(
-            f"{source} is missing required column(s): {', '.join(missing)}."
-        )
-
-
 def _validate_time_vector(t: np.ndarray, name: str) -> None:
     arr = np.asarray(t, dtype=float)
     if arr.ndim != 1:
@@ -533,67 +981,6 @@ def _validate_time_vector(t: np.ndarray, name: str) -> None:
         raise ValueError(f"{name} contains non-finite values.")
     if not np.all(np.diff(arr) > 0):
         raise ValueError(f"{name} must be strictly increasing.")
-
-
-def _convert_imu_to_si(imu_df: pd.DataFrame, config: SessionConfig) -> np.ndarray:
-    cols = config.imu.axis_map
-    signs = config.imu.axis_signs
-    gyro_scale = config.imu.gyro_scale_dps_per_lsb * DEG_TO_RAD
-    accel_scale = config.imu.accel_scale_g_per_lsb * config.imu.gravity_mps2
-    values = {
-        "gyro_x": signs.get("gyro_x", 1.0)
-        * imu_df[cols["gyro_x"]].to_numpy()
-        * gyro_scale,
-        "gyro_y": signs.get("gyro_y", 1.0)
-        * imu_df[cols["gyro_y"]].to_numpy()
-        * gyro_scale,
-        "gyro_z": signs.get("gyro_z", 1.0)
-        * imu_df[cols["gyro_z"]].to_numpy()
-        * gyro_scale,
-        "accel_x": signs.get("accel_x", 1.0)
-        * imu_df[cols["accel_x"]].to_numpy()
-        * accel_scale,
-        "accel_y": signs.get("accel_y", 1.0)
-        * imu_df[cols["accel_y"]].to_numpy()
-        * accel_scale,
-        "accel_z": signs.get("accel_z", 1.0)
-        * imu_df[cols["accel_z"]].to_numpy()
-        * accel_scale,
-    }
-    if config.imu.mode == "2d":
-        return np.column_stack([values["gyro_z"], values["accel_x"], values["accel_y"]])
-    return np.column_stack(
-        [
-            values["gyro_x"],
-            values["gyro_y"],
-            values["gyro_z"],
-            values["accel_x"],
-            values["accel_y"],
-            values["accel_z"],
-        ]
-    )
-
-
-def _project_imu_for_filter(U_full: np.ndarray, state_mode: str) -> np.ndarray:
-    if state_mode == "vision_only":
-        return np.zeros((U_full.shape[0], 3))
-    if U_full.shape[1] == 3:
-        if state_mode == "2d_cam_6dof_imu_orientation":
-            raise ValueError(
-                "state_mode='2d_cam_6dof_imu_orientation' requires 6-channel "
-                "IMU input [gyro_x, gyro_y, gyro_z, accel_x, accel_y, accel_z]; "
-                "set imu.mode: 3d or provide prepared 6-channel arrays."
-            )
-        if state_mode == "2d_cam_3d_imu":
-            return U_full
-        return U_full
-    if U_full.shape[1] != 6:
-        raise ValueError(f"Unsupported IMU shape {U_full.shape}.")
-    if state_mode == "2d_cam_6dof_imu_orientation":
-        return U_full
-    if state_mode == "2d_cam_3d_imu":
-        return U_full[:, [2, 3, 4, 5]]
-    return U_full[:, [2, 3, 4]]
 
 
 def _gyro_z_for_led_identity(U_imu: np.ndarray) -> np.ndarray | None:
@@ -607,29 +994,28 @@ def _gyro_z_for_led_identity(U_imu: np.ndarray) -> np.ndarray | None:
 
 
 def _load_leds(
-    pos_df: pd.DataFrame, config: SessionConfig
+    pos_df: pd.DataFrame, t_cam: np.ndarray, config: SessionConfig
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
     cam = config.camera
-    led1 = (
-        pos_df[[cam.led1_x_column, cam.led1_y_column]].to_numpy(dtype=float)
-        * cam.meters_per_pixel
-    )
-    led2 = (
-        pos_df[[cam.led2_x_column, cam.led2_y_column]].to_numpy(dtype=float)
-        * cam.meters_per_pixel
-    )
-    conf_cam = None
+    led1_pixels = pos_df[[cam.led1_x_column, cam.led1_y_column]].to_numpy(dtype=float)
+    led2_pixels = pos_df[[cam.led2_x_column, cam.led2_y_column]].to_numpy(dtype=float)
+    conf_cam: np.ndarray | None = None
     if cam.confidence_led1_column and cam.confidence_led2_column:
         c1 = pos_df[cam.confidence_led1_column].to_numpy(dtype=float)
         c2 = pos_df[cam.confidence_led2_column].to_numpy(dtype=float)
         conf_cam = np.column_stack([c1, c1, c2, c2])
-    return led1, led2, conf_cam
-
-
-def _index_or_time_column(df: pd.DataFrame) -> np.ndarray:
-    if "time" in df.columns:
-        return df["time"].to_numpy(dtype=float)
-    return df.index.to_numpy(dtype=float)
+    pixels = PositionPixels(
+        led1_pixels=led1_pixels,
+        led2_pixels=led2_pixels,
+        t_cam=t_cam,
+        confidence=conf_cam,
+    )
+    led1, led2, conf = pixels_to_meters(pixels, cam)
+    # Parquet workflow always provides both LEDs (schema requires
+    # led1/led2 columns); ``led2`` is only ``None`` for single-LED
+    # native loaders.
+    assert led2 is not None
+    return led1, led2, conf
 
 
 def _median_led_distance(led1: np.ndarray, led2: np.ndarray, mask: np.ndarray) -> float:
@@ -637,6 +1023,37 @@ def _median_led_distance(led1: np.ndarray, led2: np.ndarray, mask: np.ndarray) -
     if not np.any(valid):
         return 0.04
     return float(np.nanmedian(np.linalg.norm(led2[valid] - led1[valid], axis=1)))
+
+
+def _camera_envelope(
+    led1: np.ndarray, led2: np.ndarray, mask_cam: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, str]:
+    """Pick the camera trajectory used as the safety-check envelope.
+
+    Returns ``(envelope, valid, source_label)``. ``valid`` is the
+    subset of ``mask_cam`` where the chosen envelope coordinates are
+    finite.
+
+    Selection rule: if exactly one LED array is all-NaN (single-LED
+    NWB sessions populate the unobserved LED with NaN), use the
+    other LED directly. Otherwise use the LED midpoint. The midpoint
+    case requires both LEDs to be finite per row, which is the
+    pre-single-LED behavior.
+    """
+
+    led1_observed = bool(np.isfinite(led1).any())
+    led2_observed = bool(np.isfinite(led2).any())
+    if led1_observed and not led2_observed:
+        envelope = led1
+        source = "single_led1"
+    elif led2_observed and not led1_observed:
+        envelope = led2
+        source = "single_led2"
+    else:
+        envelope = 0.5 * (led1 + led2)
+        source = "dual_led_midpoint"
+    valid = mask_cam & np.isfinite(envelope).all(axis=1)
+    return envelope, valid, source
 
 
 def _validate_calibration_for_fusion(
@@ -716,10 +1133,6 @@ def _uses_accel_translation(config: SessionConfig) -> bool:
         config.filter.state_mode == "2d_cam_6dof_imu_orientation"
         and config.filter.enable_experimental_accel_translation is True
     )
-
-
-def _axis_names() -> tuple[str, ...]:
-    return ("gyro_x", "gyro_y", "gyro_z", "accel_x", "accel_y", "accel_z")
 
 
 def _json_ready(obj: object) -> object:

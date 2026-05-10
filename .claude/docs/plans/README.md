@@ -8,8 +8,12 @@ fully shipped on the `updates` branch.
 1. `2026-05-07-geom-homography-implementation-plan.md`
    - Adds the camera calibration primitive used by native Trodes and DLC
      loaders.
-2. `2026-05-07-native-trodes-dlc-loaders-implementation-plan.md`
-   - Depends on the scalar/homography pixel-to-world decision.
+2. [`native-loaders/`](native-loaders/README.md) (split per-phase plan;
+   redirect stub at `2026-05-08-native-loaders-implementation-plan.md`)
+   - Native Trodes / DLC / NWB ingest. Depends on the scalar/homography
+     pixel-to-world decision. Replaces the older
+     `2026-05-07-native-trodes-dlc-loaders-implementation-plan.md`,
+     which covered Trodes + DLC only and is now superseded.
 3. `2026-05-07-ttl-event-sensors-implementation-plan.md`
    - Independent of camera ingest, but should use the same config and session
      diagnostics conventions.
@@ -25,7 +29,7 @@ fully shipped on the `updates` branch.
 | Plan | Status | Notes |
 | --- | --- | --- |
 | `2026-05-07-geom-homography-implementation-plan.md` | Active | Needed before perspective-correct real-data ingest. |
-| `2026-05-07-native-trodes-dlc-loaders-implementation-plan.md` | Active | Adds direct Trodes and DLC position loaders. |
+| [`native-loaders/`](native-loaders/README.md) | Active | Trodes / DLC / NWB ingest. Split per-phase; redirect stub at `2026-05-08-native-loaders-implementation-plan.md`. Supersedes `2026-05-07-native-trodes-dlc-loaders-implementation-plan.md`. |
 | `2026-05-07-ttl-event-sensors-implementation-plan.md` | Active | Unified TTL event-source design covering beam break, zone trigger, and RFID. |
 | `2026-05-07-online-tracker-streaming-implementation-plan.md` | Active | Python streaming API; CLI remains batch. |
 | `2026-05-07-naming-conventions-cleanup-implementation-plan.md` | Active, lower priority | Public API usability cleanup after functional surfaces settle. |

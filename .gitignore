@@ -33,12 +33,17 @@ site/
 
 # Development artifacts
 .DS_Store
-.claude/
-# Tracked contributor reference (PRD, JAX principles, variable naming
-# review, implementation plans). Un-ignored so future files don't need
-# ``git add -f``.
+# Claude Code: ignore local state (settings, lock files, OS junk) but
+# track contributor reference (PRD, JAX principles, variable naming
+# review, implementation plans, agents, commands). Excluding via
+# ``.claude/*`` (direct children only) instead of ``.claude/`` lets the
+# negations below take effect — ``!`` cannot re-include children of an
+# excluded parent directory. Future files under the unignored subdirs
+# don't need ``git add -f``.
+.claude/*
+!.claude/agents/
+!.claude/commands/
 !.claude/docs/
-!.claude/docs/**
 *.zip
 
 # IDE/Editor files

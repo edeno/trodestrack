@@ -733,7 +733,7 @@ def test_safety_check_requires_minimum_dual_led_frames(monkeypatch):
         estimated_led_distance=0.04,
     )
 
-    with pytest.raises(ValueError, match=r"at least 20 finite dual-LED frame"):
+    with pytest.raises(ValueError, match=r"at least 20 finite dual_led_midpoint"):
         run_real_data_safety_check(
             session, EKFConfig(state_mode="2d_full"), filter_result
         )

@@ -11,12 +11,222 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
+class TrodesNativeConfig(BaseModel):
+    """Native Trodes ``.videoPositionTracking`` + PTP timestamps inputs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    position_tracking_file: Path
+    # PTP-synced per-frame timestamps. v1 supports PTP only; the loader
+    # rejects ``cameraHWFrameCount`` and plain ``videoTimeStamps``
+    # variants because clock-stitching them needs sample-rate logic
+    # that's out of scope.
+    camera_timestamps_file: Path
+    # ``dual_led`` (default): use both ``(xloc, yloc)`` and
+    # ``(xloc2, yloc2)`` from the position binary.
+    # ``single_led1`` / ``single_led2``: use only the matching column
+    # pair; the other LED is filled with NaN downstream so the EKF/UKF
+    # observation model still sees an LED-pair-shaped input. Single-LED
+    # sessions must declare ``filter.led_distance`` explicitly.
+    tracking_geometry: Literal["dual_led", "single_led1", "single_led2"] = "dual_led"
+
+
+class DLCKeypointsConfig(BaseModel):
+    """DeepLabCut HDF5 keypoint inputs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    h5_file: Path
+    # ``dual_led`` (default): both bodyparts must be set.
+    # ``single_led1`` / ``single_led2``: only the matching bodypart is
+    # set; the other LED is filled with NaN downstream so the EKF/UKF
+    # observation model still sees an LED-pair-shaped input. Single-LED
+    # sessions must declare ``filter.led_distance`` explicitly.
+    tracking_geometry: Literal["dual_led", "single_led1", "single_led2"] = "dual_led"
+    led1_bodypart: str | None = None
+    led2_bodypart: str | None = None
+    likelihood_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
+    # ``meta_pickle`` synthesizes camera timestamps from the sibling
+    # DLC ``_meta.pickle`` (``fps``, ``nframes``); ``trodes_hw_sync``
+    # joins against an external ``*.videoTimeStamps.cameraHWSync``;
+    # ``timestamp_file`` reads a 1-D float array.
+    timestamps_source: Literal["meta_pickle", "trodes_hw_sync", "timestamp_file"] = (
+        "meta_pickle"
+    )
+    camera_timestamps_file: Path | None = None
+    timestamp_file: Path | None = None
+    apply_crop_offset: bool = True
+
+    @model_validator(mode="after")
+    def _validate_timestamps_source(self) -> DLCKeypointsConfig:
+        if self.timestamps_source == "trodes_hw_sync" and (
+            self.camera_timestamps_file is None
+        ):
+            raise ValueError(
+                "dlc_keypoints.timestamps_source='trodes_hw_sync' requires "
+                "camera_timestamps_file."
+            )
+        if self.timestamps_source == "timestamp_file" and self.timestamp_file is None:
+            raise ValueError(
+                "dlc_keypoints.timestamps_source='timestamp_file' requires "
+                "timestamp_file."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_bodypart_pair(self) -> DLCKeypointsConfig:
+        if self.tracking_geometry == "dual_led":
+            missing = [
+                name
+                for name in ("led1_bodypart", "led2_bodypart")
+                if getattr(self, name) is None
+            ]
+            if missing:
+                raise ValueError(
+                    "dlc_keypoints.tracking_geometry='dual_led' requires "
+                    f"{missing}; for one-bodypart sessions set "
+                    "tracking_geometry to single_led1 or single_led2."
+                )
+            return self
+
+        # single_led{1,2}: the matching half is required, the other
+        # forbidden (silently ignoring an extra bodypart name would let
+        # a copy-paste leftover quietly steer the wrong loader path).
+        observed_field = (
+            "led1_bodypart"
+            if self.tracking_geometry == "single_led1"
+            else "led2_bodypart"
+        )
+        forbidden_field = (
+            "led2_bodypart"
+            if self.tracking_geometry == "single_led1"
+            else "led1_bodypart"
+        )
+        if getattr(self, observed_field) is None:
+            raise ValueError(
+                f"dlc_keypoints.tracking_geometry={self.tracking_geometry!r} "
+                f"requires {observed_field}."
+            )
+        if getattr(self, forbidden_field) is not None:
+            raise ValueError(
+                f"dlc_keypoints.tracking_geometry={self.tracking_geometry!r} "
+                f"forbids {forbidden_field} (only the observed LED's "
+                "bodypart may be set)."
+            )
+        return self
+
+
+class NWBLEDSourceConfig(BaseModel):
+    """How to locate the LED position container inside an NWB file."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    container: Literal["auto", "trodes_position", "ndx_pose"] = "auto"
+    # ``dual_led`` (default): the file carries both physical LEDs.
+    # ``single_led1`` / ``single_led2``: the file carries one tracked
+    # point that *is* physical LED1 or LED2 respectively (not a body
+    # centroid). The unobserved LED is filled with NaN downstream so
+    # the EKF/UKF observation model still sees an LED-pair-shaped
+    # input. Centroid / body-center sources are out of scope here —
+    # they need a different observation-model wiring.
+    tracking_geometry: Literal["dual_led", "single_led1", "single_led2"] = "dual_led"
+    # For ``trodes_position``: SpatialSeries names under the Position
+    # container. For ``ndx_pose``: bodypart names under PoseEstimation.
+    # Loader-time auto-detection picks defaults when None.
+    led1_series_name: str | None = None
+    led2_series_name: str | None = None
+    led1_bodypart: str | None = None
+    led2_bodypart: str | None = None
+    likelihood_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def _validate_paired_names(self) -> NWBLEDSourceConfig:
+        if self.tracking_geometry == "dual_led":
+            # Series names and bodypart names are pairs: the loader
+            # needs both halves to address the pair, and a half-set
+            # config used to silently fall through to auto-detect on
+            # the missing side (so ``led1_series_name="x"`` paired
+            # with the writer-default LED2 quietly loaded the wrong
+            # second series).
+            for name1, name2 in (
+                ("led1_series_name", "led2_series_name"),
+                ("led1_bodypart", "led2_bodypart"),
+            ):
+                v1, v2 = getattr(self, name1), getattr(self, name2)
+                if (v1 is None) != (v2 is None):
+                    raise ValueError(
+                        f"NWBLEDSourceConfig: {name1} and {name2} must both "
+                        f"be set or both be None (got {name1}={v1!r}, "
+                        f"{name2}={v2!r}); the loader resolves the LED "
+                        "pair atomically and a half-set config used to "
+                        "silently fall back to auto-detect on the missing "
+                        "side."
+                    )
+            return self
+
+        # single_led{1,2}: the *other* LED's name fields must be
+        # unset, otherwise the user is implicitly asking for a pair
+        # the loader cannot honor. The matching half is optional for
+        # SpatialSeries (the Position-container loader auto-detects
+        # when exactly one series is present) but required for
+        # PoseEstimation — the bodypart name has no canonical
+        # writer-default and the loader has no way to guess which
+        # bodypart is the physical LED.
+        unobserved = "2" if self.tracking_geometry == "single_led1" else "1"
+        forbidden = (f"led{unobserved}_series_name", f"led{unobserved}_bodypart")
+        bad = [name for name in forbidden if getattr(self, name) is not None]
+        if bad:
+            raise ValueError(
+                f"NWBLEDSourceConfig: tracking_geometry="
+                f"{self.tracking_geometry!r} forbids {bad} (only the "
+                f"observed LED's name fields may be set)."
+            )
+        return self
+
+
+class NWBDIOToTTLConfig(BaseModel):
+    """Map NWB ``behavioral_events`` TimeSeries names to TTL source ids."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Edges come straight from the int8 0/1 stream — 1 → "rise",
+    # 0 → "fall". The first sample is the initial level (not a
+    # transition); the loader drops it.
+    name_to_source_id: dict[str, int]
+
+
+class NWBConfig(BaseModel):
+    """NWB file + auto-detected position container + optional extras."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    nwb_file: Path
+    led_source: NWBLEDSourceConfig = Field(default_factory=NWBLEDSourceConfig)
+    # Post-hoc re-calibration. Wins over file-stored ``conversion``
+    # and over ``camera.meters_per_pixel`` per the
+    # ``pixels_to_meters`` precedence ladder. Must be strictly
+    # positive: zero collapses every coordinate to the origin and
+    # negative values silently mirror the trajectory while leaving
+    # ``axis_signs`` reading +1.
+    meters_per_pixel_override: float | None = Field(default=None, gt=0.0)
+    # When set, the NWB ``processing["behavior"]["behavioral_events"]``
+    # TimeSeries are assembled into the EKF/UKF event channel via the
+    # NWB DIO bridge.
+    dio_to_ttl: NWBDIOToTTLConfig | None = None
+
+
 class InputsConfig(BaseModel):
     """Input file locations and format selection."""
 
     model_config = ConfigDict(extra="forbid")
 
-    format: Literal["prepared_arrays", "spikegadgets_trodes"] = "prepared_arrays"
+    format: Literal[
+        "prepared_arrays",
+        "spikegadgets_trodes",
+        "trodes_native",
+        "dlc_keypoints",
+        "nwb",
+    ] = "prepared_arrays"
 
     # Existing prepared-array workflow.
     imu_timestamps: Path | None = None
@@ -29,6 +239,12 @@ class InputsConfig(BaseModel):
     # Real-data parquet workflow.
     imu_file: Path | None = None
     position_file: Path | None = None
+
+    # Native-loader workflows. Each format is selected via
+    # ``format=...`` and configured by the matching nested block.
+    trodes_native: TrodesNativeConfig | None = None
+    dlc_keypoints: DLCKeypointsConfig | None = None
+    nwb: NWBConfig | None = None
 
     @model_validator(mode="after")
     def _validate_required_paths(self) -> InputsConfig:
@@ -43,17 +259,30 @@ class InputsConfig(BaseModel):
                 )
                 if getattr(self, name) is None
             ]
-        else:
+            if missing:
+                raise ValueError(
+                    f"inputs.format='prepared_arrays' is missing required "
+                    f"path(s): {', '.join(missing)}."
+                )
+        elif self.format == "spikegadgets_trodes":
             missing = [
                 name
                 for name in ("imu_file", "position_file")
                 if getattr(self, name) is None
             ]
-        if missing:
-            raise ValueError(
-                f"inputs.format={self.format!r} is missing required path(s): "
-                f"{', '.join(missing)}."
-            )
+            if missing:
+                raise ValueError(
+                    f"inputs.format='spikegadgets_trodes' is missing "
+                    f"required path(s): {', '.join(missing)}."
+                )
+        else:
+            # Native loaders: ``format`` value matches the nested
+            # config attribute name on InputsConfig.
+            if getattr(self, self.format) is None:
+                raise ValueError(
+                    f"inputs.format={self.format!r} is missing the required "
+                    f"'inputs.{self.format}' configuration block."
+                )
         return self
 
 
@@ -214,7 +443,14 @@ class FilterConfig(BaseModel):
         "2d_cam_3d_imu",
         "2d_cam_6dof_imu_orientation",
     ] = "2d_cam_3d_imu"
-    led_distance: float | None = None
+    # The EKF/UKF camera model places LED1 / LED2 a fixed offset apart;
+    # zero collapses the offset (LEDs become indistinguishable), a
+    # negative value mirrors the offset direction, and ``inf`` / NaN
+    # would surface later as an EKFConfig rejection far from the
+    # YAML. ``None`` is the documented "infer from data" sentinel —
+    # the loader falls back to ``_median_led_distance`` (or rejects,
+    # for single-LED NWB sessions).
+    led_distance: float | None = Field(default=None, gt=0.0, allow_inf_nan=False)
     use_heading_measurement: bool | None = None
     process_noise_pos: float | None = None
     process_noise_vel: float | None = None
@@ -427,11 +663,15 @@ class TTLEventsConfig(BaseModel):
     Sources of all three types share an events parquet whose rows are
     ``(time, source_id, edge)``. ``source_id`` must be unique across the
     configured beam, zone-trigger, and RFID-reader lists.
+
+    ``events_file`` is optional and may be omitted when the events
+    come from the NWB DIO bridge — see the SessionConfig validator
+    (``_validate_dio_consistency``) for the conditional-required rule.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    events_file: Path
+    events_file: Path | None = None
     beams: list[BeamSpec] = Field(default_factory=list)
     zone_triggers: list[ZoneTriggerSpec] = Field(default_factory=list)
     rfid_readers: list[RFIDReaderSpec] = Field(default_factory=list)
@@ -469,6 +709,115 @@ class SessionConfig(BaseModel):
     led_identity: LedIdentityConfig = Field(default_factory=LedIdentityConfig)
     ttl_events: TTLEventsConfig | None = None
 
+    @model_validator(mode="after")
+    def _validate_dio_consistency(self) -> SessionConfig:
+        """Enforce the NWB DIO → TTL events bridge schema contract.
+
+        Without these, an NWB+DIO session with no ``events_file``
+        would be loader-runnable but produce a fused trajectory with
+        no event updates, and a DIO bridge whose ``name_to_source_id``
+        referenced unknown geometry ids would surface as a loader-time
+        KeyError far from the YAML.
+        """
+
+        nwb = self.inputs.nwb
+        has_dio_bridge = (
+            self.inputs.format == "nwb"
+            and nwb is not None
+            and nwb.dio_to_ttl is not None
+        )
+
+        if has_dio_bridge:
+            # The geometry block is required because the EKF/UKF
+            # event channel needs source positions, covariances, and
+            # ids — DIO without ttl_events would be loader-runnable
+            # but produce a fused trajectory with no event updates.
+            if self.ttl_events is None:
+                raise ValueError(
+                    "inputs.nwb.dio_to_ttl is configured but ttl_events "
+                    "is missing — the EKF/UKF event channel needs the "
+                    "geometry block (beams/zone_triggers/rfid_readers) "
+                    "to recover source positions and covariances. Add a "
+                    "ttl_events block matching the DIO TimeSeries names."
+                )
+            assert nwb is not None and nwb.dio_to_ttl is not None
+            known_ids = {
+                spec.id
+                for spec_list in (
+                    self.ttl_events.beams,
+                    self.ttl_events.zone_triggers,
+                    self.ttl_events.rfid_readers,
+                )
+                for spec in spec_list
+            }
+            unknown = [
+                (name, sid)
+                for name, sid in nwb.dio_to_ttl.name_to_source_id.items()
+                if sid not in known_ids
+            ]
+            if unknown:
+                raise ValueError(
+                    "inputs.nwb.dio_to_ttl.name_to_source_id values "
+                    f"{unknown} reference source ids not configured in "
+                    f"ttl_events (known ids: {sorted(known_ids)}). "
+                    "Update the geometry block or the DIO mapping so "
+                    "every TimeSeries name lands on a known source."
+                )
+
+        # ``events_file`` is required unless the DIO bridge is providing
+        # the events from the NWB file itself.
+        if self.ttl_events is not None and self.ttl_events.events_file is None:
+            if not has_dio_bridge:
+                raise ValueError(
+                    "ttl_events.events_file is required unless "
+                    "inputs.format='nwb' and inputs.nwb.dio_to_ttl is "
+                    "set (the NWB DIO bridge is the only configured "
+                    "alternative event source)."
+                )
+
+        # Single-LED sessions must declare ``filter.led_distance``
+        # explicitly. The filter's camera model interprets LED1/LED2
+        # as body-offset points, not generic center points; with one
+        # tracked LED there are no paired observations to estimate
+        # the offset from, so the median fallback in the loader would
+        # silently use its 0.04 m default instead of a real value.
+        single_led_block: tuple[str, str] | None = None
+        if self.inputs.format == "nwb" and nwb is not None:
+            if nwb.led_source.tracking_geometry != "dual_led":
+                single_led_block = (
+                    "inputs.nwb.led_source.tracking_geometry",
+                    nwb.led_source.tracking_geometry,
+                )
+        elif (
+            self.inputs.format == "trodes_native"
+            and self.inputs.trodes_native is not None
+        ):
+            tn = self.inputs.trodes_native
+            if tn.tracking_geometry != "dual_led":
+                single_led_block = (
+                    "inputs.trodes_native.tracking_geometry",
+                    tn.tracking_geometry,
+                )
+        elif (
+            self.inputs.format == "dlc_keypoints"
+            and self.inputs.dlc_keypoints is not None
+        ):
+            dlc = self.inputs.dlc_keypoints
+            if dlc.tracking_geometry != "dual_led":
+                single_led_block = (
+                    "inputs.dlc_keypoints.tracking_geometry",
+                    dlc.tracking_geometry,
+                )
+        if single_led_block is not None and self.filter.led_distance is None:
+            field, value = single_led_block
+            raise ValueError(
+                f"{field}={value!r} requires filter.led_distance to "
+                "be set explicitly: with one tracked LED the loader "
+                "cannot infer the LED1↔LED2 spacing from the data."
+            )
+
+        return self
+
 
 def load_session_config(path: str | Path) -> SessionConfig:
     """Load a YAML session config, resolving relative paths from the config file."""
@@ -488,21 +837,47 @@ def _resolve_paths(config: SessionConfig, *, base_dir: Path) -> SessionConfig:
             return path
         return base_dir / path
 
-    inputs = config.inputs.model_copy(
-        update={
-            name: resolve(getattr(config.inputs, name))
-            for name in (
-                "imu_timestamps",
-                "imu_measurements",
-                "camera_timestamps",
-                "led1_positions",
-                "led2_positions",
-                "camera_mask",
-                "imu_file",
-                "position_file",
-            )
-        }
+    flat_path_fields = (
+        "imu_timestamps",
+        "imu_measurements",
+        "camera_timestamps",
+        "led1_positions",
+        "led2_positions",
+        "camera_mask",
+        "imu_file",
+        "position_file",
     )
+    inputs_update: dict[str, object] = {
+        name: resolve(getattr(config.inputs, name)) for name in flat_path_fields
+    }
+    if config.inputs.trodes_native is not None:
+        block = config.inputs.trodes_native
+        resolved_pos = resolve(block.position_tracking_file)
+        resolved_ts = resolve(block.camera_timestamps_file)
+        assert resolved_pos is not None and resolved_ts is not None
+        inputs_update["trodes_native"] = block.model_copy(
+            update={
+                "position_tracking_file": resolved_pos,
+                "camera_timestamps_file": resolved_ts,
+            }
+        )
+    if config.inputs.dlc_keypoints is not None:
+        block = config.inputs.dlc_keypoints
+        resolved_h5 = resolve(block.h5_file)
+        assert resolved_h5 is not None
+        inputs_update["dlc_keypoints"] = block.model_copy(
+            update={
+                "h5_file": resolved_h5,
+                "camera_timestamps_file": resolve(block.camera_timestamps_file),
+                "timestamp_file": resolve(block.timestamp_file),
+            }
+        )
+    if config.inputs.nwb is not None:
+        block = config.inputs.nwb
+        resolved_nwb = resolve(block.nwb_file)
+        assert resolved_nwb is not None
+        inputs_update["nwb"] = block.model_copy(update={"nwb_file": resolved_nwb})
+    inputs = config.inputs.model_copy(update=inputs_update)
     outputs = config.outputs.model_copy(
         update={"output_dir": resolve(config.outputs.output_dir)}
     )

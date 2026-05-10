@@ -1,0 +1,54 @@
+# Example YAML config for native Trodes binaries (no parquet conversion).
+#
+# Run:
+#   uv run trodestrack online --config examples/session_trodes_native.yaml
+#   uv run trodestrack smooth --config examples/session_trodes_native.yaml
+#
+# Paths are resolved relative to this YAML file. Replace the inputs with
+# your own session files before running.
+#
+# Scope (v1 of trodes_native):
+#   - PTP-synced timestamps only (``*.videoTimeStamps.cameraHWSync``).
+#     ``cameraHWFrameCount`` and plain ``videoTimeStamps`` are rejected.
+#   - Camera-only. IMU + DIO/TTL ingest from a raw ``.rec`` file is
+#     not supported here; route those through trodes_to_nwb:
+#         trodes_to_nwb session.rec
+#         # then point trodestrack at the resulting NWB:
+#         inputs.format: nwb
+#     The ``nwb`` loader reads analog IMU and DIO TTLs end-to-end.
+#     See https://github.com/LorenFrankLab/trodes_to_nwb.
+
+inputs:
+  format: trodes_native
+  trodes_native:
+    position_tracking_file: ../data/session.videoPositionTracking
+    camera_timestamps_file: ../data/session.videoTimeStamps.cameraHWSync
+    # ``tracking_geometry`` defaults to ``dual_led``. The native
+    # binary always carries both column pairs, but you can ignore
+    # the secondary point (e.g., when only one LED was attached or
+    # the second is unreliable) by setting ``single_led1`` (use
+    # xloc/yloc) or ``single_led2`` (use xloc2/yloc2). Single-LED
+    # sessions must declare ``filter.led_distance``.
+    # tracking_geometry: single_led1
+  # Optional: a parquet IMU file to fuse with the binary camera stream.
+  # Without this, ``filter.state_mode`` must be ``vision_only`` (or
+  # the loader raises with a three-option remediation message).
+  # imu_file: ../data/session_imu.parquet
+
+camera:
+  meters_per_pixel: 0.0022
+
+filter:
+  # ``trodes_native`` v1 has no ``.rec`` IMU support; if you don't
+  # provide ``inputs.imu_file``, only ``vision_only`` runs work.
+  state_mode: vision_only
+  # Required for ``tracking_geometry: single_led{1,2}``.
+  # led_distance: 0.05
+
+led_identity:
+  mode: auto
+
+outputs:
+  output_dir: ../runs/session_trodes_native
+  write_diagnostics: true
+  run_safety_checks: true
