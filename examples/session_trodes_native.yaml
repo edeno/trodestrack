@@ -15,6 +15,13 @@ inputs:
   trodes_native:
     position_tracking_file: ../data/session.videoPositionTracking
     camera_timestamps_file: ../data/session.videoTimeStamps.cameraHWSync
+    # ``tracking_geometry`` defaults to ``dual_led``. The native
+    # binary always carries both column pairs, but you can ignore
+    # the secondary point (e.g., when only one LED was attached or
+    # the second is unreliable) by setting ``single_led1`` (use
+    # xloc/yloc) or ``single_led2`` (use xloc2/yloc2). Single-LED
+    # sessions must declare ``filter.led_distance``.
+    # tracking_geometry: single_led1
   # Optional: a parquet IMU file to fuse with the binary camera stream.
   # Without this, ``filter.state_mode`` must be ``vision_only`` (or
   # the loader raises with a three-option remediation message).
@@ -27,6 +34,8 @@ filter:
   # ``trodes_native`` v1 has no ``.rec`` IMU support; if you don't
   # provide ``inputs.imu_file``, only ``vision_only`` runs work.
   state_mode: vision_only
+  # Required for ``tracking_geometry: single_led{1,2}``.
+  # led_distance: 0.05
 
 led_identity:
   mode: auto

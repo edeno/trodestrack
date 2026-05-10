@@ -227,6 +227,47 @@ def test_single_led_session_requires_filter_led_distance(geometry: str) -> None:
         )
 
 
+@pytest.mark.parametrize("geometry", ["single_led1", "single_led2"])
+def test_single_led_dlc_session_requires_filter_led_distance(geometry: str) -> None:
+    """Same led_distance gate for ``dlc_keypoints`` single-LED."""
+
+    observed = "led1_bodypart" if geometry == "single_led1" else "led2_bodypart"
+    with pytest.raises(ValidationError, match="led_distance"):
+        SessionConfig.model_validate(
+            {
+                "inputs": {
+                    "format": "dlc_keypoints",
+                    "dlc_keypoints": {
+                        "h5_file": "x.h5",
+                        "tracking_geometry": geometry,
+                        observed: "led_green",
+                    },
+                },
+            },
+        )
+
+
+@pytest.mark.parametrize("geometry", ["single_led1", "single_led2"])
+def test_single_led_trodes_native_session_requires_filter_led_distance(
+    geometry: str,
+) -> None:
+    """Same led_distance gate for ``trodes_native`` single-LED."""
+
+    with pytest.raises(ValidationError, match="led_distance"):
+        SessionConfig.model_validate(
+            {
+                "inputs": {
+                    "format": "trodes_native",
+                    "trodes_native": {
+                        "position_tracking_file": "x.videoPositionTracking",
+                        "camera_timestamps_file": "x.videoTimeStamps.cameraHWSync",
+                        "tracking_geometry": geometry,
+                    },
+                },
+            },
+        )
+
+
 def test_single_led_session_with_filter_led_distance_succeeds() -> None:
     """Setting ``filter.led_distance`` lifts the validator."""
 

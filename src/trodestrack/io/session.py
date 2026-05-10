@@ -113,12 +113,15 @@ def _load_trodes_native(config: SessionConfig) -> PreparedSession:
     cfg = inputs.trodes_native
 
     pixels = load_trodes_native_position(
-        cfg.position_tracking_file, cfg.camera_timestamps_file
+        cfg.position_tracking_file,
+        cfg.camera_timestamps_file,
+        tracking_geometry=cfg.tracking_geometry,
     )
     led1, led2, conf_cam = pixels_to_meters(pixels, config.camera)
-    # Native loader produces both LEDs (file format guarantees the
-    # xloc2/yloc2 columns; rows where LEDs aren't found are NaN, not
-    # absent). Single-LED native sources will revisit this assumption.
+    # Loader always emits an LED2 array (NaN-filled for single_led{1,2})
+    # so the EKF/UKF observation model sees a uniform LED-pair shape.
+    # ``mask_cam`` (computed below) is what filters frames where the
+    # observed LED is missing.
     assert led2 is not None
 
     t_imu_raw, U_imu, U_full, imu_is_synthetic, imu_source = (
@@ -333,9 +336,12 @@ def _load_dlc_keypoints(config: SessionConfig) -> PreparedSession:
         camera_timestamps_file=cfg.camera_timestamps_file,
         timestamp_file=cfg.timestamp_file,
         apply_crop_offset=cfg.apply_crop_offset,
+        tracking_geometry=cfg.tracking_geometry,
     )
     led1, led2, conf_cam = pixels_to_meters(pixels, config.camera)
-    assert led2 is not None  # DLC always returns both bodyparts
+    # Loader always returns LED2 (NaN-filled for single_led{1,2}); the
+    # mask below collapses correctly to "observed-LED finite".
+    assert led2 is not None
 
     t_imu_raw, U_imu, U_full, imu_is_synthetic, imu_source = (
         _resolve_imu_for_native_loader(config, pixels.t_cam)

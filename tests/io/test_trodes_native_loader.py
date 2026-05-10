@@ -764,3 +764,83 @@ def test_pixel_to_meter_scaling_matches_camera_config(tmp_path: Path) -> None:
     expected_x = np.asarray([100 + i for i in range(n_pre, n_pre + n_post)]) * 0.01
     np.testing.assert_allclose(session.Z_cam_led1[:, 0], expected_x)
     np.testing.assert_allclose(session.Z_cam_led1[:, 1], 2.0)
+
+
+# ----------------------------------------------------------------------
+# Single-LED tracking_geometry.
+# ----------------------------------------------------------------------
+
+
+def test_single_led1_trodes_native_loader(tmp_path: Path) -> None:
+    """``tracking_geometry='single_led1'`` keeps (xloc, yloc) and NaNs
+    LED2."""
+
+    ts_path, info = _make_ptp_timestamps_file(tmp_path)
+    pos_path = _make_position_tracking_file(tmp_path, info["pos_timestamps"])
+
+    pixels = load_trodes_native_position(
+        pos_path, ts_path, tracking_geometry="single_led1"
+    )
+
+    assert pixels.led2_pixels is not None
+    assert np.isnan(pixels.led2_pixels).all()
+    assert np.isfinite(pixels.led1_pixels).all()
+    assert pixels.diagnostics["tracking_geometry"] == "single_led1"
+
+
+def test_single_led2_trodes_native_loader(tmp_path: Path) -> None:
+    """``tracking_geometry='single_led2'`` keeps (xloc2, yloc2) and
+    NaNs LED1."""
+
+    ts_path, info = _make_ptp_timestamps_file(tmp_path)
+    pos_path = _make_position_tracking_file(tmp_path, info["pos_timestamps"])
+
+    pixels = load_trodes_native_position(
+        pos_path, ts_path, tracking_geometry="single_led2"
+    )
+
+    assert pixels.led2_pixels is not None
+    assert np.isfinite(pixels.led2_pixels).all()
+    assert np.isnan(pixels.led1_pixels).all()
+
+
+def test_single_led_trodes_native_session_runs_vision_only(tmp_path: Path) -> None:
+    """End-to-end ``load_session`` with single-LED trodes_native +
+    vision_only produces an LED-pair-shaped session with the mask
+    matching the observed LED's finiteness."""
+
+    ts_path, info = _make_ptp_timestamps_file(tmp_path)
+    pos_path = _make_position_tracking_file(tmp_path, info["pos_timestamps"])
+    config = SessionConfig(
+        inputs=InputsConfig(
+            format="trodes_native",
+            trodes_native=TrodesNativeConfig(
+                position_tracking_file=pos_path,
+                camera_timestamps_file=ts_path,
+                tracking_geometry="single_led1",
+            ),
+        ),
+        imu=IMUConfig(run_calibration=False),
+        camera=CameraConfig(meters_per_pixel=0.01),
+        filter=FilterConfig(state_mode="vision_only", led_distance=0.05),
+    )
+
+    session = load_session(config)
+
+    assert np.isnan(session.Z_cam_led2).all()
+    np.testing.assert_array_equal(
+        session.mask_cam, np.isfinite(session.Z_cam_led1).all(axis=1)
+    )
+    assert session.led_distance == pytest.approx(0.05)
+
+
+def test_trodes_native_invalid_tracking_geometry_raises(tmp_path: Path) -> None:
+    """The loader rejects unknown ``tracking_geometry`` values up
+    front (the schema would catch this for YAML callers; this guards
+    direct programmatic callers like Spyglass)."""
+
+    ts_path, info = _make_ptp_timestamps_file(tmp_path)
+    pos_path = _make_position_tracking_file(tmp_path, info["pos_timestamps"])
+
+    with pytest.raises(ValueError, match="tracking_geometry"):
+        load_trodes_native_position(pos_path, ts_path, tracking_geometry="bogus")

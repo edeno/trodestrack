@@ -271,7 +271,22 @@ inputs:
 
 IMU resolution precedence: `inputs.imu_file` (parquet) wins → NWB analog group → synthetic vision-only fallback. The same precedence applies to TTL events — both `ttl_events.events_file` (parquet) and `inputs.nwb.dio_to_ttl` (NWB DIO bridge) may be configured together; the parquet `events_file` wins, the NWB DIO is loaded but ignored, and both sources are recorded in diagnostics. The NWB-DIO path is opt-in via `inputs.nwb.dio_to_ttl`. See [`examples/session_nwb.yaml`](https://github.com/edeno/trodestrack/blob/master/examples/session_nwb.yaml).
 
-Single-LED files (one tracked point that *is* physical LED1 or LED2 — not a body centroid) are supported via `inputs.nwb.led_source.tracking_geometry: single_led1` or `single_led2`. The unobserved LED is filled with NaN downstream so the EKF/UKF observation model still sees an LED-pair-shaped input. Single-LED sessions must declare `filter.led_distance` explicitly (no paired observations to infer the spacing from); for PoseEstimation containers, the matching `led{1,2}_bodypart` is also required.
+#### Single-LED tracking (all three native formats)
+
+Sessions where only one tracked point is reliable (it *is* physical LED1 or LED2 — not a body centroid) are supported in `trodes_native`, `dlc_keypoints`, and `nwb`:
+
+```yaml
+# trodes_native
+inputs.trodes_native.tracking_geometry: single_led1   # uses (xloc, yloc); NaNs LED2
+
+# dlc_keypoints
+inputs.dlc_keypoints.tracking_geometry: single_led1   # only led1_bodypart required
+
+# nwb
+inputs.nwb.led_source.tracking_geometry: single_led1  # one SpatialSeries / bodypart
+```
+
+The unobserved LED is filled with NaN downstream so the EKF/UKF observation model still sees an LED-pair-shaped input. Single-LED sessions must declare `filter.led_distance` explicitly (no paired observations to infer the spacing from). NWB PoseEstimation also requires the matching `led{1,2}_bodypart`.
 
 #### Spyglass integration
 

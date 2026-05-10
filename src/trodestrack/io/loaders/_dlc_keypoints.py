@@ -40,8 +40,8 @@ logger = logging.getLogger(__name__)
 
 def load_dlc_keypoints_position(
     h5_file: Path,
-    led1_bodypart: str,
-    led2_bodypart: str,
+    led1_bodypart: str | None,
+    led2_bodypart: str | None,
     *,
     likelihood_threshold: float = 0.6,
     timestamps_source: Literal[
@@ -50,6 +50,7 @@ def load_dlc_keypoints_position(
     camera_timestamps_file: Path | None = None,
     timestamp_file: Path | None = None,
     apply_crop_offset: bool = True,
+    tracking_geometry: Literal["dual_led", "single_led1", "single_led2"] = "dual_led",
 ) -> PositionPixels:
     """Read a DLC ``df_with_missing`` HDF5 into a ``PositionPixels``.
 
@@ -96,27 +97,7 @@ def load_dlc_keypoints_position(
     _reject_multi_animal(df, h5_file=h5_file)
     df = df.droplevel("scorer", axis=1)
 
-    led1_xy, led1_lik = _extract_led(df, led1_bodypart, h5_file=h5_file)
-    led2_xy, led2_lik = _extract_led(df, led2_bodypart, h5_file=h5_file)
-
-    led1_pixels = led1_xy.copy()
-    led2_pixels = led2_xy.copy()
-    led1_pixels[led1_lik < likelihood_threshold] = np.nan
-    led2_pixels[led2_lik < likelihood_threshold] = np.nan
-
     metadata = _read_meta_pickle(h5_file)
-    crop_params = metadata.get("cropping_parameters")
-    crop_offset = (0.0, 0.0)
-    if apply_crop_offset and crop_params is not None and len(crop_params) == 4:
-        x_min = float(crop_params[0])
-        y_min = float(crop_params[2])
-        if x_min != 0.0 or y_min != 0.0:
-            led1_pixels[:, 0] += x_min
-            led1_pixels[:, 1] += y_min
-            led2_pixels[:, 0] += x_min
-            led2_pixels[:, 1] += y_min
-            crop_offset = (x_min, y_min)
-
     n_frames = len(df)
     t_cam = _resolve_timestamps(
         timestamps_source,
@@ -125,6 +106,50 @@ def load_dlc_keypoints_position(
         camera_timestamps_file=camera_timestamps_file,
         timestamp_file=timestamp_file,
     )
+
+    crop_params = metadata.get("cropping_parameters")
+    crop_offset = (0.0, 0.0)
+    apply_crop = apply_crop_offset and crop_params is not None and len(crop_params) == 4
+    if apply_crop:
+        x_min = float(crop_params[0])
+        y_min = float(crop_params[2])
+        crop_offset = (x_min, y_min)
+
+    def _read_one(bodypart: str) -> tuple[np.ndarray, np.ndarray]:
+        xy, lik = _extract_led(df, bodypart, h5_file=h5_file)
+        pixels = xy.copy()
+        pixels[lik < likelihood_threshold] = np.nan
+        if apply_crop and (crop_offset[0] != 0.0 or crop_offset[1] != 0.0):
+            pixels[:, 0] += crop_offset[0]
+            pixels[:, 1] += crop_offset[1]
+        return pixels, lik
+
+    nan_xy = np.full((n_frames, 2), np.nan)
+    neutral_lik = np.ones(n_frames, dtype=float)
+    if tracking_geometry == "dual_led":
+        if led1_bodypart is None or led2_bodypart is None:
+            raise ValueError(
+                "tracking_geometry='dual_led' requires led1_bodypart and led2_bodypart."
+            )
+        led1_pixels, led1_lik = _read_one(led1_bodypart)
+        led2_pixels, led2_lik = _read_one(led2_bodypart)
+    elif tracking_geometry == "single_led1":
+        if led1_bodypart is None:
+            raise ValueError("tracking_geometry='single_led1' requires led1_bodypart.")
+        led1_pixels, led1_lik = _read_one(led1_bodypart)
+        led2_pixels = nan_xy
+        led2_lik = neutral_lik
+    elif tracking_geometry == "single_led2":
+        if led2_bodypart is None:
+            raise ValueError("tracking_geometry='single_led2' requires led2_bodypart.")
+        led2_pixels, led2_lik = _read_one(led2_bodypart)
+        led1_pixels = nan_xy
+        led1_lik = neutral_lik
+    else:
+        raise ValueError(
+            f"tracking_geometry={tracking_geometry!r} must be 'dual_led', "
+            "'single_led1', or 'single_led2'."
+        )
 
     # Match the existing _load_leds confidence layout: (n, 4) with
     # per-LED likelihoods replicated across x/y.
@@ -145,6 +170,7 @@ def load_dlc_keypoints_position(
         coords_meters_per_pixel=None,
         diagnostics={
             "format": "dlc_keypoints",
+            "tracking_geometry": tracking_geometry,
             "saver": saver,
             "scorer": metadata.get("Scorer"),
             "fps": metadata.get("fps"),

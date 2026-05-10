@@ -11,6 +11,13 @@ inputs:
   format: dlc_keypoints
   dlc_keypoints:
     h5_file: ../data/videoDLC_resnet50_session.h5
+    # ``tracking_geometry`` defaults to ``dual_led``. For projects
+    # that only labeled one LED, switch to ``single_led1`` /
+    # ``single_led2`` and supply only the matching bodypart name —
+    # the unobserved LED is filled with NaN downstream so the
+    # EKF/UKF observation model still sees an LED-pair-shaped input.
+    # Single-LED sessions must declare ``filter.led_distance``.
+    # tracking_geometry: single_led1
     led1_bodypart: led_green
     led2_bodypart: led_red
     likelihood_threshold: 0.6  # DLC pcutoff default
@@ -34,6 +41,9 @@ camera:
 
 filter:
   state_mode: vision_only
+  # Required for ``tracking_geometry: single_led{1,2}`` (no paired
+  # observations to infer LED1↔LED2 spacing).
+  # led_distance: 0.05
 
 led_identity:
   mode: auto

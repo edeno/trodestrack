@@ -22,6 +22,13 @@ class TrodesNativeConfig(BaseModel):
     # variants because clock-stitching them needs sample-rate logic
     # that's out of scope.
     camera_timestamps_file: Path
+    # ``dual_led`` (default): use both ``(xloc, yloc)`` and
+    # ``(xloc2, yloc2)`` from the position binary.
+    # ``single_led1`` / ``single_led2``: use only the matching column
+    # pair; the other LED is filled with NaN downstream so the EKF/UKF
+    # observation model still sees an LED-pair-shaped input. Single-LED
+    # sessions must declare ``filter.led_distance`` explicitly.
+    tracking_geometry: Literal["dual_led", "single_led1", "single_led2"] = "dual_led"
 
 
 class DLCKeypointsConfig(BaseModel):
@@ -30,8 +37,14 @@ class DLCKeypointsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     h5_file: Path
-    led1_bodypart: str
-    led2_bodypart: str
+    # ``dual_led`` (default): both bodyparts must be set.
+    # ``single_led1`` / ``single_led2``: only the matching bodypart is
+    # set; the other LED is filled with NaN downstream so the EKF/UKF
+    # observation model still sees an LED-pair-shaped input. Single-LED
+    # sessions must declare ``filter.led_distance`` explicitly.
+    tracking_geometry: Literal["dual_led", "single_led1", "single_led2"] = "dual_led"
+    led1_bodypart: str | None = None
+    led2_bodypart: str | None = None
     likelihood_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
     # ``meta_pickle`` synthesizes camera timestamps from the sibling
     # DLC ``_meta.pickle`` (``fps``, ``nframes``); ``trodes_hw_sync``
@@ -57,6 +70,48 @@ class DLCKeypointsConfig(BaseModel):
             raise ValueError(
                 "dlc_keypoints.timestamps_source='timestamp_file' requires "
                 "timestamp_file."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_bodypart_pair(self) -> DLCKeypointsConfig:
+        if self.tracking_geometry == "dual_led":
+            missing = [
+                name
+                for name in ("led1_bodypart", "led2_bodypart")
+                if getattr(self, name) is None
+            ]
+            if missing:
+                raise ValueError(
+                    "dlc_keypoints.tracking_geometry='dual_led' requires "
+                    f"{missing}; for one-bodypart sessions set "
+                    "tracking_geometry to single_led1 or single_led2."
+                )
+            return self
+
+        # single_led{1,2}: the matching half is required, the other
+        # forbidden (silently ignoring an extra bodypart name would let
+        # a copy-paste leftover quietly steer the wrong loader path).
+        observed_field = (
+            "led1_bodypart"
+            if self.tracking_geometry == "single_led1"
+            else "led2_bodypart"
+        )
+        forbidden_field = (
+            "led2_bodypart"
+            if self.tracking_geometry == "single_led1"
+            else "led1_bodypart"
+        )
+        if getattr(self, observed_field) is None:
+            raise ValueError(
+                f"dlc_keypoints.tracking_geometry={self.tracking_geometry!r} "
+                f"requires {observed_field}."
+            )
+        if getattr(self, forbidden_field) is not None:
+            raise ValueError(
+                f"dlc_keypoints.tracking_geometry={self.tracking_geometry!r} "
+                f"forbids {forbidden_field} (only the observed LED's "
+                "bodypart may be set)."
             )
         return self
 
@@ -720,24 +775,45 @@ class SessionConfig(BaseModel):
                     "alternative event source)."
                 )
 
-        # Single-LED NWB sessions must declare ``filter.led_distance``
+        # Single-LED sessions must declare ``filter.led_distance``
         # explicitly. The filter's camera model interprets LED1/LED2
         # as body-offset points, not generic center points; with one
         # tracked LED there are no paired observations to estimate
         # the offset from, so the median fallback in the loader would
         # silently use its 0.04 m default instead of a real value.
-        if (
-            self.inputs.format == "nwb"
-            and nwb is not None
-            and nwb.led_source.tracking_geometry != "dual_led"
-            and self.filter.led_distance is None
+        single_led_block: tuple[str, str] | None = None
+        if self.inputs.format == "nwb" and nwb is not None:
+            if nwb.led_source.tracking_geometry != "dual_led":
+                single_led_block = (
+                    "inputs.nwb.led_source.tracking_geometry",
+                    nwb.led_source.tracking_geometry,
+                )
+        elif (
+            self.inputs.format == "trodes_native"
+            and self.inputs.trodes_native is not None
         ):
+            tn = self.inputs.trodes_native
+            if tn.tracking_geometry != "dual_led":
+                single_led_block = (
+                    "inputs.trodes_native.tracking_geometry",
+                    tn.tracking_geometry,
+                )
+        elif (
+            self.inputs.format == "dlc_keypoints"
+            and self.inputs.dlc_keypoints is not None
+        ):
+            dlc = self.inputs.dlc_keypoints
+            if dlc.tracking_geometry != "dual_led":
+                single_led_block = (
+                    "inputs.dlc_keypoints.tracking_geometry",
+                    dlc.tracking_geometry,
+                )
+        if single_led_block is not None and self.filter.led_distance is None:
+            field, value = single_led_block
             raise ValueError(
-                "inputs.nwb.led_source.tracking_geometry="
-                f"{nwb.led_source.tracking_geometry!r} requires "
-                "filter.led_distance to be set explicitly: with one "
-                "tracked LED the loader cannot infer the LED1↔LED2 "
-                "spacing from the data."
+                f"{field}={value!r} requires filter.led_distance to "
+                "be set explicitly: with one tracked LED the loader "
+                "cannot infer the LED1↔LED2 spacing from the data."
             )
 
         return self

@@ -568,3 +568,128 @@ def test_dlc_extra_missing_raises_import_error(
 
     with pytest.raises(ImportError, match=r"trodestrack\[dlc\]"):
         load_session(config)
+
+
+# ----------------------------------------------------------------------
+# Single-LED tracking_geometry.
+# ----------------------------------------------------------------------
+
+
+def test_single_led1_dlc_loads_with_one_bodypart(tmp_path: Path) -> None:
+    """``tracking_geometry='single_led1'`` reads only led1_bodypart;
+    LED2 array is filled with NaN."""
+
+    h5_path = _write_h5_and_meta(tmp_path, n_frames=20)
+    pixels = load_dlc_keypoints_position(
+        h5_path,
+        led1_bodypart="led_green",
+        led2_bodypart=None,
+        tracking_geometry="single_led1",
+    )
+
+    assert pixels.led1_pixels.shape == (20, 2)
+    assert pixels.led2_pixels is not None
+    assert pixels.led2_pixels.shape == (20, 2)
+    assert np.isnan(pixels.led2_pixels).all()
+    assert np.isfinite(pixels.led1_pixels).all()
+    assert pixels.diagnostics["tracking_geometry"] == "single_led1"
+    # Confidence layout: observed columns get real values, missing
+    # columns get neutral 1.0 (uniform).
+    assert pixels.confidence is not None
+    np.testing.assert_array_equal(pixels.confidence[:, 2], np.full(20, 1.0))
+    np.testing.assert_array_equal(pixels.confidence[:, 3], np.full(20, 1.0))
+
+
+def test_single_led2_dlc_swaps_observed_and_missing_arrays(tmp_path: Path) -> None:
+    """``tracking_geometry='single_led2'`` puts the observation in
+    LED2 and NaNs LED1."""
+
+    h5_path = _write_h5_and_meta(tmp_path, n_frames=20)
+    pixels = load_dlc_keypoints_position(
+        h5_path,
+        led1_bodypart=None,
+        led2_bodypart="led_red",
+        tracking_geometry="single_led2",
+    )
+
+    assert pixels.led2_pixels is not None
+    assert np.isfinite(pixels.led2_pixels).all()
+    assert np.isnan(pixels.led1_pixels).all()
+
+
+def test_single_led_dlc_session_runs_vision_only(tmp_path: Path) -> None:
+    """End-to-end ``load_session`` with single-LED DLC + vision_only
+    produces an LED-pair-shaped session with mask matching the
+    observed LED's finiteness."""
+
+    h5_path = _write_h5_and_meta(tmp_path, n_frames=24)
+    config = SessionConfig(
+        inputs=InputsConfig(
+            format="dlc_keypoints",
+            dlc_keypoints=DLCKeypointsConfig(
+                h5_file=h5_path,
+                tracking_geometry="single_led1",
+                led1_bodypart="led_green",
+            ),
+        ),
+        imu=IMUConfig(run_calibration=False),
+        camera=CameraConfig(meters_per_pixel=0.01),
+        filter=FilterConfig(state_mode="vision_only", led_distance=0.05),
+    )
+
+    session = load_session(config)
+
+    assert session.Z_cam_led1.shape == (24, 2)
+    assert session.Z_cam_led2.shape == (24, 2)
+    assert np.isnan(session.Z_cam_led2).all()
+    np.testing.assert_array_equal(
+        session.mask_cam, np.isfinite(session.Z_cam_led1).all(axis=1)
+    )
+    assert session.led_distance == pytest.approx(0.05)
+
+
+def test_dlc_dual_led_missing_bodypart_raises_at_schema_time() -> None:
+    """``tracking_geometry='dual_led'`` (default) requires both bodypart
+    fields. A copy-paste leftover with only one set must fail at
+    config-load time, not silently NaN one LED."""
+
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="led2_bodypart"):
+        DLCKeypointsConfig.model_validate(
+            {
+                "h5_file": "x.h5",
+                "led1_bodypart": "led_green",
+                # led2_bodypart missing — old behavior would have
+                # required both via field-level validation; new
+                # behavior (after lifting required-ness into the
+                # validator) catches this at the cross-field check.
+            },
+        )
+
+
+@pytest.mark.parametrize(
+    "geometry,forbidden,value",
+    [
+        ("single_led1", "led2_bodypart", "led_red"),
+        ("single_led2", "led1_bodypart", "led_green"),
+    ],
+)
+def test_dlc_single_led_rejects_other_bodypart(
+    geometry: str, forbidden: str, value: str
+) -> None:
+    """Setting the *other* LED's bodypart under single-LED is rejected
+    so a copy-paste leftover can't silently steer the loader path."""
+
+    from pydantic import ValidationError
+
+    observed = "led1_bodypart" if geometry == "single_led1" else "led2_bodypart"
+    with pytest.raises(ValidationError, match=forbidden):
+        DLCKeypointsConfig.model_validate(
+            {
+                "h5_file": "x.h5",
+                "tracking_geometry": geometry,
+                observed: "x",
+                forbidden: value,
+            },
+        )

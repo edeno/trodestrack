@@ -38,6 +38,8 @@ DEFAULT_MAX_PTP_PAUSE_S = 2.0
 def load_trodes_native_position(
     position_tracking_file: Path,
     camera_timestamps_file: Path,
+    *,
+    tracking_geometry: str = "dual_led",
 ) -> PositionPixels:
     """Read PTP-synced Trodes position binaries into a ``PositionPixels``.
 
@@ -50,13 +52,27 @@ def load_trodes_native_position(
         Path to the ``*.videoTimeStamps.cameraHWSync`` PTP-timestamp
         binary. The filename suffix is checked first (heuristic); the
         authoritative gate is the ``HWTimestamp`` column.
+    tracking_geometry
+        ``"dual_led"`` (default) reads both column pairs.
+        ``"single_led1"`` / ``"single_led2"`` reads only the matching
+        pair and fills the other LED with NaN. The native binary
+        always carries both pairs, so single-LED here means the caller
+        has decided the secondary point is unused / unreliable, not
+        that it is physically absent.
 
     Raises
     ------
     ValueError
         If the timestamps filename or the timestamps file's
-        ``Fields`` declaration does not match the PTP variant.
+        ``Fields`` declaration does not match the PTP variant, or if
+        ``tracking_geometry`` is not one of the three supported values.
     """
+
+    if tracking_geometry not in {"dual_led", "single_led1", "single_led2"}:
+        raise ValueError(
+            f"tracking_geometry={tracking_geometry!r} must be 'dual_led', "
+            "'single_led1', or 'single_led2'."
+        )
 
     _check_ptp_filename(camera_timestamps_file)
 
@@ -93,6 +109,11 @@ def load_trodes_native_position(
     led1[(led1 == 0).all(axis=1)] = np.nan
     led2[(led2 == 0).all(axis=1)] = np.nan
 
+    if tracking_geometry == "single_led1":
+        led2 = np.full_like(led1, np.nan)
+    elif tracking_geometry == "single_led2":
+        led1 = np.full_like(led2, np.nan)
+
     t_cam = video_timestamps.index.to_numpy(dtype=float)
     sample_rate_hz = (
         float(1.0 / np.median(np.diff(t_cam))) if len(t_cam) > 1 else float("nan")
@@ -106,6 +127,7 @@ def load_trodes_native_position(
         coords_meters_per_pixel=None,
         diagnostics={
             "format": "trodes_native",
+            "tracking_geometry": tracking_geometry,
             "ptp_pause_frames_removed": int(initial_frame_count - len(t_cam)),
             "frame_count": len(t_cam),
             "sample_rate_hz": sample_rate_hz,
