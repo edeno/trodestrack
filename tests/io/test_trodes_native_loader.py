@@ -340,8 +340,10 @@ def test_imu_absent_with_vision_only_succeeds(tmp_path: Path) -> None:
 def test_imu_absent_with_imu_consuming_state_mode_raises(
     tmp_path: Path, state_mode: str
 ) -> None:
-    """Every IMU-consuming ``state_mode`` raises the three-option
-    remediation message when no IMU source is provided."""
+    """Every IMU-consuming ``state_mode`` raises the remediation
+    message when no IMU source is provided. Direct-Trodes users get
+    an extra hint pointing at ``trodes_to_nwb`` for ``.rec`` IMU/DIO
+    ingest, since ``trodes_native`` is camera-only in v1."""
 
     ts_path, info = _make_ptp_timestamps_file(tmp_path)
     pos_path = _make_position_tracking_file(tmp_path, info["pos_timestamps"])
@@ -353,6 +355,11 @@ def test_imu_absent_with_imu_consuming_state_mode_raises(
     assert "inputs.imu_file" in msg
     assert "vision_only" in msg
     assert "trodes_native" in msg
+    # Point users at the canonical ``.rec`` → NWB conversion path
+    # rather than leaving them to guess that ``trodes_native`` is
+    # camera-only.
+    assert "trodes_to_nwb" in msg
+    assert "inputs.format: nwb" in msg
 
 
 def test_imu_parquet_overrides_when_provided(tmp_path: Path) -> None:

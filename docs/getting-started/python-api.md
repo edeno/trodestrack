@@ -221,7 +221,10 @@ Beyond the parquet workflow, `SessionConfig` accepts three additional `inputs.fo
 
 #### `trodes_native` — Trodes binaries
 
-Reads the SpikeGadgets `.videoPositionTracking` + PTP-synced `.videoTimeStamps.cameraHWSync` pair without going through parquet conversion. v1 supports PTP only; non-PTP variants need [`trodes_to_nwb`](https://github.com/LorenFrankLab/trodes_to_nwb) and the `nwb` format.
+Reads the SpikeGadgets `.videoPositionTracking` + PTP-synced `.videoTimeStamps.cameraHWSync` pair without going through parquet conversion. v1 of this loader is **camera-only and PTP-only**:
+
+- For non-PTP timestamps (`cameraHWFrameCount`, plain `videoTimeStamps`): convert via [`trodes_to_nwb`](https://github.com/LorenFrankLab/trodes_to_nwb) and use `inputs.format: nwb`.
+- For raw `.rec` IMU and DIO/TTL ingest: same story — `trodes_to_nwb session.rec` produces an NWB file the `nwb` loader reads end-to-end (analog IMU, DIO bridge, position). The IMU-required `state_mode` error message links this path explicitly.
 
 ```yaml
 inputs:
@@ -230,7 +233,7 @@ inputs:
     position_tracking_file: data/session.videoPositionTracking
     camera_timestamps_file: data/session.videoTimeStamps.cameraHWSync
   # Optional: parquet IMU to fuse with binary camera. Without it,
-  # filter.state_mode must be vision_only.
+  # filter.state_mode must be vision_only (or convert to NWB; see above).
   # imu_file: data/session_imu.parquet
 ```
 

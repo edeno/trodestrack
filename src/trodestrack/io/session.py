@@ -295,11 +295,31 @@ def _resolve_imu_for_native_loader(
         return t_imu, U_filter, U_full, False, "nwb_analog"
 
     if _uses_imu(config.filter.state_mode):
-        raise ValueError(
-            f"inputs.format={config.inputs.format!r} requires an IMU "
-            "source. Provide inputs.imu_file, use NWB analog IMU "
-            "(NWB only), or set filter.state_mode: vision_only."
+        fmt = config.inputs.format
+        msg = (
+            f"inputs.format={fmt!r} requires an IMU source. "
+            "Provide inputs.imu_file (parquet) or set "
+            "filter.state_mode: vision_only."
         )
+        if fmt == "trodes_native":
+            # Direct-Trodes users with a ``.rec`` file are the most
+            # common case to hit this branch. The native loader is
+            # camera-only in v1; route them at the canonical
+            # conversion path that gets IMU + DIO end-to-end.
+            msg += (
+                " For a Trodes ``.rec`` file: convert via "
+                "``trodes_to_nwb path/to/session.rec`` (see "
+                "https://github.com/LorenFrankLab/trodes_to_nwb) and "
+                "use ``inputs.format: nwb`` — the NWB loader reads "
+                "analog IMU and DIO TTLs natively."
+            )
+        elif fmt == "nwb":
+            msg += (
+                " For NWB: the loader auto-detects "
+                "``processing/analog/...`` when present; if your file "
+                "lacks an analog group, populate ``inputs.imu_file``."
+            )
+        raise ValueError(msg)
 
     # vision_only: synthesize a zero IMU stream sized to the camera
     # vector (same length is convenient for the no-fusion path).

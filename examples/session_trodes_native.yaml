@@ -5,10 +5,18 @@
 #   uv run trodestrack smooth --config examples/session_trodes_native.yaml
 #
 # Paths are resolved relative to this YAML file. Replace the inputs with
-# your own session files before running. v1 supports PTP-synced
-# timestamps only (``*.videoTimeStamps.cameraHWSync``); convert the
-# session via trodes_to_nwb and use ``inputs.format: nwb`` for non-PTP
-# variants.
+# your own session files before running.
+#
+# Scope (v1 of trodes_native):
+#   - PTP-synced timestamps only (``*.videoTimeStamps.cameraHWSync``).
+#     ``cameraHWFrameCount`` and plain ``videoTimeStamps`` are rejected.
+#   - Camera-only. IMU + DIO/TTL ingest from a raw ``.rec`` file is
+#     not supported here; route those through trodes_to_nwb:
+#         trodes_to_nwb session.rec
+#         # then point trodestrack at the resulting NWB:
+#         inputs.format: nwb
+#     The ``nwb`` loader reads analog IMU and DIO TTLs end-to-end.
+#     See https://github.com/LorenFrankLab/trodes_to_nwb.
 
 inputs:
   format: trodes_native
