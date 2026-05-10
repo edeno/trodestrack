@@ -271,9 +271,25 @@ inputs:
 
 IMU resolution precedence: `inputs.imu_file` (parquet) wins → NWB analog group → synthetic vision-only fallback. The same precedence applies to TTL events — both `ttl_events.events_file` (parquet) and `inputs.nwb.dio_to_ttl` (NWB DIO bridge) may be configured together; the parquet `events_file` wins, the NWB DIO is loaded but ignored, and both sources are recorded in diagnostics. The NWB-DIO path is opt-in via `inputs.nwb.dio_to_ttl`. See [`examples/session_nwb.yaml`](https://github.com/edeno/trodestrack/blob/master/examples/session_nwb.yaml).
 
+Single-LED files (one tracked point that *is* physical LED1 or LED2 — not a body centroid) are supported via `inputs.nwb.led_source.tracking_geometry: single_led1` or `single_led2`. The unobserved LED is filled with NaN downstream so the EKF/UKF observation model still sees an LED-pair-shaped input. Single-LED sessions must declare `filter.led_distance` explicitly (no paired observations to infer the spacing from); for PoseEstimation containers, the matching `led{1,2}_bodypart` is also required.
+
 #### Spyglass integration
 
-The NWB container-layer API (`from_position_container`, `from_pose_estimation_container`, `from_analog_container`, `from_behavioral_events`) is public and pynwb-free at module load — a Spyglass `make()` that already has `pynwb` imported (via `fetch_nwb`) can call those functions directly with the returned container objects. trodestrack does not import `spyglass` or `datajoint`; the dependency direction is one-way. See `src/trodestrack/io/nwb/__init__.py` for the per-function contracts.
+The NWB container-layer API (`from_position_container`, `from_pose_estimation_container`, `from_analog_container`, `from_behavioral_events`) is public and pynwb-free at module load — a Spyglass `make()` that already has `pynwb` imported (via `fetch_nwb`) can call those functions directly with the returned container objects. trodestrack does not import `spyglass` or `datajoint`; the dependency direction is one-way.
+
+```python
+from trodestrack.config import NWBLEDSourceConfig
+from trodestrack.io.nwb import from_position_container
+
+# `nwb_file` is whatever the upstream caller already opened
+# (e.g., the result of Spyglass's `(SomeTable & key).fetch_nwb()`).
+position = nwb_file.processing["behavior"]["Position"]
+pixels = from_position_container(position, NWBLEDSourceConfig())
+# pixels.led1_pixels / led2_pixels are eager numpy arrays; the
+# caller may close the underlying NWBHDF5IO without breaking them.
+```
+
+See `src/trodestrack/io/nwb/__init__.py` for the per-function contracts.
 
 ### Extended Kalman Filter
 

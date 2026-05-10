@@ -58,7 +58,19 @@ Creates a publication-quality PDF with all PRD metrics, NEES/NIS checks, and tim
 
 ## 6. Run Real Data From a YAML Config
 
-For SpikeGadgets/Trodes-style real data, put input paths and preprocessing settings in a session YAML:
+TrodesTrack ships first-class loaders for five `inputs.format` values. Pick the one that matches what you have:
+
+| `inputs.format` | Use this if you have… | Example template |
+|---|---|---|
+| `spikegadgets_trodes` | A pre-converted parquet bundle (`imu.parquet` + `position.parquet`) from a private preprocessing pipeline. | `examples/session_spikegadgets_trodes.yaml` |
+| `trodes_native` | Raw Trodes binaries (`*.videoPositionTracking` + `*.videoTimeStamps.cameraHWSync`) from a PTP camera. | `examples/session_trodes_native.yaml` |
+| `dlc_keypoints` | A DLC `df_with_missing` HDF5 from `DeepLabCut.analyze_videos` plus a paired LED bodypart pair. | `examples/session_dlc_keypoints.yaml` |
+| `nwb` | An `.nwb` file with a `Position` (Trodes-style) or `PoseEstimation` (ndx-pose) container; optionally analog IMU and DIO TTLs. | `examples/session_nwb.yaml` |
+| `prepared_arrays` | A bundle of pre-computed `.txt` arrays (mostly used as a test/debug path). | _(see schema docstring)_ |
+
+Each format is selected via `inputs.format` and configured by the matching nested block (`inputs.trodes_native:`, `inputs.dlc_keypoints:`, `inputs.nwb:`). Schema validation rejects missing-block configs and half-set LED pair names at YAML-load time.
+
+Minimal `spikegadgets_trodes` example:
 
 ```yaml
 inputs:

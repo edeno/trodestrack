@@ -19,6 +19,14 @@ inputs:
     # when the writer used non-default series / bodypart names.
     led_source:
       container: auto  # or trodes_position / ndx_pose
+      # ``tracking_geometry`` defaults to ``dual_led`` (the file
+      # carries both physical LEDs). For sessions with a single
+      # tracked point that *is* physical LED1 or LED2 (not a body
+      # centroid), pick ``single_led1`` or ``single_led2`` and set
+      # ``filter.led_distance`` below — the unobserved LED is
+      # filled with NaN downstream so the EKF/UKF observation
+      # model still sees an LED-pair-shaped input.
+      # tracking_geometry: single_led1
       # For trodes_position (a pair):
       # led1_series_name: led_0_series_0
       # led2_series_name: led_1_series_0
@@ -26,6 +34,11 @@ inputs:
       # led1_bodypart: led_green
       # led2_bodypart: led_red
       # likelihood_threshold: 0.6
+      # Single-LED PoseEstimation requires only the matching
+      # bodypart name (the loader cannot guess which bodypart is
+      # the physical LED):
+      # tracking_geometry: single_led1
+      # led1_bodypart: led_green
     # Override the file-stored conversion (useful for post-hoc
     # re-calibration). Without this the file's ``conversion``
     # attribute is used; with ``unit="pixels"`` and
@@ -50,6 +63,10 @@ filter:
   # NWB analog IMU is auto-detected when the file has it; flip
   # state_mode to a fused mode in that case.
   state_mode: vision_only
+  # Required for ``tracking_geometry: single_led{1,2}`` (no paired
+  # observations to infer LED1↔LED2 spacing); optional for dual_led
+  # (the loader falls back to the median observed spacing).
+  # led_distance: 0.05
 
 led_identity:
   mode: auto
