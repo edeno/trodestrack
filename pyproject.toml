@@ -1,6 +1,6 @@
 [project]
 name = "trodestrack"
-version = "0.1.0"
+version = "0.2.0"
 description = "Sensor-fused 2D rat tracking with JAX EKF/UKF for SpikeGadgets/Trodes"
 readme = "README.md"
 requires-python = ">=3.11"

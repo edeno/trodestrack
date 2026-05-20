@@ -7,6 +7,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-20
+
+Sensor expansion, 3D orientation, YAML-driven CLI workflow, and a broad hardening pass across filters, smoothers, sim, QA, and CI.
+
+### Added
+
+#### Sensors
+
+- TTL event-location sensors: `EventLocationModel` with unified 2D Gaussian likelihood, ingest schemas, parquet → per-frame indexer, compact source-index masking, EKF and UKF wiring (`update_event_location`), and synthetic Trodes DIO edge generator with reset pulses
+- Configurable per-source TTL `covariance` (renamed from `R` for clarity); strict dtype/range validation on `source_id` and `event_indices_per_frame`
+
+#### 3D / Quaternion Orientation
+
+- Quaternion utilities and quaternion-aware RTS smoother with transition Jacobian builder
+- Experimental 3D camera measurement model and EKF path (`3d_cam_6dof_imu` layout); 6-DOF IMU orientation mode wired through IO and CLI
+- IMU calibration diagnostics; calibrated-gravity preservation in prediction
+- World-frame `imu_gravity` convention with documented sign
+
+#### CLI
+
+- YAML session configs (`trodestrack online --config …`, same for `smooth`/`report`) with effective-config metadata recorded into outputs
+- `--state-mode` flag; CLI defaults track `EKFConfig` rather than drifting
+- `friendly_cli_errors` decorator: surfaces `ValueError`/`TypeError` from filter / sim / config layers as actionable CLI messages
+
+#### LED identity
+
+- LED identity initial-state prior; identity correction relabels single-LED frames inside swapped intervals using position evidence at swap boundaries
+- Calibration alignment with corrected LED identity; confidence-row swap on identity correction
+
+#### Performance
+
+- JIT wrapper for 3D EKF; vectorized orientation estimator via `jax.lax.scan`
+- 3D camera and RTS JAXPR benchmarks; throughput benchmarks now `block_until_ready` inside the timer
+- 4×4 / 5s beam-grid TTL benchmark scenario
+
+#### Numerical robustness
+
+- Joseph-form EKF covariance update; square-root–style UKF update
+- Adaptive diagonal boost for PSD solves
+- IEKF double-counting fix; pos/vel-vs-quat block added to quaternion Jacobian; widened no-LED initial covariance
+- Closed-form fold for arena overshoot; bias-corrected gyro gating
+
+### Changed
+
+- `compute_dropout_drift` now measures tracking error (not endpoint motion); examples 06 and 07 updated to the new signature
+- `enable_zupt` defaults to `False` for vision-only configs; ZUPT gating now uses measured stationarity
+- Initial-state covariance contract: strictly positive definite (was PSD)
+- `make_default_config` routes through `__post_init__` so config-level validation runs on every path
+- Throughput-benchmark wall-clock asserts demoted; CPU benchmarks gated
+- Layout-aware diagnostic video (no hardcoded state indices); shared mask gate applied across `lagged_linear_fit`, axis-sign, `smooth_time_series`, and RMSE helpers
+- Filter residuals computed from configured LED offsets (not `±0.5 * led_distance`)
+- Bernoulli sampling for per-frame LED swap and reflection probabilities
+
+### Fixed
+
+- UKF heading-wrap bug; degenerate-weight diagnostic when `(n + κ) ≤ 0`; alpha floor
+- Operator-precedence bug that silently disabled `confidence_dropout_decay`
+- Quaternion transition Jacobian correctness; orientation convention aligned with filter
+- LED dropout-marker origin phantom; `FilterArtist` clearing on non-PSD covariance; `TrailArtist` color respected
+- Diagnostic video LED convention; `vision_only` crash; stale NEES line cleared when rolling window is all-NaN
+- IMU truth overlay units; `P0` PSD enforcement; `simulate_circular` rejects non-positive radius
+- Arena reflection loops on high-displacement steps; video event-detect walks every camera frame
+- Single-sample-IMU `xlim` padding; first-frame `xlim` consistent across filter panels
+- `simple_sim` short-duration / `SimpleSimConfig` paths in diagnostic video
+- Numerous doc fixes: layout-aware indexing in snippets, corrected NEES guidance and inversions, fixed mkdocs strict-mode links, refreshed test counts and benchmark numbers
+
+### Validation / Hardening
+
+- Strict input validation at every public filter, smoother, sim, QA, and CLI entrypoint: shape, dtype, length (`len(t_imu) >= 2`), monotonicity, finiteness, strict-bool config toggles, non-empty timestamps, valid `num_iter`, valid chi-squared df, valid `measurement_dim` when reporting NIS, valid mask dtypes/values, valid frame alignment, valid sensor-model constructors, valid LED pair, finite `t`/`sigma` in calibration, finite `conf_cam`, finite NaN/Inf-tolerant residual panels
+- Rejects: NaN heading metrics, NaN ZUPT/gravity config fields, NaN 3D `led_offsets`, NaN UKF scaling, NaN/non-positive `led_distance`, negative `cam_latency_s`/`cam_jitter_s`, non-1D `valid_mask`, complex-dtype event arrays, unsigned `source_id` above int64 range, `axis_signs` outside ±1, partial confidence config, `3d_cam_6dof_imu` in 2D EKF, smoother `filter_result` whose dim doesn't match `config.state_mode`
+
+### Infrastructure / CI
+
+- Publish workflow gates real-PyPI on tag matching `pyproject.toml` version; prerelease tags (PEP 440) route to TestPyPI; rejects malformed `vv`-prefixed tags
+- Removed `fix = true` from ruff config (CI was silently autofixing and exiting 0 on dirty branches); release classification now runs after `uv sync` so `packaging` is importable
+- sdist now ships `examples/` (README references them as PyPI long-description)
+
+### Removed
+
+- Scaffolding docs (`.claude/SCRATCHPAD.md`, `.claude/TASKS.md`); implementation plans moved into `.claude/docs/plans/`
+- Real-time / latency framing from `trodestrack online` CLI docs (forward-pass-only, not real-time)
+- Tilt/orientation 3D camera *plan* doc (work landed; plan no longer load-bearing)
+
 ## [0.1.0] - 2025-02-25
 
 Initial public release of trodestrack: sensor-fused 2D rat tracking with JAX EKF/UKF for SpikeGadgets/Trodes.
@@ -97,5 +180,6 @@ Initial public release of trodestrack: sensor-fused 2D rat tracking with JAX EKF
 Detailed session-by-session development notes are preserved in
 [CHANGELOG.dev-sessions.md](CHANGELOG.dev-sessions.md) for historical reference.
 
-[Unreleased]: https://github.com/edeno/trodestrack/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/edeno/trodestrack/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/edeno/trodestrack/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/edeno/trodestrack/releases/tag/v0.1.0
