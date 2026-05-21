@@ -28,6 +28,38 @@ DEG_TO_RAD = np.pi / 180.0
 
 
 @dataclass(frozen=True)
+class EventChannel:
+    """Resolved TTL-event channel data for a session.
+
+    Either all four fields are present (TTL events configured and loaded)
+    or this object is None entirely. Replaces four parallel Optional
+    fields on PreparedSession that had to move together.
+    """
+
+    sources: tuple[EventLocationSource, ...]
+    anchors: np.ndarray  # (n_sources, 2)
+    covariances: np.ndarray  # (n_sources, 2, 2)
+    indices_per_frame: np.ndarray  # (n_cam, max_events_per_frame), int32, -1 padded
+
+    def __post_init__(self) -> None:
+        if not self.sources:
+            raise ValueError(
+                "EventChannel with empty sources should be represented as None instead."
+            )
+        n_sources = len(self.sources)
+        if self.anchors.shape != (n_sources, 2):
+            raise ValueError(
+                f"anchors shape {self.anchors.shape} mismatched with "
+                f"len(sources)={n_sources}; expected ({n_sources}, 2)."
+            )
+        if self.covariances.shape != (n_sources, 2, 2):
+            raise ValueError(
+                f"covariances shape {self.covariances.shape}; expected "
+                f"({n_sources}, 2, 2)."
+            )
+
+
+@dataclass(frozen=True)
 class PreparedSession:
     """Filter-ready session arrays and diagnostics."""
 
@@ -43,10 +75,7 @@ class PreparedSession:
     config: SessionConfig
     gyro_z_for_led_identity: np.ndarray | None = None
     U_imu_for_calibration: np.ndarray | None = None
-    event_sources: tuple[EventLocationSource, ...] = ()
-    event_source_anchors: np.ndarray | None = None
-    event_source_covariances: np.ndarray | None = None
-    event_indices_per_frame: np.ndarray | None = None
+    events: EventChannel | None = None
 
     @property
     def source_format(self) -> str:
@@ -457,14 +486,13 @@ def _attach_ttl_events(session: PreparedSession) -> PreparedSession:
         "source_ids": [src.source_id for src in sources],
         **ttl_diagnostics,
     }
-    return replace(
-        session,
-        diagnostics=diagnostics,
-        event_sources=tuple(sources),
-        event_source_anchors=anchors,
-        event_source_covariances=covariances,
-        event_indices_per_frame=indices,
+    channel = EventChannel(
+        sources=tuple(sources),
+        anchors=anchors,
+        covariances=covariances,
+        indices_per_frame=indices,
     )
+    return replace(session, diagnostics=diagnostics, events=channel)
 
 
 def _add_imu_calibration_diagnostics(session: PreparedSession) -> PreparedSession:

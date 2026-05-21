@@ -212,14 +212,87 @@ def test_load_session_attaches_event_arrays(tmp_path):
 
     config = load_session_config(config_path)
     session = load_session(config)
-    assert len(session.event_sources) == 1
-    assert session.event_source_anchors.shape == (1, 2)
-    assert session.event_source_covariances.shape == (1, 2, 2)
-    assert session.event_indices_per_frame.shape[1] == 4
-    assert (session.event_indices_per_frame >= 0).sum() >= 1
+    assert session.events is not None
+    assert len(session.events.sources) == 1
+    assert session.events.anchors.shape == (1, 2)
+    assert session.events.covariances.shape == (1, 2, 2)
+    assert session.events.indices_per_frame.shape[1] == 4
+    assert (session.events.indices_per_frame >= 0).sum() >= 1
     diag = session.diagnostics["ttl_events"]
     assert diag["n_sources"] == 1
     assert diag["max_events_per_frame"] == 4
+
+
+def test_load_session_events_is_none_when_no_ttl_events(tmp_path):
+    """Session loaded without ``ttl_events`` config has ``events=None``."""
+    _write_minimal_imu_camera(tmp_path)
+    config_path = tmp_path / "session.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "inputs": {
+                    "format": "prepared_arrays",
+                    "imu_timestamps": "t_imu.txt",
+                    "imu_measurements": "u_imu.txt",
+                    "camera_timestamps": "t_cam.txt",
+                    "led1_positions": "led1.txt",
+                },
+                "filter": {"led_distance": 0.04},
+            }
+        )
+    )
+    from trodestrack.io.session import load_session
+
+    config = load_session_config(config_path)
+    session = load_session(config)
+    assert session.events is None
+
+
+def test_event_channel_rejects_inconsistent_anchor_shape():
+    from trodestrack.config.schemas import EventLocationSource
+    from trodestrack.io.session import EventChannel
+
+    src1 = EventLocationSource(
+        source_id=1, anchor=np.array([0.0, 0.0]), covariance=np.eye(2)
+    )
+    src2 = EventLocationSource(
+        source_id=2, anchor=np.array([1.0, 0.0]), covariance=np.eye(2)
+    )
+    with pytest.raises(ValueError, match="anchors shape"):
+        EventChannel(
+            sources=(src1, src2),
+            anchors=np.zeros((1, 2)),
+            covariances=np.zeros((2, 2, 2)),
+            indices_per_frame=np.full((10, 4), -1, dtype=np.int32),
+        )
+
+
+def test_event_channel_rejects_inconsistent_covariance_shape():
+    from trodestrack.config.schemas import EventLocationSource
+    from trodestrack.io.session import EventChannel
+
+    src = EventLocationSource(
+        source_id=1, anchor=np.array([0.0, 0.0]), covariance=np.eye(2)
+    )
+    with pytest.raises(ValueError, match="covariances shape"):
+        EventChannel(
+            sources=(src,),
+            anchors=np.zeros((1, 2)),
+            covariances=np.zeros((1, 3, 3)),
+            indices_per_frame=np.full((10, 4), -1, dtype=np.int32),
+        )
+
+
+def test_event_channel_rejects_empty_sources():
+    from trodestrack.io.session import EventChannel
+
+    with pytest.raises(ValueError, match="empty sources"):
+        EventChannel(
+            sources=(),
+            anchors=np.zeros((0, 2)),
+            covariances=np.zeros((0, 2, 2)),
+            indices_per_frame=np.full((10, 4), -1, dtype=np.int32),
+        )
 
 
 def test_ttl_events_path_resolved_relative_to_yaml(tmp_path):

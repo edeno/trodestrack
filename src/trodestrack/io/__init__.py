@@ -2,6 +2,7 @@
 
 from trodestrack.io.led_identity import CorrectedLEDIdentity, resolve_led_identity
 from trodestrack.io.session import (
+    EventChannel,
     PreparedSession,
     SafetyReport,
     load_session,
@@ -12,6 +13,7 @@ from trodestrack.io.session import (
 
 __all__ = [
     "CorrectedLEDIdentity",
+    "EventChannel",
     "PreparedSession",
     "SafetyReport",
     "load_session",
