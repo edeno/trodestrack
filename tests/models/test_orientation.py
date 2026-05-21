@@ -232,11 +232,18 @@ def _stationary_orientation_inputs(
     return t_imu, gyro, accel, np.asarray(true_quat)
 
 
-@pytest.mark.parametrize("pitch_deg", [88.0, 92.0])
+@pytest.mark.parametrize("pitch_deg", [88.0, 92.0, -88.0])
 def test_orientation_near_pitch_singularity_keeps_quaternion_unit_norm(
     pitch_deg: float,
 ) -> None:
     """Stationary headstage near the ±90° gimbal-lock region.
+
+    Three cases probe both sides of each pole:
+    - ``+88°`` just below the positive-pitch singularity at +90°.
+    - ``+92°`` just past the positive-pitch singularity (true quaternion
+      lives on the other side; recovered Euler pitch wraps to ~88°).
+    - ``-88°`` the negative-pitch hemisphere — catches sign-flip bugs in
+      the quaternion update that the two positive-pitch cases would miss.
 
     The Euler-angle pitch singularity sits at ±90°. The internal quaternion
     representation must stay unit-norm regardless of how poorly Euler-angle
@@ -270,7 +277,11 @@ def test_orientation_near_pitch_singularity_keeps_quaternion_unit_norm(
         atol=np.sin(np.deg2rad(3.0)),
     )
     # Sanity-check that we didn't accidentally land on the opposite hemisphere.
+    # arcsin-wrap maps +92° to +88°, so recovered pitch should be near
+    # ``pitch_deg`` for the two positive cases and near ``-pitch_deg`` for -88°.
+    expected_sign = 1.0 if pitch_deg > 0 else -1.0
     assert abs(pitch_recovered_deg) > 80.0
+    assert pitch_recovered_deg * expected_sign > 0.0
 
 
 def test_orientation_through_pitch_singularity_does_not_nan() -> None:
