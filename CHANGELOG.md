@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `trodestrack --version` now reports the correct package version (was 0.1.0; pyproject.toml ships 0.2.0).
 - `io.session._median_led_distance` now raises `ValueError` instead of silently returning a hardcoded 0.04 m fallback when no dual-LED frames are available. Set `filter.led_distance` explicitly in the YAML config or pass `--led-distance` on the CLI.
 - `io.session._index_or_time_column` now raises `ValueError` when the input DataFrame is missing the `time` column. The previous fallback silently substituted sample numbers (df.index) for seconds, producing dt values off by the sampling rate.
+- `io.session._add_imu_calibration_diagnostics` no longer swallows non-verdict `ValueError`s into a diagnostics string; only `_validate_calibration_for_fusion` exceptions are captured.
 
 ## [0.2.0] - 2026-05-20
 

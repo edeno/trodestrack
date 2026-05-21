@@ -15,6 +15,7 @@ from trodestrack.io import (
 )
 from trodestrack.io.led_identity import CorrectedLEDIdentity
 from trodestrack.io.session import (
+    _add_imu_calibration_diagnostics,
     _index_or_time_column,
     _median_led_distance,
     _validate_calibration_for_fusion,
@@ -1043,3 +1044,59 @@ def test_index_or_time_column_raises_when_time_missing():
     df_with_time = pd.DataFrame({"time": [0.0, 0.01, 0.02], "x": [1.0, 2.0, 3.0]})
     result = _index_or_time_column(df_with_time, source="test")
     np.testing.assert_array_equal(result, np.array([0.0, 0.01, 0.02]))
+
+
+def _calibration_prepared_session() -> PreparedSession:
+    """Minimal PreparedSession that passes the calibration entry guard."""
+
+    n_imu = 4
+    n_cam = 3
+    return PreparedSession(
+        t_imu=np.linspace(0.0, 0.03, n_imu),
+        U_imu=np.zeros((n_imu, 3)),
+        t_cam=np.linspace(0.0, 0.02, n_cam),
+        Z_cam_led1=np.zeros((n_cam, 2)),
+        Z_cam_led2=np.zeros((n_cam, 2)),
+        mask_cam=np.ones(n_cam, dtype=bool),
+        conf_cam=None,
+        led_distance=0.04,
+        diagnostics={},
+        config=_calibration_config(),
+        U_imu_for_calibration=np.zeros((n_imu, 6)),
+    )
+
+
+def test_add_imu_calibration_diagnostics_propagates_unexpected_errors(monkeypatch):
+    """Non-verdict ValueErrors from calibration metrics must propagate."""
+
+    def boom(**kwargs):
+        raise ValueError("shape mismatch")
+
+    monkeypatch.setattr("trodestrack.io.session.run_imu_calibration_diagnostics", boom)
+
+    session = _calibration_prepared_session()
+    with pytest.raises(ValueError, match="shape mismatch"):
+        _add_imu_calibration_diagnostics(session)
+    assert "imu_calibration_error" not in session.diagnostics
+
+
+def test_add_imu_calibration_diagnostics_still_captures_verdict_errors(monkeypatch):
+    """Verdict-function ValueErrors land in diagnostics without propagating."""
+
+    monkeypatch.setattr(
+        "trodestrack.io.session.run_imu_calibration_diagnostics",
+        lambda **kwargs: _calibration_report(),
+    )
+
+    def fail_verdict(report, config):
+        raise ValueError("calibration verdict failed")
+
+    monkeypatch.setattr(
+        "trodestrack.io.session._validate_calibration_for_fusion", fail_verdict
+    )
+
+    session = _calibration_prepared_session()
+    result = _add_imu_calibration_diagnostics(session)
+    assert "calibration verdict failed" in str(
+        result.diagnostics["imu_calibration_error"]
+    )

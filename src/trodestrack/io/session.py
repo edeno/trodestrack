@@ -480,19 +480,24 @@ def _add_imu_calibration_diagnostics(session: PreparedSession) -> PreparedSessio
         return session
 
     diagnostics = dict(session.diagnostics)
+    # run_imu_calibration_diagnostics computes metrics — bugs here are real
+    # bugs and should propagate, not be swallowed into a diagnostics string.
+    report = run_imu_calibration_diagnostics(
+        t_imu=session.t_imu,
+        gyro_z=U_full[:, 2],
+        accel_xyz=U_full[:, 3:6],
+        t_cam=session.t_cam,
+        led1=session.Z_cam_led1,
+        led2=session.Z_cam_led2,
+    )
+    diagnostics["imu_calibration"] = report
+    diagnostics["imu_calibration_led_identity_applied"] = (
+        config.led_identity.mode == "auto"
+    )
+    # Only the verdict function (_validate_calibration_for_fusion) raises
+    # ValueError as a deliberate signal — capture that into diagnostics so
+    # callers can decide whether to gate on it.
     try:
-        report = run_imu_calibration_diagnostics(
-            t_imu=session.t_imu,
-            gyro_z=U_full[:, 2],
-            accel_xyz=U_full[:, 3:6],
-            t_cam=session.t_cam,
-            led1=session.Z_cam_led1,
-            led2=session.Z_cam_led2,
-        )
-        diagnostics["imu_calibration"] = report
-        diagnostics["imu_calibration_led_identity_applied"] = (
-            config.led_identity.mode == "auto"
-        )
         _validate_calibration_for_fusion(report, config)
     except ValueError as e:
         diagnostics["imu_calibration_error"] = str(e)
