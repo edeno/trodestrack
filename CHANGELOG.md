@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `trodestrack --version` now reports the correct package version (was 0.1.0; pyproject.toml ships 0.2.0).
-- `io.session._median_led_distance` now raises `ValueError` instead of silently returning a hardcoded 0.04 m fallback when no dual-LED frames are available. Set `camera.led_distance` explicitly in the YAML config or pass `--led-distance` on the CLI.
+- `io.session._median_led_distance` now raises `ValueError` instead of silently returning a hardcoded 0.04 m fallback when no dual-LED frames are available. Set `filter.led_distance` explicitly in the YAML config or pass `--led-distance` on the CLI.
 
 ## [0.2.0] - 2026-05-20
 

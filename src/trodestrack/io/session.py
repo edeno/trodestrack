@@ -638,7 +638,7 @@ def _median_led_distance(led1: np.ndarray, led2: np.ndarray, mask: np.ndarray) -
     if n_valid == 0:
         raise ValueError(
             "Cannot auto-detect LED spacing: zero dual-LED frames are valid "
-            "(both LEDs present and finite). Set camera.led_distance "
+            "(both LEDs present and finite). Set filter.led_distance "
             "explicitly in the SessionConfig YAML, or pass --led-distance on "
             "the CLI. The previous 0.04 m fallback was removed because it "
             "silently produced wrong-sized heading pseudo-measurements when "
