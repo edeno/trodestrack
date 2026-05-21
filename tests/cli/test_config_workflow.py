@@ -588,9 +588,8 @@ def test_config_bad_imu_calibration_fails_with_diagnostics(
 ) -> None:
     """Invalid IMU calibration should stop before writing trusted outputs.
 
-    After narrowing the calibration try/except (Phase 1 Task 4), errors from
-    inside ``run_imu_calibration_diagnostics`` propagate out as
-    ``ValueError`` (surfaced via ``friendly_cli_errors``) rather than being
+    Non-verdict ``ValueError``\\s raised inside ``run_imu_calibration_diagnostics``
+    propagate out (surfaced via ``friendly_cli_errors``) rather than being
     captured into ``session.diagnostics["imu_calibration_error"]``. Only
     ``_validate_calibration_for_fusion`` ValueErrors land in diagnostics.
     """

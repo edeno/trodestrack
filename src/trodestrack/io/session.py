@@ -636,11 +636,14 @@ def _load_leds(
 def _index_or_time_column(df: pd.DataFrame, *, source: str) -> np.ndarray:
     if "time" in df.columns:
         return df["time"].to_numpy(dtype=float)
+    if df.index.name == "time":
+        return df.index.to_numpy(dtype=float)
     raise ValueError(
-        f"{source} is missing required 'time' column. The previous fallback "
-        "of using df.index silently substituted sample numbers (0, 1, 2, ...) "
-        "for seconds, producing dt values off by the sampling rate and "
-        "wildly miscalibrated filter outputs."
+        f"{source} is missing required 'time' column (or 'time'-named index). "
+        "The previous fallback of using an unnamed df.index silently "
+        "substituted sample numbers (0, 1, 2, ...) for seconds, producing dt "
+        "values off by the sampling rate and wildly miscalibrated filter "
+        "outputs."
     )
 
 
