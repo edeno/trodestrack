@@ -247,6 +247,15 @@ class FilterConfig(BaseModel):
         data = self.model_dump(exclude_none=True)
         if self.state_mode == "vision_only" and self.use_mahalanobis_gating is None:
             data["use_mahalanobis_gating"] = False
+        # ``FilterCoreConfig`` raises on vision_only + enable_zupt=True
+        # (ZUPT requires IMU stationarity detection that vision_only
+        # does not consume). Auto-disable when the YAML caller left it
+        # unset so the YAML interface stays usable, mirroring the
+        # ``use_mahalanobis_gating`` auto-disable above. An explicit
+        # ``enable_zupt: true`` under ``state_mode: vision_only`` still
+        # surfaces the ValueError from FilterCoreConfig.
+        if self.state_mode == "vision_only" and self.enable_zupt is None:
+            data["enable_zupt"] = False
         data["led_distance"] = (
             self.led_distance if self.led_distance is not None else led_distance
         )

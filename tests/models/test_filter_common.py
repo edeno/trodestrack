@@ -450,18 +450,29 @@ def test_filter_core_config_bool_fields_require_strict_bool() -> None:
     UKFConfig(use_heading_measurement=False)
 
 
-def test_filter_core_config_disables_zupt_for_vision_only() -> None:
-    """ZUPT needs IMU stationarity evidence and is not valid in vision-only mode."""
+def test_filter_core_config_rejects_vision_only_with_zupt() -> None:
+    """ZUPT needs IMU stationarity evidence and is not valid in vision-only mode.
 
-    core = FilterCoreConfig(state_mode="vision_only")
-    ekf = EKFConfig(state_mode="vision_only")
-    ukf = UKFConfig(state_mode="vision_only")
-    explicit = EKFConfig(state_mode="vision_only", enable_zupt=True)
-
-    assert core.enable_zupt is False
-    assert ekf.enable_zupt is False
-    assert ukf.enable_zupt is False
-    assert explicit.enable_zupt is False
+    Previously the config silently disabled ``enable_zupt`` in this case;
+    the mutation made it easy to miss that ZUPT was off when reading back
+    the config. Raise instead so the caller has to acknowledge the
+    incompatibility.
+    """
+    for cls in (FilterCoreConfig, EKFConfig, UKFConfig):
+        # Default ``enable_zupt=True`` collides with vision_only.
+        with pytest.raises(
+            ValueError,
+            match=r"enable_zupt=True is incompatible with state_mode='vision_only'",
+        ):
+            cls(state_mode="vision_only")
+        # Explicit collision: same error.
+        with pytest.raises(
+            ValueError,
+            match=r"enable_zupt=True is incompatible with state_mode='vision_only'",
+        ):
+            cls(state_mode="vision_only", enable_zupt=True)
+        # Explicit opt-out is accepted.
+        assert cls(state_mode="vision_only", enable_zupt=False).enable_zupt is False
 
 
 def test_filter_core_config_rejects_invalid_zupt_visual_hold_frames() -> None:

@@ -78,8 +78,12 @@ def test_vision_only_config_defaults_mahalanobis_gating_off():
         }
     )
 
-    assert config.filter.to_ekf_kwargs()["use_mahalanobis_gating"] is False
-    assert "enable_zupt" not in config.filter.to_ekf_kwargs()
+    kwargs = config.filter.to_ekf_kwargs()
+    assert kwargs["use_mahalanobis_gating"] is False
+    # ``FilterCoreConfig`` rejects vision_only + enable_zupt=True; the
+    # schema layer auto-injects ``enable_zupt=False`` so YAML callers
+    # don't have to spell it out alongside ``state_mode: vision_only``.
+    assert kwargs["enable_zupt"] is False
 
 
 def test_vision_only_config_respects_explicit_mahalanobis_gating():
