@@ -24,7 +24,7 @@ def test_event_location_source_accepts_valid_construction():
 
 
 def test_event_location_source_rejects_wrong_anchor_shape():
-    with pytest.raises(ValueError, match="anchor"):
+    with pytest.raises(ValueError, match=r"anchor.*shape"):
         EventLocationSource(
             source_id=1,
             anchor=np.zeros(3),
@@ -34,7 +34,7 @@ def test_event_location_source_rejects_wrong_anchor_shape():
 
 
 def test_event_location_source_rejects_non_finite_anchor():
-    with pytest.raises(ValueError, match="anchor"):
+    with pytest.raises(ValueError, match=r"anchor.*finite"):
         EventLocationSource(
             source_id=1,
             anchor=np.array([0.0, np.nan]),
@@ -44,7 +44,7 @@ def test_event_location_source_rejects_non_finite_anchor():
 
 
 def test_event_location_source_rejects_wrong_cov_shape():
-    with pytest.raises(ValueError, match="covariance"):
+    with pytest.raises(ValueError, match=r"covariance.*shape"):
         EventLocationSource(
             source_id=1,
             anchor=np.zeros(2),
@@ -52,7 +52,7 @@ def test_event_location_source_rejects_wrong_cov_shape():
             source_type="beam",
         )
 
-    with pytest.raises(ValueError, match="covariance"):
+    with pytest.raises(ValueError, match=r"covariance.*shape"):
         EventLocationSource(
             source_id=1,
             anchor=np.zeros(2),
@@ -64,7 +64,7 @@ def test_event_location_source_rejects_wrong_cov_shape():
 def test_event_location_source_rejects_non_finite_covariance():
     cov = np.eye(2)
     cov[0, 0] = np.inf
-    with pytest.raises(ValueError, match="covariance"):
+    with pytest.raises(ValueError, match=r"covariance.*finite"):
         EventLocationSource(
             source_id=1,
             anchor=np.zeros(2),

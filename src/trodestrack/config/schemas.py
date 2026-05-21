@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 
 import numpy as np
 import yaml
@@ -300,6 +300,7 @@ class LedIdentityConfig(BaseModel):
 
 
 SourceType = Literal["beam", "zone", "rfid"]
+SOURCE_TYPES: tuple[str, ...] = get_args(SourceType)
 
 
 @dataclass(frozen=True)
@@ -319,10 +320,10 @@ class EventLocationSource:
     source_type: SourceType = "beam"
 
     def __post_init__(self) -> None:
-        if self.source_type not in ("beam", "zone", "rfid"):
+        if self.source_type not in SOURCE_TYPES:
             raise ValueError(
                 "EventLocationSource.source_type must be one of "
-                f"('beam', 'zone', 'rfid'); got {self.source_type!r}."
+                f"{SOURCE_TYPES}; got {self.source_type!r}."
             )
 
         anchor = np.asarray(self.anchor, dtype=float)
