@@ -313,63 +313,9 @@ See [`examples/README.md`](examples/README.md) for the complete learning path. E
 - **07**: Smoothing techniques
 - **08**: QA reporting
 
-## Project Status
+## Status
 
-**Current Milestone**: Integration & QA (M4) - Ready for Production Testing
-
-### Completed ✅
-
-- ✅ **Simulation Foundation** (M1)
-  - Realistic rat motion with Ornstein-Uhlenbeck dynamics
-  - Full IMU physics (tilt, drag, bias random walks)
-  - Camera dropout, LED swaps, occlusions, and reflections
-  - Arena boundaries with inelastic collisions
-- ✅ **Filter Implementation** (M2)
-  - Extended Kalman Filter (EKF) with IMU pre-integration
-  - Unscented Kalman Filter (UKF) with sigma-point transforms
-  - Rauch-Tung-Striebel (RTS) smoothing for offline analysis
-  - Iterated EKF/Smoother (IEKF/IEKS) for nonlinear accuracy
-- ✅ **Robustness Features** (M3)
-  - Mahalanobis gating for outlier rejection
-  - Zero-velocity updates (ZUPT) for stationary periods
-  - Adaptive process noise during camera dropout
-  - Heading pseudo-measurements from dual LEDs
-  - LED spacing validation and adaptive measurement noise
-- ✅ **QA & Diagnostics** (M4)
-  - Comprehensive metrics (RMSE, NEES, NIS, innovation statistics)
-  - Publication-quality plots and multi-page PDF reports
-  - CLI tool: `trodestrack report --run qa_inputs/ --pdf report.pdf` (consumes a separately-prepared QA-input directory; see `--help`)
-  - Diagnostic videos with 9-panel filter state visualization
-- ✅ **Testing & Validation**
-  - 700+ unit, integration, regression, and property tests across the suite. The default CI-style run uses `pytest -m "not slow and not benchmark"` and excludes long-running tests marked `slow` or `benchmark`. Invoke the excluded ones locally with `uv run pytest -m "slow or benchmark"`. Persistent LED-swap correction is covered by `test_persistent_swap_prefilter_recovers_led_identities` in `tests/filters/test_robustness.py`. Rerun `uv run pytest` for the current pass count — the absolute number drifts as tests are added.
-  - Accuracy and performance targets achieved on the simulated benchmark:
-    - Position RMSE ≤ 2 cm ✓
-    - Velocity RMSE ≤ 10 cm/s ✓
-    - Heading RMSE ≤ 7° ✓
-    - Throughput-floor benchmarks (≥10× realtime offline on CPU, ≤33 ms amortized mean per frame online on a 30-minute session) live in [tests/benchmark/test_throughput.py](tests/benchmark/test_throughput.py); they are not part of the default CI matrix. Reference run on an M-series Mac CPU under the corrected (block-until-ready) timing: ~38× realtime / ~0.41 ms per frame; absolute throughput is hardware-dependent. These floors cover the synthetic 2D benchmark path, not the YAML real-data workflow with calibration, LED identity correction, and the extra vision-only safety pass.
-- ✅ **3D IMU Support** (M5)
-  - Full 6-axis IMU processing (gyro + accel)
-  - Gravity-aware dynamics with 3D acceleration
-  - 2D pose estimation with 3D IMU inputs
-  - Improved drift handling during vision dropout
-- ✅ **JAX Optimization** (M6)
-  - JIT-compiled UKF (mirrors EKF pattern)
-  - Vectorized operations (sigma points, bias freeze)
-  - Host-side preprocessing for efficiency
-  - On the 30-minute throughput benchmark, reference run on an M-series Mac CPU under the corrected (block-until-ready) timing: ~38× realtime / ~0.41 ms per frame. Floor checks (≥10× realtime offline, ≤33 ms amortized mean per frame online) live in [tests/benchmark/test_throughput.py](tests/benchmark/test_throughput.py); run them locally with `JAX_PLATFORMS=cpu uv run pytest -m benchmark` (the CPU pin is required to satisfy the in-test backend assertion).
-
-### In Progress 🚧
-
-- 🚧 **I/O Loaders**
-  - Trodes LED detection format
-  - DeepLabCut keypoint format
-  - SpikeGadgets raw IMU format
-- 🚧 **CLI Tools**
-  - Additional real-data loaders beyond the current `--config` workflows
-    for prepared arrays and SpikeGadgets IMU parquet plus Trodes dual-LED
-    parquet. Both `trodestrack smooth --config session.yaml` and
-    `trodestrack online --config session.yaml` are available today; the
-    per-file flags remain supported for prepared arrays.
+See [CHANGELOG.md](CHANGELOG.md) for completed features and release history; see [docs/plans/](.claude/docs/plans/) for active work.
 
 ## Documentation
 
