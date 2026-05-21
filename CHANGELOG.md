@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - unreleased
+
+### Changed
+
+- QA report and diagnostic plot legends now use "target" instead of "PRD" terminology. User-visible plot legend labels (e.g. `"PRD: ±10 cm/s"` → `"target: ±10 cm/s"`) change in the QA PDF and the live diagnostic video.
+- Public function parameters renamed: `qa.plots.plot_position_error` / `plot_velocity_error` `prd_threshold_m` → `target_threshold_m`; `plot_heading_error` `prd_threshold_deg` → `target_threshold_deg`. Module-level constants in `qa.report` renamed `PRD_*` → `TARGET_*` (not in `__all__`; not a public API change).
+
+### Internal
+
+- Removed scaffolding-doc references from source docstrings ("Arthur-specific", "PR2/PR3 JAX compatibility", "tilt/orientation implementation plan", "see around line N", "previously in filter_utils.py").
+- Fixed stale shape annotations in `models/ukf.py` (`# (17, 8)` → `# (2n+1, n)`; `# (17, 4)` → `# (2n+1, meas_dim)`).
+- Swept ~140 trivial WHAT-comments from `viz/components.py`, `models/ukf.py`, `models/ekf.py`, and `sim/rat_imu.py`. Comments now default to explaining WHY (non-obvious constraints, fixed bugs, numerical pitfalls), not narrating the next 1-3 lines.
+
 ## [0.2.1] - unreleased
 
 ### Fixed
@@ -190,6 +203,7 @@ Initial public release of trodestrack: sensor-fused 2D rat tracking with JAX EKF
 Detailed session-by-session development notes are preserved in
 [CHANGELOG.dev-sessions.md](CHANGELOG.dev-sessions.md) for historical reference.
 
-[0.2.1]: https://github.com/edeno/trodestrack/compare/v0.2.0...HEAD
+[0.2.2]: https://github.com/edeno/trodestrack/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/edeno/trodestrack/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/edeno/trodestrack/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/edeno/trodestrack/releases/tag/v0.1.0
