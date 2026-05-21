@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -29,26 +30,39 @@ def friendly_cli_errors(func: F) -> F:
     -----
     Generic ``Exception`` is caught so unexpected failures (e.g. a
     bug in a downstream module) still exit with a friendly
-    ``Unexpected error:`` line; the underlying issue is then
-    reproducible by re-running with ``PYTHONFAULTHANDLER=1`` or by
-    wrapping the call site with ``--debug`` if the CLI grows one.
+    ``Unexpected error (<ExceptionClass>): ...`` line. The exception
+    class name is included so users filing bug reports can identify
+    whether the failure was a ``KeyError``, ``AttributeError``, etc.
+
+    Set ``TRODESTRACK_DEBUG=1`` (or ``true``/``yes``) in the
+    environment to re-raise exceptions with a full Python traceback
+    instead of converting them to a stderr line and exiting. The
+    "Unexpected error" message also surfaces this hint so users hit
+    by an unfamiliar failure know how to get the traceback.
     """
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
+        debug = os.environ.get("TRODESTRACK_DEBUG", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
         try:
             return func(*args, **kwargs)
-        except FileNotFoundError as e:
-            print(f"Error: {e}", file=sys.stderr)
-            sys.exit(1)
-        except NotADirectoryError as e:
-            print(f"Error: {e}", file=sys.stderr)
-            sys.exit(1)
-        except ValueError as e:
+        except (FileNotFoundError, NotADirectoryError, ValueError) as e:
+            if debug:
+                raise
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
         except Exception as e:
-            print(f"Unexpected error: {e}", file=sys.stderr)
+            if debug:
+                raise
+            print(
+                f"Unexpected error ({type(e).__name__}): {e}\n"
+                "Re-run with TRODESTRACK_DEBUG=1 for a full traceback.",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
     return wrapper  # type: ignore[return-value]

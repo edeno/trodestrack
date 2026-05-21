@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `io.session._add_imu_calibration_diagnostics` no longer swallows non-verdict `ValueError`s into a diagnostics string; only `_validate_calibration_for_fusion` exceptions are captured.
 - `config.schemas.CameraConfig.confidence_led{1,2}_column` now rejects empty strings at validation time. Previously, an empty string would silently disable confidence weighting via the loader's truthy check.
 - `io.ttl_events.per_frame_event_indices` now returns per-source kept/dropped diagnostics, raises when all events are dropped, and warns when a configured source contributes no events. Diagnostics are plumbed into `session.diagnostics["ttl_events"]`.
+- `cli.utils.friendly_cli_errors` now re-raises with a full traceback when `TRODESTRACK_DEBUG=1` is set in the environment, and includes the exception class name in the "Unexpected error" message.
 
 ## [0.2.0] - 2026-05-20
 
