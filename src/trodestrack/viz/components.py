@@ -1254,7 +1254,7 @@ class StateErrorPanelArtist:
     """Show state estimation errors using small multiples (Tufte principle).
 
     Displays velocity and heading errors in a compact, information-dense layout
-    with reference lines for PRD targets.
+    with reference lines for project acceptance targets.
     """
 
     def __init__(self, ax_vel: Axes, ax_heading: Axes, window_s: float, fps: int):
@@ -1282,14 +1282,14 @@ class StateErrorPanelArtist:
             [], [], color=COLORS["green"], linewidth=1.5, label="vy error", alpha=0.8
         )
 
-        # PRD target line: ±10 cm/s
+        # acceptance target line: ±10 cm/s
         ax_vel.axhline(
             10,
             color="gray",
             linewidth=1,
             linestyle="--",
             alpha=0.5,
-            label="PRD: ±10 cm/s",
+            label="target: ±10 cm/s",
         )
         ax_vel.axhline(-10, color="gray", linewidth=1, linestyle="--", alpha=0.5)
         ax_vel.axhline(0, color="black", linewidth=0.5, alpha=0.3)
@@ -1317,9 +1317,9 @@ class StateErrorPanelArtist:
             alpha=0.8,
         )
 
-        # PRD target line: ±7°
+        # acceptance target line: ±7°
         ax_heading.axhline(
-            7, color="gray", linewidth=1, linestyle="--", alpha=0.5, label="PRD: ±7°"
+            7, color="gray", linewidth=1, linestyle="--", alpha=0.5, label="target: ±7°"
         )
         ax_heading.axhline(-7, color="gray", linewidth=1, linestyle="--", alpha=0.5)
         ax_heading.axhline(0, color="black", linewidth=0.5, alpha=0.3)

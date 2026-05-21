@@ -286,8 +286,8 @@ LAYOUT_3D_CAM_6DOF_IMU = StateLayout(
 """Full 3D camera with 6-DOF IMU fusion.
 
 Separate layout instance with the same 16D quaternion state structure as
-``LAYOUT_3D_QUAT`` and the explicit state-mode name used by the
-tilt/orientation implementation plan.
+``LAYOUT_3D_QUAT`` and the explicit state-mode name for 3D camera +
+6-DOF IMU.
 """
 
 

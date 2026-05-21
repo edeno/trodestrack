@@ -171,7 +171,7 @@ def plot_position_error(
     positions_true: NDArray[np.float64],
     positions_est: NDArray[np.float64],
     valid_mask: NDArray[np.bool_] | None = None,
-    prd_threshold_m: float | None = None,
+    target_threshold_m: float | None = None,
 ) -> tuple[Figure, Axes]:
     """Plot Euclidean position error over time.
 
@@ -185,8 +185,8 @@ def plot_position_error(
         Estimated positions (N, 2) in meters.
     valid_mask : NDArray[np.bool_] | None, optional
         Optional validity mask (N,). Only valid (True) entries plotted.
-    prd_threshold_m : float | None, optional
-        If provided, plot PRD requirement threshold (e.g., 0.02 for 2 cm).
+    target_threshold_m : float | None, optional
+        If provided, plot project acceptance target threshold (e.g., 0.02 for 2 cm).
 
     Returns
     -------
@@ -198,11 +198,11 @@ def plot_position_error(
         >>> t = np.linspace(0, 10, 100)
         >>> pos_true = np.column_stack([t * 0.1, np.zeros(100)])
         >>> pos_est = pos_true + np.random.randn(100, 2) * 0.01
-        >>> fig, ax = plot_position_error(t, pos_true, pos_est, prd_threshold_m=0.02)
+        >>> fig, ax = plot_position_error(t, pos_true, pos_est, target_threshold_m=0.02)
         >>> plt.close(fig)
 
     Notes:
-        PRD requirement: position error ≤ 0.02 m (2 cm)
+        Project acceptance target: position error ≤ 0.02 m (2 cm)
     """
     t = _validate_time_axis(t, name="t")
     pt = np.asarray(positions_true)
@@ -237,14 +237,14 @@ def plot_position_error(
     # Plot error
     ax.plot(t_plot, error_plot, color=COLORS["blue"], linewidth=1.0, label="Error")
 
-    # Plot PRD threshold if provided
-    if prd_threshold_m is not None:
+    # Plot target threshold if provided
+    if target_threshold_m is not None:
         ax.axhline(
-            prd_threshold_m,
+            target_threshold_m,
             color=COLORS["red"],
             linewidth=1.0,
             linestyle="--",
-            label=f"PRD threshold ({prd_threshold_m * 100:.0f} cm)",
+            label=f"target ({target_threshold_m * 100:.0f} cm)",
         )
 
     # Labels
@@ -288,7 +288,7 @@ def plot_velocity_error(
         >>> plt.close(fig)
 
     Notes:
-        PRD requirement: velocity error ≤ 0.10 m/s (10 cm/s)
+        Project acceptance target: velocity error ≤ 0.10 m/s (10 cm/s)
     """
     t = _validate_time_axis(t, name="t")
     vt = np.asarray(velocities_true)
@@ -342,7 +342,7 @@ def plot_heading_error(
     headings_true: NDArray[np.float64],
     headings_est: NDArray[np.float64],
     valid_mask: NDArray[np.bool_] | None = None,
-    prd_threshold_deg: float | None = None,
+    target_threshold_deg: float | None = None,
 ) -> tuple[Figure, Axes]:
     """Plot heading error over time with proper angle wrapping.
 
@@ -356,8 +356,8 @@ def plot_heading_error(
         Estimated headings (N,) in radians.
     valid_mask : NDArray[np.bool_] | None, optional
         Optional validity mask (N,). Only valid (True) entries plotted.
-    prd_threshold_deg : float | None, optional
-        If provided, plot PRD requirement threshold (degrees), e.g., 7.0.
+    target_threshold_deg : float | None, optional
+        If provided, plot project acceptance target threshold (degrees), e.g., 7.0.
 
     Returns
     -------
@@ -370,12 +370,12 @@ def plot_heading_error(
         >>> heading_true = np.linspace(0, 2 * np.pi, 100)
         >>> heading_est = heading_true + np.random.randn(100) * 0.1
         >>> fig, ax = plot_heading_error(
-        ...     t, heading_true, heading_est, prd_threshold_deg=7.0
+        ...     t, heading_true, heading_est, target_threshold_deg=7.0
         ... )
         >>> plt.close(fig)
 
     Notes:
-        PRD requirement: heading error ≤ 7.0 degrees
+        Project acceptance target: heading error ≤ 7.0 degrees
         Angle wrapping ensures errors are in [-π, π] range.
     """
     # Mirror the validation contract used by ``plot_position_error`` /
@@ -418,14 +418,14 @@ def plot_heading_error(
         t_plot, error_plot, color=COLORS["orange"], linewidth=1.0, label="Heading Error"
     )
 
-    # Plot PRD threshold if provided
-    if prd_threshold_deg is not None:
+    # Plot target threshold if provided
+    if target_threshold_deg is not None:
         ax.axhline(
-            prd_threshold_deg,
+            target_threshold_deg,
             color=COLORS["red"],
             linewidth=1.0,
             linestyle="--",
-            label=f"PRD threshold ({prd_threshold_deg:.0f}°)",
+            label=f"target ({target_threshold_deg:.0f}°)",
         )
 
     # Labels

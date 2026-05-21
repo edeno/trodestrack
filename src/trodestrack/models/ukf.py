@@ -452,7 +452,7 @@ def predict_step(
             ),
         )
 
-    sigmas_prop = vmap(f)(sigmas)  # (17, 8)
+    sigmas_prop = vmap(f)(sigmas)  # (2n+1, n)
 
     # Reconstruct predicted mean (weighted sum)
     # Note: For heading dimension, we need circular mean, but it's handled below
@@ -563,7 +563,7 @@ def update_step(
             sigmas = compute_sigma_points(m_in, P_in, n, lamb)
 
             # Transform sigma points through camera model prediction
-            sigmas_meas = vmap(camera_model.predict)(sigmas)  # (17, 4)
+            sigmas_meas = vmap(camera_model.predict)(sigmas)  # (2n+1, meas_dim)
 
             # Reconstruct predicted observation
             z_pred = jnp.tensordot(w_mean, sigmas_meas, axes=1)
@@ -703,7 +703,7 @@ def update_heading(
             # may be on the opposite side of the ±π boundary. Without this wrap, near
             # the wrap boundary the unwrapped deviations are ~2π instead of ~0 and
             # S is inflated by ~(2π)², collapsing the Kalman gain toward zero.
-            # This mirrors the wrap applied in predict_step (see around line 362).
+            # This mirrors the wrap_angle call in predict_step's covariance reconstruction.
             heading_deviations = wrap_angle(sigmas_heading - h_pred)
             S = jnp.dot(w_cov, heading_deviations**2) + R_heading
 

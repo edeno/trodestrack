@@ -2588,7 +2588,7 @@ def estimate_led_spacing(
 
 
 # =============================================================================
-# IMU Index Computation (previously in filter_utils.py)
+# IMU Index Computation
 # =============================================================================
 
 
