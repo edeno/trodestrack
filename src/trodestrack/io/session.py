@@ -309,8 +309,8 @@ def _load_spikegadgets_trodes(config: SessionConfig) -> PreparedSession:
     _require_columns(pos_df, pos_columns, source=str(inputs.position_file))
 
     imu_unique = _remove_sample_hold(imu_df, config)
-    t_imu_unix = _index_or_time_column(imu_unique)
-    t_cam_unix = _index_or_time_column(pos_df)
+    t_imu_unix = _index_or_time_column(imu_unique, source="IMU dataframe")
+    t_cam_unix = _index_or_time_column(pos_df, source="camera dataframe")
     t_start = min(float(t_imu_unix[0]), float(t_cam_unix[0]))
     t_imu = t_imu_unix - t_start + config.imu.time_offset_s
     t_cam = t_cam_unix - t_start + config.camera.time_offset_s
@@ -626,10 +626,15 @@ def _load_leds(
     return led1, led2, conf_cam
 
 
-def _index_or_time_column(df: pd.DataFrame) -> np.ndarray:
+def _index_or_time_column(df: pd.DataFrame, *, source: str) -> np.ndarray:
     if "time" in df.columns:
         return df["time"].to_numpy(dtype=float)
-    return df.index.to_numpy(dtype=float)
+    raise ValueError(
+        f"{source} is missing required 'time' column. The previous fallback "
+        "of using df.index silently substituted sample numbers (0, 1, 2, ...) "
+        "for seconds, producing dt values off by the sampling rate and "
+        "wildly miscalibrated filter outputs."
+    )
 
 
 def _median_led_distance(led1: np.ndarray, led2: np.ndarray, mask: np.ndarray) -> float:

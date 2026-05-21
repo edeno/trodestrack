@@ -15,6 +15,7 @@ from trodestrack.io import (
 )
 from trodestrack.io.led_identity import CorrectedLEDIdentity
 from trodestrack.io.session import (
+    _index_or_time_column,
     _median_led_distance,
     _validate_calibration_for_fusion,
 )
@@ -1030,3 +1031,15 @@ def test_median_led_distance_raises_when_no_dual_led_frames():
     mask = np.zeros(5, dtype=bool)
     with pytest.raises(ValueError, match="auto-detect LED spacing"):
         _median_led_distance(led1, led2, mask)
+
+
+def test_index_or_time_column_raises_when_time_missing():
+    """Missing 'time' column must raise; present 'time' returns its values."""
+
+    df_missing = pd.DataFrame({"x": [0.0, 1.0], "y": [2.0, 3.0]})
+    with pytest.raises(ValueError, match="missing required 'time' column"):
+        _index_or_time_column(df_missing, source="test")
+
+    df_with_time = pd.DataFrame({"time": [0.0, 0.01, 0.02], "x": [1.0, 2.0, 3.0]})
+    result = _index_or_time_column(df_with_time, source="test")
+    np.testing.assert_array_equal(result, np.array([0.0, 0.01, 0.02]))
