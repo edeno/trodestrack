@@ -500,6 +500,127 @@ def test_ukf_marginal_loglik_computation(sim_config, ukf_config):
     )
 
 
+@pytest.mark.slow
+def test_ukf_5s_dropout_drift_matches_ekf_within_factor_2():
+    """UKF drift during a 5 s vision dropout must not exceed 2x the EKF.
+
+    Probe: the UKF spreads sigma points more conservatively than the EKF
+    under no observations, which can amplify position drift during long
+    dropouts. This test runs both filters on the same simulated session
+    with an identical 5 s blackout window and asserts the UKF's terminal
+    drift is at most 2x the EKF's. The bound is generous on purpose —
+    the contract is "comparable order of magnitude", not "UKF tracks
+    EKF to within 1%" — but a regression that makes the UKF e.g. 5x
+    worse during dropout would still trip it.
+    """
+
+    from trodestrack.sim.rat_imu import RatIMUSimConfig, simulate_rat_imu
+
+    sim_cfg = RatIMUSimConfig(
+        duration_s=15.0,
+        fs_imu=200.0,
+        fs_cam=30.0,
+        arena_w=2.0,
+        arena_h=2.0,
+        m0=np.array([1.0, 1.0, 0.0, 0.0, 0.0]),
+        use_second_led=True,
+        cam_dropout_prob=0.0,  # we'll inject a deterministic 5 s blackout
+        cam_jitter_s=0.0,
+        cam_latency_s=0.0,
+        sigma_yaw_rate=0.5,
+        sigma_a_fwd=0.3,
+        sigma_a_lat=0.2,
+        speed_clip=0.6,
+        imu_tilt_roll_deg=0.0,
+        imu_tilt_pitch_deg=0.0,
+    )
+    sim = simulate_rat_imu(sim_cfg, seed=7)
+
+    # Inject a deterministic 5 s blackout from t=5 s to t=10 s.
+    t_cam = sim["t_cam_exp"]
+    mask_cam = sim["mask_cam"].copy()
+    blackout = (t_cam >= 5.0) & (t_cam < 10.0)
+    mask_cam[blackout] = False
+
+    common = dict(
+        process_noise_pos=0.02,
+        process_noise_vel=2.0,
+        process_noise_heading=0.02,
+        process_noise_gyro_bias=2e-6,
+        process_noise_accel_bias=2e-4,
+        measurement_noise_pos=0.005**2,
+        measurement_noise_heading=0.05**2,
+        imu_gyro_noise_density=0.0001,
+        imu_accel_noise_density=0.005,
+        damping_coeff=0.5,
+        led_distance=0.04,
+        adaptive_q_during_dropout=False,
+        dropout_q_pos_multiplier=5.0,
+        dropout_q_vel_multiplier=5.0,
+        dropout_q_bias_multiplier=0.1,
+        state_mode="2d_full",
+    )
+    ekf_cfg = EKFConfig(**common)
+    ukf_cfg = UKFConfig(
+        **common,
+        alpha=1.732,
+        beta=2.0,
+        kappa=1.0,
+    )
+
+    ekf_result = extended_kalman_filter(
+        ekf_config=ekf_cfg,
+        t_imu=sim["t_imu"],
+        U_imu=sim["U_imu"],
+        t_cam=t_cam,
+        Z_cam_led1=sim["Z_cam_led1"],
+        Z_cam_led2=sim["Z_cam_led2"],
+        mask_cam=mask_cam,
+    )
+    ukf_result = unscented_kalman_filter(
+        ukf_config=ukf_cfg,
+        t_imu=sim["t_imu"],
+        U_imu=sim["U_imu"],
+        t_cam=t_cam,
+        Z_cam_led1=sim["Z_cam_led1"],
+        Z_cam_led2=sim["Z_cam_led2"],
+        mask_cam=mask_cam,
+    )
+
+    # Measure drift at the last frame of the blackout (just before vision returns).
+    blackout_indices = np.where(blackout)[0]
+    assert blackout_indices.size > 0
+    end_idx = int(blackout_indices[-1])
+
+    truth_pos_at_cam = np.array(
+        [sim["X_truth"][np.argmin(np.abs(sim["t_imu"] - t_c))][:2] for t_c in t_cam]
+    )
+    ekf_drift = float(
+        np.linalg.norm(
+            np.asarray(ekf_result.filtered_means[end_idx, :2])
+            - truth_pos_at_cam[end_idx]
+        )
+    )
+    ukf_drift = float(
+        np.linalg.norm(
+            np.asarray(ukf_result.filtered_means[end_idx, :2])
+            - truth_pos_at_cam[end_idx]
+        )
+    )
+
+    # Sanity: both filters should have noticeable drift after 5 s blind;
+    # if either is ~0 the test isn't measuring what it claims to.
+    assert ekf_drift > 1e-3, (
+        f"EKF dropout drift {ekf_drift:.6f} m is suspiciously small — "
+        "test may not be exercising the blackout."
+    )
+    assert ukf_drift <= 2.0 * ekf_drift, (
+        f"UKF drift {ukf_drift:.4f} m exceeds 2x EKF drift "
+        f"{ekf_drift:.4f} m at end of 5 s blackout (ratio "
+        f"{ukf_drift / ekf_drift:.2f}x)"
+    )
+
+
 def test_ukf_heading_respects_camera_mask(ukf_config):
     """Heading pseudo-measurement should be inert when observation flag is False."""
     base_state = UKFState(
