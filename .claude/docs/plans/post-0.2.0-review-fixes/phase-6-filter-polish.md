@@ -18,6 +18,7 @@ Low-priority refactors with no user-visible behavior change. Ships as `0.4.1` (p
 - [src/trodestrack/models/ukf.py](../../../../src/trodestrack/models/ukf.py) lines 374-389 — `_outer_product_batch` using `vmap(lambda a, b: jnp.atleast_2d(a).T @ jnp.atleast_2d(b))`.
 - [src/trodestrack/runtime/offline.py](../../../../src/trodestrack/runtime/offline.py) lines 680-682, 725-726 — clean `vmap(jnp.outer, in_axes=(0, 0))` reference.
 - [tests/filters/test_ekf_3d_analytic.py](../../../../tests/filters/test_ekf_3d_analytic.py) — created in Phase 2; this is the parity oracle for the 3D IEKF refactor. PHASE 2 MUST SHIP BEFORE THIS PHASE.
+- The shared fixture is `simulate_3d_session` (no leading underscore) in `tests/filters/conftest.py`. Phase 2 owns its creation; Phase 6 only imports it. If Phase 2 named the fixture differently, align here.
 
 **Contracts referenced:**
 
@@ -299,7 +300,7 @@ Add under `## [0.4.1] — unreleased`:
 ## Fixtures
 
 - Reuse `simulate_3d_session` from `tests/filters/conftest.py` (added in Phase 2).
-- Add a `tests/regression/test_phase6_parity.py` test file that captures-and-compares against the pickle baseline. The pickle itself is not checked in; the test runs the baseline computation once at the top of the test, then again after each refactor and compares. This makes the test self-contained.
+- Add a `tests/regression/test_3d_iekf_lax_scan_parity.py` test file that captures-and-compares against the pickle baseline. The pickle itself is not checked in; the test runs the baseline computation once at the top of the test, then again after each refactor and compares. This makes the test self-contained. The file name describes the behavior under test, not the plan milestone — do NOT name it `test_phase6_*`.
 
 ## Review
 

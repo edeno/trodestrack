@@ -70,7 +70,7 @@ These tests are not redundant with the existing mocked tests at lines 664-1008 �
 Extend [tests/cli/test_smooth_command.py](../../../../tests/cli/test_smooth_command.py) and `tests/cli/test_online_command.py`:
 
 - `test_smooth_command_outputs_are_finite_and_psd` — Run the smooth command on a 10 s simulated session, load `smoothed_means.txt` and `smoothed_covariances.txt`, assert all values are finite, all covariance matrices are symmetric within `rtol=1e-8`, and the smallest eigenvalue is > 0.
-- Equivalent `test_online_command_outputs_are_finite_and_psd` (this test will need a rename in Phase 4 when `online` → `filter`).
+- Equivalent test for the forward-only filter command. If Phase 4 has already shipped (CLI rename to `filter`), name it `test_filter_command_outputs_are_finite_and_psd`; otherwise name it after the current command (`test_online_command_outputs_are_finite_and_psd`) and Phase 4's rename will sweep it. Either way the name describes the command, not the plan milestone.
 
 ### Task 6 — Focused unit tests for un-covered sensor models
 
@@ -126,7 +126,7 @@ This task is `Deliberately not required for the phase` — flag it explicitly in
 | `test_safety_check_passes_on_clean_simulated_session_with_real_vision_ekf` | `report.passed is True` without any EKF patching. |
 | `test_safety_check_flags_implausible_session_with_real_vision_ekf` | `report.passed is False`; message names the failing metric. |
 | `test_smooth_command_outputs_are_finite_and_psd` | All output values finite; covariances symmetric `rtol=1e-8`; min eigenvalue > 0. |
-| `test_online_command_outputs_are_finite_and_psd` | Same as above for `online` (rename in Phase 4). |
+| `test_{filter,online}_command_outputs_are_finite_and_psd` | Same as above for the forward-only filter command; name matches the live command at the time Phase 2 lands. |
 | `test_heading_pseudo_*` (4 tests) | `predict`, `jacobian` match hand-derived/jacfwd; innovation wraps; gate rejects implausible spacing. |
 | `test_camera_position_*` (3 tests) | `predict`, `jacobian` parity; partial-observation masking. |
 | `test_ukf_5s_dropout_drift_matches_ekf_within_factor_2` | `ukf_drift <= 2.0 * ekf_drift`. |
@@ -135,7 +135,7 @@ All 3D-EKF/UKF analytic tests are `@pytest.mark.slow`. The CLI report tests are 
 
 ## Fixtures
 
-- 3D-EKF/UKF tests: use `simulate_rat_imu` from [src/trodestrack/sim/rat_imu.py](../../../../src/trodestrack/sim/rat_imu.py). Add a `_simulate_3d_session` helper in `tests/filters/conftest.py` that returns the `(t_imu, U_imu, t_cam, Z_cam_led1, Z_cam_led2, mask_cam, truth)` tuple for a deterministic seed. Reuse the helper across `test_ekf_3d_analytic.py` and `test_ukf_3d_analytic.py`.
+- 3D-EKF/UKF tests: use `simulate_rat_imu` from [src/trodestrack/sim/rat_imu.py](../../../../src/trodestrack/sim/rat_imu.py). Add a `simulate_3d_session` helper (no leading underscore — Phase 6 also imports it) in `tests/filters/conftest.py` that returns the `(t_imu, U_imu, t_cam, Z_cam_led1, Z_cam_led2, mask_cam, truth)` tuple for a deterministic seed. Reuse the helper across `test_ekf_3d_analytic.py` and `test_ukf_3d_analytic.py`.
 - Report-command tests: write a `_build_qa_inputs_dir(tmp_path, n)` helper in `tests/cli/conftest.py` that creates `tmp_path/qa_inputs/{timestamps,positions_true,positions_est,...}.npy` with deterministic content. Mirror the structure from [examples/08_qa_report_generation.py](../../../../examples/08_qa_report_generation.py).
 - Safety-check tests: extend the existing fixture pattern in [tests/io/test_session_loading.py](../../../../tests/io/test_session_loading.py). Use a fixed seed (`np.random.default_rng(42)`).
 

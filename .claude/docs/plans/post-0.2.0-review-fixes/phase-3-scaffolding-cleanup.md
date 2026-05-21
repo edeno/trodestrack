@@ -12,8 +12,8 @@ This phase is a coordinated rename + comment sweep. No behavior changes — Phas
 - [src/trodestrack/viz/components.py](../../../../src/trodestrack/viz/components.py) lines 1257-1322 — user-facing legend labels like `"PRD: ±10 cm/s"`. Also the file with ~50 trivial "what" comments documented in the comment-analyzer report.
 - [src/trodestrack/models/ukf.py](../../../../src/trodestrack/models/ukf.py) lines 455, 566, 706 — stale shape annotations `(17, 8)` / `(17, 4)`, stale line-number reference "see around line 362".
 - [src/trodestrack/models/sensors/camera_position_3d.py](../../../../src/trodestrack/models/sensors/camera_position_3d.py) lines 5-7 — "Arthur-specific" docstring.
-- [src/trodestrack/models/sensors/camera_position.py](../../../../src/trodestrack/models/sensors/camera_position.py) lines 225-243 — "Critical for PR2/PR3 JAX compatibility" docstring references.
-- [src/trodestrack/models/state_layout.py](../../../../src/trodestrack/models/state_layout.py) lines 9-11 — "the explicit state-mode name used by the tilt/orientation implementation plan."
+- [src/trodestrack/models/sensors/camera_position.py](../../../../src/trodestrack/models/sensors/camera_position.py) around line 390 — "Critical for PR2/PR3 JAX compatibility" docstring reference. (Re-grep `PR2/PR3` at edit time to find current line number.)
+- [src/trodestrack/models/state_layout.py](../../../../src/trodestrack/models/state_layout.py) lines 289-290 — `LAYOUT_3D_CAM_6DOF_IMU` docstring: "the explicit state-mode name used by the tilt/orientation implementation plan." (Verify the line range — Phase 1 may have shifted it.)
 - [src/trodestrack/models/filter_common.py](../../../../src/trodestrack/models/filter_common.py) line 2591 — `"# IMU Index Computation (previously in filter_utils.py)"`.
 
 **Contracts referenced:**
@@ -57,9 +57,11 @@ Update every reference in this file. Grep: `grep -nE 'PRD' src/trodestrack/qa/re
 
 ### Task 3 — Rename PRD references in `qa/plots.py`
 
-Grep for `PRD` in [src/trodestrack/qa/plots.py](../../../../src/trodestrack/qa/plots.py): `grep -nE 'PRD' src/trodestrack/qa/plots.py`. Documented hits (verify line numbers at edit time): 189, 205, 240, 247, 291, 360, 378, 421, 428.
+Grep for `PRD` (case-insensitive) in [src/trodestrack/qa/plots.py](../../../../src/trodestrack/qa/plots.py): `grep -niE 'prd' src/trodestrack/qa/plots.py`. Documented hits (verify line numbers at edit time): 174, 188-189, 201, 205, 240-247, 291, 345, 360, 378, 421, 428.
 
 For parameter docs (`"""...PRD threshold..."""`), rewrite as `"...project acceptance target..."`. For inline comments (`# PRD requirement`), rewrite as `# acceptance target`. For user-facing matplotlib `label=` strings like `label="PRD threshold"`, rewrite as `label="target"`. These legend labels ship to users in the QA report PDF; the change is user-visible.
+
+**Public function-parameter renames** (these are not just comment changes — they break callers): `plot_position_error(..., prd_threshold_m=...)` → `plot_position_error(..., target_threshold_m=...)`. Same for `plot_velocity_error`'s `prd_threshold_m` and `plot_heading_error`'s `prd_threshold_deg`. Update every caller (grep `prd_threshold_m`, `prd_threshold_deg` across `src/` and `tests/`).
 
 ### Task 4 — Rename PRD references in `qa/metrics.py`
 
@@ -93,8 +95,8 @@ In [src/trodestrack/models/sensors/camera_position_3d.py:5-7](../../../../src/tr
 
 ### Task 9 — Drop scaffolding-doc references in remaining files
 
-- [src/trodestrack/models/sensors/camera_position.py](../../../../src/trodestrack/models/sensors/camera_position.py) lines 225-243: remove `"Critical for PR2/PR3 JAX compatibility:"` from the docstrings (multiple occurrences). The "JAX compatibility" rationale itself is real — keep it, drop the `PR2/PR3` reference. Rewrite as `"Critical for JAX-compatibility: ..."`.
-- [src/trodestrack/models/state_layout.py:9-11](../../../../src/trodestrack/models/state_layout.py#L9-L11): drop "the explicit state-mode name used by the tilt/orientation implementation plan." Rewrite as `"the explicit state-mode name for 3D camera + 6-DOF IMU."`.
+- `src/trodestrack/models/sensors/camera_position.py` around line 390: remove `"Critical for PR2/PR3 JAX compatibility:"` from the docstring. The "JAX compatibility" rationale itself is real — keep it, drop the `PR2/PR3` reference. Rewrite as `"Critical for JAX-compatibility: ..."`. Re-grep `PR2/PR3` at edit time to confirm there aren't additional hits.
+- `src/trodestrack/models/state_layout.py` around lines 289-290 (`LAYOUT_3D_CAM_6DOF_IMU` docstring): drop "the explicit state-mode name used by the tilt/orientation implementation plan." Rewrite as `"the explicit state-mode name for 3D camera + 6-DOF IMU."`.
 - [src/trodestrack/models/filter_common.py:2591](../../../../src/trodestrack/models/filter_common.py#L2591): drop `(previously in filter_utils.py)`. The section header becomes `# IMU Index Computation`.
 
 ### Task 10 — Sweep trivial "what" comments in `viz/components.py`
@@ -131,13 +133,14 @@ After the sweep, run `wc -l src/trodestrack/viz/components.py` and report the LO
 After all edits, run:
 
 ```bash
-grep -rnE '\bPRD' src/ tests/
+grep -rniE '\bprd' src/ tests/
 grep -nE '\(17, [0-9]+\)' src/trodestrack/models/ukf.py
 grep -rn 'Arthur' src/
 grep -rnE '(see around line|previously in filter_utils|PR2/PR3)' src/
+grep -rnE 'prd_threshold' src/ tests/
 ```
 
-All four greps should return zero hits. If anything remains, fix it.
+All five greps should return zero hits. If anything remains, fix it. The grep on `prd` is case-insensitive (`-i`) because identifiers like `prd_threshold_m` are lowercase.
 
 ### Task 13 — Post-refactor baseline comparison
 

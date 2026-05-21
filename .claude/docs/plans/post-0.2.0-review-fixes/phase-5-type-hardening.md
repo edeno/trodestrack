@@ -208,7 +208,7 @@ class FilterState(NamedTuple):
         return cls(mean=mean, cov=cov)
 ```
 
-Existing call sites that use raw `FilterState(mean, cov)` are left alone — `create()` is purely additive. Document in the CHANGELOG that new code should prefer `FilterState.create()`.
+Existing call sites that use raw `FilterState(mean, cov)` are left alone *in this phase*. This is the one deliberate exception to the [No backwards-compatibility shims](shared-contracts.md#no-backwards-compatibility-shims) policy: `FilterState` is constructed inside JIT-compiled scan bodies where switching to a classmethod is non-trivial (the classmethod runs Python-side validation that can't trace). Document in the CHANGELOG that new code should prefer `FilterState.create()`. **Removal trigger**: when the next refactor extracts state initialization out of the JIT body (Phase 6 Task 9 documents `initialize_state` as host-only; once that's clean, follow-up work can migrate the remaining `FilterState(...)` call sites to `FilterState.create(...)`). Track as an open issue at the time this phase merges.
 
 ### Task 6 — Add `EventLocationSource.__post_init__` validation
 
@@ -326,12 +326,16 @@ class PreparedSession:
         return self.config.inputs.format
 ```
 
-Update every consumer. Grep `grep -rnE 'event_sources|event_source_anchors|event_source_covariances|event_indices_per_frame' src/ tests/`. Expected hits:
+Update every consumer. Grep `grep -rnE '\.event_sources|\.event_source_anchors|\.event_source_covariances|\.event_indices_per_frame' src/ tests/` (the dot prefix limits hits to attribute access on `session`, not the filter-function kwargs of the same name). Expected hits as of master:
 
-- `src/trodestrack/io/session.py` itself — `_attach_ttl_events` constructs `EventChannel(sources=..., anchors=..., covariances=..., indices_per_frame=...)` and passes `events=channel` (or `events=None` if no TTL events configured).
-- `src/trodestrack/runtime/offline.py` — anywhere that destructures `session.event_sources`, `session.event_source_anchors`, etc., now reads from `session.events.sources`, etc., guarded by `if session.events is not None`.
-- Filter call sites — same pattern.
-- Tests in `tests/io/test_session_loading.py`, `tests/integration/test_ttl_event_sensors_session.py`.
+- `src/trodestrack/io/session.py:30-49` — the `PreparedSession` dataclass fields themselves; replace with `events: EventChannel | None = None`.
+- `src/trodestrack/io/session.py` `_attach_ttl_events` (around line 463-466) — constructs the new `EventChannel(...)` and passes `events=channel`.
+- `src/trodestrack/cli/config_workflow.py:84-86` — filter call site passing `event_source_anchors=session.event_source_anchors`, etc. Now reads from `session.events.anchors` / `.covariances` / `.indices_per_frame` (guarded by `if session.events is not None: ...`).
+- `src/trodestrack/cli/config_workflow.py:194-197` — output-bundle assembly; same pattern.
+
+The filter function **kwargs** at `src/trodestrack/models/ekf.py:883-885`, `models/ekf.py:219-221, 988-995, 1061-1063` and `models/ukf.py:766-768, 991-993, 1150-1157, 1180-1182` use the same names by coincidence — those are *parameters* of `extended_kalman_filter` / `unscented_kalman_filter`, not attribute accesses on `PreparedSession`. Leave them unchanged unless you want to rename the filter API too (which is OUT OF SCOPE for this phase). The CLI call sites in `config_workflow.py` will still pass `event_source_anchors=session.events.anchors` (kwarg name preserved, just sourced differently).
+
+The validation helpers in `src/trodestrack/models/sensors/event_location.py` reference these names in error messages — those are just strings, leave them. Tests in `tests/io/test_session_loading.py`, `tests/integration/test_ttl_event_sensors_session.py` that construct `PreparedSession(event_sources=..., ...)` need updating to `PreparedSession(events=EventChannel(...))`.
 
 No backwards-compat shims — the old field names are gone.
 
