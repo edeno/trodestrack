@@ -368,9 +368,15 @@ def run_smooth(args: argparse.Namespace) -> None:
         "damping_coeff": args.damping_coeff,
         "use_heading_measurement": args.use_heading_measurement,
     }
+    explicit_overrides = {k: v for k, v in config_overrides.items() if v is not None}
+    # ``FilterCoreConfig`` rejects vision_only + enable_zupt=True (its
+    # default). The legacy CLI doesn't expose ``--enable-zupt``, so
+    # auto-disable when the user picked vision_only via ``--state-mode``.
+    if explicit_overrides.get("state_mode") == "vision_only":
+        explicit_overrides.setdefault("enable_zupt", False)
     ekf_config = EKFConfig(
         led_distance=args.led_distance,  # None -> auto-detect
-        **{k: v for k, v in config_overrides.items() if v is not None},
+        **explicit_overrides,
     )
 
     print(f"  Process noise (pos): {ekf_config.process_noise_pos:.2e} m²/s")

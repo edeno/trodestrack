@@ -272,7 +272,7 @@ def test_rts_smoother_works_with_reduced_state():
 
     filter_result = make_minimal_filter_result_ekf(n_cam, state_dim)
     t_imu, U_imu, t_cam = make_minimal_imu_data(n_imu=50, n_cam=n_cam)
-    config = EKFConfig(state_mode="vision_only")
+    config = EKFConfig(state_mode="vision_only", enable_zupt=False)
 
     result = rts_smoother(filter_result, config, t_imu, U_imu, t_cam)
 
@@ -356,7 +356,7 @@ def test_sigma_point_smoother_works_with_reduced_state():
 
     filter_result = make_minimal_filter_result_ukf(n_cam, state_dim)
     t_imu, U_imu, t_cam = make_minimal_imu_data(n_imu=50, n_cam=n_cam)
-    config = UKFConfig(state_mode="vision_only")
+    config = UKFConfig(state_mode="vision_only", enable_zupt=False)
 
     result = sigma_point_smoother(filter_result, config, t_imu, U_imu, t_cam)
 
@@ -419,7 +419,11 @@ def test_sigma_point_count_adapts_to_state_dimension():
         n_cam = 3
         filter_result = make_minimal_filter_result_ukf(n_cam, state_dim)
         t_imu, U_imu, t_cam = make_minimal_imu_data(n_imu=30, n_cam=n_cam)
-        config = UKFConfig(state_mode=state_mode)
+        # vision_only is incompatible with enable_zupt (default True).
+        config_kwargs: dict[str, object] = {"state_mode": state_mode}
+        if state_mode == "vision_only":
+            config_kwargs["enable_zupt"] = False
+        config = UKFConfig(**config_kwargs)
 
         result = sigma_point_smoother(filter_result, config, t_imu, U_imu, t_cam)
         assert result.smoothed_means.shape == (n_cam, state_dim)

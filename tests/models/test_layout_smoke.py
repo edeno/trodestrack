@@ -392,7 +392,10 @@ def test_ekf_gravity_gate_uses_bias_corrected_gyro_norm() -> None:
 
 def test_ekf_smoke_vision_only_shapes() -> None:
     ekf_config = EKFConfig(
-        state_mode="vision_only", led_distance=0.04, use_heading_measurement=False
+        state_mode="vision_only",
+        led_distance=0.04,
+        use_heading_measurement=False,
+        enable_zupt=False,
     )
 
     # Small 3-frame scenario

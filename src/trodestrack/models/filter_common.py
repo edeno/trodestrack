@@ -23,7 +23,13 @@ from trodestrack.models.quaternion import (
     rotate_vector_body_to_world,
     rotate_vector_world_to_body,
 )
-from trodestrack.models.state_layout import StateLayout, get_heading_index, get_layout
+from trodestrack.models.state_layout import (
+    STATE_MODES,
+    StateLayout,
+    StateMode,
+    get_heading_index,
+    get_layout,
+)
 
 
 @dataclass(frozen=True)
@@ -171,10 +177,12 @@ class FilterCoreConfig:
     zupt_camera_stationary_window_frames: int = 10
     zupt_visual_context_hold_frames: int = 10
 
-    # State layout mode (controls state dimension and index mapping)
-    # Supported for 2D paths: "2d_full" (8D), "vision_only" (5D),
-    # "2d_cam_3d_imu" (10D), "2d_cam_6dof_imu_orientation" (14D)
-    state_mode: str = "2d_cam_3d_imu"
+    # State layout mode (controls state dimension and index mapping).
+    # ``StateMode`` is the Literal alias owned by
+    # ``trodestrack.models.state_layout``; ``STATE_MODES`` is the runtime
+    # tuple of valid values. mypy enforces the Literal statically; the
+    # runtime guard in ``__post_init__`` rejects typos at construction.
+    state_mode: StateMode = "2d_cam_3d_imu"
 
     # PyTree support: treat `state_mode` as static auxiliary data.
     _TREE_STATIC_FIELDS: ClassVar[tuple[str, ...]] = ("state_mode",)
@@ -225,8 +233,25 @@ class FilterCoreConfig:
                     f"config."
                 )
 
+        # Runtime check on ``state_mode``: mypy enforces the Literal at
+        # static-analysis time, but dataclasses bypass that at runtime.
+        # Catch typos (e.g. ``"vison_only"``) at construction so callers
+        # get a helpful message naming the allowed values instead of a
+        # KeyError later in ``get_layout``.
+        if self.state_mode not in STATE_MODES:
+            raise ValueError(
+                f"state_mode must be one of {STATE_MODES}; got "
+                f"{self.state_mode!r}. Add to LAYOUT_REGISTRY and StateMode "
+                "(in state_layout.py) if introducing a new mode."
+            )
+
         if self.state_mode == "vision_only" and self.enable_zupt:
-            object.__setattr__(self, "enable_zupt", False)
+            raise ValueError(
+                "enable_zupt=True is incompatible with state_mode='vision_only': "
+                "ZUPT requires IMU stationarity detection. Set enable_zupt=False "
+                "explicitly when using vision_only, or use a state mode that "
+                "consumes IMU data."
+            )
 
         if self.use_mahalanobis_gating:
             prob = self.mahalanobis_threshold_prob
@@ -505,10 +530,96 @@ class FilterState(NamedTuple):
         [x(m), y(m), vx(m/s), vy(m/s), θ(rad), b_gz(rad/s), b_ax(m/s^2), b_ay(m/s^2)].
     cov : jnp.ndarray
         State covariance (n, n).
+
+    Notes
+    -----
+    Raw ``FilterState(mean, cov)`` construction is intentionally still
+    supported: the filter cores build ``FilterState`` instances inside
+    JIT-compiled scan bodies, where the Python-side validation done by
+    :meth:`create` cannot be traced. For host-side construction (CLI
+    initialization, tests, user code building an initial state), prefer
+    :meth:`FilterState.create` so shape and PSD violations are caught at
+    construction instead of crashing deep in a JAX trace.
     """
 
     mean: jnp.ndarray
     cov: jnp.ndarray
+
+    @classmethod
+    def create(
+        cls,
+        mean: jnp.ndarray,
+        cov: jnp.ndarray,
+        layout: StateLayout | None = None,
+    ) -> FilterState:
+        """Construct a ``FilterState`` with shape and PSD validation.
+
+        Validates shape, finiteness, symmetry, and strict positive-
+        definiteness of ``cov`` before constructing. When ``layout`` is
+        provided, additionally checks that ``mean`` has length
+        ``layout.n``. Raises ``ValueError`` on any violation.
+
+        Parameters
+        ----------
+        mean : jnp.ndarray
+            State mean (n,).
+        cov : jnp.ndarray
+            State covariance (n, n). Must be symmetric and positive
+            definite.
+        layout : StateLayout, optional
+            If provided, additionally validates that ``mean.shape[0] ==
+            layout.n`` so the state vector matches the active state mode.
+
+        Returns
+        -------
+        FilterState
+            The constructed state container.
+
+        Raises
+        ------
+        ValueError
+            If ``mean`` is not 1-D, ``cov`` is not square, the shapes
+            disagree, any value is non-finite, ``cov`` is non-symmetric,
+            ``cov`` is not strictly positive definite, or (when
+            ``layout`` is given) ``mean.shape[0] != layout.n``.
+        """
+        mean_np = np.asarray(mean)
+        cov_np = np.asarray(cov)
+        if mean_np.ndim != 1:
+            raise ValueError(
+                f"FilterState.mean must be 1-D; got shape {mean_np.shape}."
+            )
+        n = mean_np.shape[0]
+        if cov_np.shape != (n, n):
+            raise ValueError(
+                f"FilterState.cov must have shape ({n}, {n}) to match mean of "
+                f"shape ({n},); got {cov_np.shape}."
+            )
+        if not np.all(np.isfinite(mean_np)):
+            raise ValueError("FilterState.mean contains non-finite value(s) (NaN/inf).")
+        if not np.all(np.isfinite(cov_np)):
+            raise ValueError("FilterState.cov contains non-finite value(s) (NaN/inf).")
+        if not np.allclose(cov_np, cov_np.T, atol=1e-10):
+            raise ValueError(
+                "FilterState.cov must be symmetric (cov == cov.T); got an "
+                "asymmetric matrix."
+            )
+        try:
+            np.linalg.cholesky(cov_np)
+        except np.linalg.LinAlgError as exc:
+            raise ValueError(
+                "FilterState.cov must be symmetric and strictly positive "
+                "definite (the filter's covariance solves require a non-"
+                "singular prior; add a small diagonal floor to express "
+                "deterministic components instead of zero variance). "
+                f"Cholesky factorization failed: {exc}."
+            ) from exc
+        if layout is not None and n != layout.n:
+            raise ValueError(
+                f"FilterState.mean has shape ({n},); layout requires "
+                f"({layout.n},). Use the StateLayout matching the state_mode."
+            )
+        return cls(mean=mean, cov=cov)
 
 
 def symmetrize(matrix: jnp.ndarray) -> jnp.ndarray:

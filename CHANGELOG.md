@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - unreleased
+
+### Changed (breaking)
+
+- `PreparedSession` now exposes TTL events via a single optional `events: EventChannel | None` field, replacing the four parallel optional fields (`event_sources`, `event_source_anchors`, `event_source_covariances`, `event_indices_per_frame`). Update consumers to read from `session.events.sources` / `.anchors` / `.covariances` / `.indices_per_frame` when `session.events is not None`. The filter function kwargs (`event_source_anchors=`, etc. on `extended_kalman_filter`/`unscented_kalman_filter`) keep their names; only the `PreparedSession` attribute access changed.
+- `FilterCoreConfig.state_mode` is now `Literal["2d_full", "vision_only", "imu_only", "2d_cam_3d_imu", "2d_cam_6dof_imu_orientation", "3d_euler", "3d_quat", "3d_cam_6dof_imu"]` with a runtime membership check. Typos now fail at construction with a clear error message instead of producing an opaque `KeyError` deep inside `get_layout`.
+- `FilterCoreConfig(state_mode="vision_only", enable_zupt=True)` now raises `ValueError` instead of silently disabling ZUPT. Set `enable_zupt=False` explicitly when constructing the config directly. The YAML config loader and the legacy CLI `--state-mode vision_only` path auto-disable ZUPT (mirroring the existing `use_mahalanobis_gating` shim) so existing YAML / CLI users are unaffected.
+- `EventLocationSource.source_type` is now `Literal["beam", "zone", "rfid"]`. The default value changed from `"unknown"` to `"beam"`.
+- `StateLayout(...)` now validates indices at construction: all indices must be in `[0, n)`, disjoint, and exhaust the state vector. `heading_idx` must be `int` (2D heading) or a tuple of length 3 (Euler) or 4 (quaternion). Custom layouts with out-of-range or overlapping indices now fail loudly.
+- `EventLocationSource` now validates anchor/covariance shape, finiteness, symmetry, and PSD at construction.
+
+### Added
+
+- `FilterState.create(mean, cov, layout=None)` classmethod: validates shape, finiteness, symmetry, and PSD at construction. Prefer over raw `FilterState(mean, cov)` for new code. Raw construction is intentionally NOT removed — it is still used inside JIT-compiled scan bodies where the classmethod validation cannot trace.
+- `StateMode` Literal alias and `STATE_MODES` tuple exported from `models.state_layout` for downstream consumers (CLI argparse `choices=`, schema validation, tests). Test invariant `set(STATE_MODES) == set(LAYOUT_REGISTRY.keys())` ensures the literal stays in sync with the registry.
+- `EventChannel` dataclass in `io.session` grouping the TTL-event fields into a single nested type with self-validation.
+
 ## [0.2.2] - unreleased
 
 ### Changed
@@ -204,7 +221,8 @@ Initial public release of trodestrack: sensor-fused 2D rat tracking with JAX EKF
 Detailed session-by-session development notes are preserved in
 [CHANGELOG.dev-sessions.md](CHANGELOG.dev-sessions.md) for historical reference.
 
-[0.2.2]: https://github.com/edeno/trodestrack/compare/v0.2.1...HEAD
+[0.4.0]: https://github.com/edeno/trodestrack/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/edeno/trodestrack/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/edeno/trodestrack/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/edeno/trodestrack/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/edeno/trodestrack/releases/tag/v0.1.0

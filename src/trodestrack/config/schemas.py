@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 
 import numpy as np
 import yaml
@@ -247,6 +247,15 @@ class FilterConfig(BaseModel):
         data = self.model_dump(exclude_none=True)
         if self.state_mode == "vision_only" and self.use_mahalanobis_gating is None:
             data["use_mahalanobis_gating"] = False
+        # ``FilterCoreConfig`` raises on vision_only + enable_zupt=True
+        # (ZUPT requires IMU stationarity detection that vision_only
+        # does not consume). Auto-disable when the YAML caller left it
+        # unset so the YAML interface stays usable, mirroring the
+        # ``use_mahalanobis_gating`` auto-disable above. An explicit
+        # ``enable_zupt: true`` under ``state_mode: vision_only`` still
+        # surfaces the ValueError from FilterCoreConfig.
+        if self.state_mode == "vision_only" and self.enable_zupt is None:
+            data["enable_zupt"] = False
         data["led_distance"] = (
             self.led_distance if self.led_distance is not None else led_distance
         )
@@ -290,6 +299,10 @@ class LedIdentityConfig(BaseModel):
     max_speed_mps: float = Field(default=3.0, gt=0.0)
 
 
+SourceType = Literal["beam", "zone", "rfid"]
+SOURCE_TYPES: tuple[str, ...] = get_args(SourceType)
+
+
 @dataclass(frozen=True)
 class EventLocationSource:
     """Resolved geometry the EKF event-update model consumes per source.
@@ -304,7 +317,46 @@ class EventLocationSource:
     anchor: np.ndarray  # (2,) world meters
     covariance: np.ndarray  # (2, 2) world-frame measurement covariance, PSD
     label: str | None = None
-    source_type: str = "unknown"
+    source_type: SourceType = "beam"
+
+    def __post_init__(self) -> None:
+        if self.source_type not in SOURCE_TYPES:
+            raise ValueError(
+                "EventLocationSource.source_type must be one of "
+                f"{SOURCE_TYPES}; got {self.source_type!r}."
+            )
+
+        anchor = np.asarray(self.anchor, dtype=float)
+        if anchor.shape != (2,):
+            raise ValueError(
+                f"EventLocationSource.anchor must have shape (2,); got {anchor.shape}."
+            )
+        if not np.all(np.isfinite(anchor)):
+            raise ValueError(
+                f"EventLocationSource.anchor must be finite; got {anchor.tolist()}."
+            )
+        object.__setattr__(self, "anchor", anchor)
+
+        cov = np.asarray(self.covariance, dtype=float)
+        if cov.shape != (2, 2):
+            raise ValueError(
+                f"EventLocationSource.covariance must have shape (2, 2); "
+                f"got {cov.shape}."
+            )
+        if not np.all(np.isfinite(cov)):
+            raise ValueError("EventLocationSource.covariance must be finite.")
+        if not np.allclose(cov, cov.T, atol=1e-10):
+            raise ValueError(
+                "EventLocationSource.covariance must be symmetric; "
+                f"max asymmetry={float(np.max(np.abs(cov - cov.T))):.2e}."
+            )
+        eigs = np.linalg.eigvalsh(cov)
+        if eigs.min() < -1e-10:
+            raise ValueError(
+                f"EventLocationSource.covariance must be PSD; min eigenvalue="
+                f"{float(eigs.min()):.2e}."
+            )
+        object.__setattr__(self, "covariance", cov)
 
 
 def _isotropic_event_source(
@@ -313,7 +365,7 @@ def _isotropic_event_source(
     center: tuple[float, float],
     sigma: float,
     label: str | None,
-    source_type: str,
+    source_type: SourceType,
 ) -> EventLocationSource:
     return EventLocationSource(
         source_id=source_id,

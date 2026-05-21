@@ -53,7 +53,10 @@ def test_rts_smoother_smoke_vision_only_layout():
     t_cam, t_imu, U_imu, Z1, Z2, mask = _tiny_synthetic_sequence()
 
     ekf_config = EKFConfig(
-        state_mode="vision_only", led_distance=0.04, use_heading_measurement=False
+        state_mode="vision_only",
+        led_distance=0.04,
+        use_heading_measurement=False,
+        enable_zupt=False,
     )
     filter_result = extended_kalman_filter(
         ekf_config, t_imu, U_imu, t_cam, Z1, Z2, mask, initial_state=None, conf_cam=None

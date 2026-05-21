@@ -11,6 +11,8 @@ from trodestrack.models.state_layout import (
     LAYOUT_3D_QUAT,
     LAYOUT_REGISTRY,
     LAYOUT_VISION_ONLY,
+    STATE_MODES,
+    StateLayout,
     get_heading_index,
     get_layout,
 )
@@ -336,3 +338,98 @@ def test_layout_2d_cam_3d_imu_has_2d_heading():
     assert layout.has_heading_2d is True
     assert layout.has_orientation_3d is False
     assert isinstance(layout.heading_idx, int)
+
+
+# =============================================================================
+# StateLayout construction-time validation
+# =============================================================================
+
+
+def test_state_layout_rejects_out_of_range_indices():
+    """An index outside ``[0, n)`` fails at construction."""
+    with pytest.raises(ValueError, match="out of range"):
+        StateLayout(
+            n=5,
+            pos_idx=(0, 1),
+            vel_idx=(2, 99),
+            heading_idx=4,
+            bias_gyro_idx=(),
+            bias_accel_idx=(),
+        )
+
+
+def test_state_layout_rejects_overlapping_indices():
+    """Duplicate indices across components fail at construction."""
+    with pytest.raises(ValueError, match="disjoint"):
+        StateLayout(
+            n=5,
+            pos_idx=(0, 1),
+            vel_idx=(1, 2),  # 1 reused from pos_idx
+            heading_idx=3,
+            bias_gyro_idx=(4,),
+            bias_accel_idx=(),
+        )
+
+
+def test_state_layout_rejects_non_exhaustive_indices():
+    """Indices that do not cover ``[0, n)`` fail at construction."""
+    # n=10 but only 5 indices claimed (0..4); 5..9 are missing.
+    with pytest.raises(ValueError, match="exhaust"):
+        StateLayout(
+            n=10,
+            pos_idx=(0, 1),
+            vel_idx=(2, 3),
+            heading_idx=4,
+            bias_gyro_idx=(),
+            bias_accel_idx=(),
+        )
+
+
+def test_state_layout_rejects_wrong_heading_tuple_length():
+    """A ``heading_idx`` tuple of length != 3 or 4 fails."""
+    with pytest.raises(ValueError, match="length 3"):
+        StateLayout(
+            n=4,
+            pos_idx=(2, 3),
+            vel_idx=(),
+            heading_idx=(0, 1),  # length 2 — not Euler (3) or quaternion (4)
+            bias_gyro_idx=(),
+            bias_accel_idx=(),
+        )
+
+
+def test_state_layout_accepts_all_registered_layouts():
+    """Every layout in ``LAYOUT_REGISTRY`` satisfies the new validation."""
+    for mode, layout in LAYOUT_REGISTRY.items():
+        # Re-construct from the existing layout's fields to exercise __post_init__.
+        rebuilt = StateLayout(
+            n=layout.n,
+            pos_idx=layout.pos_idx,
+            vel_idx=layout.vel_idx,
+            heading_idx=layout.heading_idx,
+            bias_gyro_idx=layout.bias_gyro_idx,
+            bias_accel_idx=layout.bias_accel_idx,
+        )
+        assert rebuilt.n == layout.n, f"layout {mode!r} round-trip changed n"
+
+
+def test_state_modes_match_layout_registry_keys():
+    """The ``StateMode`` literal and ``LAYOUT_REGISTRY`` stay in sync."""
+    assert set(STATE_MODES) == set(LAYOUT_REGISTRY.keys())
+
+
+# =============================================================================
+# FilterCoreConfig.state_mode runtime guard
+# =============================================================================
+
+
+def test_filter_core_config_rejects_unknown_state_mode():
+    """A typo'd ``state_mode`` fails at construction with a helpful message.
+
+    Lives here (next to the ``STATE_MODES`` definition it consults) because
+    the runtime check is the public surface of the ``StateMode`` literal.
+    """
+    from trodestrack.models.filter_common import FilterCoreConfig
+
+    with pytest.raises(ValueError, match="must be one of"):
+        FilterCoreConfig(state_mode="typo")  # type: ignore[arg-type]

@@ -81,9 +81,15 @@ def prepare_config_filter_run(args: argparse.Namespace) -> ConfigFilterRun:
         Z_cam_led2=session.Z_cam_led2,
         mask_cam=session.mask_cam,
         conf_cam=session.conf_cam,
-        event_source_anchors=session.event_source_anchors,
-        event_source_covariances=session.event_source_covariances,
-        event_indices_per_frame=session.event_indices_per_frame,
+        event_source_anchors=(
+            session.events.anchors if session.events is not None else None
+        ),
+        event_source_covariances=(
+            session.events.covariances if session.events is not None else None
+        ),
+        event_indices_per_frame=(
+            session.events.indices_per_frame if session.events is not None else None
+        ),
     )
     # ``run_real_data_safety_check`` can raise *before* returning a
     # ``SafetyReport`` (e.g. no finite dual-LED frame, or no finite
@@ -191,10 +197,10 @@ def save_filter_outputs(run: ConfigFilterRun) -> None:
     }
     if run.session.conf_cam is not None:
         bundle["conf_cam"] = run.session.conf_cam
-    if run.session.event_source_anchors is not None:
-        bundle["event_source_anchors"] = run.session.event_source_anchors
-        bundle["event_source_covariances"] = run.session.event_source_covariances
-        bundle["event_indices_per_frame"] = run.session.event_indices_per_frame
+    if run.session.events is not None:
+        bundle["event_source_anchors"] = run.session.events.anchors
+        bundle["event_source_covariances"] = run.session.events.covariances
+        bundle["event_indices_per_frame"] = run.session.events.indices_per_frame
         ttl_diag = run.session.diagnostics.get("ttl_events")
         if isinstance(ttl_diag, dict):
             bundle["event_source_ids"] = np.asarray(
