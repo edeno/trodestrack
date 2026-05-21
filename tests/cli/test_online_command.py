@@ -95,33 +95,17 @@ def test_online_help_message():
         assert exc_info.value.code == 0
 
 
-def test_online_command_creates_output_directory(synthetic_data_files, temp_output_dir):
+def test_online_command_creates_output_directory(
+    synthetic_data_files, temp_output_dir, smooth_online_io_args
+):
     """Test that online command creates output directory structure."""
-    input_dir = synthetic_data_files
     output_dir = temp_output_dir / "run1"
-
-    # Run online command
-    with patch(
-        "sys.argv",
-        [
-            "trodestrack",
-            "online",
-            "--imu-timestamps",
-            str(input_dir / "t_imu.txt"),
-            "--imu-measurements",
-            str(input_dir / "U_imu.txt"),
-            "--camera-timestamps",
-            str(input_dir / "t_cam.txt"),
-            "--led1-positions",
-            str(input_dir / "Z_cam_led1.txt"),
-            "--led2-positions",
-            str(input_dir / "Z_cam_led2.txt"),
-            "--camera-mask",
-            str(input_dir / "mask_cam.txt"),
-            "--output-dir",
-            str(output_dir),
-        ],
-    ):
+    argv = [
+        "trodestrack",
+        "online",
+        *smooth_online_io_args(synthetic_data_files, output_dir),
+    ]
+    with patch("sys.argv", argv):
         main()
 
     # Check output directory was created
@@ -129,33 +113,17 @@ def test_online_command_creates_output_directory(synthetic_data_files, temp_outp
     assert output_dir.is_dir()
 
 
-def test_online_command_saves_required_outputs(synthetic_data_files, temp_output_dir):
+def test_online_command_saves_required_outputs(
+    synthetic_data_files, temp_output_dir, smooth_online_io_args
+):
     """Test that online command saves all required output files (filter only, no smoother)."""
-    input_dir = synthetic_data_files
     output_dir = temp_output_dir / "run1"
-
-    # Run online command
-    with patch(
-        "sys.argv",
-        [
-            "trodestrack",
-            "online",
-            "--imu-timestamps",
-            str(input_dir / "t_imu.txt"),
-            "--imu-measurements",
-            str(input_dir / "U_imu.txt"),
-            "--camera-timestamps",
-            str(input_dir / "t_cam.txt"),
-            "--led1-positions",
-            str(input_dir / "Z_cam_led1.txt"),
-            "--led2-positions",
-            str(input_dir / "Z_cam_led2.txt"),
-            "--camera-mask",
-            str(input_dir / "mask_cam.txt"),
-            "--output-dir",
-            str(output_dir),
-        ],
-    ):
+    argv = [
+        "trodestrack",
+        "online",
+        *smooth_online_io_args(synthetic_data_files, output_dir),
+    ]
+    with patch("sys.argv", argv):
         main()
 
     # Check required outputs exist (filter only, no smoother)
@@ -169,13 +137,18 @@ def test_online_command_saves_required_outputs(synthetic_data_files, temp_output
 
     # Verify data shapes are correct
     filtered_means = np.loadtxt(output_dir / "filtered_means.txt")
-    n_cam = len(np.loadtxt(input_dir / "t_cam.txt"))
+    n_cam = len(np.loadtxt(synthetic_data_files / "t_cam.txt"))
     assert filtered_means.shape[0] == n_cam
     assert filtered_means.shape[1] == 10  # Default 10D state (2d_cam_3d_imu)
 
 
 def test_online_command_missing_input_file(temp_output_dir):
-    """Test that online command handles missing input files gracefully."""
+    """Test that online command handles missing input files gracefully.
+
+    Doesn't reuse ``smooth_online_io_args`` because that helper expects
+    a fully populated input directory; here we deliberately point flags
+    at nonexistent paths so the CLI must reject them.
+    """
     output_dir = temp_output_dir / "run1"
 
     # Run online command with non-existent files
@@ -249,7 +222,12 @@ def ten_second_session(temp_output_dir):
     return input_dir
 
 
-def test_online_command_outputs_are_finite_and_psd(ten_second_session, temp_output_dir):
+def test_online_command_outputs_are_finite_and_psd(
+    ten_second_session,
+    temp_output_dir,
+    smooth_online_io_args,
+    assert_outputs_are_finite_and_psd,
+):
     """Filter-only outputs must stay finite and PSD across a 10 s run.
 
     Same probe as the smooth-command equivalent: silent numerical
@@ -259,83 +237,37 @@ def test_online_command_outputs_are_finite_and_psd(ten_second_session, temp_outp
     """
 
     output_dir = temp_output_dir / "run_online_finite"
-    with patch(
-        "sys.argv",
-        [
-            "trodestrack",
-            "online",
-            "--imu-timestamps",
-            str(ten_second_session / "t_imu.txt"),
-            "--imu-measurements",
-            str(ten_second_session / "U_imu.txt"),
-            "--camera-timestamps",
-            str(ten_second_session / "t_cam.txt"),
-            "--led1-positions",
-            str(ten_second_session / "Z_cam_led1.txt"),
-            "--led2-positions",
-            str(ten_second_session / "Z_cam_led2.txt"),
-            "--camera-mask",
-            str(ten_second_session / "mask_cam.txt"),
-            "--output-dir",
-            str(output_dir),
-        ],
-    ):
+    argv = [
+        "trodestrack",
+        "online",
+        *smooth_online_io_args(ten_second_session, output_dir),
+    ]
+    with patch("sys.argv", argv):
         main()
 
-    means = np.loadtxt(output_dir / "filtered_means.txt")
-    flat_covs = np.loadtxt(output_dir / "filtered_covariances.txt")
-    n_cam = means.shape[0]
-    state_dim = means.shape[1]
-    assert flat_covs.shape == (n_cam, state_dim * state_dim)
-    covs = flat_covs.reshape(n_cam, state_dim, state_dim)
-
-    assert np.all(np.isfinite(means)), "filtered means contain NaN/Inf"
-    assert np.all(np.isfinite(covs)), "filtered covariances contain NaN/Inf"
-
-    rtol = 1e-8
-    asym = np.abs(covs - np.swapaxes(covs, 1, 2))
-    max_sym_violation = float(asym.max())
-    cov_scale = float(np.abs(covs).max())
-    assert max_sym_violation <= rtol * max(cov_scale, 1.0)
-
-    sym_covs = 0.5 * (covs + np.swapaxes(covs, 1, 2))
-    eigs = np.linalg.eigvalsh(sym_covs)
-    assert float(eigs.min()) > 0.0
+    assert_outputs_are_finite_and_psd(
+        output_dir / "filtered_means.txt",
+        output_dir / "filtered_covariances.txt",
+    )
 
 
-def test_online_command_with_filter_config(synthetic_data_files, temp_output_dir):
+def test_online_command_with_filter_config(
+    synthetic_data_files, temp_output_dir, smooth_online_io_args
+):
     """Test online command with custom filter configuration."""
-    input_dir = synthetic_data_files
     output_dir = temp_output_dir / "run1"
-
-    # Run with custom process noise
-    with patch(
-        "sys.argv",
-        [
-            "trodestrack",
-            "online",
-            "--imu-timestamps",
-            str(input_dir / "t_imu.txt"),
-            "--imu-measurements",
-            str(input_dir / "U_imu.txt"),
-            "--camera-timestamps",
-            str(input_dir / "t_cam.txt"),
-            "--led1-positions",
-            str(input_dir / "Z_cam_led1.txt"),
-            "--led2-positions",
-            str(input_dir / "Z_cam_led2.txt"),
-            "--camera-mask",
-            str(input_dir / "mask_cam.txt"),
-            "--output-dir",
-            str(output_dir),
-            "--process-noise-pos",
-            "0.05",
-            "--process-noise-vel",
-            "3.0",
-            "--damping-coeff",
-            "0.5",
-        ],
-    ):
+    argv = [
+        "trodestrack",
+        "online",
+        *smooth_online_io_args(synthetic_data_files, output_dir),
+        "--process-noise-pos",
+        "0.05",
+        "--process-noise-vel",
+        "3.0",
+        "--damping-coeff",
+        "0.5",
+    ]
+    with patch("sys.argv", argv):
         main()
 
     # Should complete successfully

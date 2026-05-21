@@ -1,26 +1,22 @@
-"""3D quaternion UKF analytic-correctness tests.
+"""3D quaternion UKF rejection-contract tests.
 
-Parallel to ``test_ekf_3d_analytic.py``. Each test exercises the same
-scenario from ``simulate_3d_session`` but routes the call through
-``unscented_kalman_filter``.
-
-Current behavior: the UKF entry point rejects every quaternion-orientation
-state mode (``3d_quat`` and ``3d_cam_6dof_imu``) with ``NotImplementedError``
+Parallel to ``test_ekf_3d_analytic.py`` but locks in the *current*
+behavior: the UKF entry point rejects every quaternion-orientation state
+mode (``3d_quat`` and ``3d_cam_6dof_imu``) with ``NotImplementedError``
 because sigma-point quaternion mean/covariance handling is not yet
 implemented (see ``unscented_kalman_filter`` docstring and
-``tests/filters/test_imu_shape_validation.py``). These tests lock that
-contract in: each one runs the same simulator setup as its EKF
-counterpart and asserts the UKF raises ``NotImplementedError`` with a
-quaternion-related message rather than silently downgrading or producing
-wrong output. When the UKF gains 3D quaternion support, these stubs will
-fail and force real analytic bounds (matching the EKF tolerances, up to
-~20% looser to account for sigma-point spread) to be written.
+``tests/filters/test_imu_shape_validation.py``).
 
-The simulator calls themselves still allocate the full 6-DOF IMU + 3D
-LED tensors and the resulting fixtures end up shaped the way the
-post-UKF-3D tests will need, so this file stays usable as the skeleton
-once the UKF gains 3D quaternion support — only the call site swaps from
-``pytest.raises`` to an analytic-bound assertion.
+The rejection happens at the very top of ``unscented_kalman_filter``
+(before any input tensor is inspected — see ``ukf.py`` ~line 1039), so
+each test just needs zero-filled IMU/camera arrays of the right shape.
+We deliberately do *not* call ``simulate_3d`` here: a ~20 s sim per
+test would be ~100 s of wasted CI time. Once the UKF gains 3D
+quaternion support, swap ``_make_unused_inputs`` for ``simulate_3d``
+and replace ``pytest.raises`` with analytic-bound assertions matching
+the EKF tolerances (up to ~20% looser for sigma-point spread). The
+scenario docstrings below preserve the analytic intent so the future
+tests inherit the right parameters.
 """
 
 from __future__ import annotations
@@ -54,137 +50,98 @@ def _make_ukf_3d_config() -> UKFConfig:
     )
 
 
-def _run_ukf_3d_stub(sim) -> None:
-    """Invoke ``unscented_kalman_filter`` with 3D-quaternion config.
+def _make_unused_inputs() -> dict:
+    """Minimal IMU/camera arrays with the right shapes for the UKF entry point.
 
-    The 2D ``Z_cam_led*`` arguments are passed through unchanged because
-    the entry point rejects the configuration before it inspects the
-    measurement tensors — so any shape works for the rejection contract.
+    Returns zero-filled tensors sized for a tiny 6-DOF IMU + 3D camera
+    session (50 IMU samples, 15 camera frames). The entry point raises
+    ``NotImplementedError`` before any value is consumed, so the
+    contents are irrelevant — only the shapes matter, and even those
+    aren't validated before the raise. Replace with ``simulate_3d(...)``
+    when the UKF gains 3D quaternion support.
     """
 
+    n_imu, n_cam = 50, 15
+    return {
+        "t_imu": np.linspace(0.0, 0.5, n_imu, dtype=np.float64),
+        "U_imu": np.zeros((n_imu, 6), dtype=np.float64),
+        "t_cam": np.linspace(0.0, 0.5, n_cam, dtype=np.float64),
+        "Z_cam_led1": np.zeros((n_cam, 3), dtype=np.float64),
+        "Z_cam_led2": np.zeros((n_cam, 3), dtype=np.float64),
+        "mask_cam": np.ones(n_cam, dtype=bool),
+    }
+
+
+def _assert_ukf_3d_rejects() -> None:
+    """Invoke the UKF with the 3D-quaternion config and assert it rejects."""
+
     config = _make_ukf_3d_config()
-    unscented_kalman_filter(
-        config,
-        sim.t_imu,
-        sim.U_imu,
-        sim.t_cam,
-        sim.Z_cam_led1,
-        sim.Z_cam_led2,
-        sim.mask_cam,
-    )
+    inp = _make_unused_inputs()
+    with pytest.raises(NotImplementedError, match="quaternion"):
+        unscented_kalman_filter(
+            config,
+            inp["t_imu"],
+            inp["U_imu"],
+            inp["t_cam"],
+            inp["Z_cam_led1"],
+            inp["Z_cam_led2"],
+            inp["mask_cam"],
+        )
 
 
 # =============================================================================
 # Tests
 # =============================================================================
+#
+# Each test corresponds 1:1 with an analytic test in test_ekf_3d_analytic.py
+# (stationary pitch/roll, yaw-only bias observability, 5 s dropout drift,
+# 4D NEES consistency, perfect-input idempotence). When the UKF gains 3D
+# quaternion support, each test should switch from a rejection contract
+# to a real analytic-bound assertion with the parameters captured in its
+# docstring.
 
 
-@pytest.mark.slow
-def test_ukf_3d_stationary_pitch_roll_recovers_gravity_orientation(simulate_3d) -> None:
-    """Stationary pitch/roll session: UKF currently rejects 3D quaternion modes."""
+def test_ukf_3d_stationary_pitch_roll_rejects() -> None:
+    """Stationary pitch=10° roll=5°, 30 s @ 100 Hz IMU.
 
-    sim = simulate_3d(
-        seed=0,
-        duration_s=30.0,
-        fs_imu=100.0,
-        motion="stationary",
-        init_pitch_deg=10.0,
-        init_roll_deg=5.0,
-    )
-    with pytest.raises(NotImplementedError, match="quaternion"):
-        _run_ukf_3d_stub(sim)
-
-
-@pytest.mark.slow
-def test_ukf_3d_yaw_only_motion_converges_gyro_bias_z(simulate_3d) -> None:
-    """Yaw-only bias-observability session: UKF currently rejects 3D quaternion modes."""
-
-    sim = simulate_3d(
-        seed=0,
-        duration_s=30.0,
-        fs_imu=100.0,
-        motion="yaw_only",
-        yaw_rate_dps=30.0,
-        init_pitch_deg=2.0,
-        init_roll_deg=1.0,
-        gyro_bias_xyz=(0.0, 0.0, 0.05),
-        gyro_noise_std=5e-4,
-        accel_noise_std=5e-3,
-    )
-    with pytest.raises(NotImplementedError, match="quaternion"):
-        _run_ukf_3d_stub(sim)
-
-
-@pytest.mark.slow
-def test_ukf_3d_5s_dropout_drift_under_acceptance_target(simulate_3d) -> None:
-    """5 s dropout session: UKF currently rejects 3D quaternion modes.
-
-    Once the UKF supports 3D quaternion, the analytic bound should be
-    drift ≤ 0.18 m (~20% looser than the EKF's 0.15 m bound to account
-    for sigma-point spread under no observations).
+    Future analytic bound: pitch/roll within 2° of truth, quaternion
+    norm 1 ± 1e-6 (matching the EKF test, up to ~20% looser for
+    sigma-point spread).
     """
-
-    sim = simulate_3d(
-        seed=0,
-        duration_s=30.0,
-        fs_imu=100.0,
-        motion="yaw_only",
-        yaw_rate_dps=10.0,
-        init_pitch_deg=2.0,
-        init_roll_deg=1.0,
-        gyro_bias_xyz=(0.001, -0.001, 0.005),
-        gyro_noise_std=5e-4,
-        accel_noise_std=5e-3,
-        dropout_window_s=(10.0, 15.0),
-    )
-    with pytest.raises(NotImplementedError, match="quaternion"):
-        _run_ukf_3d_stub(sim)
+    _assert_ukf_3d_rejects()
 
 
-@pytest.mark.slow
-def test_ukf_3d_nees_consistency_on_4d_state(simulate_3d) -> None:
-    """4D NEES session: UKF currently rejects 3D quaternion modes.
+def test_ukf_3d_yaw_only_motion_rejects() -> None:
+    """Yaw-only at 30 deg/s with gyro bias z=0.05, 30 s @ 100 Hz IMU.
 
-    Once supported, NEES bound should be [1.0, 9.6] (~20% looser top end
-    than the EKF's [1.0, 8.0]). TODO: Replace this stub with a real NEES
-    assertion when ``unscented_kalman_filter`` learns sigma-point
-    quaternion handling.
+    Future analytic bound: gyro-bias-z RMSE under the EKF target after
+    the bias-observability window, ~20% looser than the EKF.
     """
-
-    sim = simulate_3d(
-        seed=0,
-        duration_s=30.0,
-        fs_imu=100.0,
-        motion="yaw_only",
-        yaw_rate_dps=10.0,
-        init_pitch_deg=2.0,
-        init_roll_deg=1.0,
-        gyro_bias_xyz=(0.001, -0.001, 0.005),
-        gyro_noise_std=5e-4,
-        accel_noise_std=5e-3,
-    )
-    with pytest.raises(NotImplementedError, match="quaternion"):
-        _run_ukf_3d_stub(sim)
+    _assert_ukf_3d_rejects()
 
 
-@pytest.mark.slow
-def test_ukf_3d_perfect_input_no_drift(simulate_3d) -> None:
-    """Perfect-input idempotence session: UKF currently rejects 3D quaternion modes.
+def test_ukf_3d_5s_dropout_rejects() -> None:
+    """Yaw-only 30 s session with a 5 s camera dropout window (t=[10,15] s).
 
-    Once supported, the posterior-vs-truth tolerance should be ``rtol=1.2e-5``
+    Future analytic bound: drift ≤ 0.18 m (~20% looser than the EKF's
+    0.15 m to account for sigma-point spread under no observations).
+    """
+    _assert_ukf_3d_rejects()
+
+
+def test_ukf_3d_nees_consistency_rejects() -> None:
+    """4D NEES session: yaw-only 30 s with small gyro bias and noise.
+
+    Future analytic bound: NEES in [1.0, 9.6] (~20% looser top end
+    than the EKF's [1.0, 8.0]).
+    """
+    _assert_ukf_3d_rejects()
+
+
+def test_ukf_3d_perfect_input_rejects() -> None:
+    """Perfect-input idempotence: stationary 10 s, all noise sources zero.
+
+    Future analytic bound: posterior matches truth with ``rtol=1.2e-5``
     (~20% looser than the EKF's ``1e-5`` to account for sigma-point spread).
     """
-
-    sim = simulate_3d(
-        seed=42,
-        duration_s=10.0,
-        fs_imu=100.0,
-        motion="perfect",
-        init_pitch_deg=10.0,
-        init_roll_deg=5.0,
-    )
-    # Touch ``sim`` so ruff doesn't flag the parameter as unused once the
-    # entry-point check is replaced with a real filter call.
-    assert np.isfinite(sim.U_imu).all()
-    with pytest.raises(NotImplementedError, match="quaternion"):
-        _run_ukf_3d_stub(sim)
+    _assert_ukf_3d_rejects()
