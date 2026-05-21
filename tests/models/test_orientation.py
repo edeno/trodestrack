@@ -2,6 +2,7 @@
 
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 from trodestrack.models.orientation import (
     OrientationEstimatorConfig,
@@ -207,3 +208,113 @@ def test_camera_speed_gate_supports_two_camera_samples() -> None:
     )
 
     assert np.isfinite(result.quaternions).all()
+
+
+def _stationary_orientation_inputs(
+    pitch_deg: float, duration_s: float = 5.0, fs_imu: float = 100.0
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Build stationary IMU inputs at a given true pitch.
+
+    Returns ``(t_imu, gyro, accel, true_quat)`` such that
+    ``estimate_orientation`` should recover a body-to-world quaternion close
+    to ``true_quat``. Roll and yaw are held at zero.
+    """
+
+    n = round(duration_s * fs_imu) + 1
+    t_imu = np.linspace(0.0, duration_s, n)
+    pitch_rad = np.deg2rad(pitch_deg)
+    true_quat = quaternion_from_rotation_vector(jnp.array([0.0, pitch_rad, 0.0]))
+    gravity_body = np.asarray(
+        rotate_vector_world_to_body(true_quat, jnp.array([0.0, 0.0, GRAVITY]))
+    )
+    gyro = np.zeros((n, 3))
+    accel = np.tile(gravity_body, (n, 1))
+    return t_imu, gyro, accel, np.asarray(true_quat)
+
+
+@pytest.mark.parametrize("pitch_deg", [88.0, 92.0])
+def test_orientation_near_pitch_singularity_keeps_quaternion_unit_norm(
+    pitch_deg: float,
+) -> None:
+    """Stationary headstage near the ±90° gimbal-lock region.
+
+    The Euler-angle pitch singularity sits at ±90°. The internal quaternion
+    representation must stay unit-norm regardless of how poorly Euler-angle
+    yaw is conditioned there, so we assert ``||q|| == 1 ± 2e-7`` on every
+    timestep and check that yaw is finite (no division-by-zero NaN).
+    """
+
+    t_imu, gyro, accel, true_quat = _stationary_orientation_inputs(pitch_deg)
+
+    result = estimate_orientation(
+        t_imu=t_imu,
+        gyro_xyz=gyro,
+        accel_xyz=accel,
+        config=OrientationEstimatorConfig(
+            initial_quaternion=true_quat,
+            initial_gyro_bias_rad_s=np.zeros(3),
+        ),
+    )
+
+    norms = np.linalg.norm(result.quaternions, axis=1)
+    np.testing.assert_allclose(norms, 1.0, atol=2e-7)
+    assert np.isfinite(result.yaw).all()
+
+    pitch_recovered_deg = np.rad2deg(result.pitch[-1])
+    # Pitch is measured as arcsin and wraps within [-90, 90]; for an input
+    # of 92° the recovered value sits near +88° (the symmetric image of the
+    # singularity). Compare via sin to avoid that branch ambiguity.
+    np.testing.assert_allclose(
+        np.sin(result.pitch[-1]),
+        np.sin(np.deg2rad(pitch_deg)),
+        atol=np.sin(np.deg2rad(3.0)),
+    )
+    # Sanity-check that we didn't accidentally land on the opposite hemisphere.
+    assert abs(pitch_recovered_deg) > 80.0
+
+
+def test_orientation_through_pitch_singularity_does_not_nan() -> None:
+    """Pitch sweep -89° → +89° (10 s, 100 Hz) must not produce NaN outputs.
+
+    Crossing the ±90° region with a finite pitch rate is the realistic
+    failure mode for an inverted headstage. None of the public outputs
+    (quaternion, roll, pitch, yaw) may NaN at any timestep.
+    """
+
+    fs_imu = 100.0
+    duration_s = 10.0
+    n = round(duration_s * fs_imu) + 1
+    t_imu = np.linspace(0.0, duration_s, n)
+    pitch_start = np.deg2rad(-89.0)
+    pitch_end = np.deg2rad(89.0)
+    pitch_rate = (pitch_end - pitch_start) / duration_s
+
+    gyro = np.zeros((n, 3))
+    gyro[:, 1] = pitch_rate  # constant body-y rotation
+    # Accelerometer measures gravity rotated into the body frame at the
+    # current pitch; build the truth quaternion at each sample.
+    pitch_t = pitch_start + pitch_rate * t_imu
+    accel = np.zeros((n, 3))
+    for i, pitch_i in enumerate(pitch_t):
+        q_i = quaternion_from_rotation_vector(jnp.array([0.0, float(pitch_i), 0.0]))
+        accel[i] = np.asarray(
+            rotate_vector_world_to_body(q_i, jnp.array([0.0, 0.0, GRAVITY]))
+        )
+
+    initial_quat = quaternion_from_rotation_vector(
+        jnp.array([0.0, float(pitch_start), 0.0])
+    )
+    result = estimate_orientation(
+        t_imu=t_imu,
+        gyro_xyz=gyro,
+        accel_xyz=accel,
+        config=OrientationEstimatorConfig(
+            initial_quaternion=np.asarray(initial_quat),
+            initial_gyro_bias_rad_s=np.zeros(3),
+        ),
+    )
+
+    assert np.isfinite(result.quaternions).all()
+    assert np.isfinite(result.roll).all()
+    assert np.isfinite(result.pitch).all()
+    assert np.isfinite(result.yaw).all()
