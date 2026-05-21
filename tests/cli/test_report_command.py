@@ -509,3 +509,88 @@ def test_report_command_with_custom_title_appears_in_pdf(
             f"Title bytes {title!r} not found in raw PDF; "
             "install pypdf for a more robust check."
         )
+
+
+def _bad_state_dim(qa_dir: Path) -> None:
+    (qa_dir / "state_dim.txt").write_text("not-an-int")
+
+
+def _zero_state_dim(qa_dir: Path) -> None:
+    (qa_dir / "state_dim.txt").write_text("0")
+
+
+def _non_finite_timestamps(qa_dir: Path) -> None:
+    n = int((qa_dir / "state_dim.txt").read_text().strip()) and 100
+    t = np.linspace(0.0, 1.0, n)
+    t[5] = np.nan
+    np.save(qa_dir / "timestamps.npy", t)
+
+
+def _non_monotonic_timestamps(qa_dir: Path) -> None:
+    t = np.linspace(0.0, 1.0, 100)
+    t[10] = t[9]
+    np.save(qa_dir / "timestamps.npy", t)
+
+
+def _two_d_timestamps(qa_dir: Path) -> None:
+    np.save(qa_dir / "timestamps.npy", np.zeros((100, 2)))
+
+
+def _too_short_timestamps(qa_dir: Path) -> None:
+    np.save(qa_dir / "timestamps.npy", np.array([0.0]))
+
+
+def _bad_nis_shape(qa_dir: Path) -> None:
+    np.save(qa_dir / "nis.npy", np.zeros(50))
+
+
+def _bad_measurement_dim(qa_dir: Path) -> None:
+    np.save(qa_dir / "nis.npy", np.zeros(100))
+    (qa_dir / "measurement_dim.txt").write_text("not-an-int")
+
+
+def _zero_measurement_dim(qa_dir: Path) -> None:
+    np.save(qa_dir / "nis.npy", np.zeros(100))
+    (qa_dir / "measurement_dim.txt").write_text("0")
+
+
+@pytest.mark.parametrize(
+    "corrupt,match",
+    [
+        (_bad_state_dim, "state_dim.txt must contain an integer"),
+        (_zero_state_dim, "state_dim must be a positive integer"),
+        (_non_finite_timestamps, "non-finite"),
+        (_non_monotonic_timestamps, "strictly increasing"),
+        (_two_d_timestamps, "1D array"),
+        (_too_short_timestamps, "at least two samples"),
+        (_bad_nis_shape, "nis has shape"),
+        (_bad_measurement_dim, "measurement_dim.txt must contain an integer"),
+        (_zero_measurement_dim, "measurement_dim must be a positive integer"),
+    ],
+)
+def test_load_run_data_validates_inputs(
+    tmp_path: Path, build_qa_inputs_dir, corrupt, match
+) -> None:
+    """``load_run_data`` raises on the documented corruption modes.
+
+    Pure validation-path coverage for the ``raise`` branches in
+    ``cli.report.load_run_data`` that the happy-path tests do not exercise.
+    """
+    qa_dir = build_qa_inputs_dir(tmp_path, n=100)
+    corrupt(qa_dir)
+    with pytest.raises(ValueError, match=match):
+        load_run_data(qa_dir)
+
+
+def test_load_run_data_rejects_missing_run_dir(tmp_path: Path) -> None:
+    """Nonexistent run directory raises FileNotFoundError."""
+    with pytest.raises(FileNotFoundError, match="does not exist"):
+        load_run_data(tmp_path / "does_not_exist")
+
+
+def test_load_run_data_rejects_file_as_run_dir(tmp_path: Path) -> None:
+    """Path that is a file (not a directory) raises NotADirectoryError."""
+    file_path = tmp_path / "regular_file.txt"
+    file_path.write_text("hello")
+    with pytest.raises(NotADirectoryError, match="not a directory"):
+        load_run_data(file_path)
