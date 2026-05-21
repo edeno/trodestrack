@@ -7,7 +7,7 @@ simulation data:
 - Heading RMSE <= 7 degrees
 - Dropout drift <= 3.5 m after 5 s (realistic consumer-grade IMU bound)
 
-Unlike test_target_bounds.py (which tests truth-vs-truth), these tests run
+Unlike tests/sim/test_target_bounds.py (which tests truth-vs-truth), these tests run
 actual EKF filtering and validate performance against the acceptance targets.
 """
 
