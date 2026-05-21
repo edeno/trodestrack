@@ -179,8 +179,8 @@ class CameraConfig(BaseModel):
     led1_y_column: str = "yloc"
     led2_x_column: str = "xloc2"
     led2_y_column: str = "yloc2"
-    confidence_led1_column: str | None = None
-    confidence_led2_column: str | None = None
+    confidence_led1_column: str | None = Field(default=None, min_length=1)
+    confidence_led2_column: str | None = Field(default=None, min_length=1)
 
     @model_validator(mode="after")
     def _validate_confidence_columns(self) -> CameraConfig:

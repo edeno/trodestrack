@@ -624,7 +624,10 @@ def _load_leds(
         * cam.meters_per_pixel
     )
     conf_cam = None
-    if cam.confidence_led1_column and cam.confidence_led2_column:
+    if (
+        cam.confidence_led1_column is not None
+        and cam.confidence_led2_column is not None
+    ):
         c1 = pos_df[cam.confidence_led1_column].to_numpy(dtype=float)
         c2 = pos_df[cam.confidence_led2_column].to_numpy(dtype=float)
         conf_cam = np.column_stack([c1, c1, c2, c2])
