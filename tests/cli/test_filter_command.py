@@ -1,14 +1,12 @@
-"""Tests for the ``trodestrack online`` CLI command.
+"""Tests for the ``trodestrack filter`` CLI command.
 
-The ``online`` subcommand runs the EKF in **forward filter only** mode (no
+The ``filter`` subcommand runs the EKF in forward-pass-only mode (no
 backward smoothing) as a batch over complete IMU/camera/LED arrays loaded
-from disk. There is no streaming or per-frame ingest loop; "online" here
-means "no future-frame dependence", not "real-time per-frame". These
-tests cover the batch end-to-end behaviour.
+from disk. These tests cover the batch end-to-end behaviour.
 
 Test cases:
 1. Help message displays correctly.
-2. Online command with minimal config (stationary scenario), end-to-end batch run.
+2. Filter command with minimal config (stationary scenario), end-to-end batch run.
 3. Output directory creation and file structure.
 4. Error handling for missing/invalid input files.
 5. Argument parsing fall-through to ``EKFConfig`` defaults.
@@ -86,24 +84,24 @@ def synthetic_data_files(temp_output_dir):
     return input_dir
 
 
-def test_online_help_message():
-    """Test that online --help displays usage information."""
-    with patch("sys.argv", ["trodestrack", "online", "--help"]):
+def test_filter_help_message():
+    """Test that filter --help displays usage information."""
+    with patch("sys.argv", ["trodestrack", "filter", "--help"]):
         with pytest.raises(SystemExit) as exc_info:
             main()
         # Help should exit with code 0
         assert exc_info.value.code == 0
 
 
-def test_online_command_creates_output_directory(
-    synthetic_data_files, temp_output_dir, smooth_online_io_args
+def test_filter_command_creates_output_directory(
+    synthetic_data_files, temp_output_dir, smooth_filter_io_args
 ):
-    """Test that online command creates output directory structure."""
+    """Test that filter command creates output directory structure."""
     output_dir = temp_output_dir / "run1"
     argv = [
         "trodestrack",
-        "online",
-        *smooth_online_io_args(synthetic_data_files, output_dir),
+        "filter",
+        *smooth_filter_io_args(synthetic_data_files, output_dir),
     ]
     with patch("sys.argv", argv):
         main()
@@ -113,15 +111,15 @@ def test_online_command_creates_output_directory(
     assert output_dir.is_dir()
 
 
-def test_online_command_saves_required_outputs(
-    synthetic_data_files, temp_output_dir, smooth_online_io_args
+def test_filter_command_saves_required_outputs(
+    synthetic_data_files, temp_output_dir, smooth_filter_io_args
 ):
-    """Test that online command saves all required output files (filter only, no smoother)."""
+    """Test that filter command saves all required output files (filter only, no smoother)."""
     output_dir = temp_output_dir / "run1"
     argv = [
         "trodestrack",
-        "online",
-        *smooth_online_io_args(synthetic_data_files, output_dir),
+        "filter",
+        *smooth_filter_io_args(synthetic_data_files, output_dir),
     ]
     with patch("sys.argv", argv):
         main()
@@ -131,7 +129,7 @@ def test_online_command_saves_required_outputs(
     assert (output_dir / "filtered_covariances.txt").exists()
     assert (output_dir / "marginal_loglik.txt").exists()
 
-    # Smoother outputs should NOT exist for online mode
+    # Smoother outputs should NOT exist for the filter-only command
     assert not (output_dir / "smoothed_means.txt").exists()
     assert not (output_dir / "smoothed_covariances.txt").exists()
 
@@ -142,21 +140,21 @@ def test_online_command_saves_required_outputs(
     assert filtered_means.shape[1] == 10  # Default 10D state (2d_cam_3d_imu)
 
 
-def test_online_command_missing_input_file(temp_output_dir):
-    """Test that online command handles missing input files gracefully.
+def test_filter_command_missing_input_file(temp_output_dir):
+    """Test that filter command handles missing input files gracefully.
 
-    Doesn't reuse ``smooth_online_io_args`` because that helper expects
+    Doesn't reuse ``smooth_filter_io_args`` because that helper expects
     a fully populated input directory; here we deliberately point flags
     at nonexistent paths so the CLI must reject them.
     """
     output_dir = temp_output_dir / "run1"
 
-    # Run online command with non-existent files
+    # Run filter command with non-existent files
     with patch(
         "sys.argv",
         [
             "trodestrack",
-            "online",
+            "filter",
             "--imu-timestamps",
             str(temp_output_dir / "nonexistent_t_imu.txt"),
             "--imu-measurements",
@@ -222,10 +220,10 @@ def ten_second_session(temp_output_dir):
     return input_dir
 
 
-def test_online_command_outputs_are_finite_and_psd(
+def test_filter_command_outputs_are_finite_and_psd(
     ten_second_session,
     temp_output_dir,
-    smooth_online_io_args,
+    smooth_filter_io_args,
     assert_outputs_are_finite_and_psd,
 ):
     """Filter-only outputs must stay finite and PSD across a 10 s run.
@@ -236,11 +234,11 @@ def test_online_command_outputs_are_finite_and_psd(
     only assert file existence.
     """
 
-    output_dir = temp_output_dir / "run_online_finite"
+    output_dir = temp_output_dir / "run_filter_finite"
     argv = [
         "trodestrack",
-        "online",
-        *smooth_online_io_args(ten_second_session, output_dir),
+        "filter",
+        *smooth_filter_io_args(ten_second_session, output_dir),
     ]
     with patch("sys.argv", argv):
         main()
@@ -251,15 +249,15 @@ def test_online_command_outputs_are_finite_and_psd(
     )
 
 
-def test_online_command_with_filter_config(
-    synthetic_data_files, temp_output_dir, smooth_online_io_args
+def test_filter_command_with_filter_config(
+    synthetic_data_files, temp_output_dir, smooth_filter_io_args
 ):
-    """Test online command with custom filter configuration."""
+    """Test filter command with custom filter configuration."""
     output_dir = temp_output_dir / "run1"
     argv = [
         "trodestrack",
-        "online",
-        *smooth_online_io_args(synthetic_data_files, output_dir),
+        "filter",
+        *smooth_filter_io_args(synthetic_data_files, output_dir),
         "--process-noise-pos",
         "0.05",
         "--process-noise-vel",

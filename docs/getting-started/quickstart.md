@@ -82,7 +82,7 @@ led_identity:
 Then run either CLI path:
 
 ```bash
-uv run trodestrack online --config session.yaml
+uv run trodestrack filter --config session.yaml
 uv run trodestrack smooth --config session.yaml
 ```
 

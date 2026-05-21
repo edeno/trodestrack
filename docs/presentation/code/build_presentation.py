@@ -704,7 +704,7 @@ def build_section_3_features(builder):
             "Forward-only EKF mean per-frame ≤33 ms over a 30-min session (amortized batch lax.scan; NOT per-frame streaming)",
             "JAX JIT compilation: First run slow, subsequent runs fast",
         ],
-        notes="TrodesTrack is highly optimized using JAX. The throughput floor (≥10× realtime offline on CPU) is enforced by tests/benchmark/test_throughput.py with block-until-ready timing; the reference run on an M-series Mac CPU was ~38× realtime / ~0.41 ms per frame. Absolute throughput is hardware-dependent, so re-measure on your target backend before quoting numbers. The codebase has no thread/core pinning, so calling this 'single core' would be unsupported; describe it simply as 'CPU'. GPU acceleration is supported via JAX's standard device-placement story but no first-party GPU benchmark is shipped today. Memory scales linearly O(n). Batch processing across sessions is embarrassingly parallel. The PRD's ≤33 ms-per-frame target is verified by tests/benchmark/test_throughput.py as the amortized mean (total / num_frames over a single 30-min batch lax.scan), which is necessary but not sufficient for tail / p99 per-frame latency — there is no streaming per-frame ingest harness today, so this is a throughput-style proxy for the forward-only 'online' CLI rather than a real-time guarantee. JAX JIT compilation adds ~10s overhead on first run, then subsequent runs are instant.",
+        notes="TrodesTrack is highly optimized using JAX. The throughput floor (≥10× realtime offline on CPU) is enforced by tests/benchmark/test_throughput.py with block-until-ready timing; the reference run on an M-series Mac CPU was ~38× realtime / ~0.41 ms per frame. Absolute throughput is hardware-dependent, so re-measure on your target backend before quoting numbers. The codebase has no thread/core pinning, so calling this 'single core' would be unsupported; describe it simply as 'CPU'. GPU acceleration is supported via JAX's standard device-placement story but no first-party GPU benchmark is shipped today. Memory scales linearly O(n). Batch processing across sessions is embarrassingly parallel. The PRD's ≤33 ms-per-frame target is verified by tests/benchmark/test_throughput.py as the amortized mean (total / num_frames over a single 30-min batch lax.scan), which is necessary but not sufficient for tail / p99 per-frame latency — there is no streaming per-frame ingest harness today, so this is a throughput-style proxy for the forward-only 'trodestrack filter' CLI rather than a real-time guarantee. JAX JIT compilation adds ~10s overhead on first run, then subsequent runs are instant.",
     )
 
     # Slide 25: Real Data Support
@@ -712,13 +712,13 @@ def build_section_3_features(builder):
         title="Real Data Support (Status)",
         bullets=[
             "Today: generic NumPy array inputs (timestamps + LED positions + IMU)",
-            "CLI: ``trodestrack online`` / ``smooth`` / ``report`` (text + .npy I/O)",
+            "CLI: ``trodestrack filter`` / ``smooth`` / ``report`` (text + .npy I/O)",
             "Diagnostic videos: MP4 via ``trodestrack.viz.video``",
             "Planned: native loaders for Trodes LED CSV, DeepLabCut CSV, SpikeGadgets MDA/REC",
             "Planned: homography calibration tool, Parquet/HDF5 outputs, fetch_example() demo data",
             "User pipeline today: convert to NumPy arrays, then call the filters / CLIs",
         ],
-        notes="TrodesTrack today consumes generic NumPy arrays for IMU + camera inputs and ships a CLI ('trodestrack online / smooth / report') that reads text files (.txt for filter outputs and .npy for QA inputs). Diagnostic videos render via the trodestrack.viz.video module. Format-specific loaders for Trodes LED CSV, DeepLabCut CSV, and SpikeGadgets MDA/REC, a homography calibration tool, Parquet/HDF5 outputs, and a fetch_example() demo helper are planned (see README.md 'In Progress'). Until they ship, users convert their own data to NumPy arrays and call the filter or CLI directly.",
+        notes="TrodesTrack today consumes generic NumPy arrays for IMU + camera inputs and ships a CLI ('trodestrack filter / smooth / report') that reads text files (.txt for filter outputs and .npy for QA inputs). Diagnostic videos render via the trodestrack.viz.video module. Format-specific loaders for Trodes LED CSV, DeepLabCut CSV, and SpikeGadgets MDA/REC, a homography calibration tool, Parquet/HDF5 outputs, and a fetch_example() demo helper are planned (see README.md 'In Progress'). Until they ship, users convert their own data to NumPy arrays and call the filter or CLI directly.",
     )
 
 
@@ -770,7 +770,7 @@ def build_section_4_getting_started(builder):
             "Unsure? → Start with EKF (default)",
             "All filters have identical API: just swap config",
         ],
-        notes="Decision tree for choosing filter. Forward-only / no-lookahead use → EKF (fastest; this is what the trodestrack online CLI runs as a batch over complete files — not a streaming per-frame ingest). Strong nonlinearities (e.g., 3D rotations) → UKF. Offline analysis + max accuracy → RTS smoother. Iterative refinement → IEKS, exposed today as ``rts_smoother(..., num_iter=N)`` and as the ``--num-iter`` flag on ``trodestrack smooth``; example 07 demonstrates ``num_iter=2``. When unsure, start with EKF (default, works for 95% of cases). All filters share identical API (filter config object + same input arrays), so switching is trivial.",
+        notes="Decision tree for choosing filter. Forward-only / no-lookahead use → EKF (fastest; this is what the trodestrack filter CLI runs as a batch over complete files — not a streaming per-frame ingest). Strong nonlinearities (e.g., 3D rotations) → UKF. Offline analysis + max accuracy → RTS smoother. Iterative refinement → IEKS, exposed today as ``rts_smoother(..., num_iter=N)`` and as the ``--num-iter`` flag on ``trodestrack smooth``; example 07 demonstrates ``num_iter=2``. When unsure, start with EKF (default, works for 95% of cases). All filters share identical API (filter config object + same input arrays), so switching is trivial.",
     )
 
     # Slide 30: When to Use TrodesTrack
@@ -786,7 +786,7 @@ def build_section_4_getting_started(builder):
             "  • Production 3D tracking (3D EKF is experimental)",
             "  • Closed-loop / per-frame streaming (no streaming ingest API today)",
         ],
-        notes="TrodesTrack is ideal for: SpikeGadgets IMU + camera setups, 2D planar tracking, high accuracy requirements, long sessions with occlusions. Python-based. NOT recommended for: production 3D tracking (the extended_kalman_filter_3d entry point exists today but is experimental — 2D is the supported path); closed-loop / per-frame streaming (the trodestrack online CLI is forward-only batch over complete files, not a streaming ingest harness — there is no per-frame ingest API today, so closed-loop is unsupported regardless of latency); non-planar arenas (assumes flat surface). For production 3D, use top-down projection. For closed-loop, consider simpler trackers or specialized hardware.",
+        notes="TrodesTrack is ideal for: SpikeGadgets IMU + camera setups, 2D planar tracking, high accuracy requirements, long sessions with occlusions. Python-based. NOT recommended for: production 3D tracking (the extended_kalman_filter_3d entry point exists today but is experimental — 2D is the supported path); closed-loop / per-frame streaming (the trodestrack filter CLI is forward-only batch over complete files, not a streaming ingest harness — there is no per-frame ingest API today, so closed-loop is unsupported regardless of latency); non-planar arenas (assumes flat surface). For production 3D, use top-down projection. For closed-loop, consider simpler trackers or specialized hardware.",
     )
 
     # Slide 31: Troubleshooting Common Issues
@@ -836,7 +836,7 @@ def build_section_5_advanced(builder):
             "Speedup vs pure Python: large but hardware-dependent — measure on your backend before quoting",
             "GPU: Same code runs on GPU via jax.device_put()",
         ],
-        notes="TrodesTrack is built on JAX (Google's NumPy successor). jax.lax.scan fuses loops for efficient filtering. Pure functional design enables JIT compilation and parallelization. XLA backend compiles Python to machine code (first run slow, subsequent runs instant). The speedup vs pure Python loops is large but hardware-dependent and not pinned by any in-repo benchmark; quote a measured number from your own backend rather than a hard-coded multiplier. GPU support is trivial: same code, just change device. The JAX architecture is what makes the forward-only batch filter cheap to run end-to-end (mean per-frame ≤33 ms over a 30-min session on commodity CPU); it does NOT itself provide a streaming / per-frame ingest API — see slides 8-9 and the trodestrack online CLI docs.",
+        notes="TrodesTrack is built on JAX (Google's NumPy successor). jax.lax.scan fuses loops for efficient filtering. Pure functional design enables JIT compilation and parallelization. XLA backend compiles Python to machine code (first run slow, subsequent runs instant). The speedup vs pure Python loops is large but hardware-dependent and not pinned by any in-repo benchmark; quote a measured number from your own backend rather than a hard-coded multiplier. GPU support is trivial: same code, just change device. The JAX architecture is what makes the forward-only batch filter cheap to run end-to-end (mean per-frame ≤33 ms over a 30-min session on commodity CPU); it does NOT itself provide a streaming / per-frame ingest API — see slides 8-9 and the trodestrack filter CLI docs.",
     )
 
     # Slide 35: Extending to 3D

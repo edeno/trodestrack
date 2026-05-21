@@ -1,5 +1,5 @@
-"""Runtime processing: online filtering and offline smoothing.
+"""Runtime processing: forward-only filtering and offline smoothing.
 
-Entry points and helpers for executing filters in real time and applying
-Rauch–Tung–Striebel or sigma-point smoothers offline.
+Entry points and helpers for the forward filter pass and the
+Rauch–Tung–Striebel / sigma-point smoothers that consume its output.
 """

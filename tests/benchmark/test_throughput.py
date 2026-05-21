@@ -2,13 +2,13 @@
 
 This module validates system performance against the project's targets:
 - Offline smoothing >=10x realtime (CPU) on a 30 min session
-- Online EKF latency <=33 ms per frame (CPU) - measured here as amortized
+- Forward-only EKF latency <=33 ms per frame (CPU) - measured here as amortized
   mean per-frame time (total / num_frames) over a single JIT'd ``lax.scan``
   batch, which is a *necessary* but not sufficient condition for the
   per-frame target. Per-frame tail / p99 latency is not measured by this
   suite (the filter is not driven from a streaming ingest loop), so this
-  is a throughput-style proxy for the forward-only "online" CLI rather
-  than a streaming / real-time guarantee.
+  is a throughput-style proxy for the forward-only ``trodestrack filter``
+  CLI rather than a streaming / real-time guarantee.
 """
 
 import time
@@ -100,7 +100,7 @@ def get_benchmark_ekf_config(**overrides: Any) -> EKFConfig:
 
     The headline floors checked by these tests therefore cover the
     synthetic 2D ``simulate_rat_imu`` path only. The YAML real-data
-    workflow (``trodestrack online --config session.yaml``) is not
+    workflow (``trodestrack filter --config session.yaml``) is not
     covered: it runs through additional preprocessing (parquet
     loading, sample-and-hold removal, IMU calibration diagnostics,
     LED identity correction) and an optional vision-only safety
@@ -257,14 +257,14 @@ def test_offline_smoother_throughput():
 
 
 # =============================================================================
-# Test 2: Online EKF Latency (≤33 ms per frame)
+# Test 2: Forward-only EKF Latency (≤33 ms per frame)
 # =============================================================================
 
 
 @pytest.mark.slow
 @pytest.mark.benchmark
-def test_online_ekf_latency():
-    """Online EKF end-to-end latency <=33 ms per frame on CPU (acceptance target).
+def test_forward_only_ekf_latency():
+    """Forward-only EKF end-to-end latency <=33 ms per frame on CPU (acceptance target).
 
     Validates that the EKF can keep up with a 30 Hz camera over a long
     session: total wall-clock processing time divided by frame count
@@ -274,7 +274,7 @@ def test_online_ekf_latency():
     tail-latency check. The filter runs as a single JIT-compiled
     ``lax.scan`` over the full session, so individual scan steps are not
     timed and slow tail frames cannot be detected here. Per-frame
-    distribution and p99 measurement require an unrolled / online-loop
+    distribution and p99 measurement require an unrolled per-step
     harness; this test verifies only that the average frame budget is
     met. For the cited <=33 ms target, the mean is a *necessary*, not
     sufficient, condition.

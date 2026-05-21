@@ -146,7 +146,7 @@ Indices:
 motion only, or want faster processing.
 
 > *Note*: even though no IMU dynamics run for this layout, the public APIs
-> (``trodestrack online`` / ``trodestrack smooth`` / ``extended_kalman_filter``)
+> (``trodestrack filter`` / ``trodestrack smooth`` / ``extended_kalman_filter``)
 > still require ``--imu-timestamps`` / ``--imu-measurements`` / ``t_imu`` /
 > ``U_imu``. Pass placeholder arrays (e.g. an evenly spaced timestamp grid
 > and zero-filled IMU samples with the layout-appropriate channel count)

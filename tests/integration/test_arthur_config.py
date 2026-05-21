@@ -34,7 +34,7 @@ def test_bundled_arthur_example_runs_fused_orientation(tmp_path: Path) -> None:
         "sys.argv",
         [
             "trodestrack",
-            "online",
+            "filter",
             "--config",
             str(config_path),
             "--output-dir",

@@ -1,12 +1,12 @@
-"""Regression tests for ``online`` / ``smooth`` CLI ValueError handling.
+"""Regression tests for ``filter`` / ``smooth`` CLI ValueError handling.
 
-The ``trodestrack online`` and ``trodestrack smooth`` subcommands
+The ``trodestrack filter`` and ``trodestrack smooth`` subcommands
 construct ``EKFConfig`` and run the EKF / RTS smoother. A bad numeric
 flag (e.g. ``--process-noise-pos -1`` or ``--num-iter 0``) used to
 bubble out as a raw Python traceback because, unlike
 ``trodestrack report``, neither command wrapped its body in a
 ``ValueError`` handler. These tests exercise the wrapper added in
-:func:`trodestrack.cli.online.run_online` and
+:func:`trodestrack.cli.filter.run_filter` and
 :func:`trodestrack.cli.smooth.run_smooth`.
 """
 
@@ -58,10 +58,10 @@ def synthetic_inputs(temp_dir):
     return input_dir
 
 
-def _online_argv(input_dir: Path, output_dir: Path, *extra: str) -> list[str]:
+def _filter_argv(input_dir: Path, output_dir: Path, *extra: str) -> list[str]:
     return [
         "trodestrack",
-        "online",
+        "filter",
         "--imu-timestamps",
         str(input_dir / "t_imu.txt"),
         "--imu-measurements",
@@ -98,7 +98,7 @@ def _smooth_argv(input_dir: Path, output_dir: Path, *extra: str) -> list[str]:
     ]
 
 
-def test_online_negative_process_noise_prints_error_not_traceback(
+def test_filter_negative_process_noise_prints_error_not_traceback(
     synthetic_inputs, temp_dir, capsys
 ) -> None:
     """``--process-noise-pos -1`` must exit 1 with ``Error:``, no traceback.
@@ -106,11 +106,11 @@ def test_online_negative_process_noise_prints_error_not_traceback(
     The probe in the finding: ``EKFConfig`` validation rejects
     negative process noise via ``ValueError``. Without the wrapper,
     the raw exception propagated and Python printed a traceback
-    before the message. The wrapper added to ``run_online`` should
+    before the message. The wrapper added to ``run_filter`` should
     convert this to a clean ``Error: ... must be ...`` line.
     """
     output_dir = temp_dir / "run"
-    argv = _online_argv(synthetic_inputs, output_dir, "--process-noise-pos", "-1")
+    argv = _filter_argv(synthetic_inputs, output_dir, "--process-noise-pos", "-1")
     with patch("sys.argv", argv), pytest.raises(SystemExit) as exc_info:
         main()
     assert exc_info.value.code == 1

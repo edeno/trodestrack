@@ -8,9 +8,9 @@ TrodesTrack combines video tracking (Trodes LEDs and/or DeepLabCut keypoints) wi
 
 - **Sensor Fusion**: Extended Kalman Filter (EKF) and Unscented Kalman Filter (UKF) for combining video (~30 Hz) and IMU (100 Hz) measurements
 - **3D IMU Support**: Full 6-axis IMU processing (3-axis gyro + 3-axis accel) with gravity compensation
-- **Online & Offline Processing**: Forward-only EKF and RTS smoothing — both run as batch operations over complete input arrays. The "online" CLI is forward-only, not a streaming ingest loop.
+- **Forward-only & Offline Processing**: Forward-only EKF and RTS smoothing — both run as batch operations over complete input arrays. The `trodestrack filter` CLI is forward-only, not a streaming ingest loop.
 - **Robust Handling**: Occlusions, reflections, and camera/sensor dropout. Transient LED swaps are mitigated by Mahalanobis gating on dual-LED measurements; persistent LED swaps can be corrected before filtering with config-driven LED identity correction. A whole-session global label reversal still needs `led_identity.initial_state: original` or `swapped`.
-- **JAX-Accelerated**: JIT-compiled JAX. Throughput-floor benchmarks (≥10× realtime offline on CPU, ≤33 ms amortized mean per frame online on a 30-minute session) live in [tests/benchmark/test_throughput.py](https://github.com/edeno/trodestrack/blob/master/tests/benchmark/test_throughput.py); they are not run on every PR. Absolute throughput is hardware-dependent.
+- **JAX-Accelerated**: JIT-compiled JAX. Throughput-floor benchmarks (≥10× realtime offline on CPU, ≤33 ms amortized mean per frame forward-only on a 30-minute session) live in [tests/benchmark/test_throughput.py](https://github.com/edeno/trodestrack/blob/master/tests/benchmark/test_throughput.py); they are not run on every PR. Absolute throughput is hardware-dependent.
 - **Rich Simulation**: Comprehensive synthetic data generation for testing and validation
 - **Diagnostic Visualization**: Publication-quality video output for quality control
 
@@ -24,7 +24,7 @@ TrodesTrack achieves production-ready accuracy:
 | Velocity RMSE | < 10 cm/s | < 10 cm/s |
 | Heading RMSE | < 7 deg | < 7 deg |
 | Throughput (offline) | ≥ 10× realtime | reference run on M-series Mac CPU ~38× realtime under block-until-ready timing (floor checked by `JAX_PLATFORMS=cpu pytest -m benchmark`, not on every PR; **scope: synthetic 2D `simulate_rat_imu` 30-min session with `state_mode="2d_full"` — does not cover the YAML real-data workflow or other layouts**) |
-| Latency (online, amortized mean) | ≤ 33 ms / frame | reference run on M-series Mac CPU ~0.41 ms / frame under block-until-ready timing (floor checked by `JAX_PLATFORMS=cpu pytest -m benchmark`, not on every PR; same scope caveat as above) |
+| Latency (forward-only, amortized mean) | ≤ 33 ms / frame | reference run on M-series Mac CPU ~0.41 ms / frame under block-until-ready timing (floor checked by `JAX_PLATFORMS=cpu pytest -m benchmark`, not on every PR; same scope caveat as above) |
 
 ## Quick Example
 

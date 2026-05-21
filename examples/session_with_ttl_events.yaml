@@ -2,7 +2,7 @@
 # (beam break, zone trigger, RFID reader) to a SpikeGadgets/Trodes session.
 #
 # Run:
-#   uv run trodestrack online --config examples/session_with_ttl_events.yaml
+#   uv run trodestrack filter --config examples/session_with_ttl_events.yaml
 #
 # All paths are resolved relative to this YAML file. Replace the inputs and
 # the events parquet with your own session files before running.

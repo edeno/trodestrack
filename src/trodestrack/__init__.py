@@ -32,8 +32,8 @@ Examples:
                      --camera-timestamps t_cam.txt --led1-positions led1.txt \\
                      --output-dir run1/
 
-  # Run online filtering only (faster, lower latency)
-  trodestrack online --imu-timestamps t_imu.txt --imu-measurements U_imu.txt \\
+  # Run forward-only filtering (no smoother lookahead)
+  trodestrack filter --imu-timestamps t_imu.txt --imu-measurements U_imu.txt \\
                      --camera-timestamps t_cam.txt --led1-positions led1.txt \\
                      --output-dir run1/
 
@@ -46,7 +46,7 @@ Examples:
   # Generate report with custom title
   trodestrack report --run qa_inputs/ --pdf report.pdf --title "Session 2024-10-11"
 
-Note: ``online`` and ``smooth`` write the raw filter state
+Note: ``filter`` and ``smooth`` write the raw filter state
 (filtered_means.txt, filtered_covariances.txt, marginal_loglik.txt) to
 ``--output-dir``. The ``report`` command operates on a different,
 QA-prepared file layout that includes ground truth, so the two stages
@@ -72,13 +72,13 @@ For more information, visit: https://github.com/edeno/trodestrack
     )
 
     # Import and register subcommands
-    from trodestrack.cli.online import add_online_parser
+    from trodestrack.cli.filter import add_filter_parser
     from trodestrack.cli.report import add_report_parser
     from trodestrack.cli.smooth import add_smooth_parser
 
     add_report_parser(subparsers)
     add_smooth_parser(subparsers)
-    add_online_parser(subparsers)
+    add_filter_parser(subparsers)
 
     # Parse arguments
     args = parser.parse_args()

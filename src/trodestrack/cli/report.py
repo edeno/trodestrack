@@ -33,7 +33,7 @@ def add_report_parser(subparsers: argparse._SubParsersAction) -> None:
             "consistency checks, and diagnostic plots from a QA-prepared "
             "run directory containing paired ground-truth and estimated "
             "trajectories (positions_true.npy, positions_est.npy, etc.) "
-            "and NEES/NIS series. Filter outputs from `trodestrack online` "
+            "and NEES/NIS series. Filter outputs from `trodestrack filter` "
             "or `trodestrack smooth` are not in this format directly — "
             "ground-truth arrays must be supplied alongside the estimates."
         ),

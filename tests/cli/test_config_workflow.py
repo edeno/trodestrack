@@ -1,4 +1,4 @@
-"""CLI tests for YAML-configured online/smooth workflows."""
+"""CLI tests for YAML-configured filter/smooth workflows."""
 
 from __future__ import annotations
 
@@ -100,15 +100,15 @@ outputs:
     return config_path
 
 
-def test_online_config_writes_filter_outputs(tmp_path: Path) -> None:
-    """``trodestrack online --config`` produces the expected output files."""
+def test_filter_config_writes_filter_outputs(tmp_path: Path) -> None:
+    """``trodestrack filter --config`` produces the expected output files."""
 
-    config_path = _write_prepared_config(tmp_path, command="online")
+    config_path = _write_prepared_config(tmp_path, command="filter")
 
-    with patch("sys.argv", ["trodestrack", "online", "--config", str(config_path)]):
+    with patch("sys.argv", ["trodestrack", "filter", "--config", str(config_path)]):
         main()
 
-    output_dir = tmp_path / "out_online"
+    output_dir = tmp_path / "out_filter"
     filtered = np.loadtxt(output_dir / "filtered_means.txt")
     assert filtered.shape == (16, 5)
     assert (output_dir / "session_diagnostics.json").exists()
@@ -154,12 +154,12 @@ outputs:
     return config_path, output_dir
 
 
-def test_online_config_runs_orientation_fused_mode(tmp_path: Path) -> None:
-    """``online --config`` should wire 6-channel IMU into the orientation EKF."""
+def test_filter_config_runs_orientation_fused_mode(tmp_path: Path) -> None:
+    """``filter --config`` should wire 6-channel IMU into the orientation EKF."""
 
-    config_path, output_dir = _write_orientation_config(tmp_path, command="online")
+    config_path, output_dir = _write_orientation_config(tmp_path, command="filter")
 
-    with patch("sys.argv", ["trodestrack", "online", "--config", str(config_path)]):
+    with patch("sys.argv", ["trodestrack", "filter", "--config", str(config_path)]):
         main()
 
     filtered = np.loadtxt(output_dir / "filtered_means.txt")
@@ -190,7 +190,7 @@ def test_config_output_dir_flag_overrides_yaml(tmp_path: Path) -> None:
         "sys.argv",
         [
             "trodestrack",
-            "online",
+            "filter",
             "--config",
             str(config_path),
             "--output-dir",
@@ -203,21 +203,21 @@ def test_config_output_dir_flag_overrides_yaml(tmp_path: Path) -> None:
     assert not (tmp_path / "out_override" / "filtered_means.txt").exists()
 
 
-def test_online_config_prepared_arrays_matches_legacy_flags(tmp_path: Path) -> None:
+def test_filter_config_prepared_arrays_matches_legacy_flags(tmp_path: Path) -> None:
     """Prepared-array config runs should match the equivalent legacy CLI flags."""
 
-    config_path = _write_prepared_config(tmp_path, command="online_parity")
-    input_dir = tmp_path / "input_online_parity"
-    legacy_dir = tmp_path / "out_online_legacy"
+    config_path = _write_prepared_config(tmp_path, command="filter_parity")
+    input_dir = tmp_path / "input_filter_parity"
+    legacy_dir = tmp_path / "out_filter_legacy"
 
-    with patch("sys.argv", ["trodestrack", "online", "--config", str(config_path)]):
+    with patch("sys.argv", ["trodestrack", "filter", "--config", str(config_path)]):
         main()
 
     with patch(
         "sys.argv",
         [
             "trodestrack",
-            "online",
+            "filter",
             "--imu-timestamps",
             str(input_dir / "t_imu.txt"),
             "--imu-measurements",
@@ -238,7 +238,7 @@ def test_online_config_prepared_arrays_matches_legacy_flags(tmp_path: Path) -> N
     ):
         main()
 
-    config_dir = tmp_path / "out_online_parity"
+    config_dir = tmp_path / "out_filter_parity"
     np.testing.assert_allclose(
         np.loadtxt(config_dir / "filtered_means.txt"),
         np.loadtxt(legacy_dir / "filtered_means.txt"),
@@ -335,7 +335,7 @@ def test_spikegadgets_vision_only_config_skips_real_data_safety(
         )
     )
 
-    with patch("sys.argv", ["trodestrack", "online", "--config", str(config_path)]):
+    with patch("sys.argv", ["trodestrack", "filter", "--config", str(config_path)]):
         main()
 
     output_dir = tmp_path / "out_unsafe"
@@ -355,7 +355,7 @@ def test_config_fused_safety_failure_is_friendly(
     config_path = _write_arthur_config(tmp_path, safety_max_speed_mps=1e-9)
 
     with (
-        patch("sys.argv", ["trodestrack", "online", "--config", str(config_path)]),
+        patch("sys.argv", ["trodestrack", "filter", "--config", str(config_path)]),
         pytest.raises(SystemExit) as exc_info,
     ):
         main()
@@ -365,8 +365,8 @@ def test_config_fused_safety_failure_is_friendly(
     assert (tmp_path / "out_unsafe" / "session_diagnostics.json").exists()
 
 
-def test_online_config_writes_camera_arrays_and_npz_bundle(tmp_path: Path) -> None:
-    """Config-driven online run must persist t_cam, LEDs, mask, and the npz bundle.
+def test_filter_config_writes_camera_arrays_and_npz_bundle(tmp_path: Path) -> None:
+    """Config-driven filter run must persist t_cam, LEDs, mask, and the npz bundle.
 
     Programmatic consumers need the camera-frame side-data (timestamps,
     post-correction LEDs, validity mask) alongside the filter output;
@@ -375,12 +375,12 @@ def test_online_config_writes_camera_arrays_and_npz_bundle(tmp_path: Path) -> No
     recover the inputs.
     """
 
-    config_path = _write_prepared_config(tmp_path, command="online")
+    config_path = _write_prepared_config(tmp_path, command="filter")
 
-    with patch("sys.argv", ["trodestrack", "online", "--config", str(config_path)]):
+    with patch("sys.argv", ["trodestrack", "filter", "--config", str(config_path)]):
         main()
 
-    output_dir = tmp_path / "out_online"
+    output_dir = tmp_path / "out_filter"
     assert (output_dir / "t_cam.txt").exists()
     assert (output_dir / "Z_cam_led1.txt").exists()
     assert (output_dir / "Z_cam_led2.txt").exists()
@@ -451,7 +451,7 @@ outputs:
     )
 
     with (
-        patch("sys.argv", ["trodestrack", "online", "--config", str(config_path)]),
+        patch("sys.argv", ["trodestrack", "filter", "--config", str(config_path)]),
         pytest.raises(SystemExit) as exc_info,
     ):
         main()
@@ -521,7 +521,7 @@ outputs:
     )
 
     with (
-        patch("sys.argv", ["trodestrack", "online", "--config", str(config_path)]),
+        patch("sys.argv", ["trodestrack", "filter", "--config", str(config_path)]),
         pytest.raises(SystemExit) as exc_info,
     ):
         main()
@@ -571,7 +571,7 @@ def test_config_safety_check_raise_writes_diagnostics(
     config_workflow.run_real_data_safety_check = mocked
     try:
         with (
-            patch("sys.argv", ["trodestrack", "online", "--config", str(config_path)]),
+            patch("sys.argv", ["trodestrack", "filter", "--config", str(config_path)]),
             pytest.raises(SystemExit) as exc_info,
         ):
             main()
@@ -600,7 +600,7 @@ def test_config_bad_imu_calibration_fails_with_diagnostics(
     )
 
     with (
-        patch("sys.argv", ["trodestrack", "online", "--config", str(config_path)]),
+        patch("sys.argv", ["trodestrack", "filter", "--config", str(config_path)]),
         pytest.raises(SystemExit) as exc_info,
     ):
         main()

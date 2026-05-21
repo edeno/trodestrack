@@ -269,7 +269,7 @@ def run_smooth(args: argparse.Namespace) -> None:
     args : argparse.Namespace
         Parsed command-line arguments.
     """
-    # Defer the banner until inputs are validated; see online.py for
+    # Defer the banner until inputs are validated; see filter.py for
     # the rationale.
     if args.config is not None:
         _run_smooth_from_config(args)

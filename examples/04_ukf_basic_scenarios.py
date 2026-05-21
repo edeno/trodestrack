@@ -1227,7 +1227,7 @@ def main() -> None:
        • Start with EKF (simpler, faster, usually sufficient)
        • Profile on your specific data
        • Switch to UKF only if EKF fails to meet accuracy requirements
-       • For trodestrack: EKF is recommended for online mode, UKF for offline smoothing
+       • For trodestrack: EKF is recommended for forward-only mode, UKF for offline smoothing
 
     NEXT STEPS:
     • Run examples/05_ekf_with_dropouts.py to test robustness under occlusions
