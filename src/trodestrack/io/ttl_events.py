@@ -250,11 +250,8 @@ def per_frame_event_indices(
     t_evt_kept = t_evt[keep]
     source_id_kept = source_id[keep]
 
-    # Compute frame_idx on the edge-filtered events. searchsorted side='left'
-    # yields the smallest k with t_cam[k] >= t_evt, placing each event in the
-    # (t_cam[k-1], t_cam[k]] bucket. frame_idx == 0 ⇒ event at or before
-    # t_cam[0] (dropped — no preceding frame interval); frame_idx == n_cam ⇒
-    # event strictly after t_cam[-1] (dropped).
+    # searchsorted side='left' yields smallest k with t_cam[k] >= t_evt,
+    # placing each event in the (t_cam[k-1], t_cam[k]] bucket.
     frame_idx_all = np.searchsorted(t_cam, t_evt_kept, side="left")
     n_dropped_before_t_cam = int((frame_idx_all == 0).sum())
     n_dropped_after_t_cam = int((frame_idx_all == n_cam).sum())
@@ -308,9 +305,6 @@ def per_frame_event_indices(
     )
     out[sorted_frames, slot] = compact
 
-    # Warn when a configured source contributed zero events but other
-    # configured sources did contribute. A wholly empty input file is fine;
-    # a misconfigured single source amid a busy file is the bug we surface.
     zero_kept_sources = sorted(
         sid for sid, kept in per_source_kept.items() if kept == 0
     )
