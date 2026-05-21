@@ -518,6 +518,7 @@ def plot_nees_histogram(
     # Labels
     ax.set_xlabel("NEES")
     ax.set_ylabel("Frequency")
+    ax.set_title("NEES Histogram — Filter Consistency Check")
     ax.legend(loc="upper right")
 
     return fig, ax
@@ -605,6 +606,7 @@ def plot_nis_histogram(
     # Labels
     ax.set_xlabel("NIS")
     ax.set_ylabel("Frequency")
+    ax.set_title("NIS Histogram — Innovation Consistency Check")
     ax.legend(loc="upper right")
 
     return fig, ax

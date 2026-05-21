@@ -5,7 +5,10 @@ Consistent with example plotting style (Tufte/Gelman principles).
 
 import matplotlib.pyplot as plt
 
-# ColorBrewer-inspired palette (color-blind safe, print-friendly)
+# ColorBrewer-inspired palette (color-blind safe, print-friendly).
+# The Okabe-Ito entries (``okabe_ito_blue`` / ``okabe_ito_orange``) are taken
+# from the Okabe-Ito 8-color palette and are used where a distinctly
+# colorblind-safe pair is required (e.g. start/end trajectory markers).
 COLORS = {
     "blue": "#2166AC",
     "red": "#B2182B",
@@ -15,6 +18,10 @@ COLORS = {
     "green": "#1B7837",
     "purple": "#762A83",
     "yellow": "#FDB863",
+    "okabe_ito_blue": "#0072B2",
+    "okabe_ito_orange": "#E69F00",
+    "verdict_pass": "#2C7A2C",
+    "verdict_fail": "#C13030",
 }
 
 

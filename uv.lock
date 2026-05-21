@@ -2528,6 +2528,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pypdf"
+version = "6.12.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a2/ba/f82d1cb35b04041b5f796d4eedbaecafcbf99e83b7a2542b44a936959dd7/pypdf-6.12.0.tar.gz", hash = "sha256:061f135db8934503ed301c2d4cfaccb12f0a2ef1db11c5d0768a72a5ab4097d8", size = 6466074, upload-time = "2026-05-21T09:21:42.621Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f4/fa/3597fb3fb28f40bf8291fdddbc4dcd51ce52fccaf1cbfca10ee9db09c69a/pypdf-6.12.0-py3-none-any.whl", hash = "sha256:a8e104ab950e655d0bcf5fa5e71317c06474bc707987335da44a210f73a8883b", size = 343457, upload-time = "2026-05-21T09:21:40.852Z" },
+]
+
+[[package]]
 name = "pytest"
 version = "8.4.2"
 source = { registry = "https://pypi.org/simple" }
@@ -3201,6 +3210,11 @@ video = [
     { name = "python-pptx" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "pypdf" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "chex", specifier = ">=0.1.0" },
@@ -3242,6 +3256,9 @@ requires-dist = [
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0.0" },
 ]
 provides-extras = ["dev", "docs", "notebooks", "video"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pypdf", specifier = ">=6.12.0" }]
 
 [[package]]
 name = "types-pytz"

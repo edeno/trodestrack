@@ -8,10 +8,35 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from trodestrack.qa.report import generate_qa_report
+from trodestrack.qa.report import (
+    TARGET_HEADING_MAE_DEG,
+    TARGET_POSITION_RMSE_M,
+    TARGET_VELOCITY_RMSE_MS,
+    _create_trajectory_plot,
+    generate_qa_report,
+)
+from trodestrack.viz.styles import COLORS
+
+
+def _extract_pdf_text(pdf_path: Path) -> str:
+    """Return PDF text content, preferring pypdf and falling back to raw bytes.
+
+    Matplotlib PDFs typically keep text streams uncompressed, so a raw-byte
+    search works in practice when pypdf isn't installed. The fallback mirrors
+    the pattern used in ``tests/cli/test_report_command.py``.
+    """
+    try:
+        import pypdf  # type: ignore[import-not-found]
+    except ImportError:
+        pypdf = None  # type: ignore[assignment]
+    if pypdf is not None:
+        reader = pypdf.PdfReader(str(pdf_path))
+        return "".join(page.extract_text() or "" for page in reader.pages)
+    return pdf_path.read_bytes().decode("latin-1", errors="replace")
 
 
 class TestGenerateQAReport:
@@ -310,3 +335,132 @@ class TestGenerateQAReport:
         finally:
             if pdf_path.exists():
                 pdf_path.unlink()
+
+
+class TestSummaryVerdictBanner:
+    """The summary page leads with a PASS/FAIL verdict against project targets."""
+
+    @staticmethod
+    def _render(
+        pdf_path: Path,
+        *,
+        pos_offset: float,
+        vel_offset: float,
+        heading_offset_rad: float,
+    ) -> None:
+        """Generate a report with deterministic per-metric error magnitudes."""
+        np.random.seed(0)
+        N = 200
+        t = np.linspace(0.0, 10.0, N)
+        pos_true = np.column_stack([t * 0.1, np.zeros(N)])
+        # Constant offset in x => RMSE == abs(offset) exactly.
+        pos_est = pos_true + np.array([pos_offset, 0.0])
+        vel_true = np.column_stack([np.ones(N) * 0.1, np.zeros(N)])
+        vel_est = vel_true + np.array([vel_offset, 0.0])
+        heading_true = np.zeros(N)
+        heading_est = np.full(N, heading_offset_rad)
+        nees = np.random.chisquare(df=8, size=N)
+        generate_qa_report(
+            pdf_path=pdf_path,
+            t=t,
+            positions_true=pos_true,
+            positions_est=pos_est,
+            velocities_true=vel_true,
+            velocities_est=vel_est,
+            headings_true=heading_true,
+            headings_est=heading_est,
+            nees=nees,
+            state_dim=8,
+        )
+
+    def test_qa_report_summary_page_shows_pass_for_passing_metrics(self) -> None:
+        """All metrics inside their targets should render a PASS banner."""
+        # Use half the target as the per-metric offset so each RMSE/MAE is
+        # comfortably under the threshold (and the test follows if the
+        # constants move).
+        pos_offset = TARGET_POSITION_RMSE_M / 2.0
+        vel_offset = TARGET_VELOCITY_RMSE_MS / 2.0
+        heading_offset_rad = float(np.deg2rad(TARGET_HEADING_MAE_DEG / 2.0))
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+            pdf_path = Path(f.name)
+
+        try:
+            self._render(
+                pdf_path,
+                pos_offset=pos_offset,
+                vel_offset=vel_offset,
+                heading_offset_rad=heading_offset_rad,
+            )
+            text = _extract_pdf_text(pdf_path)
+            assert "RESULT: PASS" in text, text[:500]
+        finally:
+            if pdf_path.exists():
+                pdf_path.unlink()
+
+    def test_qa_report_summary_page_shows_fail_with_failing_metric_names(
+        self,
+    ) -> None:
+        """A failing position metric must produce a FAIL banner naming position."""
+        # Position offset clearly exceeds the target; velocity and heading stay
+        # inside theirs so the verdict cites only "position".
+        pos_offset = TARGET_POSITION_RMSE_M * 5.0
+        vel_offset = TARGET_VELOCITY_RMSE_MS / 2.0
+        heading_offset_rad = float(np.deg2rad(TARGET_HEADING_MAE_DEG / 2.0))
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+            pdf_path = Path(f.name)
+
+        try:
+            self._render(
+                pdf_path,
+                pos_offset=pos_offset,
+                vel_offset=vel_offset,
+                heading_offset_rad=heading_offset_rad,
+            )
+            text = _extract_pdf_text(pdf_path)
+            assert "RESULT: FAIL" in text, text[:500]
+            assert "position" in text, text[:500]
+        finally:
+            if pdf_path.exists():
+                pdf_path.unlink()
+
+
+class TestTrajectoryMarkers:
+    """The trajectory start/end markers must use the Okabe-Ito colorblind pair."""
+
+    def test_qa_report_start_end_markers_are_okabe_ito(self) -> None:
+        """Start/end markers should use Okabe-Ito blue/orange, not green/red."""
+        np.random.seed(0)
+        N = 50
+        positions_true = np.column_stack([np.linspace(0.0, 1.0, N), np.zeros(N)])
+        positions_est = positions_true + np.random.randn(N, 2) * 0.001
+
+        fig = _create_trajectory_plot(positions_true, positions_est)
+        try:
+            ax = fig.axes[0]
+            # Find the two scatter PathCollections (start + end markers).
+            scatters = ax.collections
+            assert len(scatters) >= 2, (
+                f"Expected start/end scatter markers; got {len(scatters)} collections"
+            )
+            # Collect the face colors of the scatter markers as hex strings.
+            from matplotlib.colors import to_hex
+
+            face_hexes = {
+                to_hex(scatter.get_facecolor()[0]).lower() for scatter in scatters[:2]
+            }
+            expected = {
+                COLORS["okabe_ito_blue"].lower(),
+                COLORS["okabe_ito_orange"].lower(),
+            }
+            assert face_hexes == expected, (
+                f"Marker colors {face_hexes} did not match Okabe-Ito pair {expected}"
+            )
+            # Defensively guard against regressing to the old green/red pair.
+            forbidden = {COLORS["green"].lower(), COLORS["red"].lower()}
+            assert not (face_hexes & forbidden), (
+                f"Marker colors must not include the legacy green/red pair: {face_hexes}"
+            )
+        finally:
+            plt.close(fig)

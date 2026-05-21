@@ -225,3 +225,8 @@ disallow_untyped_defs = false
 [[tool.mypy.overrides]]
 module = "docs.*"
 ignore_errors = true
+
+[dependency-groups]
+dev = [
+    "pypdf>=6.12.0",
+]
