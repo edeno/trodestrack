@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] — unreleased
+
+### Fixed
+
+- `trodestrack --version` now reports the correct package version (was 0.1.0; pyproject.toml ships 0.2.0).
+
 ## [0.2.0] - 2026-05-20
 
 Sensor expansion, 3D orientation, YAML-driven CLI workflow, and a broad hardening pass across filters, smoothers, sim, QA, and CI.
