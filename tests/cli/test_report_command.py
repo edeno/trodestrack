@@ -1,11 +1,9 @@
-"""Tests for CLI report command.
+"""Tests for the ``trodestrack report`` CLI command.
 
-Following TDD: These tests are written BEFORE implementation to define the API.
-
-The report command should:
-1. Accept a run directory with filter results
-2. Generate a PDF report at the specified path
-3. Handle missing/invalid inputs gracefully
+Covers the happy path (qa_inputs/ → PDF), the validation raise branches
+in ``load_run_data`` (missing files, bad shapes, non-finite/non-monotonic
+timestamps, bad state_dim or measurement_dim), and the optional custom
+``--title`` rendering path.
 """
 
 from __future__ import annotations
@@ -520,8 +518,7 @@ def _zero_state_dim(qa_dir: Path) -> None:
 
 
 def _non_finite_timestamps(qa_dir: Path) -> None:
-    n = int((qa_dir / "state_dim.txt").read_text().strip()) and 100
-    t = np.linspace(0.0, 1.0, n)
+    t = np.linspace(0.0, 1.0, 100)
     t[5] = np.nan
     np.save(qa_dir / "timestamps.npy", t)
 
@@ -554,6 +551,30 @@ def _zero_measurement_dim(qa_dir: Path) -> None:
     (qa_dir / "measurement_dim.txt").write_text("0")
 
 
+def _bad_velocities_true_shape(qa_dir: Path) -> None:
+    np.save(qa_dir / "velocities_true.npy", np.zeros((50, 2)))
+
+
+def _bad_velocities_est_shape(qa_dir: Path) -> None:
+    np.save(qa_dir / "velocities_est.npy", np.zeros((50, 2)))
+
+
+def _bad_headings_true_shape(qa_dir: Path) -> None:
+    np.save(qa_dir / "headings_true.npy", np.zeros(50))
+
+
+def _bad_headings_est_shape(qa_dir: Path) -> None:
+    np.save(qa_dir / "headings_est.npy", np.zeros(50))
+
+
+def _bad_nees_shape(qa_dir: Path) -> None:
+    np.save(qa_dir / "nees.npy", np.zeros(50))
+
+
+def _bad_positions_true_shape(qa_dir: Path) -> None:
+    np.save(qa_dir / "positions_true.npy", np.zeros((50, 2)))
+
+
 @pytest.mark.parametrize(
     "corrupt,match",
     [
@@ -566,6 +587,12 @@ def _zero_measurement_dim(qa_dir: Path) -> None:
         (_bad_nis_shape, "nis has shape"),
         (_bad_measurement_dim, "measurement_dim.txt must contain an integer"),
         (_zero_measurement_dim, "measurement_dim must be a positive integer"),
+        (_bad_positions_true_shape, "positions_true has shape"),
+        (_bad_velocities_true_shape, "velocities_true has shape"),
+        (_bad_velocities_est_shape, "velocities_est has shape"),
+        (_bad_headings_true_shape, "headings_true has shape"),
+        (_bad_headings_est_shape, "headings_est has shape"),
+        (_bad_nees_shape, "nees has shape"),
     ],
 )
 def test_load_run_data_validates_inputs(

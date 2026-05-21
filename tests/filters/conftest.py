@@ -107,8 +107,8 @@ def run_filter_with_events():
 # 6-DOF IMU readings by differentiating the trajectory and rotating with
 # the truth quaternion, and projects the LEDs to a 3D camera with simple
 # additive noise. The helper is intentionally module-level (no leading
-# underscore) because Phase 6 imports it as the parity oracle for the
-# ``lax.scan`` refactor of ``extended_kalman_filter_3d``.
+# underscore) so other test modules can import it as a numerical-parity
+# oracle for future refactors of ``extended_kalman_filter_3d``.
 
 
 GRAVITY_W: np.ndarray = np.array([0.0, 0.0, 9.81], dtype=np.float64)
@@ -174,8 +174,9 @@ def _quaternion_from_euler_zyx(roll: float, pitch: float, yaw: float) -> np.ndar
 def simulate_3d() -> Callable[..., SimSession]:
     """Fixture handle to ``simulate_3d_session`` for the 3D analytic tests.
 
-    Test files use ``simulate_3d(...)`` directly. Phase 6 imports the
-    underlying function as ``simulate_3d_session`` for its parity oracle.
+    Test files use ``simulate_3d(...)`` directly via this fixture; the
+    underlying ``simulate_3d_session`` is also importable for use as a
+    numerical-parity oracle by other test modules.
     """
 
     return simulate_3d_session
