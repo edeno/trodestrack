@@ -14,6 +14,7 @@ for padded slots) that the EKF event-update path consumes inside a JIT'd
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -161,7 +162,7 @@ def per_frame_event_indices(
     source_active_edges: Mapping[int, int],
     source_id_to_index: Mapping[int, int],
     max_events_per_frame: int,
-) -> np.ndarray:
+) -> tuple[np.ndarray, dict[str, object]]:
     """Bucket TTL events into camera frames as compact source indices.
 
     Each event is assigned to the camera frame ``k`` whose interval
@@ -178,7 +179,7 @@ def per_frame_event_indices(
     source_active_edges : Mapping[int, int]
         Maps user-facing ``source_id`` to its active edge code (0=fall, 1=rise).
         Events whose edge does not match the active edge for their source are
-        silently dropped.
+        dropped (counted in the returned diagnostics dict).
     source_id_to_index : Mapping[int, int]
         Maps user-facing ``source_id`` to a dense compact index in
         ``[0, n_sources)``.
@@ -187,14 +188,52 @@ def per_frame_event_indices(
 
     Returns
     -------
-    np.ndarray, shape (n_cam, max_events_per_frame)
+    indices : np.ndarray, shape (n_cam, max_events_per_frame)
         Compact source indices, padded with ``-1``.
+    diagnostics : dict[str, object]
+        Per-source kept/dropped accounting with keys ``n_events_total``,
+        ``n_dropped_edge_mismatch``, ``n_dropped_before_t_cam``,
+        ``n_dropped_after_t_cam``, ``n_events_kept``, and
+        ``n_events_kept_per_source`` (``dict[int, int]`` keyed by user-facing
+        ``source_id``).
+
+    Raises
+    ------
+    ValueError
+        When every event in the input was dropped (likely cause: wrong
+        configured ``active_edge`` or an uncorrected IMU/camera clock offset).
+
+    Warns
+    -----
+    UserWarning
+        When a configured source contributes no kept events even though
+        the file did contain events from other configured sources.
     """
 
     n_cam = int(t_cam.shape[0])
     out = np.full((n_cam, max_events_per_frame), PAD_SENTINEL, dtype=np.int32)
-    if t_evt.size == 0:
-        return out
+    n_events_total = int(t_evt.size)
+    per_source_kept: dict[int, int] = {int(sid): 0 for sid in source_id_to_index}
+
+    def _build_diagnostics(
+        n_dropped_edge_mismatch: int,
+        n_dropped_before_t_cam: int,
+        n_dropped_after_t_cam: int,
+        n_events_kept: int,
+    ) -> dict[str, object]:
+        return {
+            "n_events_total": n_events_total,
+            "n_dropped_edge_mismatch": int(n_dropped_edge_mismatch),
+            "n_dropped_before_t_cam": int(n_dropped_before_t_cam),
+            "n_dropped_after_t_cam": int(n_dropped_after_t_cam),
+            "n_events_kept": int(n_events_kept),
+            "n_events_kept_per_source": {
+                int(sid): int(kept) for sid, kept in per_source_kept.items()
+            },
+        }
+
+    if n_events_total == 0:
+        return out, _build_diagnostics(0, 0, 0, 0)
 
     unknown = sorted({int(s) for s in source_id if int(s) not in source_id_to_index})
     if unknown:
@@ -207,25 +246,52 @@ def per_frame_event_indices(
         [source_active_edges[int(s)] for s in source_id], dtype=int
     )
     keep = edge == active_edges
-    t_evt = t_evt[keep]
-    source_id = source_id[keep]
-    if t_evt.size == 0:
-        return out
+    n_dropped_edge_mismatch = int((~keep).sum())
+    t_evt_kept = t_evt[keep]
+    source_id_kept = source_id[keep]
 
-    # searchsorted side='left' yields smallest k with t_cam[k] >= t_evt,
-    # placing each event in the (t_cam[k-1], t_cam[k]] bucket.
-    frame_idx = np.searchsorted(t_cam, t_evt, side="left")
-    valid = (frame_idx >= 1) & (frame_idx < n_cam)
-    frame_idx = frame_idx[valid]
-    source_id = source_id[valid]
-    if frame_idx.size == 0:
-        return out
+    # Compute frame_idx on the edge-filtered events. searchsorted side='left'
+    # yields the smallest k with t_cam[k] >= t_evt, placing each event in the
+    # (t_cam[k-1], t_cam[k]] bucket. frame_idx == 0 ⇒ event at or before
+    # t_cam[0] (dropped — no preceding frame interval); frame_idx == n_cam ⇒
+    # event strictly after t_cam[-1] (dropped).
+    frame_idx_all = np.searchsorted(t_cam, t_evt_kept, side="left")
+    n_dropped_before_t_cam = int((frame_idx_all == 0).sum())
+    n_dropped_after_t_cam = int((frame_idx_all == n_cam).sum())
+
+    valid = (frame_idx_all >= 1) & (frame_idx_all < n_cam)
+    frame_idx = frame_idx_all[valid]
+    source_id_valid = source_id_kept[valid]
+
+    n_events_kept_total = int(frame_idx.size)
+    if n_events_kept_total == 0:
+        if n_events_total > 0:
+            raise ValueError(
+                f"All {n_events_total} TTL events were dropped (edge mismatch: "
+                f"{n_dropped_edge_mismatch}, before t_cam: "
+                f"{n_dropped_before_t_cam}, after t_cam: "
+                f"{n_dropped_after_t_cam}). Check that the configured "
+                "active_edge matches your source, and that the IMU/camera "
+                "clock-offset is correct."
+            )
+        # Defensive: n_events_total == 0 was already returned above.
+        return out, _build_diagnostics(
+            n_dropped_edge_mismatch,
+            n_dropped_before_t_cam,
+            n_dropped_after_t_cam,
+            0,
+        )
+
+    # Tally kept events per user-facing source id.
+    unique_sids, counts = np.unique(source_id_valid, return_counts=True)
+    for sid, count in zip(unique_sids, counts, strict=True):
+        per_source_kept[int(sid)] = int(count)
 
     # Compute each event's slot inside its camera frame via stable sort,
     # then a per-frame "rank from group start" using searchsorted.
     order = np.argsort(frame_idx, kind="stable")
     sorted_frames = frame_idx[order]
-    sorted_sids = source_id[order]
+    sorted_sids = source_id_valid[order]
     group_start = np.searchsorted(sorted_frames, sorted_frames, side="left")
     slot = np.arange(sorted_frames.size) - group_start
     if slot.max() >= max_events_per_frame:
@@ -241,4 +307,26 @@ def per_frame_event_indices(
         count=sorted_sids.size,
     )
     out[sorted_frames, slot] = compact
-    return out
+
+    # Warn when a configured source contributed zero events but other
+    # configured sources did contribute. A wholly empty input file is fine;
+    # a misconfigured single source amid a busy file is the bug we surface.
+    zero_kept_sources = sorted(
+        sid for sid, kept in per_source_kept.items() if kept == 0
+    )
+    any_kept = any(kept > 0 for kept in per_source_kept.values())
+    if zero_kept_sources and any_kept:
+        warnings.warn(
+            f"TTL source(s) {zero_kept_sources} contributed no events to any "
+            "camera frame. Verify their active_edge and source_id "
+            "configuration if you expected them to be active.",
+            UserWarning,
+            stacklevel=2,
+        )
+
+    return out, _build_diagnostics(
+        n_dropped_edge_mismatch,
+        n_dropped_before_t_cam,
+        n_dropped_after_t_cam,
+        n_events_kept_total,
+    )

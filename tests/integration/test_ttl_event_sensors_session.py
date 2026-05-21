@@ -95,7 +95,7 @@ def _events_to_dense(events, specs, t_cam, max_events_per_frame=4):
     t_evt = np.array([e.time for e in events])
     sid = np.array([e.source_id for e in events], dtype=int)
     edge = np.array([EDGE_TO_INT[e.edge] for e in events], dtype=int)
-    indices = per_frame_event_indices(
+    indices, _ttl_diagnostics = per_frame_event_indices(
         t_evt,
         sid,
         edge,

@@ -438,7 +438,7 @@ def _attach_ttl_events(session: PreparedSession) -> PreparedSession:
     covariances = np.stack([src.covariance for src in sources], axis=0)
 
     t_evt, source_id, edge = load_ttl_events(cfg.events_file)
-    indices = per_frame_event_indices(
+    indices, ttl_diagnostics = per_frame_event_indices(
         t_evt,
         source_id,
         edge,
@@ -452,11 +452,10 @@ def _attach_ttl_events(session: PreparedSession) -> PreparedSession:
     diagnostics["ttl_events"] = {
         "n_sources": len(sources),
         "events_file": str(cfg.events_file),
-        "n_events_total": int(t_evt.size),
-        "n_events_kept": int((indices >= 0).sum()),
         "max_events_per_frame": cfg.max_events_per_frame,
         "source_types": [src.source_type for src in sources],
         "source_ids": [src.source_id for src in sources],
+        **ttl_diagnostics,
     }
     return replace(
         session,

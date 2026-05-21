@@ -414,7 +414,7 @@ class TestPerFrameEventIndices:
         source_id = np.array([7])
         edge = np.array([0])  # fall
         t_cam = np.array([0.0, 0.05, 0.1])
-        result = per_frame_event_indices(
+        result, _diag = per_frame_event_indices(
             t_evt,
             source_id,
             edge,
@@ -437,7 +437,7 @@ class TestPerFrameEventIndices:
         source_id = np.array([1, 2])
         edge = np.array([0, 1])
         t_cam = np.array([0.0, 0.05])
-        result = per_frame_event_indices(
+        result, _diag = per_frame_event_indices(
             t_evt,
             source_id,
             edge,
@@ -456,7 +456,7 @@ class TestPerFrameEventIndices:
         source_id = np.array([1, 1])
         edge = np.array([1, 0])  # rise then fall
         t_cam = np.array([0.0, 0.05])
-        result = per_frame_event_indices(
+        result, _diag = per_frame_event_indices(
             t_evt,
             source_id,
             edge,
@@ -506,7 +506,7 @@ class TestPerFrameEventIndices:
         source_id = np.array([1, 1])
         edge = np.array([0, 0])
         t_cam = np.array([0.0, 0.05])
-        result = per_frame_event_indices(
+        result, _diag = per_frame_event_indices(
             t_evt,
             source_id,
             edge,
@@ -517,3 +517,68 @@ class TestPerFrameEventIndices:
         )
         # Only the second event ends up in frame 1.
         assert (result == 0).sum() == 1
+
+    def test_per_frame_event_indices_returns_drop_counts(self):
+        # 5 events for source 1 (active_edge="rise" / 1):
+        #   - 2 with edge=0 (fall) → edge-mismatch drops
+        #   - 1 with edge=1 but time before t_cam[0] → before-t_cam drop
+        #   - 2 with edge=1 and times inside camera interval → kept
+        t_cam = np.array([0.0, 0.05, 0.1, 0.15])
+        t_evt = np.array([0.02, 0.06, -0.01, 0.04, 0.08])
+        edge = np.array([0, 0, 1, 1, 1])
+        source_id = np.array([1, 1, 1, 1, 1])
+        _result, diag = per_frame_event_indices(
+            t_evt,
+            source_id,
+            edge,
+            t_cam,
+            source_active_edges={1: 1},
+            source_id_to_index={1: 0},
+            max_events_per_frame=4,
+        )
+        assert diag["n_events_total"] == 5
+        assert diag["n_dropped_edge_mismatch"] == 2
+        assert diag["n_dropped_before_t_cam"] == 1
+        assert diag["n_dropped_after_t_cam"] == 0
+        assert diag["n_events_kept"] == 2
+        assert diag["n_events_kept_per_source"] == {1: 2}
+
+    def test_per_frame_event_indices_raises_when_all_events_dropped(self):
+        # All 5 events have edge=0 (fall) but the configured active_edge is
+        # 1 (rise). Every event is filtered out, so the helper must raise.
+        t_evt = np.array([0.01, 0.02, 0.03, 0.04, 0.05])
+        source_id = np.array([1, 1, 1, 1, 1])
+        edge = np.array([0, 0, 0, 0, 0])
+        t_cam = np.array([0.0, 0.05, 0.1])
+        with pytest.raises(ValueError, match="All 5 TTL events were dropped"):
+            per_frame_event_indices(
+                t_evt,
+                source_id,
+                edge,
+                t_cam,
+                source_active_edges={1: 1},
+                source_id_to_index={1: 0},
+                max_events_per_frame=4,
+            )
+
+    def test_per_frame_event_indices_warns_when_configured_source_has_no_events(
+        self,
+    ):
+        # Configure sources 10 and 20, but the file only contains events for
+        # source 10. The helper should emit a UserWarning naming source 20.
+        t_evt = np.array([0.02, 0.04])
+        source_id = np.array([10, 10])
+        edge = np.array([0, 0])
+        t_cam = np.array([0.0, 0.05, 0.1])
+        with pytest.warns(UserWarning, match="20"):
+            _result, diag = per_frame_event_indices(
+                t_evt,
+                source_id,
+                edge,
+                t_cam,
+                source_active_edges={10: 0, 20: 0},
+                source_id_to_index={10: 0, 20: 1},
+                max_events_per_frame=4,
+            )
+        assert diag["n_events_kept_per_source"][10] >= 1
+        assert diag["n_events_kept_per_source"][20] == 0

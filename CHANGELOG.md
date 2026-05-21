@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `io.session._index_or_time_column` now raises `ValueError` when the input DataFrame is missing the `time` column. The previous fallback silently substituted sample numbers (df.index) for seconds, producing dt values off by the sampling rate.
 - `io.session._add_imu_calibration_diagnostics` no longer swallows non-verdict `ValueError`s into a diagnostics string; only `_validate_calibration_for_fusion` exceptions are captured.
 - `config.schemas.CameraConfig.confidence_led{1,2}_column` now rejects empty strings at validation time. Previously, an empty string would silently disable confidence weighting via the loader's truthy check.
+- `io.ttl_events.per_frame_event_indices` now returns per-source kept/dropped diagnostics, raises when all events are dropped, and warns when a configured source contributes no events. Diagnostics are plumbed into `session.diagnostics["ttl_events"]`.
 
 ## [0.2.0] - 2026-05-20
 
