@@ -404,7 +404,7 @@ def run_smooth(args: argparse.Namespace) -> None:
     # progress would require chunked execution, which requires
     # `extended_kalman_filter` to accept `initial_state` and return
     # `final_state`; the current scan body deletes `final_state`, so chunking
-    # is deferred to a follow-up (see phase-4 plan, Task 4 Option B).
+    # is deferred until the filter API supports per-chunk continuation.
     print("\nRunning Extended Kalman Filter (forward pass)...")
     print(
         "  Compiling JAX kernels and running filter (this may take a while "
