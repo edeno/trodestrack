@@ -404,7 +404,7 @@ def test_filter_3d_imu_detects_vertical_acceleration():
 def test_filter_3d_imu_reduced_drift_during_occlusion():
     """Test that 3D IMU reduces drift compared to 2D IMU during occlusions.
 
-    PRD requirement (Section 4): Vision dropout tolerance → ≤3.5 m drift after 5s IMU-only.
+    Acceptance target: vision dropout tolerance <= 3.5 m drift after 5s IMU-only.
 
     This test compares:
     1. 2D IMU (3-element: [ω_z, fx, fy]) - baseline
@@ -499,7 +499,7 @@ def test_filter_3d_imu_reduced_drift_during_occlusion():
     print(f"  2D IMU: {drift_2d:.3f} m")
     print(f"  3D IMU: {drift_3d:.3f} m")
 
-    # Both should meet PRD requirement (≤3.5 m for 5s, so ~2.1 m for 3s)
+    # Both should meet the acceptance target (<=3.5 m for 5s, so ~2.1 m for 3s)
     # But 3D should be better or comparable
     assert drift_3d <= 2.5, f"3D IMU drift {drift_3d:.3f}m exceeds tolerance"
 

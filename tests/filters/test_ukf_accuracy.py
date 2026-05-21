@@ -145,8 +145,8 @@ def test_ukf_stationary_rejects_imu_drift(sim_config, ukf_config):
     """Test that UKF rejects IMU drift in stationary scenario.
 
     Expected behavior:
-    - Position RMSE ≤ 2 cm (PRD requirement)
-    - Velocity RMSE ≤ 10 cm/s
+    - Position RMSE <= 2 cm (acceptance target)
+    - Velocity RMSE <= 10 cm/s
     - NEES consistent (within 95% CI)
     """
     # Generate stationary trajectory
@@ -179,7 +179,7 @@ def test_ukf_stationary_rejects_imu_drift(sim_config, ukf_config):
     pos_rmse = compute_position_rmse(result.filtered_means[:, :2], truth_xy)
     vel_rmse = compute_velocity_rmse(result.filtered_means[:, 2:4], truth_vel)
 
-    # Check PRD requirements (slightly relaxed for UKF vs EKF differences)
+    # Check acceptance targets (slightly relaxed for UKF vs EKF differences)
     assert pos_rmse <= 0.025, f"Position RMSE {pos_rmse * 100:.2f} cm exceeds 2.5 cm"
     assert vel_rmse <= 0.10, f"Velocity RMSE {vel_rmse * 100:.1f} cm/s exceeds 10 cm/s"
 
@@ -266,7 +266,7 @@ def test_ukf_constant_velocity_tracking(sim_config, ukf_config):
     pos_rmse = compute_position_rmse(result.filtered_means[:, :2], truth_xy)
     vel_rmse = compute_velocity_rmse(result.filtered_means[:, 2:4], truth_vel)
 
-    # Check PRD requirements (slightly relaxed for UKF vs EKF differences)
+    # Check acceptance targets (slightly relaxed for UKF vs EKF differences)
     assert pos_rmse <= 0.025, f"Position RMSE {pos_rmse * 100:.2f} cm exceeds 2.5 cm"
     assert vel_rmse <= 0.10, f"Velocity RMSE {vel_rmse * 100:.1f} cm/s exceeds 10 cm/s"
     # Note: Heading convergence requires dual-LED observations or persistent motion

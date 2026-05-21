@@ -1,15 +1,14 @@
-"""Throughput and latency benchmarks for PRD performance requirements.
+"""Throughput and latency benchmarks for the performance acceptance targets.
 
-This module validates system performance against PRD requirements:
-- Offline smoothing ≥10× realtime (CPU) on 30 min session (PRD §4.3)
-- Online EKF latency ≤33 ms per frame (CPU) (PRD §4.4) — measured here
-  as amortized mean per-frame time (total / num_frames) over a single
-  JIT'd ``lax.scan`` batch, which is a *necessary* but not sufficient
-  condition for the per-frame requirement. Per-frame tail / p99 latency
-  is not measured by this suite (the filter is not driven from a
-  streaming ingest loop), so this is a throughput-style proxy for the
-  forward-only "online" CLI rather than a streaming / real-time
-  guarantee.
+This module validates system performance against the project's targets:
+- Offline smoothing >=10x realtime (CPU) on a 30 min session
+- Online EKF latency <=33 ms per frame (CPU) - measured here as amortized
+  mean per-frame time (total / num_frames) over a single JIT'd ``lax.scan``
+  batch, which is a *necessary* but not sufficient condition for the
+  per-frame target. Per-frame tail / p99 latency is not measured by this
+  suite (the filter is not driven from a streaming ingest loop), so this
+  is a throughput-style proxy for the forward-only "online" CLI rather
+  than a streaming / real-time guarantee.
 """
 
 import time
@@ -45,11 +44,11 @@ def _block_until_ready(result: Any) -> Any:
 def _assert_cpu_backend() -> None:
     """Assert the active JAX backend is CPU and report it.
 
-    The PRD floors are explicitly described as CPU targets ("≥10× realtime
-    on CPU", "≤33 ms per frame on CPU"). Without this gate, a runner with
-    ``JAX_PLATFORMS=cuda`` (or a local machine where jaxlib finds an
-    accelerator) would silently use the GPU and the printed numbers would
-    misrepresent what the floors actually cover. Run with
+    The acceptance floors are explicitly described as CPU targets ("≥10×
+    realtime on CPU", "≤33 ms per frame on CPU"). Without this gate, a
+    runner with ``JAX_PLATFORMS=cuda`` (or a local machine where jaxlib
+    finds an accelerator) would silently use the GPU and the printed
+    numbers would misrepresent what the floors actually cover. Run with
     ``JAX_PLATFORMS=cpu pytest -m benchmark`` to enforce.
     """
     backend = jax.default_backend()
@@ -67,8 +66,8 @@ def _assert_cpu_backend() -> None:
 # Performance Requirements (acceptance criteria)
 # =============================================================================
 
-PRD_OFFLINE_SMOOTHER_SPEEDUP_MIN = 10.0  # Offline ≥10× realtime (CPU)
-PRD_ONLINE_EKF_LATENCY_MS_MAX = 33.0  # Online ≤33 ms per frame (CPU)
+TARGET_OFFLINE_SMOOTHER_SPEEDUP_MIN = 10.0  # Offline ≥10× realtime (CPU)
+TARGET_ONLINE_EKF_LATENCY_MS_MAX = 33.0  # Online ≤33 ms per frame (CPU)
 
 # Session duration for throughput benchmarking
 BENCHMARK_SESSION_DURATION_S = 1800.0  # 30 minutes
@@ -143,7 +142,7 @@ get_production_ekf_config = get_benchmark_ekf_config
 @pytest.mark.slow
 @pytest.mark.benchmark
 def test_offline_smoother_throughput():
-    """PRD §4.3: Offline RTS smoother should achieve ≥10× realtime on CPU.
+    """Offline RTS smoother should achieve >=10x realtime on CPU (acceptance target).
 
     Validates that the complete offline smoothing pipeline (filter + RTS smoother)
     can process a 30-minute session at least 10× faster than realtime on CPU.
@@ -222,14 +221,14 @@ def test_offline_smoother_throughput():
         f"Processing time: {processing_time_s:.2f} s ({processing_time_s / 60:.2f} min)"
     )
     print(f"Speedup: {speedup:.1f}× realtime")
-    print(f"PRD requirement: ≥{PRD_OFFLINE_SMOOTHER_SPEEDUP_MIN:.1f}× realtime")
+    print(f"Target: ≥{TARGET_OFFLINE_SMOOTHER_SPEEDUP_MIN:.1f}× realtime")
     print(
-        f"Status: {'PASS ✓' if speedup >= PRD_OFFLINE_SMOOTHER_SPEEDUP_MIN else 'FAIL ✗'}"
+        f"Status: {'PASS ✓' if speedup >= TARGET_OFFLINE_SMOOTHER_SPEEDUP_MIN else 'FAIL ✗'}"
     )
 
-    # Validate PRD requirement
-    assert speedup >= PRD_OFFLINE_SMOOTHER_SPEEDUP_MIN, (
-        f"Offline smoother speedup {speedup:.1f}× is below PRD requirement {PRD_OFFLINE_SMOOTHER_SPEEDUP_MIN:.1f}×"
+    # Validate acceptance target
+    assert speedup >= TARGET_OFFLINE_SMOOTHER_SPEEDUP_MIN, (
+        f"Offline smoother speedup {speedup:.1f}× is below acceptance target {TARGET_OFFLINE_SMOOTHER_SPEEDUP_MIN:.1f}×"
     )
 
     # Sanity check: verify smoother produced valid results
@@ -265,7 +264,7 @@ def test_offline_smoother_throughput():
 @pytest.mark.slow
 @pytest.mark.benchmark
 def test_online_ekf_latency():
-    """PRD §4 Online: end-to-end latency ≤33 ms per frame (EKF on CPU).
+    """Online EKF end-to-end latency <=33 ms per frame on CPU (acceptance target).
 
     Validates that the EKF can keep up with a 30 Hz camera over a long
     session: total wall-clock processing time divided by frame count
@@ -277,8 +276,8 @@ def test_online_ekf_latency():
     timed and slow tail frames cannot be detected here. Per-frame
     distribution and p99 measurement require an unrolled / online-loop
     harness; this test verifies only that the average frame budget is
-    met. For the cited PRD ≤33 ms requirement, the mean is a
-    *necessary*, not sufficient, condition.
+    met. For the cited <=33 ms target, the mean is a *necessary*, not
+    sufficient, condition.
 
     Strategy:
         - Generate a realistic 30-min session with 30 Hz camera.
@@ -347,19 +346,19 @@ def test_online_ekf_latency():
     print(f"Mean latency per frame (amortized): {mean_latency_per_frame_ms:.2f} ms")
     print(f"Camera frame period (30 Hz): {frame_period_ms:.2f} ms")
     print(
-        f"PRD requirement: ≤{PRD_ONLINE_EKF_LATENCY_MS_MAX:.1f} ms per frame "
+        f"Target: ≤{TARGET_ONLINE_EKF_LATENCY_MS_MAX:.1f} ms per frame "
         "(this test checks MEAN only — necessary, not sufficient)"
     )
     print(
-        f"Status: {'PASS ✓' if mean_latency_per_frame_ms <= PRD_ONLINE_EKF_LATENCY_MS_MAX else 'FAIL ✗'}"
+        f"Status: {'PASS ✓' if mean_latency_per_frame_ms <= TARGET_ONLINE_EKF_LATENCY_MS_MAX else 'FAIL ✗'}"
     )
 
-    # Validate PRD ≤33 ms requirement at the mean (necessary condition).
+    # Validate the <=33 ms acceptance target at the mean (necessary condition).
     # Tail / p99 verification requires an unrolled per-frame harness and is
     # not covered by this test.
-    assert mean_latency_per_frame_ms <= PRD_ONLINE_EKF_LATENCY_MS_MAX, (
+    assert mean_latency_per_frame_ms <= TARGET_ONLINE_EKF_LATENCY_MS_MAX, (
         f"Mean EKF latency {mean_latency_per_frame_ms:.2f} ms exceeds "
-        f"PRD requirement {PRD_ONLINE_EKF_LATENCY_MS_MAX:.1f} ms (mean check)"
+        f"acceptance target {TARGET_ONLINE_EKF_LATENCY_MS_MAX:.1f} ms (mean check)"
     )
 
     # Sanity check: verify filter produced valid results

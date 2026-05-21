@@ -724,7 +724,7 @@ def test_dropout_drift_perfect_estimator_reports_zero():
     Previously the function returned ``||pos_est[end] - pos_est[start]||``
     — the displacement of the estimate during the dropout — which is
     nonzero whenever the animal is moving, regardless of tracking
-    quality. The PRD-relevant question is "did the IMU-only segment
+    quality. The acceptance-criterion question is "did the IMU-only segment
     grow tracking error?", which is zero when the estimate equals
     truth at every sample.
     """
@@ -850,7 +850,7 @@ def test_dropout_drift_rejects_non_1d_mask():
     (a common shape coming out of column-vector loaders or one-hot
     conversions) silently bypassed the dropout detection and returned
     "no qualifying dropout" for what was actually a real dropout —
-    masking a PRD-relevant drift failure.
+    masking a drift failure relevant to the acceptance target.
     """
     t = np.linspace(0, 10, 100)
     truth = np.column_stack([t * 0.1, np.zeros_like(t)])

@@ -1,14 +1,10 @@
 """Tests for filter robustness under challenging scenarios.
 
-This module tests Milestone 3 robustness requirements:
+This module tests the robustness acceptance criteria:
 - Out-of-bounds measurements rejected (arena boundary checks)
 - Swap & dropout handling stability (no divergence)
 - Bias estimation stability across occlusions (covariance bounded)
-
-PRD References:
-- §4.2: Robustness Requirements (≥5s dropout → ≤15cm drift)
-- §6: Mathematical Model (arena bounds, gating, bias estimation)
-- §13: Robustness & Data Quality
+- >=5 s vision dropout produces <=15 cm drift (robustness target)
 """
 
 from __future__ import annotations
@@ -32,7 +28,7 @@ MAX_RAT_VELOCITY_MPS = 2.0  # Rats can't exceed ~2 m/s in typical arena
 MAX_GYRO_BIAS_RAD_S = 0.1  # Typical IMU gyro bias bound (rad/s)
 MAX_ACCEL_BIAS_M_S2 = 1.0  # Typical IMU accel bias bound (m/s²)
 
-# Robustness acceptance criteria (PRD §4.2)
+# Robustness acceptance criteria
 MAX_POSITION_RMSE_WITH_GATING_M = 0.05  # 5cm tolerance with outlier gating
 MAX_COVARIANCE_DURING_SWAPS_M2 = (
     0.05  # ~22cm std dev bound during swaps (adaptive dropout Q inflates P)
@@ -51,8 +47,8 @@ class TestOutOfBoundsMeasurements:
     def test_filter_rejects_extreme_outliers_via_gating(self) -> None:
         """Test that Mahalanobis gating rejects extreme outliers.
 
-        This test verifies PRD §13 robustness requirement: the filter must
-        reject physically impossible measurements without divergence.
+        This test verifies the robustness acceptance criterion: the filter
+        must reject physically impossible measurements without divergence.
 
         Test Scenario
         -------------
@@ -87,10 +83,10 @@ class TestOutOfBoundsMeasurements:
         artifact, tracker confusion). Typical outliers are smaller but
         still need rejection.
 
-        References
-        ----------
-        .. [PRD] §13: Robustness & Data Quality
-        .. [PRD] §6: Mathematical Model (Mahalanobis gating)
+        Notes
+        -----
+        Exercises the robustness acceptance criterion and the Mahalanobis
+        gating behavior of the mathematical model.
         """
         # Create a simple stationary scenario
         config_sim = SimpleSimConfig(
@@ -180,9 +176,10 @@ class TestOutOfBoundsMeasurements:
         - Time: seconds (s)
         - Frame rate: 30 Hz (camera)
 
-        References
-        ----------
-        .. [PRD] §13: Robustness & Data Quality
+        Notes
+        -----
+        Exercises the robustness acceptance criterion (the filter must
+        not produce unphysical state estimates from a single outlier).
         """
         config_sim = SimpleSimConfig(
             duration_s=10.0,
@@ -238,7 +235,7 @@ class TestSwapAndDropoutStability:
     def test_persistent_swap_prefilter_recovers_led_identities(self) -> None:
         """Test that persistent LED swaps are corrected before filtering.
 
-        This test verifies the PRD Tier 3 requirement that persistent LED
+        This test verifies the Tier 3 acceptance criterion that persistent LED
         identity swaps can be resolved before the EKF consumes the camera
         measurements. The old regression was xfailed because the filter had
         no swap-resolution layer and received wrong LED identities directly.
@@ -280,8 +277,8 @@ class TestSwapAndDropoutStability:
     def test_filter_stable_during_long_dropout(self) -> None:
         """Test that filter remains stable during extended vision dropout.
 
-        This test verifies PRD §4.2 robustness requirement: filter must
-        remain stable (no divergence) during ≥5 second vision dropout.
+        This test verifies the robustness acceptance criterion: the filter
+        must remain stable (no divergence) during >=5 second vision dropout.
 
         Test Scenario
         -------------
@@ -312,20 +309,16 @@ class TestSwapAndDropoutStability:
         -----
         - Duration: seconds (s)
         - Position covariance: m² (variance)
-        - Drift bound (PRD): 15 cm (not explicitly tested here)
+        - Drift bound (acceptance target): 15 cm (not explicitly tested here)
 
         Notes
         -----
-        PRD §4.2 specifies drift ≤ 15 cm after 5s dropout.
-        This test focuses on stability (no divergence).
-        Drift requirement tested separately in acceptance tests.
+        The acceptance target specifies drift <= 15 cm after 5s dropout.
+        This test focuses on stability (no divergence). The drift target
+        itself is exercised separately in the acceptance tests.
 
-        Covariance can legitimately grow to ~10 m² during 5s dropout.
+        Covariance can legitimately grow to ~10 m^2 during 5s dropout.
         This represents realistic uncertainty growth in IMU-only mode.
-
-        References
-        ----------
-        .. [PRD] §4.2: Robustness Requirements (≥5s dropout → ≤15cm drift)
         """
         # Create scenario with guaranteed 5s dropout
         config_sim = SimpleSimConfig(

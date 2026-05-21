@@ -1,7 +1,7 @@
 """Test config immutability during filter execution.
 
-PRD requirement: Configs must be immutable for reproducibility.
-When auto-inferring parameters like LED spacing, the inferred value
+Reproducibility requirement: configs must be immutable. When
+auto-inferring parameters like LED spacing, the inferred value
 should be returned in the result, not mutate the original config.
 """
 

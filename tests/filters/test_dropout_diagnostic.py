@@ -144,7 +144,7 @@ def main():
     )  # cm
     ax.plot(sim_data["t_cam_exp"], pos_error, "b-", linewidth=2)
     ax.axvspan(5.0, 10.0, color="red", alpha=0.2, label="Dropout")
-    ax.axhline(15.0, color="red", linestyle="--", label="PRD Limit (15 cm)")
+    ax.axhline(15.0, color="red", linestyle="--", label="Target limit (15 cm)")
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Position Error (cm)")
     ax.set_title("Position Error Over Time")

@@ -14,10 +14,6 @@ The 2D camera + 3D IMU mode (LAYOUT_2D_CAM_3D_IMU) estimates:
 
 This enables detection of vertical motion (rearing, jumping) even though
 the overhead camera only provides 2D position.
-
-PRD Reference:
-    - Section 6: Mathematical Model (2D v1) - future 3D extension
-    - Milestone M5: 2D Pose + 3D IMU (Gravity-Aware)
 """
 
 from __future__ import annotations

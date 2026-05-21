@@ -433,7 +433,7 @@ sim['Z_cam_led1'][swap_mask], sim['Z_cam_led2'][swap_mask] = \
 
 #### Expected Behavior
 
-**PRD Target:** ≤ 3.5 m drift after 5 seconds of occlusion (95th percentile over realistic sessions; see `tests/integration/test_prd_session.py::test_5s_dropout_drift_integration` and `qa.metrics.compute_dropout_drift`).
+**PRD Target:** ≤ 3.5 m drift after 5 seconds of occlusion (95th percentile over realistic sessions; see `tests/integration/test_target_session.py::test_5s_dropout_drift_integration` and `qa.metrics.compute_dropout_drift`).
 
 **Note:** The simulator typically achieves ~11 cm in this scenario; the 3.5 m target is the relaxed PRD requirement that accommodates consumer-grade IMU drift in worst-case sessions.
 
@@ -880,7 +880,7 @@ create_diagnostic_video(
 
 ```bash
 # Accuracy / consistency tests (RMSE, NEES, dropout drift)
-uv run pytest tests/integration/test_prd_session.py -v
+uv run pytest tests/integration/test_target_session.py -v
 ```
 
 **Expected results from the integration suite:**

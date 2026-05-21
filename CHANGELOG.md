@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed scaffolding-doc references from source docstrings ("Arthur-specific", "PR2/PR3 JAX compatibility", "tilt/orientation implementation plan", "see around line N", "previously in filter_utils.py").
 - Fixed stale shape annotations in `models/ukf.py` (`# (17, 8)` → `# (2n+1, n)`; `# (17, 4)` → `# (2n+1, meas_dim)`).
 - Swept ~140 trivial WHAT-comments from `viz/components.py`, `models/ukf.py`, `models/ekf.py`, and `sim/rat_imu.py`. Comments now default to explaining WHY (non-obvious constraints, fixed bugs, numerical pitfalls), not narrating the next 1-3 lines.
+- Renamed PRD-prefixed test files and internal test constants to `target_*`: `tests/filters/test_prd_acceptance.py` → `test_target_acceptance.py`, `tests/integration/test_prd_session.py` → `test_target_session.py`, `tests/sim/test_prd_bounds.py` → `test_target_bounds.py`, and the `PRD_*` constants in `tests/benchmark/test_throughput.py`. Docstring `PRD §N.M` section references replaced with plain "acceptance target" language across the test suite.
 
 ## [0.2.1] - unreleased
 

@@ -53,7 +53,7 @@ def main() -> None:
     print("Filter vs IEKS Smoother: 5s Dropout Comparison")
     print("=" * 70)
 
-    # Simulation configuration (same as test_prd_dropout_drift_5s_smoothed)
+    # Simulation configuration (same as test_target_dropout_drift_5s_smoothed)
     config = RatIMUSimConfig(
         duration_s=15.0,
         fs_imu=200.0,
