@@ -235,11 +235,9 @@ class RatIMUSimConfig:
     arena_h: float = 2.0
 
     # Camera model
-    cam_sigma_m: float = 0.005  # 5 mm std noise per axis
+    cam_sigma_m: float = 0.005
     cam_dropout_prob: float = 0.10
-    cam_dropout_correlation: float = (
-        0.8  # Correlation between LED1/LED2 dropouts (0=independent, 1=identical)
-    )
+    cam_dropout_correlation: float = 0.8
     cam_latency_s: float = 0.05
     cam_jitter_s: float = 0.005
     use_confidence: bool = False
@@ -250,32 +248,18 @@ class RatIMUSimConfig:
     # Convention: LED1 is rear, LED2 is front
     # Body frame: x=forward, y=left, z=up (right-handed)
     # LED vector (LED2 - LED1) points forward along heading
-    led1_offset_body: np.ndarray = field(
-        default_factory=lambda: np.array([-0.02, 0.0])
-    )  # Rear LED (2cm behind center)
+    led1_offset_body: np.ndarray = field(default_factory=lambda: np.array([-0.02, 0.0]))
     use_second_led: bool = False
-    led2_offset_body: np.ndarray = field(
-        default_factory=lambda: np.array([0.02, 0.0])
-    )  # Front LED (2cm ahead of center)
+    led2_offset_body: np.ndarray = field(default_factory=lambda: np.array([0.02, 0.0]))
     # LED swap configuration
-    led_swap_mode: str = "per_frame"  # "per_frame" or "persistent"
-    led_swap_prob: float = (
-        0.0  # Probability of swapping LED1/LED2 labels per frame (per_frame mode)
-    )
-    led_swap_rate: float = 0.5  # Mean swap events per second (persistent mode)
-    led_swap_duration_mean: float = (
-        1.0  # Mean duration of swap event in seconds (persistent mode)
-    )
-    led_swap_duration_std: float = (
-        0.3  # Std dev of swap duration in seconds (persistent mode)
-    )
+    led_swap_mode: str = "per_frame"
+    led_swap_prob: float = 0.0
+    led_swap_rate: float = 0.5
+    led_swap_duration_mean: float = 1.0
+    led_swap_duration_std: float = 0.3
 
-    led_wall_reflection_prob: float = (
-        0.0  # Probability of LED reflection artifacts near walls (0-1)
-    )
-    led_wall_reflection_distance: float = (
-        0.2  # Distance from wall (m) within which reflections can occur
-    )
+    led_wall_reflection_prob: float = 0.0
+    led_wall_reflection_distance: float = 0.2
 
     # IMU white noise densities (per √Hz) - SpikeGadgets specifications
     gyro_noise_density: float = _GYRO_NOISE_DENSITY  # 0.01 °/s/√Hz
@@ -286,23 +270,23 @@ class RatIMUSimConfig:
     accel_bias_rw_density: float = 0.005  # m/s² / √s
 
     # IMU mounting/tilt (small constant roll/pitch misalignment)
-    imu_tilt_roll_deg: float = 3.0  # Roll tilt in degrees
-    imu_tilt_pitch_deg: float = 2.0  # Pitch tilt in degrees
-    gravity: float = 9.80665  # m/s² (Earth gravity)
+    imu_tilt_roll_deg: float = 3.0
+    imu_tilt_pitch_deg: float = 2.0
+    gravity: float = 9.80665
 
     # Motion model (OU parameters)
-    tau_yaw_rate: float = 0.8  # s
+    tau_yaw_rate: float = 0.8
     sigma_yaw_rate: float = _SIGMA_YAW_RATE  # 60 °/s / √s
-    tau_a_fwd: float = 0.7  # s
-    sigma_a_fwd: float = 1.0  # m/s² / √s
-    tau_a_lat: float = 0.5  # s
-    sigma_a_lat: float = 0.5  # m/s² / √s
+    tau_a_fwd: float = 0.7
+    sigma_a_fwd: float = 1.0
+    tau_a_lat: float = 0.5
+    sigma_a_lat: float = 0.5
 
     # Physical damping / limits
-    vel_drag: float = 0.4  # 1/s (deprecated, use drag_fwd/drag_lat)
-    drag_fwd: float | None = None  # Forward drag in body frame (1/s)
-    drag_lat: float | None = None  # Lateral drag in body frame (1/s)
-    speed_clip: float = 1.5  # m/s
+    vel_drag: float = 0.4  # deprecated, use drag_fwd/drag_lat
+    drag_fwd: float | None = None
+    drag_lat: float | None = None
+    speed_clip: float = 1.5
 
     # Initial state (truth)
     m0: np.ndarray = field(default_factory=lambda: np.array([1.0, 1.0, 0.0, 0.0, 0.0]))
