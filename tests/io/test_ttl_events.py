@@ -519,14 +519,15 @@ class TestPerFrameEventIndices:
         assert (result == 0).sum() == 1
 
     def test_per_frame_event_indices_returns_drop_counts(self):
-        # 5 events for source 1 (active_edge="rise" / 1):
+        # 7 events for source 1 (active_edge="rise" / 1):
         #   - 2 with edge=0 (fall) → edge-mismatch drops
         #   - 1 with edge=1 but time before t_cam[0] → before-t_cam drop
-        #   - 2 with edge=1 and times inside camera interval → kept
+        #   - 1 with edge=1 but time after t_cam[-1] → after-t_cam drop
+        #   - 3 with edge=1 and times inside camera interval → kept
         t_cam = np.array([0.0, 0.05, 0.1, 0.15])
-        t_evt = np.array([0.02, 0.06, -0.01, 0.04, 0.08])
-        edge = np.array([0, 0, 1, 1, 1])
-        source_id = np.array([1, 1, 1, 1, 1])
+        t_evt = np.array([0.02, 0.06, -0.01, 0.04, 0.08, 0.20, 0.12])
+        edge = np.array([0, 0, 1, 1, 1, 1, 1])
+        source_id = np.array([1, 1, 1, 1, 1, 1, 1])
         _result, diag = per_frame_event_indices(
             t_evt,
             source_id,
@@ -536,12 +537,32 @@ class TestPerFrameEventIndices:
             source_id_to_index={1: 0},
             max_events_per_frame=4,
         )
-        assert diag["n_events_total"] == 5
+        assert diag["n_events_total"] == 7
         assert diag["n_dropped_edge_mismatch"] == 2
         assert diag["n_dropped_before_t_cam"] == 1
-        assert diag["n_dropped_after_t_cam"] == 0
-        assert diag["n_events_kept"] == 2
-        assert diag["n_events_kept_per_source"] == {1: 2}
+        assert diag["n_dropped_after_t_cam"] == 1
+        assert diag["n_events_kept"] == 3
+        assert diag["n_events_kept_per_source"] == {1: 3}
+
+    def test_per_frame_event_indices_warns_when_events_file_is_empty(self):
+        t_evt = np.array([], dtype=float)
+        source_id = np.array([], dtype=int)
+        edge = np.array([], dtype=int)
+        t_cam = np.array([0.0, 0.05, 0.1])
+        with pytest.warns(UserWarning, match="events file is empty"):
+            result, diag = per_frame_event_indices(
+                t_evt,
+                source_id,
+                edge,
+                t_cam,
+                source_active_edges={1: 1},
+                source_id_to_index={1: 0},
+                max_events_per_frame=4,
+            )
+        assert diag["n_events_total"] == 0
+        assert diag["n_events_kept"] == 0
+        assert diag["n_events_kept_per_source"] == {1: 0}
+        assert (result == -1).all()
 
     def test_per_frame_event_indices_raises_when_all_events_dropped(self):
         # All 5 events have edge=0 (fall) but the configured active_edge is

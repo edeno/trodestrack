@@ -1045,6 +1045,17 @@ def test_index_or_time_column_raises_when_time_missing():
     result = _index_or_time_column(df_with_time, source="test")
     np.testing.assert_array_equal(result, np.array([0.0, 0.01, 0.02]))
 
+    df_time_index = pd.DataFrame(
+        {"x": [1.0, 2.0, 3.0]},
+        index=pd.Index([0.0, 0.01, 0.02], name="time"),
+    )
+    result_idx = _index_or_time_column(df_time_index, source="test")
+    np.testing.assert_array_equal(result_idx, np.array([0.0, 0.01, 0.02]))
+
+    df_unnamed_index = pd.DataFrame({"x": [1.0, 2.0, 3.0]})
+    with pytest.raises(ValueError, match="missing required 'time' column"):
+        _index_or_time_column(df_unnamed_index, source="test")
+
 
 def _calibration_prepared_session() -> PreparedSession:
     """Minimal PreparedSession that passes the calibration entry guard."""

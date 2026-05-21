@@ -124,15 +124,18 @@ def test_online_negative_process_noise_prints_error_not_traceback(
     )
 
 
-def test_friendly_cli_errors_reraises_when_debug_env_set(monkeypatch) -> None:
-    """``TRODESTRACK_DEBUG=1`` should let exceptions propagate.
+@pytest.mark.parametrize("debug_value", ["1", "true", "yes", "TRUE", "Yes"])
+def test_friendly_cli_errors_reraises_when_debug_env_set(
+    monkeypatch, debug_value: str
+) -> None:
+    """``TRODESTRACK_DEBUG`` (truthy values) should let exceptions propagate.
 
     The wrapper normally converts ``ValueError`` (and friends) into a
-    stderr line + ``sys.exit(1)``. When the debug env var is set the
-    wrapper should instead re-raise so users get a full traceback for
-    bug reports.
+    stderr line + ``sys.exit(1)``. When the debug env var is set to a
+    truthy value the wrapper should instead re-raise so users get a full
+    traceback for bug reports.
     """
-    monkeypatch.setenv("TRODESTRACK_DEBUG", "1")
+    monkeypatch.setenv("TRODESTRACK_DEBUG", debug_value)
 
     @friendly_cli_errors
     def boom() -> None:

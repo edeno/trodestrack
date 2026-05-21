@@ -233,6 +233,15 @@ def per_frame_event_indices(
         }
 
     if n_events_total == 0:
+        if source_active_edges:
+            warnings.warn(
+                "TTL events configured but the events file is empty. "
+                f"Configured sources: {sorted(int(s) for s in source_active_edges)}. "
+                "Verify the events file path and that the recording covers "
+                "the time window of interest.",
+                UserWarning,
+                stacklevel=3,
+            )
         return out, _build_diagnostics(0, 0, 0, 0)
 
     unknown = sorted({int(s) for s in source_id if int(s) not in source_id_to_index})
@@ -315,7 +324,7 @@ def per_frame_event_indices(
             "camera frame. Verify their active_edge and source_id "
             "configuration if you expected them to be active.",
             UserWarning,
-            stacklevel=2,
+            stacklevel=3,
         )
 
     return out, _build_diagnostics(
