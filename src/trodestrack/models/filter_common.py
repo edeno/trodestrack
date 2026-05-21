@@ -23,7 +23,13 @@ from trodestrack.models.quaternion import (
     rotate_vector_body_to_world,
     rotate_vector_world_to_body,
 )
-from trodestrack.models.state_layout import StateLayout, get_heading_index, get_layout
+from trodestrack.models.state_layout import (
+    STATE_MODES,
+    StateLayout,
+    StateMode,
+    get_heading_index,
+    get_layout,
+)
 
 
 @dataclass(frozen=True)
@@ -171,10 +177,12 @@ class FilterCoreConfig:
     zupt_camera_stationary_window_frames: int = 10
     zupt_visual_context_hold_frames: int = 10
 
-    # State layout mode (controls state dimension and index mapping)
-    # Supported for 2D paths: "2d_full" (8D), "vision_only" (5D),
-    # "2d_cam_3d_imu" (10D), "2d_cam_6dof_imu_orientation" (14D)
-    state_mode: str = "2d_cam_3d_imu"
+    # State layout mode (controls state dimension and index mapping).
+    # ``StateMode`` is the Literal alias owned by
+    # ``trodestrack.models.state_layout``; ``STATE_MODES`` is the runtime
+    # tuple of valid values. mypy enforces the Literal statically; the
+    # runtime guard in ``__post_init__`` rejects typos at construction.
+    state_mode: StateMode = "2d_cam_3d_imu"
 
     # PyTree support: treat `state_mode` as static auxiliary data.
     _TREE_STATIC_FIELDS: ClassVar[tuple[str, ...]] = ("state_mode",)
@@ -224,6 +232,18 @@ class FilterCoreConfig:
                     f"the string to a bool before constructing the "
                     f"config."
                 )
+
+        # Runtime check on ``state_mode``: mypy enforces the Literal at
+        # static-analysis time, but dataclasses bypass that at runtime.
+        # Catch typos (e.g. ``"vison_only"``) at construction so callers
+        # get a helpful message naming the allowed values instead of a
+        # KeyError later in ``get_layout``.
+        if self.state_mode not in STATE_MODES:
+            raise ValueError(
+                f"state_mode must be one of {STATE_MODES}; got "
+                f"{self.state_mode!r}. Add to LAYOUT_REGISTRY and StateMode "
+                "(in state_layout.py) if introducing a new mode."
+            )
 
         if self.state_mode == "vision_only" and self.enable_zupt:
             object.__setattr__(self, "enable_zupt", False)

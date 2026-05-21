@@ -17,6 +17,7 @@ velocity, orientation, and bias states.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal, get_args
 
 
 @dataclass(frozen=True)
@@ -91,6 +92,71 @@ class StateLayout:
     def has_quaternion_orientation(self) -> bool:
         """Check if state uses scalar-first quaternion orientation."""
         return isinstance(self.heading_idx, tuple) and len(self.heading_idx) == 4
+
+    def __post_init__(self) -> None:
+        """Validate that the layout describes a consistent state vector.
+
+        Without this guard, a layout with out-of-range or overlapping
+        indices passes construction silently and only fails downstream
+        inside a JAX trace with an opaque clamp-or-broadcast error.
+        """
+        if self.n < 1:
+            raise ValueError(f"StateLayout.n must be >= 1; got {self.n}.")
+
+        if isinstance(self.heading_idx, int):
+            heading_indices: tuple[int, ...] = (self.heading_idx,)
+        elif isinstance(self.heading_idx, tuple):
+            heading_indices = self.heading_idx
+        else:
+            raise TypeError(
+                "StateLayout.heading_idx must be int or tuple of ints; got "
+                f"{type(self.heading_idx).__name__}."
+            )
+
+        # heading_idx structural check (length 3 Euler / length 4 quaternion).
+        # Done before the disjoint/exhaustion checks so a wrong-length tuple
+        # gets a specific error rather than a generic "doesn't exhaust" one.
+        if isinstance(self.heading_idx, tuple) and len(self.heading_idx) not in (3, 4):
+            raise ValueError(
+                "StateLayout.heading_idx tuple must have length 3 (Euler) or "
+                f"4 (quaternion); got {len(self.heading_idx)}."
+            )
+
+        all_indices = (
+            tuple(self.pos_idx)
+            + tuple(self.vel_idx)
+            + heading_indices
+            + tuple(self.bias_gyro_idx)
+            + tuple(self.bias_accel_idx)
+        )
+
+        # Range check
+        out_of_range = [i for i in all_indices if not 0 <= i < self.n]
+        if out_of_range:
+            raise ValueError(
+                f"StateLayout indices out of range [0, {self.n}): {out_of_range}."
+            )
+
+        # Disjoint check
+        if len(set(all_indices)) != len(all_indices):
+            seen: set[int] = set()
+            dupes: list[int] = []
+            for i in all_indices:
+                if i in seen:
+                    dupes.append(i)
+                else:
+                    seen.add(i)
+            raise ValueError(
+                f"StateLayout indices must be disjoint; duplicates: "
+                f"{sorted(set(dupes))}."
+            )
+
+        # Exhaustion check (every index in [0, n) is claimed by exactly one component)
+        if set(all_indices) != set(range(self.n)):
+            missing = sorted(set(range(self.n)) - set(all_indices))
+            raise ValueError(
+                f"StateLayout indices do not exhaust [0, {self.n}); missing: {missing}."
+            )
 
 
 def get_heading_index(layout: StateLayout) -> int:
@@ -336,3 +402,32 @@ def get_layout(mode: str) -> StateLayout:
         If ``mode`` is not recognized.
     """
     return LAYOUT_REGISTRY[mode]
+
+
+# =============================================================================
+# State Mode Literal
+# =============================================================================
+
+StateMode = Literal[
+    "2d_full",
+    "vision_only",
+    "imu_only",
+    "2d_cam_3d_imu",
+    "2d_cam_6dof_imu_orientation",
+    "3d_euler",
+    "3d_quat",
+    "3d_cam_6dof_imu",
+]
+"""Literal alias enumerating the valid ``state_mode`` strings.
+
+Kept in lockstep with ``LAYOUT_REGISTRY``: any new key added to the registry
+must also be added to this alias (and vice versa). A test asserts the two
+sets match so the invariant cannot drift silently.
+"""
+
+STATE_MODES: tuple[str, ...] = get_args(StateMode)
+"""Runtime tuple of valid ``state_mode`` strings derived from ``StateMode``.
+
+Used for runtime membership checks (``FilterCoreConfig.__post_init__``) and
+for argparse ``choices=`` on the CLI's ``--state-mode`` flag.
+"""
