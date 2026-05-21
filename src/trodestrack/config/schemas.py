@@ -299,6 +299,9 @@ class LedIdentityConfig(BaseModel):
     max_speed_mps: float = Field(default=3.0, gt=0.0)
 
 
+SourceType = Literal["beam", "zone", "rfid"]
+
+
 @dataclass(frozen=True)
 class EventLocationSource:
     """Resolved geometry the EKF event-update model consumes per source.
@@ -313,7 +316,46 @@ class EventLocationSource:
     anchor: np.ndarray  # (2,) world meters
     covariance: np.ndarray  # (2, 2) world-frame measurement covariance, PSD
     label: str | None = None
-    source_type: str = "unknown"
+    source_type: SourceType = "beam"
+
+    def __post_init__(self) -> None:
+        if self.source_type not in ("beam", "zone", "rfid"):
+            raise ValueError(
+                "EventLocationSource.source_type must be one of "
+                f"('beam', 'zone', 'rfid'); got {self.source_type!r}."
+            )
+
+        anchor = np.asarray(self.anchor, dtype=float)
+        if anchor.shape != (2,):
+            raise ValueError(
+                f"EventLocationSource.anchor must have shape (2,); got {anchor.shape}."
+            )
+        if not np.all(np.isfinite(anchor)):
+            raise ValueError(
+                f"EventLocationSource.anchor must be finite; got {anchor.tolist()}."
+            )
+        object.__setattr__(self, "anchor", anchor)
+
+        cov = np.asarray(self.covariance, dtype=float)
+        if cov.shape != (2, 2):
+            raise ValueError(
+                f"EventLocationSource.covariance must have shape (2, 2); "
+                f"got {cov.shape}."
+            )
+        if not np.all(np.isfinite(cov)):
+            raise ValueError("EventLocationSource.covariance must be finite.")
+        if not np.allclose(cov, cov.T, atol=1e-10):
+            raise ValueError(
+                "EventLocationSource.covariance must be symmetric; "
+                f"max asymmetry={float(np.max(np.abs(cov - cov.T))):.2e}."
+            )
+        eigs = np.linalg.eigvalsh(cov)
+        if eigs.min() < -1e-10:
+            raise ValueError(
+                f"EventLocationSource.covariance must be PSD; min eigenvalue="
+                f"{float(eigs.min()):.2e}."
+            )
+        object.__setattr__(self, "covariance", cov)
 
 
 def _isotropic_event_source(
@@ -322,7 +364,7 @@ def _isotropic_event_source(
     center: tuple[float, float],
     sigma: float,
     label: str | None,
-    source_type: str,
+    source_type: SourceType,
 ) -> EventLocationSource:
     return EventLocationSource(
         source_id=source_id,
