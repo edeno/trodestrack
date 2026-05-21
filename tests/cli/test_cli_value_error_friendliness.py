@@ -20,6 +20,7 @@ import numpy as np
 import pytest
 
 from trodestrack import main
+from trodestrack.cli.utils import friendly_cli_errors
 
 
 @pytest.fixture
@@ -120,6 +121,55 @@ def test_online_negative_process_noise_prints_error_not_traceback(
     )
     assert "Traceback" not in captured.err, (
         f"Expected no traceback in stderr, got: {captured.err!r}"
+    )
+
+
+@pytest.mark.parametrize("debug_value", ["1", "true", "yes", "TRUE", "Yes"])
+def test_friendly_cli_errors_reraises_when_debug_env_set(
+    monkeypatch, debug_value: str
+) -> None:
+    """``TRODESTRACK_DEBUG`` (truthy values) should let exceptions propagate.
+
+    The wrapper normally converts ``ValueError`` (and friends) into a
+    stderr line + ``sys.exit(1)``. When the debug env var is set to a
+    truthy value the wrapper should instead re-raise so users get a full
+    traceback for bug reports.
+    """
+    monkeypatch.setenv("TRODESTRACK_DEBUG", debug_value)
+
+    @friendly_cli_errors
+    def boom() -> None:
+        raise ValueError("x")
+
+    with pytest.raises(ValueError, match="x"):
+        boom()
+
+
+def test_friendly_cli_errors_includes_exception_type_in_unexpected(
+    capsys,
+) -> None:
+    """Unexpected errors should name the exception class and the debug hint.
+
+    A ``KeyError`` is not in the (FileNotFoundError, NotADirectoryError,
+    ValueError) friendly set so it hits the generic ``Exception`` branch.
+    The stderr message must include ``KeyError`` (so bug reports identify
+    the failure mode) and the ``TRODESTRACK_DEBUG=1`` hint.
+    """
+
+    @friendly_cli_errors
+    def boom() -> None:
+        raise KeyError("missing")
+
+    with pytest.raises(SystemExit) as exc_info:
+        boom()
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+    assert "KeyError" in captured.err, (
+        f"Expected 'KeyError' in stderr, got: {captured.err!r}"
+    )
+    assert "TRODESTRACK_DEBUG=1" in captured.err, (
+        f"Expected 'TRODESTRACK_DEBUG=1' hint in stderr, got: {captured.err!r}"
     )
 
 

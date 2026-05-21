@@ -372,6 +372,29 @@ def test_camera_partial_confidence_columns_rejected():
     SessionConfig.model_validate({"inputs": _PREPARED_INPUTS})
 
 
+def test_load_leds_treats_empty_confidence_column_as_missing():
+    """Empty string was falsy in the loader's truthy check, silently
+    disabling confidence weighting. The schema now rejects empty
+    strings at validation time so the loader never sees them.
+    """
+
+    for empty_field in ("confidence_led1_column", "confidence_led2_column"):
+        with pytest.raises(ValidationError, match=empty_field):
+            SessionConfig.model_validate(
+                {
+                    "inputs": _PREPARED_INPUTS,
+                    "camera": {
+                        "confidence_led1_column": (
+                            "" if empty_field == "confidence_led1_column" else "c1"
+                        ),
+                        "confidence_led2_column": (
+                            "" if empty_field == "confidence_led2_column" else "c2"
+                        ),
+                    },
+                }
+            )
+
+
 def test_camera_meters_per_pixel_must_be_positive():
     """``meters_per_pixel <= 0`` collapses or mirrors trajectory; reject."""
 

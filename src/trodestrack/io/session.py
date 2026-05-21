@@ -309,8 +309,8 @@ def _load_spikegadgets_trodes(config: SessionConfig) -> PreparedSession:
     _require_columns(pos_df, pos_columns, source=str(inputs.position_file))
 
     imu_unique = _remove_sample_hold(imu_df, config)
-    t_imu_unix = _index_or_time_column(imu_unique)
-    t_cam_unix = _index_or_time_column(pos_df)
+    t_imu_unix = _index_or_time_column(imu_unique, source="IMU dataframe")
+    t_cam_unix = _index_or_time_column(pos_df, source="camera dataframe")
     t_start = min(float(t_imu_unix[0]), float(t_cam_unix[0]))
     t_imu = t_imu_unix - t_start + config.imu.time_offset_s
     t_cam = t_cam_unix - t_start + config.camera.time_offset_s
@@ -438,7 +438,7 @@ def _attach_ttl_events(session: PreparedSession) -> PreparedSession:
     covariances = np.stack([src.covariance for src in sources], axis=0)
 
     t_evt, source_id, edge = load_ttl_events(cfg.events_file)
-    indices = per_frame_event_indices(
+    indices, ttl_diagnostics = per_frame_event_indices(
         t_evt,
         source_id,
         edge,
@@ -452,11 +452,10 @@ def _attach_ttl_events(session: PreparedSession) -> PreparedSession:
     diagnostics["ttl_events"] = {
         "n_sources": len(sources),
         "events_file": str(cfg.events_file),
-        "n_events_total": int(t_evt.size),
-        "n_events_kept": int((indices >= 0).sum()),
         "max_events_per_frame": cfg.max_events_per_frame,
         "source_types": [src.source_type for src in sources],
         "source_ids": [src.source_id for src in sources],
+        **ttl_diagnostics,
     }
     return replace(
         session,
@@ -480,19 +479,19 @@ def _add_imu_calibration_diagnostics(session: PreparedSession) -> PreparedSessio
         return session
 
     diagnostics = dict(session.diagnostics)
+    report = run_imu_calibration_diagnostics(
+        t_imu=session.t_imu,
+        gyro_z=U_full[:, 2],
+        accel_xyz=U_full[:, 3:6],
+        t_cam=session.t_cam,
+        led1=session.Z_cam_led1,
+        led2=session.Z_cam_led2,
+    )
+    diagnostics["imu_calibration"] = report
+    diagnostics["imu_calibration_led_identity_applied"] = (
+        config.led_identity.mode == "auto"
+    )
     try:
-        report = run_imu_calibration_diagnostics(
-            t_imu=session.t_imu,
-            gyro_z=U_full[:, 2],
-            accel_xyz=U_full[:, 3:6],
-            t_cam=session.t_cam,
-            led1=session.Z_cam_led1,
-            led2=session.Z_cam_led2,
-        )
-        diagnostics["imu_calibration"] = report
-        diagnostics["imu_calibration_led_identity_applied"] = (
-            config.led_identity.mode == "auto"
-        )
         _validate_calibration_for_fusion(report, config)
     except ValueError as e:
         diagnostics["imu_calibration_error"] = str(e)
@@ -619,23 +618,42 @@ def _load_leds(
         * cam.meters_per_pixel
     )
     conf_cam = None
-    if cam.confidence_led1_column and cam.confidence_led2_column:
+    if (
+        cam.confidence_led1_column is not None
+        and cam.confidence_led2_column is not None
+    ):
         c1 = pos_df[cam.confidence_led1_column].to_numpy(dtype=float)
         c2 = pos_df[cam.confidence_led2_column].to_numpy(dtype=float)
         conf_cam = np.column_stack([c1, c1, c2, c2])
     return led1, led2, conf_cam
 
 
-def _index_or_time_column(df: pd.DataFrame) -> np.ndarray:
+def _index_or_time_column(df: pd.DataFrame, *, source: str) -> np.ndarray:
     if "time" in df.columns:
         return df["time"].to_numpy(dtype=float)
-    return df.index.to_numpy(dtype=float)
+    if df.index.name == "time":
+        return df.index.to_numpy(dtype=float)
+    raise ValueError(
+        f"{source} is missing required 'time' column (or 'time'-named index). "
+        "The previous fallback of using an unnamed df.index silently "
+        "substituted sample numbers (0, 1, 2, ...) for seconds, producing dt "
+        "values off by the sampling rate and wildly miscalibrated filter "
+        "outputs."
+    )
 
 
 def _median_led_distance(led1: np.ndarray, led2: np.ndarray, mask: np.ndarray) -> float:
     valid = mask & np.isfinite(led1).all(axis=1) & np.isfinite(led2).all(axis=1)
-    if not np.any(valid):
-        return 0.04
+    n_valid = int(np.sum(valid))
+    if n_valid == 0:
+        raise ValueError(
+            "Cannot auto-detect LED spacing: zero dual-LED frames are valid "
+            "(both LEDs present and finite). Set filter.led_distance "
+            "explicitly in the SessionConfig YAML, or pass --led-distance on "
+            "the CLI. The previous 0.04 m fallback was removed because it "
+            "silently produced wrong-sized heading pseudo-measurements when "
+            "no dual-LED frames were available."
+        )
     return float(np.nanmedian(np.linalg.norm(led2[valid] - led1[valid], axis=1)))
 
 

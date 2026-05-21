@@ -5,7 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.1] - unreleased
+
+### Fixed
+
+- `trodestrack --version` now reports the correct package version (was 0.1.0; pyproject.toml ships 0.2.0).
+- `io.session._median_led_distance` now raises `ValueError` instead of silently returning a hardcoded 0.04 m fallback when no dual-LED frames are available. Set `filter.led_distance` explicitly in the YAML config or pass `--led-distance` on the CLI.
+- `io.session._index_or_time_column` now raises `ValueError` when the input DataFrame is missing the `time` column. The previous fallback silently substituted sample numbers (df.index) for seconds, producing dt values off by the sampling rate.
+- `io.session._add_imu_calibration_diagnostics` no longer swallows non-verdict `ValueError`s into a diagnostics string; only `_validate_calibration_for_fusion` exceptions are captured.
+- `config.schemas.CameraConfig.confidence_led{1,2}_column` now rejects empty strings at validation time. Previously, an empty string would silently disable confidence weighting via the loader's truthy check.
+- `io.ttl_events.per_frame_event_indices` now returns per-source kept/dropped diagnostics, raises when all events are dropped, and warns when a configured source contributes no events. Diagnostics are plumbed into `session.diagnostics["ttl_events"]`.
+- `cli.utils.friendly_cli_errors` now re-raises with a full traceback when `TRODESTRACK_DEBUG=1` is set in the environment, and includes the exception class name in the "Unexpected error" message.
 
 ## [0.2.0] - 2026-05-20
 
@@ -180,6 +190,6 @@ Initial public release of trodestrack: sensor-fused 2D rat tracking with JAX EKF
 Detailed session-by-session development notes are preserved in
 [CHANGELOG.dev-sessions.md](CHANGELOG.dev-sessions.md) for historical reference.
 
-[Unreleased]: https://github.com/edeno/trodestrack/compare/v0.2.0...HEAD
+[0.2.1]: https://github.com/edeno/trodestrack/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/edeno/trodestrack/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/edeno/trodestrack/releases/tag/v0.1.0

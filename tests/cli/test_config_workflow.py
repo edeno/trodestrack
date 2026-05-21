@@ -586,7 +586,13 @@ def test_config_safety_check_raise_writes_diagnostics(
 def test_config_bad_imu_calibration_fails_with_diagnostics(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Invalid IMU calibration should stop before writing trusted outputs."""
+    """Invalid IMU calibration should stop before writing trusted outputs.
+
+    Non-verdict ``ValueError``\\s raised inside ``run_imu_calibration_diagnostics``
+    propagate out (surfaced via ``friendly_cli_errors``) rather than being
+    captured into ``session.diagnostics["imu_calibration_error"]``. Only
+    ``_validate_calibration_for_fusion`` ValueErrors land in diagnostics.
+    """
 
     config_path = _write_arthur_config(tmp_path, safety_max_speed_mps=3.0)
     config_path.write_text(
@@ -600,7 +606,7 @@ def test_config_bad_imu_calibration_fails_with_diagnostics(
         main()
 
     assert exc_info.value.code == 1
-    assert "IMU calibration diagnostics failed" in capsys.readouterr().err
+    stderr = capsys.readouterr().err
+    assert "Error:" in stderr
     output_dir = tmp_path / "out_unsafe"
-    assert (output_dir / "session_diagnostics.json").exists()
     assert not (output_dir / "filtered_means.txt").exists()
