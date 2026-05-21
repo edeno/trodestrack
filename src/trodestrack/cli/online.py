@@ -236,7 +236,7 @@ that, drive `trodestrack.models.ekf.predict_step` /
         "--led-distance",
         type=float,
         default=None,
-        help="Expected LED spacing in meters (default: auto-detect via the median pairwise distance over frames where both LEDs are finite, with a hardcoded 0.04 m fallback when no such frames exist)",
+        help="Expected LED spacing in meters (default: auto-detected from dual-LED frames; must be set explicitly via --led-distance or YAML config.camera.led_distance if no dual-LED frames exist.)",
     )
     filter_group.add_argument(
         "--use-heading-measurement",

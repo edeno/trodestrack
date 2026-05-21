@@ -634,8 +634,16 @@ def _index_or_time_column(df: pd.DataFrame) -> np.ndarray:
 
 def _median_led_distance(led1: np.ndarray, led2: np.ndarray, mask: np.ndarray) -> float:
     valid = mask & np.isfinite(led1).all(axis=1) & np.isfinite(led2).all(axis=1)
-    if not np.any(valid):
-        return 0.04
+    n_valid = int(np.sum(valid))
+    if n_valid == 0:
+        raise ValueError(
+            "Cannot auto-detect LED spacing: zero dual-LED frames are valid "
+            "(both LEDs present and finite). Set camera.led_distance "
+            "explicitly in the SessionConfig YAML, or pass --led-distance on "
+            "the CLI. The previous 0.04 m fallback was removed because it "
+            "silently produced wrong-sized heading pseudo-measurements when "
+            "no dual-LED frames were available."
+        )
     return float(np.nanmedian(np.linalg.norm(led2[valid] - led1[valid], axis=1)))
 
 

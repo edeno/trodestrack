@@ -14,7 +14,10 @@ from trodestrack.io import (
     write_session_diagnostics,
 )
 from trodestrack.io.led_identity import CorrectedLEDIdentity
-from trodestrack.io.session import _validate_calibration_for_fusion
+from trodestrack.io.session import (
+    _median_led_distance,
+    _validate_calibration_for_fusion,
+)
 from trodestrack.models.ekf import EKFConfig, EKFResult
 from trodestrack.qa.imu_calibration import (
     AxisSignDiagnostic,
@@ -1017,3 +1020,13 @@ outputs:
     np.testing.assert_allclose(captured["led1"], led1_true)
     np.testing.assert_allclose(captured["led2"], led2_true)
     assert session.diagnostics["imu_calibration_led_identity_applied"] is True
+
+
+def test_median_led_distance_raises_when_no_dual_led_frames():
+    """Auto-detection must fail loudly when no dual-LED frames are valid."""
+
+    led1 = np.ones((5, 2))
+    led2 = np.ones((5, 2))
+    mask = np.zeros(5, dtype=bool)
+    with pytest.raises(ValueError, match="auto-detect LED spacing"):
+        _median_led_distance(led1, led2, mask)

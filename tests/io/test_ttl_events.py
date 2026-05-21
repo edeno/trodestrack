@@ -192,6 +192,7 @@ def test_load_session_attaches_event_arrays(tmp_path):
                     "camera_timestamps": "t_cam.txt",
                     "led1_positions": "led1.txt",
                 },
+                "filter": {"led_distance": 0.04},
                 "ttl_events": {
                     "events_file": "events.parquet",
                     "beams": [
