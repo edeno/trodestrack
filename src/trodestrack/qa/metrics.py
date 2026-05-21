@@ -1,7 +1,7 @@
 """Quality assurance metrics for tracking performance evaluation.
 
 This module provides metrics to validate filter accuracy and consistency against
-PRD requirements (all in SI units):
+project acceptance targets (all in SI units):
 - Position RMSE <= 0.02 m (2 cm)
 - Velocity RMSE <= 0.10 m/s (10 cm/s)
 - Heading error <= 0.122 rad (7 degrees)
@@ -899,7 +899,7 @@ def compute_dropout_drift(
 ) -> dict[str, float | None]:
     """Tracking-error growth during the first qualifying dropout block.
 
-    The PRD requirement is that *IMU-only tracking error* should not grow
+    The project acceptance target is that *IMU-only tracking error* should not grow
     beyond a bound during a camera dropout (≤3.5 m after 5 s on consumer
     hardware). The previous implementation took only the estimate and
     returned ``||pos_est[end] - pos_est[start]||`` — endpoint
@@ -934,7 +934,7 @@ def compute_dropout_drift(
           high-error state and the IMU happened to point back toward
           truth, but typically ``≥ 0``.
         * ``end_error_m``: tracking error at the last in-block sample
-          (``||pos_est[end_idx - 1] - pos_true[end_idx - 1]||``). PRD
+          (``||pos_est[end_idx - 1] - pos_true[end_idx - 1]||``). Acceptance
           checks usually compare this against the absolute bound.
         * ``start_error_m``: tracking error at the first in-block
           sample (``||pos_est[start_idx] - pos_true[start_idx]||``).
@@ -955,7 +955,7 @@ def compute_dropout_drift(
         True
 
     Notes:
-        PRD Acceptance Criteria (§4.2):
+        Project acceptance criteria:
         - After 5 s camera dropout, IMU-only drift should be ≤3.5 m
           on consumer-grade IMUs (95th percentile bound). In
           simulation the filter typically tracks to a few cm of truth.
@@ -982,7 +982,7 @@ def compute_dropout_drift(
     # ``None`` fields. A float ``0.0/1.0`` mask raises a raw
     # ``TypeError`` from ``~`` instead of the documented contract
     # error. Mirror the gate already used by ``qa.plots`` and
-    # ``qa.imu_calibration`` so PRD dropout checks can't be hidden by
+    # ``qa.imu_calibration`` so dropout checks can't be hidden by
     # a corrupted mask.
     valid_mask_arr = validate_bool_mask_dtype(raw_mask_arr, name="valid_mask")
     if pos_est.shape != pos_true.shape:

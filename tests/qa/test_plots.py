@@ -104,15 +104,15 @@ class TestPlotPositionError:
 
         plt.close(fig)
 
-    def test_position_error_with_prd_threshold(self) -> None:
-        """Test position error plot with PRD threshold line."""
+    def test_position_error_with_target_threshold(self) -> None:
+        """Test position error plot with target threshold line."""
         # Arrange
         t = np.linspace(0, 10, 100)
         pos_true = np.zeros((100, 2))
         pos_est = np.random.randn(100, 2) * 0.01
 
         # Act
-        fig, ax = plot_position_error(t, pos_true, pos_est, prd_threshold_m=0.02)
+        fig, ax = plot_position_error(t, pos_true, pos_est, target_threshold_m=0.02)
 
         # Assert: Check for threshold line
         # Should be a horizontal line
@@ -419,7 +419,7 @@ class TestIntegration:
         nees = np.random.chisquare(df=8, size=N)
 
         # Act: Create all QA plots
-        fig1, _ax1 = plot_position_error(t, pos_true, pos_est, prd_threshold_m=0.02)
+        fig1, _ax1 = plot_position_error(t, pos_true, pos_est, target_threshold_m=0.02)
         fig2, _ax2 = plot_velocity_error(t, vel_true, vel_est)
         fig3, _axes3 = plot_residuals(t, residuals, confidence_std=0.01)
         fig4, _ax4 = plot_nees_histogram(nees, state_dim=8, confidence=0.95)

@@ -80,7 +80,7 @@ class TestRTSSmoother:
             f"Smoother RMSE {rmse_smoother:.6f} should be <= filter RMSE {rmse_filter:.6f}"
         )
 
-        # Both should be within PRD requirement (2 cm + small tolerance)
+        # Both should be within the acceptance target (2 cm + small tolerance)
         assert rmse_filter < 0.021, f"Filter RMSE {rmse_filter:.4f} exceeds 2 cm"
         assert rmse_smoother < 0.021, f"Smoother RMSE {rmse_smoother:.4f} exceeds 2 cm"
 
@@ -285,7 +285,7 @@ class TestSigmaPointSmoother:
             f"Smoother RMSE {rmse_smoother:.6f} should be <= filter RMSE {rmse_filter:.6f}"
         )
 
-        # Both should be within PRD requirement (2 cm + small tolerance)
+        # Both should be within the acceptance target (2 cm + small tolerance)
         assert rmse_filter < 0.021, f"Filter RMSE {rmse_filter:.4f} exceeds 2 cm"
         assert rmse_smoother < 0.021, f"Smoother RMSE {rmse_smoother:.4f} exceeds 2 cm"
 

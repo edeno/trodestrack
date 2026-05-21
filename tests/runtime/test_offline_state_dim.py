@@ -19,9 +19,8 @@ Note:
     runtime dynamics function while keeping arbitrary state dimensions. This
     test validates that the SMOOTHER INFRASTRUCTURE is dimension-agnostic.
 
-PRD Reference:
-    - Section 15: Extensibility (3D Roadmap)
-    - REVIEW.md P0.4: State-dimension generalization
+This supports planned 3D extensions (e.g. 12D state) and reduced-state
+ablation studies without rewriting the smoother infrastructure.
 """
 
 from __future__ import annotations

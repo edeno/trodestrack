@@ -1,13 +1,14 @@
-"""PRD Acceptance Tests with Real EKF Filtering.
+"""Acceptance tests for the EKF on simulation data.
 
-This module validates that the EKF meets PRD acceptance criteria on simulation data:
-- Position RMSE <= 0.02 m (PRD §4.1)
-- Velocity RMSE <= 0.10 m/s (PRD §4.1)
-- Heading RMSE <= 7° (PRD §4.1)
-- Dropout drift <= 3.5 m after 5s (PRD §4.2, realistic bound)
+This module validates that the EKF meets the project's acceptance targets on
+simulation data:
+- Position RMSE <= 0.02 m
+- Velocity RMSE <= 0.10 m/s
+- Heading RMSE <= 7 degrees
+- Dropout drift <= 3.5 m after 5 s (realistic consumer-grade IMU bound)
 
-Unlike test_prd_bounds.py (which tests truth-vs-truth), these tests run actual
-EKF filtering and validate performance against PRD thresholds.
+Unlike tests/sim/test_target_bounds.py (which tests truth-vs-truth), these tests run
+actual EKF filtering and validate performance against the acceptance targets.
 """
 
 import numpy as np
@@ -33,10 +34,10 @@ from trodestrack.sim.simple import (
 # Acceptance Criteria
 # =============================================================================
 
-PRD_POSITION_RMSE_M = 0.02  # Position RMSE <= 0.02 m (2 cm)
-PRD_VELOCITY_RMSE_M_S = 0.10  # Velocity RMSE <= 0.10 m/s (10 cm/s)
-PRD_HEADING_RMSE_DEG = 7.0  # Heading RMSE <= 7 degrees
-PRD_DROPOUT_DRIFT_M = 3.5  # Drift <= 3.5 m after 5s dropout (realistic consumer-grade IMU, 95th percentile)
+TARGET_POSITION_RMSE_M = 0.02  # Position RMSE <= 0.02 m (2 cm)
+TARGET_VELOCITY_RMSE_M_S = 0.10  # Velocity RMSE <= 0.10 m/s (10 cm/s)
+TARGET_HEADING_RMSE_DEG = 7.0  # Heading RMSE <= 7 degrees
+TARGET_DROPOUT_DRIFT_M = 3.5  # Drift <= 3.5 m after 5s dropout (realistic consumer-grade IMU, 95th percentile)
 
 
 # =============================================================================
@@ -129,7 +130,7 @@ def run_ekf_on_sim(
 
 @pytest.mark.slow
 def test_tier0_stationary_ekf_position():
-    """Tier 0: Stationary - EKF position RMSE should meet PRD (<=0.02m).
+    """Tier 0: Stationary - EKF position RMSE should meet the target (<=0.02m).
 
     Runtime (observed locally): ~4.7 s
     """
@@ -144,19 +145,19 @@ def test_tier0_stationary_ekf_position():
     pos_rmse_m = compute_position_rmse(result["pos_truth"], result["pos_est"])
 
     print(
-        f"\nStationary Position RMSE: {pos_rmse_m:.4f} m (PRD: <={PRD_POSITION_RMSE_M} m)"
+        f"\nStationary Position RMSE: {pos_rmse_m:.4f} m (target: <={TARGET_POSITION_RMSE_M} m)"
     )
 
-    # Allow 5% margin above PRD threshold to account for filter convergence
-    assert pos_rmse_m <= PRD_POSITION_RMSE_M * 1.05, (
-        f"Position RMSE {pos_rmse_m:.4f} m exceeds PRD requirement "
-        f"of {PRD_POSITION_RMSE_M} m (with 5% margin)"
+    # Allow 5% margin above the acceptance target to account for filter convergence
+    assert pos_rmse_m <= TARGET_POSITION_RMSE_M * 1.05, (
+        f"Position RMSE {pos_rmse_m:.4f} m exceeds acceptance target "
+        f"of {TARGET_POSITION_RMSE_M} m (with 5% margin)"
     )
 
 
 @pytest.mark.slow
 def test_tier0_constant_velocity_ekf_velocity():
-    """Tier 0: Constant velocity - EKF velocity RMSE should meet PRD (<=0.10m/s).
+    """Tier 0: Constant velocity - EKF velocity RMSE should meet the target (<=0.10m/s).
 
     Runtime (observed locally): ~4.7 s
     """
@@ -172,18 +173,18 @@ def test_tier0_constant_velocity_ekf_velocity():
     vel_rmse_m_s = compute_velocity_rmse(result["vel_truth"], result["vel_est"])
 
     print(
-        f"\nConstant Velocity RMSE: {vel_rmse_m_s:.4f} m/s (PRD: <={PRD_VELOCITY_RMSE_M_S} m/s)"
+        f"\nConstant Velocity RMSE: {vel_rmse_m_s:.4f} m/s (target: <={TARGET_VELOCITY_RMSE_M_S} m/s)"
     )
 
-    assert vel_rmse_m_s <= PRD_VELOCITY_RMSE_M_S, (
-        f"Velocity RMSE {vel_rmse_m_s:.4f} m/s exceeds PRD requirement "
-        f"of {PRD_VELOCITY_RMSE_M_S} m/s"
+    assert vel_rmse_m_s <= TARGET_VELOCITY_RMSE_M_S, (
+        f"Velocity RMSE {vel_rmse_m_s:.4f} m/s exceeds acceptance target "
+        f"of {TARGET_VELOCITY_RMSE_M_S} m/s"
     )
 
 
 @pytest.mark.slow
 def test_tier0_circular_ekf_heading():
-    """Tier 0: Circular motion - EKF heading RMSE should meet PRD (<=7°).
+    """Tier 0: Circular motion - EKF heading RMSE should meet the target (<=7 deg).
 
     Runtime (observed locally): ~4.6 s
     """
@@ -201,11 +202,11 @@ def test_tier0_circular_ekf_heading():
     heading_rmse_deg = np.rad2deg(heading_rmse_rad)
 
     print(
-        f"\nCircular Heading RMSE: {heading_rmse_deg:.3f}° (PRD: <={PRD_HEADING_RMSE_DEG}°)"
+        f"\nCircular Heading RMSE: {heading_rmse_deg:.3f}° (target: <={TARGET_HEADING_RMSE_DEG}°)"
     )
 
-    assert heading_rmse_deg <= PRD_HEADING_RMSE_DEG, (
-        f"Heading RMSE {heading_rmse_deg:.3f}° exceeds PRD requirement of {PRD_HEADING_RMSE_DEG}°"
+    assert heading_rmse_deg <= TARGET_HEADING_RMSE_DEG, (
+        f"Heading RMSE {heading_rmse_deg:.3f}° exceeds acceptance target of {TARGET_HEADING_RMSE_DEG}°"
     )
 
 
@@ -216,7 +217,7 @@ def test_tier0_circular_ekf_heading():
 
 @pytest.mark.slow
 def test_tier3_rat_imu_ekf_position():
-    """Tier 3: Rat IMU - EKF position RMSE should meet PRD (<=0.02m).
+    """Tier 3: Rat IMU - EKF position RMSE should meet the target (<=0.02m).
 
     Runtime (observed locally): ~23.0 s
     """
@@ -240,17 +241,17 @@ def test_tier3_rat_imu_ekf_position():
     pos_rmse_m = compute_position_rmse(result["pos_truth"], result["pos_est"])
 
     print(
-        f"\nRat IMU Position RMSE: {pos_rmse_m:.4f} m (PRD: <={PRD_POSITION_RMSE_M} m)"
+        f"\nRat IMU Position RMSE: {pos_rmse_m:.4f} m (target: <={TARGET_POSITION_RMSE_M} m)"
     )
 
-    assert pos_rmse_m <= PRD_POSITION_RMSE_M, (
-        f"Position RMSE {pos_rmse_m:.4f} m exceeds PRD requirement of {PRD_POSITION_RMSE_M} m"
+    assert pos_rmse_m <= TARGET_POSITION_RMSE_M, (
+        f"Position RMSE {pos_rmse_m:.4f} m exceeds acceptance target of {TARGET_POSITION_RMSE_M} m"
     )
 
 
 @pytest.mark.slow
 def test_tier3_rat_imu_ekf_velocity():
-    """Tier 3: Rat IMU - EKF velocity RMSE should meet PRD (<=0.10m/s).
+    """Tier 3: Rat IMU - EKF velocity RMSE should meet the target (<=0.10m/s).
 
     Runtime (observed locally): ~5.6 s
     """
@@ -274,18 +275,18 @@ def test_tier3_rat_imu_ekf_velocity():
     vel_rmse_m_s = compute_velocity_rmse(result["vel_truth"], result["vel_est"])
 
     print(
-        f"\nRat IMU Velocity RMSE: {vel_rmse_m_s:.4f} m/s (PRD: <={PRD_VELOCITY_RMSE_M_S} m/s)"
+        f"\nRat IMU Velocity RMSE: {vel_rmse_m_s:.4f} m/s (target: <={TARGET_VELOCITY_RMSE_M_S} m/s)"
     )
 
-    assert vel_rmse_m_s <= PRD_VELOCITY_RMSE_M_S, (
-        f"Velocity RMSE {vel_rmse_m_s:.4f} m/s exceeds PRD requirement "
-        f"of {PRD_VELOCITY_RMSE_M_S} m/s"
+    assert vel_rmse_m_s <= TARGET_VELOCITY_RMSE_M_S, (
+        f"Velocity RMSE {vel_rmse_m_s:.4f} m/s exceeds acceptance target "
+        f"of {TARGET_VELOCITY_RMSE_M_S} m/s"
     )
 
 
 @pytest.mark.slow
 def test_tier3_rat_imu_ekf_heading():
-    """Tier 3: Rat IMU - EKF heading RMSE should meet PRD (<=7°).
+    """Tier 3: Rat IMU - EKF heading RMSE should meet the target (<=7 deg).
 
     Runtime (observed locally): ~5.0 s
     """
@@ -313,22 +314,22 @@ def test_tier3_rat_imu_ekf_heading():
     heading_rmse_deg = np.rad2deg(heading_rmse_rad)
 
     print(
-        f"\nRat IMU Heading RMSE: {heading_rmse_deg:.3f}° (PRD: <={PRD_HEADING_RMSE_DEG}°)"
+        f"\nRat IMU Heading RMSE: {heading_rmse_deg:.3f}° (target: <={TARGET_HEADING_RMSE_DEG}°)"
     )
 
-    assert heading_rmse_deg <= PRD_HEADING_RMSE_DEG, (
-        f"Heading RMSE {heading_rmse_deg:.3f}° exceeds PRD requirement of {PRD_HEADING_RMSE_DEG}°"
+    assert heading_rmse_deg <= TARGET_HEADING_RMSE_DEG, (
+        f"Heading RMSE {heading_rmse_deg:.3f}° exceeds acceptance target of {TARGET_HEADING_RMSE_DEG}°"
     )
 
 
 # =============================================================================
-# PRD §4.2: Dropout Drift Test
+# Dropout Drift Test (vision blackout acceptance criterion)
 # =============================================================================
 
 
 @pytest.mark.slow
-def test_prd_dropout_drift_5s():
-    """PRD §4.2: Dropout drift should be <=3.5m after 5s camera blackout.
+def test_target_dropout_drift_5s():
+    """Dropout drift should be <=3.5 m after 5s camera blackout.
 
     Validates realistic IMU-only tracking performance during vision dropout.
     The drift accumulates from multiple sources:
@@ -346,7 +347,7 @@ def test_prd_dropout_drift_5s():
     ---------------------
     - Typical drift: ~1.4 m (with vision before/after dropout)
     - Worst-case: ~3.0 m (at session start with poor initial conditions)
-    - Requirement: ≤3.5 m (conservative bound)
+    - Acceptance target: <=3.5 m (conservative bound)
 
     Mitigations Applied:
     --------------------
@@ -357,7 +358,7 @@ def test_prd_dropout_drift_5s():
 
     For better performance (offline processing):
     - Use RTS smoother which leverages vision before/after dropout
-    - See test_prd_dropout_drift_5s_smoothed() for smoothed results
+    - See test_target_dropout_drift_5s_smoothed() for smoothed results
 
     Runtime: ~4.5 s
     """
@@ -421,7 +422,7 @@ def test_prd_dropout_drift_5s():
         sim_data_dropout, use_heading=True, ekf_config_override=ekf_config_override
     )
 
-    # Compute dropout drift using PRD helper (in meters)
+    # Compute dropout drift (in meters) against ground truth
     drift_result = compute_dropout_drift(
         positions_est=result["pos_est"],  # Positions in meters
         positions_true=result["pos_truth"],
@@ -434,18 +435,18 @@ def test_prd_dropout_drift_5s():
     duration_s = drift_result["duration_s"]
 
     print(
-        f"\nDropout drift: {drift_m:.4f} m over {duration_s:.1f}s (PRD: <={PRD_DROPOUT_DRIFT_M} m)"
+        f"\nDropout drift: {drift_m:.4f} m over {duration_s:.1f}s (target: <={TARGET_DROPOUT_DRIFT_M} m)"
     )
 
     assert drift_m is not None, "No qualifying dropout found in simulation"
-    assert drift_m <= PRD_DROPOUT_DRIFT_M, (
-        f"Dropout drift {drift_m:.4f} m exceeds PRD requirement of {PRD_DROPOUT_DRIFT_M} m after 5s"
+    assert drift_m <= TARGET_DROPOUT_DRIFT_M, (
+        f"Dropout drift {drift_m:.4f} m exceeds acceptance target of {TARGET_DROPOUT_DRIFT_M} m after 5s"
     )
 
 
 @pytest.mark.slow
-def test_prd_dropout_drift_5s_smoothed():
-    """PRD §4.2: Smoothed dropout drift with IEKS and blackout-aware Q/R.
+def test_target_dropout_drift_5s_smoothed():
+    """Smoothed dropout drift with IEKS and blackout-aware Q/R.
 
     This test applies iterative EKS (IEKS) with blackout-aware noise scaling
     to improve upon the filtered drift. Expected improvements:

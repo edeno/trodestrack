@@ -239,7 +239,7 @@ def test_ekf_constant_velocity_maintains_steady_covariance(sim_config, ekf_confi
     X_est = result.filtered_means
     P_est = result.filtered_covariances
 
-    # Position RMSE should meet PRD target (< 2 cm)
+    # Position RMSE should meet the acceptance target (< 2 cm)
     X_truth_at_cam = np.array(
         [
             sim["X_truth"][np.argmin(np.abs(sim["t_imu"] - t_c))]
@@ -251,7 +251,7 @@ def test_ekf_constant_velocity_maintains_steady_covariance(sim_config, ekf_confi
         np.array(X_est[:, :2]),
     )
     pos_rmse_cm = pos_rmse_m * 100  # Convert to cm for display
-    # Relax slightly to 2.5 cm to account for tuning (PRD target is 2.0 cm)
+    # Relax slightly to 2.5 cm to account for tuning (acceptance target is 2.0 cm)
     assert pos_rmse_cm < 2.5, f"Position RMSE {pos_rmse_cm:.2f} cm exceeds 2.5 cm"
 
     # Velocity should be estimated accurately
@@ -345,7 +345,7 @@ def test_ekf_handles_vision_dropout(sim_config, ekf_config):
     During dropout:
     - State should continue to propagate using IMU
     - Covariance should grow (no measurement updates)
-    - Position drift should be bounded by PRD (< 15 cm for 5s dropout)
+    - Position drift should be bounded by the acceptance target (< 15 cm for 5s dropout)
     """
     # Create simulation with extended dropout
     config_with_dropout = SimpleSimConfig(
@@ -557,16 +557,16 @@ def test_ekf_consistency_nees(sim_config, ekf_config):
 
 
 # =============================================================================
-# Test: Long Dropout (5 seconds) - PRD Requirement
+# Test: Long Dropout (5 seconds) - acceptance target
 # =============================================================================
 
 
 @pytest.mark.slow
 def test_ekf_long_dropout_drift(ekf_config):
-    """Test EKF drift during 5-second vision dropout meets PRD bound (≤15 cm).
+    """Test EKF drift during 5-second vision dropout meets the target (<=15 cm).
 
-    PRD Section 4: Robustness requirement
-    - 5 second vision dropout → drift ≤ 15 cm (maze ~2 m)
+    Robustness acceptance criterion:
+    - 5 second vision dropout -> drift <= 15 cm (maze ~2 m)
 
     Strategy: Use circular motion with extended training for bias observability
     - Constant turn excites both gyro bias (yaw rate) and lateral accel bias
@@ -671,16 +671,16 @@ def test_ekf_long_dropout_drift(ekf_config):
     bias_gyro_est = X_est[dropout_start_idx - 1, 5]  # State index 5
     bias_gyro_error = np.abs(bias_gyro_est - bias_gyro_true)
 
-    # PRD requirement: drift ≤ 15 cm after 5s dropout
+    # Acceptance target: drift <= 15 cm after 5s dropout
     assert drift_cm < 15.0, (
-        f"Position drift {drift_cm:.2f} cm exceeds PRD target of 15 cm "
+        f"Position drift {drift_cm:.2f} cm exceeds acceptance target of 15 cm "
         f"for {dropout_duration:.2f}s dropout ({dropout_frames} frames)\n"
         f"  Gyro bias error before dropout: {bias_gyro_error:.4f} rad/s "
         f"(true: {bias_gyro_true:.4f}, est: {bias_gyro_est:.4f})"
     )
 
     # Diagnostic: Print actual drift for tracking tuning progress
-    print(f"\n  Dropout drift: {drift_cm:.1f} cm (PRD target: 15 cm)")
+    print(f"\n  Dropout drift: {drift_cm:.1f} cm (target: 15 cm)")
     print(
         f"  Bias convergence: gyro error = {bias_gyro_error * 1000:.1f} millirad/s (target: near 0)"
     )

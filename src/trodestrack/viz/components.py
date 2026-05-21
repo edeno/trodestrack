@@ -60,20 +60,17 @@ class RatArtist:
         self.ax = ax
         self.body_radius = body_radius
 
-        # Rat body: gray circle with white edge for visibility
         self.body = Circle(
             (0, 0),
             radius=body_radius,
             facecolor=COLORS["gray"],
             edgecolor="white",
             linewidth=2,
-            alpha=0.9,  # Increased from 0.8 for prominence
+            alpha=0.9,
             zorder=5,
         )
         ax.add_patch(self.body)
 
-        # Heading arrow: large, prominent arrow indicating orientation
-        # Use FancyArrowPatch with transforms for efficient updates
         arrow_length = body_radius * 1.8
         self.heading_arrow = FancyArrowPatch(
             (0, 0),
@@ -87,9 +84,6 @@ class RatArtist:
         )
         ax.add_patch(self.heading_arrow)
 
-        # Velocity vector: colored arrow showing motion direction and speed
-        # Different color from heading to distinguish orientation vs motion
-        # Initialize with same length as heading arrow
         self.velocity_arrow = FancyArrowPatch(
             (0, 0),
             (arrow_length, 0),
@@ -99,7 +93,7 @@ class RatArtist:
             facecolor=COLORS["purple"],
             alpha=0.7,
             zorder=6,
-            visible=False,  # Hidden initially
+            visible=False,
         )
         ax.add_patch(self.velocity_arrow)
 
@@ -126,24 +120,20 @@ class RatArtist:
         list[Any]
             Modified artists for blitting.
         """
-        # Update body position
         self.body.center = (x, y)
 
-        # Update heading arrow using transform (no recreation needed)
         T_heading = (
             Affine2D().rotate_around(0, 0, theta).translate(x, y) + self.ax.transData
         )
         self.heading_arrow.set_transform(T_heading)
 
-        # Update velocity arrow using transform (scale by speed + rotate by velocity direction)
         speed = np.hypot(vx, vy)
 
-        if speed > 0.01:  # Only show if moving > 1 cm/s
+        if speed > 0.01:
             vel_angle = np.arctan2(vy, vx)
-            vel_scale = 4.0  # Amplification for visibility
+            vel_scale = 4.0
             vel_length = speed * vel_scale
 
-            # Scale arrow length relative to default, then rotate and translate
             arrow_length = self.body_radius * 1.8
             scale_factor = vel_length / arrow_length
             T_vel = (
@@ -156,7 +146,6 @@ class RatArtist:
             self.velocity_arrow.set_transform(T_vel)
             self.velocity_arrow.set_visible(True)
         else:
-            # Hide when stationary
             self.velocity_arrow.set_visible(False)
 
         return [self.body, self.heading_arrow, self.velocity_arrow]
@@ -197,26 +186,23 @@ class LEDArtist:
         self.marker_size = marker_size
         self.show_residuals = show_residuals
 
-        # LED marker: colored circle (reduced size for better hierarchy)
         (self.marker,) = ax.plot(
             [],
             [],
             "o",
             color=color,
-            markersize=6,  # Reduced from 8
-            markeredgewidth=1.0,  # Reduced from 1.5
+            markersize=6,
+            markeredgewidth=1.0,
             markeredgecolor="white",
             label=f"LED{led_id}",
             zorder=10,
         )
 
-        # Confidence halo: transparent circle scaled by confidence
         self.halo = Circle(
             (0, 0), radius=marker_size * 2, color=color, alpha=0.0, zorder=9
         )
         ax.add_patch(self.halo)
 
-        # Dropout marker: red X at last known position (subtle)
         (self.dropout_marker,) = ax.plot(
             [],
             [],
@@ -228,11 +214,9 @@ class LEDArtist:
             zorder=11,
         )
 
-        # Residual visualization: expected position (small cross) + residual line
         self.expected_marker: Line2D | None
         self.residual_line: Line2D | None
         if show_residuals:
-            # Expected position marker (small cross)
             (self.expected_marker,) = ax.plot(
                 [],
                 [],
@@ -243,7 +227,6 @@ class LEDArtist:
                 alpha=0.7,
                 zorder=8,
             )
-            # Residual line from expected to observed (de-emphasized gray dashed)
             (self.residual_line,) = ax.plot(
                 [], [], "--", color=COLORS["gray"], linewidth=1.0, alpha=0.4, zorder=8
             )
@@ -293,13 +276,11 @@ class LEDArtist:
         artists = [self.marker, self.halo, self.dropout_marker]
 
         if visible:
-            # Show LED marker and confidence halo
             self.marker.set_data([x], [y])
             self.halo.center = (x, y)
-            self.halo.set_alpha(confidence * 0.5)  # Scale alpha by confidence
-            self.dropout_marker.set_data([], [])  # Hide dropout marker
+            self.halo.set_alpha(confidence * 0.5)
+            self.dropout_marker.set_data([], [])
 
-            # Show residuals if enabled and expected position provided
             if (
                 self.show_residuals
                 and self.expected_marker is not None
@@ -315,15 +296,12 @@ class LEDArtist:
                 and self.expected_marker is not None
                 and self.residual_line is not None
             ):
-                # Hide residual if no expected position
                 self.expected_marker.set_data([], [])
                 self.residual_line.set_data([], [])
                 artists.extend([self.expected_marker, self.residual_line])
 
-            # Update last known position
             self.last_x, self.last_y = x, y
         else:
-            # Hide LED marker and halo
             self.marker.set_data([], [])
             self.halo.set_alpha(0.0)
 
@@ -336,7 +314,6 @@ class LEDArtist:
             else:
                 self.dropout_marker.set_data([], [])
 
-            # Hide residuals when dropped out
             if (
                 self.show_residuals
                 and self.expected_marker is not None
@@ -384,7 +361,6 @@ class TrailArtist:
         # of the requested ``color``.
         self._color_rgb = to_rgb(color)
 
-        # LineCollection for efficient multi-segment rendering
         self.lines = LineCollection([], linewidths=1.5, colors=color, zorder=4)
         ax.add_collection(self.lines)
 
@@ -406,7 +382,6 @@ class TrailArtist:
         self.positions.append([x, y])
 
         if len(self.positions) > 1:
-            # Create line segments from consecutive positions
             segments = [
                 [self.positions[i], self.positions[i + 1]]
                 for i in range(len(self.positions) - 1)
@@ -438,7 +413,6 @@ class HUDArtist:
         ax : Axes
             Matplotlib axes to draw on.
         """
-        # State info only (time shown in progress bar)
         self.state_text = ax.text(
             0.02,
             0.98,
@@ -477,13 +451,11 @@ class HUDArtist:
         list[Text]
             Modified text artists.
         """
-        # Format state info
         speed_ms = state.get("speed", 0.0)
         theta_rad = state.get("theta", 0.0)
         led1_vis = state.get("led1_visible", False)
         led2_vis = state.get("led2_visible", False)
 
-        # Compact display with time, velocity, heading, LED status
         state_str = (
             f"t = {t:.2f} s\n"
             f"v = {speed_ms:.2f} m/s\n"
@@ -510,7 +482,6 @@ class EventMarkerArtist:
         Args:
             ax: Matplotlib axes to draw on
         """
-        # Event banner (top center)
         self.banner = ax.text(
             0.5,
             0.98,
@@ -525,8 +496,8 @@ class EventMarkerArtist:
             zorder=25,
         )
 
-        self.timer = 0  # Frames remaining to show banner
-        self.banner_duration_frames = 60  # Show for 2 seconds at 30fps
+        self.timer = 0  # frames remaining to show banner
+        self.banner_duration_frames = 60  # 2 seconds at 30 fps
 
     def update(self, events: dict[str, bool]) -> list[Text]:
         """Update event markers based on detected events.
@@ -539,7 +510,6 @@ class EventMarkerArtist:
         Returns:
             List of modified text artists
         """
-        # Check for new events
         if events.get("led_swap", False):
             self.banner.set_text("⚠ LED SWAP DETECTED")
             self.banner.set_color("red")
@@ -556,7 +526,6 @@ class EventMarkerArtist:
                 bbox.set_facecolor(COLORS["red"])
             self.timer = self.banner_duration_frames
 
-        # Update banner visibility (fade out)
         if self.timer > 0:
             alpha = 0.9 * (self.timer / self.banner_duration_frames)
             bbox = self.banner.get_bbox_patch()
@@ -602,18 +571,14 @@ class IMUPanelArtist:
         self.window_frames = int(window_s * fps)
         self.config = config
 
-        # Fixed y-axis limits (symmetric around zero for intuitive interpretation)
-        # Defaults based on typical rat locomotion: gyro ±3 rad/s, accel ±10 m/s²
         self.gyro_ylim = gyro_ylim if gyro_ylim is not None else (-3.0, 3.0)
         self.accel_ylim = accel_ylim if accel_ylim is not None else (-10.0, 10.0)
 
-        # Data buffers
         self.time_buffer: deque[float] = deque(maxlen=self.window_frames)
         self.gyro_buffer: deque[float] = deque(maxlen=self.window_frames)
         self.accel_x_buffer: deque[float] = deque(maxlen=self.window_frames)
         self.accel_y_buffer: deque[float] = deque(maxlen=self.window_frames)
 
-        # Initialize line artists (measured)
         (self.gyro_line,) = self.ax_gyro.plot(
             [], [], "-", color=COLORS["blue"], linewidth=1
         )
@@ -624,7 +589,6 @@ class IMUPanelArtist:
             [], [], "-", color=COLORS["green"], linewidth=1
         )
 
-        # Initialize truth line artists (ground truth overlays)
         (self.gyro_truth_line,) = self.ax_gyro.plot(
             [], [], "--", color="black", linewidth=1, alpha=0.6, label="truth"
         )
@@ -635,35 +599,29 @@ class IMUPanelArtist:
             [], [], "--", color="black", linewidth=1, alpha=0.6, label="truth"
         )
 
-        # Zero reference lines
         self.ax_gyro.axhline(0, color=COLORS["gray"], linestyle="-", linewidth=0.5)
         self.ax_accel_x.axhline(0, color=COLORS["gray"], linestyle="-", linewidth=0.5)
         self.ax_accel_y.axhline(0, color=COLORS["gray"], linestyle="-", linewidth=0.5)
 
-        # Set fixed y-axis limits
         self.ax_gyro.set_ylim(self.gyro_ylim)
         self.ax_accel_x.set_ylim(self.accel_ylim)
         self.ax_accel_y.set_ylim(self.accel_ylim)
 
-        # Labels (explicit body-frame for EKF debugging)
         self.ax_gyro.set_ylabel("gyro\n(body rad/s)", fontsize=8)
         self.ax_accel_x.set_ylabel("accel X\n(body m/s²)", fontsize=8)
         self.ax_accel_y.set_ylabel("accel Y\n(body m/s²)", fontsize=8)
         self.ax_accel_y.set_xlabel("time (s)", fontsize=8)
 
-        # Remove top spine, keep bottom for x-axis
         for ax in axes:
             ax.spines["top"].set_visible(False)
             ax.spines["right"].set_visible(False)
 
-        # Add minor ticks at 0.5s intervals for temporal reference
         from matplotlib.ticker import MultipleLocator
 
         for ax in axes:
             ax.xaxis.set_minor_locator(MultipleLocator(0.5))
             ax.tick_params(which="minor", length=2, color="gray")
 
-        # Only show x-ticks on bottom plot
         self.ax_gyro.set_xticklabels([])
         self.ax_accel_x.set_xticklabels([])
 
@@ -689,12 +647,10 @@ class IMUPanelArtist:
         None
             Modifies axes in-place by adding axhspan patches.
         """
-        # Compute percentiles for each IMU channel
         gyro_low, gyro_high = np.percentile(U_imu[:, 0], percentiles)
         accel_x_low, accel_x_high = np.percentile(U_imu[:, 1], percentiles)
         accel_y_low, accel_y_high = np.percentile(U_imu[:, 2], percentiles)
 
-        # Add shaded bands (subtle, low alpha)
         self.ax_gyro.axhspan(
             gyro_low, gyro_high, color=COLORS["blue"], alpha=0.1, zorder=1, linewidth=0
         )
@@ -745,26 +701,21 @@ class IMUPanelArtist:
             self.accel_x_line.set_data(t_raw, imu_raw["accel_x"])
             self.accel_y_line.set_data(t_raw, imu_raw["accel_y"])
 
-            # Update truth overlays if provided
             if imu_truth is not None:
                 self.gyro_truth_line.set_data(t_raw, imu_truth["yaw_rate"])
                 self.accel_x_truth_line.set_data(t_raw, imu_truth["accel_x"])
                 self.accel_y_truth_line.set_data(t_raw, imu_truth["accel_y"])
             else:
-                # Clear truth lines if no truth data
                 self.gyro_truth_line.set_data([], [])
                 self.accel_x_truth_line.set_data([], [])
                 self.accel_y_truth_line.set_data([], [])
 
-            # Set x-axis limits via shared helper that pads ±1 ms when
-            # only one sample is in the window (avoids matplotlib's
-            # "identical xlim" warning on the first rendered frame).
             t_raw_arr = np.asarray(t_raw)
             _set_scrolling_xlim(self.ax_gyro, t_raw_arr)
             _set_scrolling_xlim(self.ax_accel_x, t_raw_arr)
             _set_scrolling_xlim(self.ax_accel_y, t_raw_arr)
         else:
-            # Single sample mode (legacy): buffer interpolated points
+            # Single-sample mode (legacy): buffer interpolated points
             if imu_data is not None:
                 self.time_buffer.append(t)
                 self.gyro_buffer.append(imu_data["gyro"])
@@ -779,7 +730,7 @@ class IMUPanelArtist:
                 list(self.time_buffer), list(self.accel_y_buffer)
             )
 
-            # Clear truth lines in single-sample mode (not supported)
+            # Truth not available in single-sample mode
             self.gyro_truth_line.set_data([], [])
             self.accel_x_truth_line.set_data([], [])
             self.accel_y_truth_line.set_data([], [])
@@ -816,7 +767,6 @@ class CameraPanelArtist:
         """
         self.ax = ax
 
-        # Set up axes
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 2.5)
         ax.set_yticks([0.5, 1.5])
@@ -825,16 +775,13 @@ class CameraPanelArtist:
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
 
-        # Create bar artists (will update widths)
         self.led1_bar = ax.barh(0.5, 0, height=0.4, color=COLORS["blue"], alpha=0.6)[0]
         self.led2_bar = ax.barh(1.5, 0, height=0.4, color=COLORS["orange"], alpha=0.6)[
             0
         ]
 
-        # Reference line at full confidence
         ax.axvline(1.0, color=COLORS["gray"], linestyle="--", linewidth=0.5)
 
-        # Text labels for confidence values (will update)
         self.led1_text = ax.text(
             1.02, 0.5, "", va="center", ha="left", fontsize=7, family="monospace"
         )
@@ -842,7 +789,6 @@ class CameraPanelArtist:
             1.02, 1.5, "", va="center", ha="left", fontsize=7, family="monospace"
         )
 
-        # Latency readout (camera observation lag)
         self.latency_text = ax.text(
             0.5, 2.2, "", va="center", ha="center", fontsize=7, family="monospace"
         )
@@ -867,7 +813,6 @@ class CameraPanelArtist:
         Returns:
             List of modified artists
         """
-        # Update bar widths, colors, and text labels
         if led1_visible:
             self.led1_bar.set_width(conf1)
             self.led1_bar.set_color(COLORS["blue"])
@@ -875,7 +820,7 @@ class CameraPanelArtist:
             self.led1_text.set_text(f"{conf1:.2f}")
             self.led1_text.set_color("black")
         else:
-            self.led1_bar.set_width(0.05)  # Small bar for dropout
+            self.led1_bar.set_width(0.05)
             self.led1_bar.set_color(COLORS["red"])
             self.led1_bar.set_alpha(0.3)
             self.led1_text.set_text("(dropout)")
@@ -894,7 +839,6 @@ class CameraPanelArtist:
             self.led2_text.set_text("(dropout)")
             self.led2_text.set_color(COLORS["red"])
 
-        # Update latency display
         if latency_ms is not None:
             self.latency_text.set_text(f"latency: {latency_ms:.1f} ms")
         else:
@@ -932,7 +876,6 @@ class ProgressBarArtist:
         self.ax = ax
         self.duration_s = duration_s
 
-        # Set up axes (horizontal bar spanning 0-duration)
         ax.set_xlim(0, duration_s)
         ax.set_ylim(0, 1)
         ax.set_yticks([])
@@ -941,22 +884,18 @@ class ProgressBarArtist:
         ax.spines["left"].set_visible(False)
         ax.spines["right"].set_visible(False)
 
-        # Background bar (full duration, light gray)
         self.background = ax.barh(
             0.5, duration_s, height=0.6, left=0, color=COLORS["light_gray"], alpha=0.3
         )[0]
 
-        # Progress bar (current position, blue)
         self.progress_bar = ax.barh(
             0.5, 0, height=0.6, left=0, color=COLORS["blue"], alpha=0.6
         )[0]
 
-        # Current time marker (vertical line)
         (self.time_marker,) = ax.plot(
             [0, 0], [0, 1], color="black", linewidth=2, zorder=10
         )
 
-        # Event markers (vertical lines for swaps/dropouts)
         legend_handles = []
         if event_times:
             for event_type, times in event_times.items():
@@ -975,12 +914,10 @@ class ProgressBarArtist:
                 else:
                     continue
 
-                # Plot markers and collect for legend
                 for t in times:
                     ax.axvline(t, color=color, alpha=0.4, linewidth=1, linestyle="--")
                     ax.plot(t, 0.5, marker=marker, color=color, markersize=4, zorder=5)
 
-                # Add legend handle (only once per event type)
                 from matplotlib.lines import Line2D
 
                 legend_handles.append(
@@ -995,7 +932,6 @@ class ProgressBarArtist:
                     )
                 )
 
-        # Add legend if there are any events
         if legend_handles:
             ax.legend(
                 handles=legend_handles,
@@ -1014,10 +950,7 @@ class ProgressBarArtist:
         Returns:
             List of modified artists
         """
-        # Update progress bar width
         self.progress_bar.set_width(t)
-
-        # Update time marker position
         self.time_marker.set_data([t, t], [0, 1])
 
         return [self.progress_bar, self.time_marker]
@@ -1037,7 +970,6 @@ class FilterArtist:
         """
         self.ax = ax
 
-        # Predicted position marker (hollow circle to distinguish from truth)
         (self.pred_marker,) = ax.plot(
             [],
             [],
@@ -1050,7 +982,6 @@ class FilterArtist:
             zorder=8,
         )
 
-        # Uncertainty ellipse (95% confidence = 2.45-sigma for 2D)
         from matplotlib.patches import Ellipse
 
         self.uncertainty_ellipse = Ellipse(
@@ -1091,7 +1022,6 @@ class FilterArtist:
         ValueError
             If ``P`` is not shape ``(2, 2)``.
         """
-        # Validate input shape
         P_np = np.asarray(P)
         if P_np.shape != (2, 2):
             raise ValueError(f"Expected P shape (2, 2), got {P_np.shape}")
@@ -1127,7 +1057,6 @@ class FilterArtist:
             self.uncertainty_ellipse.height = 0.0
             return [self.pred_marker, self.uncertainty_ellipse]
 
-        # Update marker position
         self.pred_marker.set_data([x_pred], [y_pred])
 
         # Clamp tiny negative eigenvalues from floating-point roundoff
@@ -1135,15 +1064,13 @@ class FilterArtist:
         # negatives.
         eigenvalues = np.clip(eigenvalues, 0.0, None)
 
-        # Orientation angle from first eigenvector
         angle = np.degrees(np.arctan2(eigenvectors[1, 0], eigenvectors[0, 0]))
 
-        # Width and height from eigenvalues (95% confidence)
+        # 95% confidence ellipse for 2D Gaussian: χ²(2, 0.05) = 5.991
         chi2_95 = 5.991
         width = 2 * np.sqrt(chi2_95 * eigenvalues[0])
         height = 2 * np.sqrt(chi2_95 * eigenvalues[1])
 
-        # Update ellipse
         self.uncertainty_ellipse.center = (x_pred, y_pred)
         self.uncertainty_ellipse.width = width
         self.uncertainty_ellipse.height = height
@@ -1171,12 +1098,10 @@ class ResidualPanelArtist:
         self.window_s = window_s
         self.window_frames = int(window_s * fps)
 
-        # Buffers for time series
         self.time_buffer: deque[float] = deque(maxlen=self.window_frames)
         self.resid_led1_buffer: deque[float] = deque(maxlen=self.window_frames)
         self.resid_led2_buffer: deque[float] = deque(maxlen=self.window_frames)
 
-        # Initialize lines
         (self.line_led1,) = ax.plot(
             [],
             [],
@@ -1194,10 +1119,8 @@ class ResidualPanelArtist:
             alpha=0.8,
         )
 
-        # Zero reference line
         ax.axhline(0, color="black", linewidth=0.5, linestyle="--", alpha=0.5)
 
-        # Styling
         ax.set_ylabel("Position Residual (cm)", fontsize=9)
         ax.set_xlabel("Time (s)", fontsize=9)
         ax.set_title(
@@ -1206,7 +1129,6 @@ class ResidualPanelArtist:
         ax.grid(True, alpha=0.15)
         ax.legend(loc="upper right", fontsize=7)
 
-        # Initial y-limits (will auto-scale)
         ax.set_ylim(-5, 5)
 
     def update(self, t: float, resid_led1: float, resid_led2: float) -> list[Any]:
@@ -1220,23 +1142,17 @@ class ResidualPanelArtist:
         Returns:
             List of modified artists
         """
-        # Add new samples to buffers
         self.time_buffer.append(t)
         self.resid_led1_buffer.append(resid_led1)
         self.resid_led2_buffer.append(resid_led2)
 
-        # Update lines
         if len(self.time_buffer) > 0:
             time_array = np.array(self.time_buffer)
             self.line_led1.set_data(time_array, np.array(self.resid_led1_buffer))
             self.line_led2.set_data(time_array, np.array(self.resid_led2_buffer))
 
-            # Auto-scale x-axis to show scrolling window (helper pads
-            # ±1 ms when only one sample is in the buffer to avoid the
-            # matplotlib "identical xlim" warning).
             _set_scrolling_xlim(self.ax, time_array)
 
-            # Auto-scale y-axis based on recent data (with some margin).
             # Use ``np.isfinite`` (not ``not np.isnan``): a diverged filter
             # can emit ±Inf residuals and matplotlib's set_ylim raises
             # "Axis limits cannot be NaN or Inf", aborting video render.
@@ -1244,7 +1160,7 @@ class ResidualPanelArtist:
             valid_resid = [r for r in all_resid if np.isfinite(r)]
             if len(valid_resid) > 0:
                 y_max = max(abs(min(valid_resid)), abs(max(valid_resid)))
-                y_lim = max(y_max * 1.2, 1.0)  # At least ±1 cm
+                y_lim = max(y_max * 1.2, 1.0)
                 self.ax.set_ylim(-y_lim, y_lim)
 
         return [self.line_led1, self.line_led2]
@@ -1254,7 +1170,7 @@ class StateErrorPanelArtist:
     """Show state estimation errors using small multiples (Tufte principle).
 
     Displays velocity and heading errors in a compact, information-dense layout
-    with reference lines for PRD targets.
+    with reference lines for project acceptance targets.
     """
 
     def __init__(self, ax_vel: Axes, ax_heading: Axes, window_s: float, fps: int):
@@ -1269,7 +1185,6 @@ class StateErrorPanelArtist:
         self.window_s = window_s
         self.window_frames = int(window_s * fps)
 
-        # Velocity error panel (show both components for directional insight)
         self.ax_vel = ax_vel
         self.time_buffer_vel: deque[float] = deque(maxlen=self.window_frames)
         self.error_vx_buffer: deque[float] = deque(maxlen=self.window_frames)
@@ -1282,14 +1197,13 @@ class StateErrorPanelArtist:
             [], [], color=COLORS["green"], linewidth=1.5, label="vy error", alpha=0.8
         )
 
-        # PRD target line: ±10 cm/s
         ax_vel.axhline(
             10,
             color="gray",
             linewidth=1,
             linestyle="--",
             alpha=0.5,
-            label="PRD: ±10 cm/s",
+            label="target: ±10 cm/s",
         )
         ax_vel.axhline(-10, color="gray", linewidth=1, linestyle="--", alpha=0.5)
         ax_vel.axhline(0, color="black", linewidth=0.5, alpha=0.3)
@@ -1303,7 +1217,6 @@ class StateErrorPanelArtist:
         ax_vel.legend(loc="upper right", fontsize=6, framealpha=0.9)
         ax_vel.set_ylim(-15, 15)
 
-        # Heading error panel
         self.ax_heading = ax_heading
         self.time_buffer_heading: deque[float] = deque(maxlen=self.window_frames)
         self.error_heading_buffer: deque[float] = deque(maxlen=self.window_frames)
@@ -1317,9 +1230,8 @@ class StateErrorPanelArtist:
             alpha=0.8,
         )
 
-        # PRD target line: ±7°
         ax_heading.axhline(
-            7, color="gray", linewidth=1, linestyle="--", alpha=0.5, label="PRD: ±7°"
+            7, color="gray", linewidth=1, linestyle="--", alpha=0.5, label="target: ±7°"
         )
         ax_heading.axhline(-7, color="gray", linewidth=1, linestyle="--", alpha=0.5)
         ax_heading.axhline(0, color="black", linewidth=0.5, alpha=0.3)
@@ -1331,7 +1243,7 @@ class StateErrorPanelArtist:
         )
         ax_heading.grid(True, alpha=0.1, linewidth=0.5)
         ax_heading.legend(loc="upper right", fontsize=6, framealpha=0.9)
-        ax_heading.set_ylim(-30, 30)  # Larger range to accommodate realistic errors
+        ax_heading.set_ylim(-30, 30)
 
     def update(
         self,
@@ -1351,7 +1263,6 @@ class StateErrorPanelArtist:
         Returns:
             List of modified artists
         """
-        # Update velocity errors
         self.time_buffer_vel.append(t)
         self.error_vx_buffer.append(error_vx)
         self.error_vy_buffer.append(error_vy)
@@ -1362,7 +1273,6 @@ class StateErrorPanelArtist:
             self.line_vy.set_data(time_array, np.array(self.error_vy_buffer))
             _set_scrolling_xlim(self.ax_vel, time_array)
 
-        # Update heading error
         self.time_buffer_heading.append(t)
         self.error_heading_buffer.append(error_heading_deg)
 
@@ -1393,13 +1303,11 @@ class BiasEstimatePanelArtist:
         self.window_s = window_s
         self.window_frames = int(window_s * fps)
 
-        # Buffers
         self.time_buffer: deque[float] = deque(maxlen=self.window_frames)
         self.gyro_bias_buffer: deque[float] = deque(maxlen=self.window_frames)
         self.accel_bias_x_buffer: deque[float] = deque(maxlen=self.window_frames)
         self.accel_bias_y_buffer: deque[float] = deque(maxlen=self.window_frames)
 
-        # Lines (use distinct colors for each bias)
         (self.line_gyro,) = ax.plot(
             [],
             [],
@@ -1425,16 +1333,14 @@ class BiasEstimatePanelArtist:
             alpha=0.8,
         )
 
-        # Zero reference
         ax.axhline(0, color="black", linewidth=0.5, linestyle="--", alpha=0.3)
 
-        # Styling (minimal, Tufte-inspired)
         ax.set_ylabel("Bias Estimate", fontsize=8)
         ax.set_xlabel("Time (s)", fontsize=8)
         ax.set_title("Learned IMU Biases", fontweight="normal", loc="left", fontsize=9)
         ax.grid(True, alpha=0.1, linewidth=0.5)
         ax.legend(loc="upper right", fontsize=6, framealpha=0.9)
-        ax.set_ylim(-0.1, 0.1)  # Will auto-scale
+        ax.set_ylim(-0.1, 0.1)
 
     def update(
         self,
@@ -1454,25 +1360,22 @@ class BiasEstimatePanelArtist:
         Returns:
             List of modified artists
         """
-        # Add new samples
         self.time_buffer.append(t)
         self.gyro_bias_buffer.append(gyro_bias)
         self.accel_bias_x_buffer.append(accel_bias_x)
         self.accel_bias_y_buffer.append(accel_bias_y)
 
-        # Update lines
         if len(self.time_buffer) > 0:
             time_array = np.array(self.time_buffer)
             self.line_gyro.set_data(time_array, np.array(self.gyro_bias_buffer))
             self.line_ax.set_data(time_array, np.array(self.accel_bias_x_buffer))
             self.line_ay.set_data(time_array, np.array(self.accel_bias_y_buffer))
 
-            # Auto-scale x-axis (single-sample-safe).
             _set_scrolling_xlim(self.ax, time_array)
 
-            # Auto-scale y-axis based on data range. Filter out non-finite
-            # samples — a diverged filter can emit ±Inf bias estimates and
-            # matplotlib's set_ylim raises on Inf, aborting video render.
+            # Filter out non-finite samples — a diverged filter can emit
+            # ±Inf bias estimates and matplotlib's set_ylim raises on Inf,
+            # aborting video render.
             all_biases = [
                 b
                 for b in (
@@ -1484,7 +1387,7 @@ class BiasEstimatePanelArtist:
             ]
             if len(all_biases) > 0:
                 y_max = max(abs(min(all_biases)), abs(max(all_biases)))
-                y_lim = max(y_max * 1.2, 0.01)  # At least ±0.01
+                y_lim = max(y_max * 1.2, 0.01)
                 self.ax.set_ylim(-y_lim, y_lim)
 
         return [self.line_gyro, self.line_ax, self.line_ay]
@@ -1511,23 +1414,19 @@ class NEESPanelArtist:
         self.window_frames = int(window_s * fps)
         self.state_dim = state_dim
 
-        # Buffers
         self.time_buffer: deque[float] = deque(maxlen=self.window_frames)
         self.nees_buffer: deque[float] = deque(maxlen=self.window_frames)
 
-        # NEES line
         (self.line_nees,) = ax.plot(
             [], [], color=COLORS["purple"], linewidth=2, label="NEES", alpha=0.9
         )
 
-        # Chi-squared 95% confidence bounds (from scipy)
         from scipy.stats import chi2  # type: ignore[import]
 
         self.chi2_lower = chi2.ppf(0.025, df=state_dim)
         self.chi2_upper = chi2.ppf(0.975, df=state_dim)
         self.chi2_mean = state_dim
 
-        # Reference lines (Tufte: use subtle colors for reference)
         ax.axhline(
             self.chi2_mean,
             color="gray",
@@ -1546,8 +1445,6 @@ class NEESPanelArtist:
         )
         ax.axhline(self.chi2_upper, color="red", linewidth=1, linestyle="--", alpha=0.4)
 
-        # Fill between bounds (visual emphasis on acceptable range)
-        # Use axhspan instead of fill_between for horizontal band
         ax.axhspan(
             self.chi2_lower,
             self.chi2_upper,
@@ -1557,7 +1454,6 @@ class NEESPanelArtist:
             zorder=0,
         )
 
-        # Styling
         ax.set_ylabel(f"NEES ({state_dim}-D)", fontsize=8)
         ax.set_xlabel("Time (s)", fontsize=8)
         ax.set_title(
@@ -1577,11 +1473,9 @@ class NEESPanelArtist:
         Returns:
             List of modified artists
         """
-        # Add new sample
         self.time_buffer.append(t)
         self.nees_buffer.append(nees)
 
-        # Update line
         if len(self.time_buffer) > 0:
             time_array = np.array(self.time_buffer)
             nees_array = np.array(self.nees_buffer)
@@ -1604,10 +1498,8 @@ class NEESPanelArtist:
             else:
                 self.line_nees.set_data([], [])
 
-            # Auto-scale x-axis (single-sample-safe).
             _set_scrolling_xlim(self.ax, time_array)
 
-            # Auto-scale y-axis based on data (but keep bounds visible)
             valid_nees = nees_array[valid_mask]
             if len(valid_nees) > 0:
                 y_max = max(np.max(valid_nees), self.chi2_upper)

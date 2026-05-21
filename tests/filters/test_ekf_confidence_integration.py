@@ -1,10 +1,10 @@
-"""Test EKF top-level confidence integration (PRD robustness requirement).
+"""Test EKF top-level confidence integration (robustness acceptance criterion).
 
 This module tests that camera confidence scores are properly wired through
 the extended_kalman_filter() API and affect measurement noise scaling.
 
-PRD Reference:
-    Section 13: "DLC confidence → measurement noise scaling"
+DLC confidence is mapped to measurement-noise scaling so that low-confidence
+detections are downweighted; this is the robustness behavior exercised here.
 """
 
 import numpy as np
@@ -46,8 +46,8 @@ def test_confidence_parameter_exists() -> None:
 def test_low_confidence_increases_uncertainty() -> None:
     """Test that low confidence increases position uncertainty.
 
-    PRD requirement: Low-confidence measurements should be trusted less,
-    resulting in larger posterior covariance.
+    Acceptance criterion: low-confidence measurements should be trusted
+    less, resulting in larger posterior covariance.
 
     Currently FAILS because conf_cam is not wired through.
     """

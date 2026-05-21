@@ -972,7 +972,6 @@ def extended_kalman_filter(
         func_name="extended_kalman_filter",
     )
 
-    # Convert to JAX arrays
     t_imu_jax = jnp.array(t_imu)
     U_imu_jax = jnp.array(U_imu)
     t_cam_jax = jnp.array(t_cam)
@@ -1009,7 +1008,6 @@ def extended_kalman_filter(
         # Create new config with estimated spacing (do NOT mutate original)
         config_for_filter = replace(ekf_config, led_distance=estimated_led_distance)
     else:
-        # Use original config as-is
         config_for_filter = ekf_config
 
     # Initialize state

@@ -1,14 +1,15 @@
-"""PRD Session Integration Tests.
+"""Full-session integration tests against the acceptance targets.
 
-This module validates full-session performance against PRD acceptance criteria:
-- 30 min session RMSE ≤ 2 cm, velocity ≤ 10 cm/s, heading ≤ 7° (PRD §4.1)
-- 5 s dropout drift ≤ 15 cm (PRD §4.2)
+This module validates full-session performance against the project's
+acceptance targets:
+- 30 min session RMSE <= 2 cm, velocity <= 10 cm/s, heading <= 7 deg
+- 5 s dropout drift <= 15 cm
 - IMU-only vs Vision-only vs Fusion ablations
 - NEES consistency check (95% CI) on 5D observable state
 
 These are integration tests that exercise the complete filter pipeline
 on realistic long-duration sessions. They validate that the system meets
-all PRD quantitative requirements under production-like conditions.
+all quantitative acceptance targets under production-like conditions.
 
 NEES Computation:
     For state estimate x̂ₖ with covariance Pₖ and true state xₖ:
@@ -48,10 +49,10 @@ if TYPE_CHECKING:
 # Acceptance Criteria
 # =============================================================================
 
-PRD_POSITION_RMSE_M = 0.02  # Position RMSE <= 0.02 m (2 cm)
-PRD_VELOCITY_RMSE_M_S = 0.10  # Velocity RMSE <= 0.10 m/s (10 cm/s)
-PRD_HEADING_RMSE_DEG = 7.0  # Heading RMSE <= 7 degrees
-PRD_DROPOUT_DRIFT_M = 3.5  # Drift <= 3.5 m after 5s dropout (realistic consumer-grade IMU, 95th percentile)
+TARGET_POSITION_RMSE_M = 0.02  # Position RMSE <= 0.02 m (2 cm)
+TARGET_VELOCITY_RMSE_M_S = 0.10  # Velocity RMSE <= 0.10 m/s (10 cm/s)
+TARGET_HEADING_RMSE_DEG = 7.0  # Heading RMSE <= 7 degrees
+TARGET_DROPOUT_DRIFT_M = 3.5  # Drift <= 3.5 m after 5s dropout (realistic consumer-grade IMU, 95th percentile)
 
 
 # =============================================================================
@@ -91,7 +92,7 @@ class GroundTruthDict(TypedDict):
 def get_production_ekf_config(**overrides: float | int | bool) -> EKFConfig:
     """Get production EKF configuration with optional parameter overrides.
 
-    Returns configuration matching PRD requirements with adaptive dropout handling.
+    Returns configuration matching the acceptance targets with adaptive dropout handling.
 
     Args:
         **overrides: Optional parameter overrides (e.g., use_heading_measurement=False)
@@ -207,7 +208,7 @@ def run_ekf_on_sim(
 
 @pytest.mark.slow
 def test_30min_session_accuracy():
-    """PRD §4.1: 30-min session should meet RMSE requirements.
+    """30-min session should meet the RMSE acceptance targets.
 
     Validates:
     - Position RMSE ≤ 0.02 m (2 cm)
@@ -254,26 +255,28 @@ def test_30min_session_accuracy():
 
     # Report results
     print("\n30-Minute Session Accuracy:")
-    print(f"  Position RMSE: {pos_rmse_m:.4f} m (PRD: ≤{PRD_POSITION_RMSE_M} m)")
+    print(f"  Position RMSE: {pos_rmse_m:.4f} m (target: ≤{TARGET_POSITION_RMSE_M} m)")
     print(
-        f"  Velocity RMSE: {vel_rmse_m_s:.4f} m/s (PRD: ≤{PRD_VELOCITY_RMSE_M_S} m/s)"
+        f"  Velocity RMSE: {vel_rmse_m_s:.4f} m/s (target: ≤{TARGET_VELOCITY_RMSE_M_S} m/s)"
     )
-    print(f"  Heading RMSE:  {heading_rmse_deg:.3f}° (PRD: ≤{PRD_HEADING_RMSE_DEG}°)")
+    print(
+        f"  Heading RMSE:  {heading_rmse_deg:.3f}° (target: ≤{TARGET_HEADING_RMSE_DEG}°)"
+    )
     print(f"  Duration: {config.duration_s / 60:.1f} min")
     print(f"  Camera frames: {len(pos_est)}")
 
-    # Validate PRD requirements
-    assert pos_rmse_m <= PRD_POSITION_RMSE_M, (
-        f"Position RMSE {pos_rmse_m:.4f} m exceeds PRD requirement of {PRD_POSITION_RMSE_M} m"
+    # Validate acceptance targets
+    assert pos_rmse_m <= TARGET_POSITION_RMSE_M, (
+        f"Position RMSE {pos_rmse_m:.4f} m exceeds acceptance target of {TARGET_POSITION_RMSE_M} m"
     )
 
-    assert vel_rmse_m_s <= PRD_VELOCITY_RMSE_M_S, (
-        f"Velocity RMSE {vel_rmse_m_s:.4f} m/s exceeds PRD requirement "
-        f"of {PRD_VELOCITY_RMSE_M_S} m/s"
+    assert vel_rmse_m_s <= TARGET_VELOCITY_RMSE_M_S, (
+        f"Velocity RMSE {vel_rmse_m_s:.4f} m/s exceeds acceptance target "
+        f"of {TARGET_VELOCITY_RMSE_M_S} m/s"
     )
 
-    assert heading_rmse_deg <= PRD_HEADING_RMSE_DEG, (
-        f"Heading RMSE {heading_rmse_deg:.3f}° exceeds PRD requirement of {PRD_HEADING_RMSE_DEG}°"
+    assert heading_rmse_deg <= TARGET_HEADING_RMSE_DEG, (
+        f"Heading RMSE {heading_rmse_deg:.3f}° exceeds acceptance target of {TARGET_HEADING_RMSE_DEG}°"
     )
 
 
@@ -284,7 +287,7 @@ def test_30min_session_accuracy():
 
 @pytest.mark.slow
 def test_5s_dropout_drift_integration():
-    """PRD §4.2: 5s dropout drift ≤ 3.5m in realistic session.
+    """5s dropout drift <= 3.5 m in realistic session (acceptance target).
 
     Validates dropout handling with realistic physical bounds. During 5s
     camera dropout, IMU-only tracking accumulates drift from:
@@ -367,11 +370,13 @@ def test_5s_dropout_drift_integration():
                 f"\nDropout {i + 1} ({start_t:.0f}s-{end_t:.0f}s): drift = {drift_m:.4f} m"
             )
 
-    print(f"\nMaximum dropout drift: {max_drift:.4f} m (PRD: ≤{PRD_DROPOUT_DRIFT_M} m)")
+    print(
+        f"\nMaximum dropout drift: {max_drift:.4f} m (target: ≤{TARGET_DROPOUT_DRIFT_M} m)"
+    )
 
-    # Validate PRD requirement with realistic bound
-    assert max_drift <= PRD_DROPOUT_DRIFT_M, (
-        f"Dropout drift {max_drift:.4f} m exceeds PRD requirement of {PRD_DROPOUT_DRIFT_M} m. "
+    # Validate acceptance target with realistic bound
+    assert max_drift <= TARGET_DROPOUT_DRIFT_M, (
+        f"Dropout drift {max_drift:.4f} m exceeds acceptance target of {TARGET_DROPOUT_DRIFT_M} m. "
         f"This indicates either poor IMU calibration or unrealistic simulation parameters."
     )
 
@@ -499,7 +504,7 @@ def test_sensor_fusion_ablations():
 
 @pytest.mark.slow
 def test_nees_consistency():
-    """PRD: NEES should be within 95% confidence interval.
+    """NEES should be within the 95% confidence interval (filter consistency target).
 
     Validates that the filter's uncertainty estimates (covariances) are
     statistically consistent with the actual errors. NEES values within
@@ -682,8 +687,8 @@ def test_smoother_long_session():
         f"observed reduction = {mean_uncertainty_reduction:.2f}×"
     )
 
-    # Smoother should still meet PRD requirements
-    assert pos_rmse_smoother <= PRD_POSITION_RMSE_M, (
-        f"Smoother position RMSE {pos_rmse_smoother:.4f} m exceeds PRD requirement "
-        f"of {PRD_POSITION_RMSE_M} m"
+    # Smoother should still meet the acceptance target
+    assert pos_rmse_smoother <= TARGET_POSITION_RMSE_M, (
+        f"Smoother position RMSE {pos_rmse_smoother:.4f} m exceeds acceptance target "
+        f"of {TARGET_POSITION_RMSE_M} m"
     )

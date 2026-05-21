@@ -36,8 +36,8 @@ class TestZUPTDetection:
 class TestZUPTStationary:
     """Test ZUPT performance on stationary scenario.
 
-    Validates PRD Section 4 acceptance criteria:
-    - Velocity RMSE ≤ 0.10 m/s (general requirement)
+    Validates the project's acceptance criteria:
+    - Velocity RMSE <= 0.10 m/s (general target)
     - ZUPT should significantly improve stationary tracking
     """
 
@@ -182,7 +182,7 @@ class TestZUPTMoving:
         # Ground truth velocity
         truth_vel = np.tile([0.2, 0.0], (len(moving_sim["t_cam_exp"]), 1))
 
-        # Velocity RMSE should be good (< 10 cm/s per PRD)
+        # Velocity RMSE should be good (< 10 cm/s per the acceptance target)
         vel_rmse = compute_velocity_rmse(result.filtered_means[:, 2:4], truth_vel)
         assert vel_rmse < 0.10, f"Velocity RMSE too high: {vel_rmse:.4f} m/s"
 

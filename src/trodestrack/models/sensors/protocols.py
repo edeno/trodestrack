@@ -229,7 +229,7 @@ class MeasurementModel(Protocol):
 
         Notes
         -----
-        **Critical for PR2/PR3 JAX compatibility:**
+        **Critical for JAX-compatibility:**
         - Shape must be **static** and **known at trace time**
         - Camera: always returns (2, 4) selector, never (4, 4)
         - Heading: returns (1, 1) identity. ZUPT: returns (2, 2) identity

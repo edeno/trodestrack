@@ -94,9 +94,9 @@ class UKFConfig(FilterCoreConfig):
     ``UKFConfig.aggressive()`` for stronger nonlinearity capture.
     """
 
-    alpha: float = 1.732  # sqrt(3), Sigma-point spread
-    beta: float = 2.0  # Prior knowledge (2 = Gaussian optimal)
-    kappa: float = 1.0  # Secondary scaling
+    alpha: float = 1.732
+    beta: float = 2.0
+    kappa: float = 1.0
 
     # Floor on (n + λ) = α²(n + κ). Below this, sigma-point weights
     # w_mean[0] = λ/(n+λ) exceed ≈100 in magnitude and covariance
@@ -193,12 +193,6 @@ class UKFConfig(FilterCoreConfig):
 
         Example:
             >>> config = UKFConfig.conservative(use_mahalanobis_gating=True)
-
-        Note
-        ----
-        Prior versions of this preset used alpha=1e-3 which produces extreme
-        weights (O(10⁶)) at state dimension n=10 and is rejected at runtime by
-        the __post_init__ guard.
         """
         return cls(alpha=0.5, beta=2.0, kappa=0.0, **kwargs)
 
@@ -298,7 +292,6 @@ def compute_sigma_points(
     with varying scales. Fixed 1e-9 jitter can fail for tight/degenerate
     covariances in real animal motion data.
     """
-    # Compute Cholesky decomposition: P = L @ L.T
     # Scale jitter by average diagonal for numerical stability
     # This prevents failures with tight covariances (e.g., high-confidence position updates)
     avg_variance = jnp.trace(cov) / n
@@ -426,9 +419,7 @@ def predict_step(
         Predicted state with mean and covariance.
     """
     m, P = state.mean, state.cov
-    n = len(
-        m
-    )  # State dimension, resolved from `layout` (8 for 2d_full, 10 for 2d_cam_3d_imu, etc.)
+    n = len(m)
 
     # Compute UKF parameters
     lamb = config.alpha**2 * (n + config.kappa) - n
@@ -452,10 +443,8 @@ def predict_step(
             ),
         )
 
-    sigmas_prop = vmap(f)(sigmas)  # (17, 8)
+    sigmas_prop = vmap(f)(sigmas)  # (2n+1, n)
 
-    # Reconstruct predicted mean (weighted sum)
-    # Note: For heading dimension, we need circular mean, but it's handled below
     m_pred = jnp.tensordot(w_mean, sigmas_prop, axes=1)
 
     # Fix heading component using circular mean
@@ -563,7 +552,7 @@ def update_step(
             sigmas = compute_sigma_points(m_in, P_in, n, lamb)
 
             # Transform sigma points through camera model prediction
-            sigmas_meas = vmap(camera_model.predict)(sigmas)  # (17, 4)
+            sigmas_meas = vmap(camera_model.predict)(sigmas)  # (2n+1, meas_dim)
 
             # Reconstruct predicted observation
             z_pred = jnp.tensordot(w_mean, sigmas_meas, axes=1)
@@ -703,7 +692,7 @@ def update_heading(
             # may be on the opposite side of the ±π boundary. Without this wrap, near
             # the wrap boundary the unwrapped deviations are ~2π instead of ~0 and
             # S is inflated by ~(2π)², collapsing the Kalman gain toward zero.
-            # This mirrors the wrap applied in predict_step (see around line 362).
+            # This mirrors the wrap_angle call in predict_step's covariance reconstruction.
             heading_deviations = wrap_angle(sigmas_heading - h_pred)
             S = jnp.dot(w_cov, heading_deviations**2) + R_heading
 
@@ -1084,7 +1073,6 @@ def unscented_kalman_filter(
         func_name="unscented_kalman_filter",
     )
 
-    # Convert to JAX arrays
     t_imu_jax = jnp.array(t_imu)
     U_imu_jax = jnp.array(U_imu)
     t_cam_jax = jnp.array(t_cam)
@@ -1108,7 +1096,6 @@ def unscented_kalman_filter(
         # Create new config with estimated spacing (do NOT mutate original)
         config_for_filter = replace(ukf_config, led_distance=estimated_led_distance)
     else:
-        # Use original config as-is
         config_for_filter = ukf_config
 
     # Initialize state (reuse EKF initialization)

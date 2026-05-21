@@ -387,7 +387,7 @@ class CameraPositionModel:
 
         Notes
         -----
-        **Critical for PR2/PR3 JAX compatibility:**
+        **Critical for JAX-compatibility:**
         - Always returns (2, 4) shape, even for dual-LED case
         - Generic update primitive uses `lax.cond(both_leds, ...)` to choose
           between 4D direct update vs 2D projected update

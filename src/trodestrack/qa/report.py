@@ -35,10 +35,10 @@ from trodestrack.qa.plots import (
 )
 from trodestrack.viz.styles import COLORS, apply_tufte_style
 
-# PRD Acceptance Criteria (Section 4)
-PRD_POSITION_RMSE_M = 0.02  # 2 cm
-PRD_VELOCITY_RMSE_MS = 0.10  # 10 cm/s
-PRD_HEADING_MAE_DEG = 7.0  # 7 degrees
+# Project acceptance targets for filter quality (rat tracking, ground-truth-aligned)
+TARGET_POSITION_RMSE_M = 0.02  # 2 cm
+TARGET_VELOCITY_RMSE_MS = 0.10  # 10 cm/s
+TARGET_HEADING_MAE_DEG = 7.0  # 7 degrees
 
 
 def generate_qa_report(
@@ -247,7 +247,7 @@ def generate_qa_report(
 
             # Page 2: Position error time series
             fig_pos, _ = plot_position_error(
-                t, positions_true, positions_est, prd_threshold_m=0.02
+                t, positions_true, positions_est, target_threshold_m=0.02
             )
             pdf.savefig(fig_pos, bbox_inches="tight")
             plt.close(fig_pos)
@@ -259,7 +259,10 @@ def generate_qa_report(
 
             # Page 4: Heading error time series
             fig_heading, _ = plot_heading_error(
-                t, headings_true, headings_est, prd_threshold_deg=PRD_HEADING_MAE_DEG
+                t,
+                headings_true,
+                headings_est,
+                target_threshold_deg=TARGET_HEADING_MAE_DEG,
             )
             pdf.savefig(fig_heading, bbox_inches="tight")
             plt.close(fig_heading)
@@ -344,15 +347,15 @@ def _create_summary_page(
     text_lines.append("")
     text_lines.append(
         f"Position RMSE:    {pos_rmse * 100:.2f} cm    "
-        f"(PRD req: ≤{PRD_POSITION_RMSE_M * 100:.1f} cm)"
+        f"(target: ≤{TARGET_POSITION_RMSE_M * 100:.1f} cm)"
     )
     text_lines.append(
         f"Velocity RMSE:    {vel_rmse * 100:.2f} cm/s  "
-        f"(PRD req: ≤{PRD_VELOCITY_RMSE_MS * 100:.1f} cm/s)"
+        f"(target: ≤{TARGET_VELOCITY_RMSE_MS * 100:.1f} cm/s)"
     )
     text_lines.append(
         f"Heading MAE:      {np.rad2deg(heading_mae):.2f}°     "
-        f"(PRD req: ≤{PRD_HEADING_MAE_DEG:.1f}°)"
+        f"(target: ≤{TARGET_HEADING_MAE_DEG:.1f}°)"
     )
     text_lines.append(f"Heading RMSE:     {np.rad2deg(heading_rmse):.2f}°")
     text_lines.append("")

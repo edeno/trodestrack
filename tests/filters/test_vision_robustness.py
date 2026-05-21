@@ -1,8 +1,8 @@
 """
 Test vision robustness: LED swaps, long occlusions, confidence scaling.
 
-These tests validate Tier 3 requirements from the PRD:
-- Long dropout handling (PRD: ≥5s dropout → ≤15cm drift)
+These tests validate the Tier 3 acceptance criteria:
+- Long dropout handling (target: >=5s dropout -> <=15cm drift)
 - LED swap detection and resolution
 - Confidence-dependent measurement noise scaling
 - Dual LED heading accuracy
@@ -135,7 +135,7 @@ class TestLEDSwap:
 
 
 class TestLongOcclusion:
-    """Test long occlusion handling (PRD: ≥5s dropout → ≤15cm drift)."""
+    """Test long occlusion handling (target: >=5s dropout -> <=15cm drift)."""
 
     def test_5s_dropout_simulation(self):
         """Test that we can simulate ≥5 second occlusions."""
@@ -170,7 +170,7 @@ class TestLongOcclusion:
             # Not strictly guaranteed with random sampling, but likely with seed=42
             if max_dropout_seconds < 3.0:
                 pytest.skip(
-                    f"Longest dropout only {max_dropout_seconds:.1f}s, need ≥5s for PRD test. "
+                    f"Longest dropout only {max_dropout_seconds:.1f}s, need >=5s for the dropout-drift target test. "
                     "This is a statistical fluke with current seed."
                 )
             else:
