@@ -824,6 +824,200 @@ def test_safety_check_rejects_fused_drift_from_vision_baseline(monkeypatch):
     assert report.p95_vision_position_deviation_m == pytest.approx(0.2)
 
 
+def _build_clean_simulated_session(
+    *,
+    seed: int = 42,
+    duration_s: float = 30.0,
+    led_dropout_prob: float = 0.10,
+    led_noise_scale: float = 1.0,
+) -> tuple[PreparedSession, EKFConfig, EKFResult]:
+    """Build a SpikeGadgets-flagged PreparedSession from ``simulate_rat_imu``.
+
+    Returns the prepared session, an EKFConfig for the fused 2D run, and the
+    actual fused EKF result so the caller can hand both to
+    ``run_real_data_safety_check``. The vision EKF inside the safety check
+    is *not* patched; the goal is to verify the real vision-only filter
+    converges on this geometry.
+
+    Parameters
+    ----------
+    led_dropout_prob
+        Fraction of frames where LED visibility is dropped (matches the
+        plan's "90% visible" constraint when set to 0.10).
+    led_noise_scale
+        Multiplier on ``cam_sigma_m`` used to inject extra LED-position
+        noise for the implausible-session variant.
+    """
+
+    from trodestrack.io import PreparedSession
+    from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
+    from trodestrack.sim.rat_imu import RatIMUSimConfig, simulate_rat_imu
+
+    sim_cfg = RatIMUSimConfig(
+        duration_s=duration_s,
+        fs_imu=200.0,
+        fs_cam=30.0,
+        # 1 m x 1 m arena, centered initial position so the rat stays inside.
+        arena_w=1.0,
+        arena_h=1.0,
+        m0=np.array([0.5, 0.5, 0.0, 0.0, 0.0]),
+        use_second_led=True,
+        cam_dropout_prob=led_dropout_prob,
+        cam_dropout_correlation=1.0,  # both LEDs drop together
+        cam_sigma_m=0.005 * led_noise_scale,
+        cam_jitter_s=0.0,
+        cam_latency_s=0.0,
+        # Calm motion keeps the session well within the 3 m/s safety cap.
+        sigma_yaw_rate=0.5,
+        sigma_a_fwd=0.3,
+        sigma_a_lat=0.2,
+        speed_clip=0.8,
+        # Disable IMU mounting tilt to keep the gravity check meaningful.
+        imu_tilt_roll_deg=0.0,
+        imu_tilt_pitch_deg=0.0,
+    )
+    sim = simulate_rat_imu(sim_cfg, seed=seed)
+
+    # SessionConfig must be a SpikeGadgets-flagged config for the safety
+    # check to run. The actual loader path isn't exercised — we build the
+    # PreparedSession directly from the simulated arrays.
+    config = SessionConfig.model_validate(
+        {
+            "inputs": {
+                "format": "spikegadgets_trodes",
+                "imu_file": "imu.parquet",
+                "position_file": "position.parquet",
+            },
+            "outputs": {
+                "run_safety_checks": True,
+                "safety_min_dual_led_frames": 20,
+            },
+        }
+    )
+    session = PreparedSession(
+        t_imu=sim["t_imu"],
+        U_imu=sim["U_imu"],
+        t_cam=sim["t_cam_exp"],
+        Z_cam_led1=sim["Z_cam_led1"],
+        Z_cam_led2=sim["Z_cam_led2"],
+        mask_cam=sim["mask_cam"],
+        conf_cam=None,
+        led_distance=0.04,
+        diagnostics={},
+        config=config,
+    )
+
+    ekf_config = EKFConfig(state_mode="2d_full", led_distance=0.04)
+    fused = extended_kalman_filter(
+        ekf_config,
+        session.t_imu,
+        session.U_imu,
+        session.t_cam,
+        session.Z_cam_led1,
+        session.Z_cam_led2,
+        session.mask_cam,
+    )
+    return session, ekf_config, fused
+
+
+@pytest.mark.slow
+def test_safety_check_passes_on_clean_simulated_session_with_real_vision_ekf() -> None:
+    """Clean dual-LED session must pass the real (unmocked) vision-EKF gate.
+
+    Probe: the existing safety-check tests substitute a fake vision filter,
+    so they can't detect a regression where the real vision-only EKF
+    diverges on otherwise-clean geometry. This test runs the actual filter
+    end-to-end and asserts both the boolean gate and the underlying
+    deviation metrics sit comfortably inside the configured envelope.
+    """
+
+    session, ekf_config, fused = _build_clean_simulated_session(
+        seed=42, duration_s=30.0, led_dropout_prob=0.10, led_noise_scale=1.0
+    )
+
+    report = run_real_data_safety_check(session, ekf_config, fused)
+
+    assert report.passed, (
+        f"clean simulated session failed safety check: msg={report.message!r}, "
+        f"max_dev={report.max_vision_position_deviation_m:.4f} m, "
+        f"p95_dev={report.p95_vision_position_deviation_m:.4f} m, "
+        f"max_speed={report.max_fused_speed_mps:.3f} m/s, "
+        f"camera_range={report.camera_range_m}, fused_range={report.fused_range_m}"
+    )
+    # Deviation metrics should be a tiny fraction of the configured caps
+    # (defaults: 0.5 m max, 0.25 m p95). A clean session should not even
+    # come close.
+    assert report.max_vision_position_deviation_m < 0.2
+    assert report.p95_vision_position_deviation_m < 0.1
+    assert report.max_fused_speed_mps < 3.0
+    assert report.dual_led_frame_count >= 20
+
+
+@pytest.mark.slow
+def test_safety_check_flags_implausible_session_with_real_vision_ekf() -> None:
+    """Heavy LED noise must trip the real (unmocked) vision-EKF gate.
+
+    Probe: a session with 200% LED-position noise drives both the fused
+    and vision-only EKFs into noticeably different trajectories. The
+    safety check must flag this without any patching — i.e., the real
+    vision filter has to diverge from the fused filter by more than the
+    configured deviation threshold on its own.
+    """
+
+    # 200% LED noise (3x the baseline 0.005 m) is "implausible" in the
+    # sense that the camera-only baseline diverges from the IMU-fused
+    # baseline by more than the default deviation envelope, while still
+    # being smooth enough that the EKF doesn't NaN out.
+    session, ekf_config, fused = _build_clean_simulated_session(
+        seed=42, duration_s=20.0, led_dropout_prob=0.10, led_noise_scale=3.0
+    )
+
+    # Tighten the deviation gate so this test doesn't depend on the
+    # 0.5 m default holding for a 20 s session. The test contract is
+    # "real vision EKF flags an implausible session"; the threshold
+    # tuning is part of the test, not the production default.
+    tight_config = SessionConfig.model_validate(
+        {
+            "inputs": {
+                "format": "spikegadgets_trodes",
+                "imu_file": "imu.parquet",
+                "position_file": "position.parquet",
+            },
+            "outputs": {
+                "run_safety_checks": True,
+                "safety_min_dual_led_frames": 20,
+                "safety_max_position_deviation_m": 0.02,
+                "safety_p95_position_deviation_m": 0.01,
+            },
+        }
+    )
+    tight_session = PreparedSession(
+        t_imu=session.t_imu,
+        U_imu=session.U_imu,
+        t_cam=session.t_cam,
+        Z_cam_led1=session.Z_cam_led1,
+        Z_cam_led2=session.Z_cam_led2,
+        mask_cam=session.mask_cam,
+        conf_cam=session.conf_cam,
+        led_distance=session.led_distance,
+        diagnostics={},
+        config=tight_config,
+    )
+
+    report = run_real_data_safety_check(tight_session, ekf_config, fused)
+
+    assert not report.passed
+    # Message should name the failing axis — either deviation or speed/envelope.
+    # The implausible variant is engineered to trip the deviation gate.
+    assert "implausible" in report.message
+    assert (
+        report.max_vision_position_deviation_m
+        > tight_config.outputs.safety_max_position_deviation_m
+        or report.p95_vision_position_deviation_m
+        > tight_config.outputs.safety_p95_position_deviation_m
+    )
+
+
 def _calibration_report(
     *,
     gravity_body: tuple[float, float, float] = (0.0, 0.0, 9.80665),
