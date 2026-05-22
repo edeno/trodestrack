@@ -345,6 +345,7 @@ def _extended_kalman_filter_impl(
             state_after_heading,
             config_for_filter,
             active=has_seen_vision_next & imu_stationary & stationary_context_next,
+            layout=layout,
         )
 
         event_source_indices = event_indices_per_frame_jax[t_idx]
@@ -1323,6 +1324,7 @@ def _extended_kalman_filter_3d_core(
             state_cam,
             config_for_filter,
             active=has_seen_vision_next & imu_stationary & stationary_context_next,
+            layout=layout,
         )
         marginal_loglik = marginal_loglik_prev + log_lik_camera + log_lik_zupt
         outputs = (

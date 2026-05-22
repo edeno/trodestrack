@@ -2101,6 +2101,7 @@ def update_zupt(
     config: FilterCoreConfig,
     *,
     active: bool | jnp.ndarray = True,
+    layout: StateLayout,
 ) -> tuple[FilterState, jnp.ndarray]:
     """Apply zero-velocity pseudo-measurement when nearly stationary.
 
@@ -2114,6 +2115,10 @@ def update_zupt(
         Caller-side stationarity gate. Filters should pass measured
         stationarity evidence here (IMU quietness plus camera speed/context),
         not a predicate derived from the velocity state being updated.
+    layout : StateLayout
+        Explicit state layout used to construct the ZUPT measurement model.
+        Required so callers cannot rely on a brittle state-dimension lookup
+        that could silently miswire two layouts sharing the same ``n``.
 
     Returns
     -------
@@ -2129,28 +2134,11 @@ def update_zupt(
     from trodestrack.models.sensors.zupt import ZUPTModel
 
     mean, cov = state
-    n = mean.shape[0]
-
-    # Determine layout from state dimension. We look up in LAYOUT_REGISTRY
-    # (assumed unique per dimension in the codebase). If the dimension does
-    # not match any registered layout we raise: silently assuming `2d_full`
-    # used to mask genuine state-layout wiring bugs, producing numerically
-    # finite but semantically wrong ZUPT updates (wrong velocity indices,
-    # wrong measurement Jacobian).
-    from trodestrack.models.state_layout import LAYOUT_REGISTRY
-
-    layout = None
-    for mode_layout in LAYOUT_REGISTRY.values():
-        if mode_layout.n == n:
-            layout = mode_layout
-            break
-
-    if layout is None:
-        known = sorted({lay.n for lay in LAYOUT_REGISTRY.values()})
+    if mean.shape[0] != layout.n:
         raise ValueError(
-            f"update_zupt: state dimension n={n} does not match any registered "
-            f"StateLayout. Known dimensions: {known}. Check that the FilterState "
-            f"was built from the same state_mode the rest of the pipeline uses."
+            f"update_zupt: state has dim {mean.shape[0]} but layout.n={layout.n}. "
+            f"Check that the FilterState was built from the same state_mode the "
+            f"rest of the pipeline uses."
         )
 
     # Create ZUPT model (fully pure, no mutable state)

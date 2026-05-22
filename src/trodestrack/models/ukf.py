@@ -899,6 +899,7 @@ def _unscented_kalman_filter_impl(
             state_after_heading,
             config_for_filter,
             active=has_seen_vision_next & imu_stationary & stationary_context_next,
+            layout=layout,
         )
 
         event_source_indices = event_indices_per_frame_jax[t_idx]

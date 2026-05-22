@@ -112,14 +112,15 @@ def test_update_zupt_accepts_filter_configs() -> None:
     zeros = jnp.zeros(8)
     identity = jnp.eye(8)
     state = FilterState(mean=zeros, cov=identity)
+    layout = get_layout("2d_full")
 
     ekf_config = EKFConfig(enable_zupt=True, zupt_velocity_threshold=0.05)
-    state_ekf, log_lik_ekf = update_zupt(state, ekf_config)
+    state_ekf, log_lik_ekf = update_zupt(state, ekf_config, layout=layout)
     assert isinstance(state_ekf, FilterState)
     assert bool(jnp.isfinite(log_lik_ekf))
 
     ukf_config = UKFConfig(enable_zupt=True, zupt_velocity_threshold=0.05)
-    state_ukf, log_lik_ukf = update_zupt(state, ukf_config)
+    state_ukf, log_lik_ukf = update_zupt(state, ukf_config, layout=layout)
     assert isinstance(state_ukf, FilterState)
     assert bool(jnp.isfinite(log_lik_ukf))
 
@@ -132,6 +133,7 @@ def test_update_zupt_disabled_is_exact_noop_with_large_covariance() -> None:
     posterior, log_lik = update_zupt(
         state,
         EKFConfig(enable_zupt=False, state_mode="2d_full"),
+        layout=get_layout("2d_full"),
     )
 
     np.testing.assert_allclose(posterior.mean, mean)
@@ -148,6 +150,7 @@ def test_update_zupt_inactive_is_exact_noop_with_large_covariance() -> None:
         state,
         EKFConfig(enable_zupt=True, zupt_velocity_threshold=0.05, state_mode="2d_full"),
         active=False,
+        layout=get_layout("2d_full"),
     )
 
     np.testing.assert_allclose(posterior.mean, mean)
@@ -169,6 +172,7 @@ def test_update_zupt_active_corrects_large_velocity_state() -> None:
             zupt_velocity_threshold=0.02,
             state_mode="2d_full",
         ),
+        layout=get_layout("2d_full"),
     )
 
     assert np.linalg.norm(np.asarray(posterior.mean[2:4])) < 1e-3
