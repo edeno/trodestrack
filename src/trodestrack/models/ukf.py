@@ -379,7 +379,7 @@ def compute_weights(
 
 
 def _outer_product_batch(x: jnp.ndarray, y: jnp.ndarray) -> jnp.ndarray:
-    """Batched outer products for covariance reconstruction.
+    """Per-sample outer product: ``(N, n) × (N, m) → (N, n, m)``.
 
     Parameters
     ----------
@@ -391,9 +391,9 @@ def _outer_product_batch(x: jnp.ndarray, y: jnp.ndarray) -> jnp.ndarray:
     Returns
     -------
     jnp.ndarray
-        Outer products (N, n, m) with ``result[i] = x[i][:, None] @ y[i][None, :]``.
+        Outer products (N, n, m) with ``result[i] = jnp.outer(x[i], y[i])``.
     """
-    return vmap(lambda a, b: jnp.atleast_2d(a).T @ jnp.atleast_2d(b), 0, 0)(x, y)
+    return vmap(jnp.outer, in_axes=(0, 0))(x, y)
 
 
 # =============================================================================
