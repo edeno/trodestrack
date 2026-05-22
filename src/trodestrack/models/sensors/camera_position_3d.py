@@ -326,24 +326,26 @@ class Camera3DPositionModel:
         dR_dqhat = _drotation_dquaternion(q_hat).astype(dtype)
 
         n_leds = self.led_offsets_body.shape[0]
-        meas_dim = self.meas_dim
-        H = jnp.zeros((meas_dim, n), dtype=dtype)
+        H = jnp.zeros((self.meas_dim, n), dtype=dtype)
 
-        pos_indices = list(layout.pos_idx)
-        quat_indices = list(layout.heading_idx)
+        pos_indices = jnp.asarray(layout.pos_idx, dtype=jnp.int32)
+        quat_indices = jnp.asarray(layout.heading_idx, dtype=jnp.int32)
+        offsets = self.led_offsets_body.astype(dtype)
 
-        for led in range(n_leds):
-            offset = self.led_offsets_body[led].astype(dtype)
-            row_base = led * 3
-            # ∂h_ℓ/∂position = I₃ in the position columns.
-            for i in range(3):
-                H = H.at[row_base + i, pos_indices[i]].set(1.0)
-            # ∂h_ℓ/∂q̂ · offset gives a (3, 4) block; chain through ∂q̂/∂q.
-            d_R_o_dqhat = jnp.einsum("ijk,j->ik", dR_dqhat, offset)
-            d_R_o_dq = d_R_o_dqhat @ dq_hat_dq
-            for k in range(4):
-                for i in range(3):
-                    H = H.at[row_base + i, quat_indices[k]].set(d_R_o_dq[i, k])
+        # ∂h_ℓ/∂position = I₃ in the position columns, stacked across LEDs.
+        # H[led*3 + i, pos_indices[i]] = 1 for every led, i.
+        led_rows = jnp.arange(n_leds)[:, None] * 3 + jnp.arange(3)[None, :]
+        H = H.at[led_rows, jnp.broadcast_to(pos_indices, (n_leds, 3))].set(1.0)
+
+        # ∂h_ℓ/∂q = (∂R/∂q̂ · o_ℓ) · ∂q̂/∂q gives a (3, 4) block per LED.
+        # Compute all blocks at once: einsum yields (n_leds, 3, 4).
+        d_R_o_dqhat = jnp.einsum("ijk,lj->lik", dR_dqhat, offsets)
+        d_R_o_dq = d_R_o_dqhat @ dq_hat_dq  # (n_leds, 3, 4)
+
+        # H[led*3 + i, quat_indices[k]] = d_R_o_dq[led, i, k] via advanced indexing.
+        quat_rows = led_rows[:, :, None]  # (n_leds, 3, 1)
+        quat_cols = jnp.broadcast_to(quat_indices, (n_leds, 3, 4))
+        H = H.at[jnp.broadcast_to(quat_rows, (n_leds, 3, 4)), quat_cols].set(d_R_o_dq)
 
         return H
 
