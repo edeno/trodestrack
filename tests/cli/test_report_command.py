@@ -20,6 +20,26 @@ from trodestrack import main
 from trodestrack.cli.report import load_run_data
 
 
+@pytest.fixture(autouse=True)
+def _use_truetype_pdf_fonts():
+    """Force matplotlib to embed TrueType (Type 42) fonts in test PDFs.
+
+    The default ``pdf.fonttype = 3`` (Type 3) gives matplotlib a custom
+    per-document font subset whose ``/Encoding`` table pypdf cannot
+    decode reliably on Windows (characters come back as glyph indices
+    rather than Unicode). Type 42 fonts ship a proper Unicode map that
+    pypdf decodes consistently on every platform. Test-only.
+    """
+    import matplotlib
+
+    previous = matplotlib.rcParams["pdf.fonttype"]
+    matplotlib.rcParams["pdf.fonttype"] = 42
+    try:
+        yield
+    finally:
+        matplotlib.rcParams["pdf.fonttype"] = previous
+
+
 @pytest.fixture
 def mock_run_directory(tmp_path: Path) -> Path:
     """Create a mock run directory with filter results.

@@ -25,6 +25,28 @@ from trodestrack.viz.styles import COLORS
 _UNI_GLYPH = re.compile(r"/uni([0-9A-Fa-f]{4,8})")
 
 
+@pytest.fixture(autouse=True)
+def _use_truetype_pdf_fonts():
+    """Force matplotlib to embed TrueType (Type 42) fonts in test PDFs.
+
+    The default ``pdf.fonttype = 3`` (Type 3) gives matplotlib a custom
+    per-document font subset with a non-standard ``/Encoding`` table —
+    pypdf returns the raw glyph indices (e.g. ``/uniHHHHHHHH`` references
+    or simply ASCII shifted by the font's ``/FirstChar`` offset) rather
+    than the original Unicode. Type 42 fonts ship a proper Unicode map
+    that pypdf decodes correctly on every platform. This affects only
+    test-generated PDFs; production reports keep the matplotlib default.
+    """
+    import matplotlib
+
+    previous = matplotlib.rcParams["pdf.fonttype"]
+    matplotlib.rcParams["pdf.fonttype"] = 42
+    try:
+        yield
+    finally:
+        matplotlib.rcParams["pdf.fonttype"] = previous
+
+
 def _decode_pdf_glyphs(text: str) -> str:
     """Decode ``/uniXXXXXXXX`` matplotlib glyph references back to Unicode.
 
@@ -32,7 +54,8 @@ def _decode_pdf_glyphs(text: str) -> str:
     encodes characters as ``/uniHHHHHHHH`` glyph references rather than
     direct Unicode in the PDF text stream. pypdf returns those references
     verbatim, so substring searches like ``"RESULT: PASS" in extracted``
-    fail even though the text is structurally present.
+    fail even though the text is structurally present. Kept as a defense
+    in depth alongside the ``pdf.fonttype = 42`` fixture above.
     """
     return _UNI_GLYPH.sub(lambda m: chr(int(m.group(1), 16)), text)
 
