@@ -20,15 +20,17 @@ from trodestrack import main
 from trodestrack.cli.report import load_run_data
 
 
-@pytest.fixture(autouse=True)
-def _use_truetype_pdf_fonts():
+@pytest.fixture
+def use_truetype_pdf_fonts():
     """Force matplotlib to embed TrueType (Type 42) fonts in test PDFs.
 
     The default ``pdf.fonttype = 3`` (Type 3) gives matplotlib a custom
     per-document font subset whose ``/Encoding`` table pypdf cannot
     decode reliably on Windows (characters come back as glyph indices
     rather than Unicode). Type 42 fonts ship a proper Unicode map that
-    pypdf decodes consistently on every platform. Test-only.
+    pypdf decodes consistently on every platform. Opt-in only — Type 42
+    embedding produces a slightly smaller PDF and some pre-existing
+    tests assert on absolute byte sizes.
     """
     import matplotlib
 
@@ -482,7 +484,7 @@ def test_load_run_data_returns_expected_keys_and_shapes(
 
 
 def test_report_command_with_custom_title_appears_in_pdf(
-    tmp_path: Path, build_qa_inputs_dir
+    tmp_path: Path, build_qa_inputs_dir, use_truetype_pdf_fonts
 ) -> None:
     """``--title`` must propagate through to the rendered PDF."""
     title = "Session 2024-10-11"

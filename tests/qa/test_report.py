@@ -25,8 +25,8 @@ from trodestrack.viz.styles import COLORS
 _UNI_GLYPH = re.compile(r"/uni([0-9A-Fa-f]{4,8})")
 
 
-@pytest.fixture(autouse=True)
-def _use_truetype_pdf_fonts():
+@pytest.fixture
+def use_truetype_pdf_fonts():
     """Force matplotlib to embed TrueType (Type 42) fonts in test PDFs.
 
     The default ``pdf.fonttype = 3`` (Type 3) gives matplotlib a custom
@@ -34,8 +34,11 @@ def _use_truetype_pdf_fonts():
     pypdf returns the raw glyph indices (e.g. ``/uniHHHHHHHH`` references
     or simply ASCII shifted by the font's ``/FirstChar`` offset) rather
     than the original Unicode. Type 42 fonts ship a proper Unicode map
-    that pypdf decodes correctly on every platform. This affects only
-    test-generated PDFs; production reports keep the matplotlib default.
+    that pypdf decodes correctly on every platform.
+
+    Opt-in (not autouse) because Type 42 embedding produces a slightly
+    smaller PDF and some pre-existing tests assert on absolute byte
+    sizes; only the tests that extract PDF text need this fixture.
     """
     import matplotlib
 
@@ -415,7 +418,9 @@ class TestSummaryVerdictBanner:
             state_dim=8,
         )
 
-    def test_qa_report_summary_page_shows_pass_for_passing_metrics(self) -> None:
+    def test_qa_report_summary_page_shows_pass_for_passing_metrics(
+        self, use_truetype_pdf_fonts
+    ) -> None:
         """All metrics inside their targets should render a PASS banner."""
         # Use half the target as the per-metric offset so each RMSE/MAE is
         # comfortably under the threshold (and the test follows if the
@@ -441,7 +446,7 @@ class TestSummaryVerdictBanner:
                 pdf_path.unlink()
 
     def test_qa_report_summary_page_shows_fail_with_failing_metric_names(
-        self,
+        self, use_truetype_pdf_fonts
     ) -> None:
         """A failing position metric must produce a FAIL banner naming position."""
         # Position offset clearly exceeds the target; velocity and heading stay
