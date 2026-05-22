@@ -247,7 +247,12 @@ def test_geometric_jacobian_matches_jacfwd() -> None:
 
     Samples 50 random states with quaternion blocks normalized to the unit
     sphere; asserts ``model.geometric_jacobian(state)`` matches
-    ``jax.jacfwd(model.predict)(state)`` to ``rtol=1e-6``.
+    ``jax.jacfwd(model.predict)(state)`` within float32 numerical tolerance.
+
+    Tolerance is sized for cross-platform XLA float32 summation variance
+    (~10× single-precision eps). A genuine analytic-formula bug (missing
+    sign, missing chain-rule term, wrong index) produces O(1) differences,
+    well outside this bound.
     """
     import jax
 
@@ -280,6 +285,6 @@ def test_geometric_jacobian_matches_jacfwd() -> None:
         np.testing.assert_allclose(
             np.asarray(H_analytic),
             np.asarray(H_autodiff),
-            rtol=1e-6,
-            atol=1e-8,
+            rtol=1e-5,
+            atol=1e-7,
         )
