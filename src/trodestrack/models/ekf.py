@@ -41,7 +41,7 @@ References:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import NamedTuple
 
 import jax
@@ -125,6 +125,20 @@ class EKFConfig(FilterCoreConfig):
 
 
 tree_util.register_pytree_node_class(EKFConfig)
+
+
+def _with_led_distance(config: EKFConfig, led_distance: float) -> EKFConfig:
+    """Shallow-clone config with a new led_distance, skipping re-validation.
+
+    The original config already passed ``__post_init__``; re-running the
+    full validation cascade for a single field update is wasted work.
+    The caller resolves ``led_distance`` once host-side per filter run,
+    so PyTree round-trip safety is not needed here.
+    """
+    new_cfg = object.__new__(type(config))
+    object.__setattr__(new_cfg, "__dict__", dict(config.__dict__))
+    object.__setattr__(new_cfg, "led_distance", led_distance)
+    return new_cfg
 
 
 EKFState = FilterState
@@ -1007,7 +1021,7 @@ def extended_kalman_filter(
             Z_cam_led1_jax, Z_cam_led2_jax, mask_cam_jax
         )
         # Create new config with estimated spacing (do NOT mutate original)
-        config_for_filter = replace(ekf_config, led_distance=estimated_led_distance)
+        config_for_filter = _with_led_distance(ekf_config, estimated_led_distance)
     else:
         config_for_filter = ekf_config
 
