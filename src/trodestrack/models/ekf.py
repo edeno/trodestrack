@@ -1460,17 +1460,27 @@ def _update_camera_3d_scanned(
         return state, jnp.asarray(0.0, dtype=state.mean.dtype)
 
     def do_update(_: None) -> tuple[EKFState, jnp.ndarray]:
-        state_iter = state
-        innovation = jnp.zeros(camera_model.meas_dim, dtype=state.mean.dtype)
-        S = jnp.eye(camera_model.meas_dim, dtype=state.mean.dtype)
-        for _ in range(config.num_iter):
-            state_iter, innovation, S = _camera_3d_linear_update(
+        def iter_body(
+            carry: tuple[EKFState, jnp.ndarray, jnp.ndarray], _i: int
+        ) -> tuple[tuple[EKFState, jnp.ndarray, jnp.ndarray], None]:
+            state_iter, _innov, _S = carry
+            new_state, innov, S = _camera_3d_linear_update(
                 state,
                 state_iter.mean,
                 camera_model,
                 frame_idx,
                 layout,
             )
+            return (new_state, innov, S), None
+
+        init_carry = (
+            state,
+            jnp.zeros(camera_model.meas_dim, dtype=state.mean.dtype),
+            jnp.eye(camera_model.meas_dim, dtype=state.mean.dtype),
+        )
+        (state_iter, innovation, S), _ = lax.scan(
+            iter_body, init_carry, jnp.arange(config.num_iter)
+        )
 
         log_lik = gaussian_log_likelihood_masked(innovation, S, active_mask)
         if config.use_mahalanobis_gating:
