@@ -21,7 +21,6 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax import jacfwd
 
 from trodestrack.models.filter_common import confidence_to_R_diagonal
 from trodestrack.models.quaternion import rotate_vector_body_to_world
@@ -32,6 +31,55 @@ def _is_traced(arr) -> bool:
     """True when ``arr`` is a JAX tracer (cannot run host-side numeric checks)."""
 
     return isinstance(arr, jax.core.Tracer)
+
+
+def _drotation_dquaternion(q: jnp.ndarray) -> jnp.ndarray:
+    """Derivative of quaternion-to-rotation matrix wrt q (scalar-first).
+
+    Parameters
+    ----------
+    q : jnp.ndarray
+        Quaternion with scalar-first order ``[qw, qx, qy, qz]``, shape ``(4,)``.
+
+    Returns
+    -------
+    jnp.ndarray
+        Tensor of shape ``(3, 3, 4)`` with ``dR/dq[i, j, k] = ∂R[i, j] / ∂q[k]``
+        for the rotation matrix
+
+        ``R(q) = [
+            [1 - 2(qy² + qz²),   2(qx*qy - qw*qz),   2(qx*qz + qw*qy)],
+            [2(qx*qy + qw*qz),   1 - 2(qx² + qz²),   2(qy*qz - qw*qx)],
+            [2(qx*qz - qw*qy),   2(qy*qz + qw*qx),   1 - 2(qx² + qy²)],
+        ]``.
+
+    Notes
+    -----
+    Each row groups the (i, j) entry's partial derivatives wrt
+    ``[qw, qx, qy, qz]``. Each entry is the analytic derivative scaled by 2.
+    """
+
+    qw, qx, qy, qz = q[0], q[1], q[2], q[3]
+    zero = jnp.zeros_like(qw)
+    return 2.0 * jnp.array(
+        [
+            [
+                [zero, zero, -2.0 * qy, -2.0 * qz],
+                [-qz, qy, qx, -qw],
+                [qy, qz, qw, qx],
+            ],
+            [
+                [qz, qy, qx, qw],
+                [zero, -2.0 * qx, zero, -2.0 * qz],
+                [-qx, -qw, qz, qy],
+            ],
+            [
+                [-qy, qz, -qw, qx],
+                [qx, qw, qz, qy],
+                [zero, -2.0 * qx, -2.0 * qy, zero],
+            ],
+        ]
+    )
 
 
 class Camera3DPositionModel:
@@ -239,8 +287,67 @@ class Camera3DPositionModel:
         return H * valid[:, None]
 
     def geometric_jacobian(self, state_mean: jnp.ndarray) -> jnp.ndarray:
-        """Return unmasked geometric Jacobian with shape ``(meas_dim, n)``."""
-        return jacfwd(lambda state: self.predict(state))(state_mean)
+        """Return unmasked geometric Jacobian with shape ``(meas_dim, n)``.
+
+        Notes
+        -----
+        Analytic derivative of ``predict`` with respect to ``state_mean``.
+        For each LED ``ℓ`` with body-frame offset ``o_ℓ``, the measurement is
+        ``h_ℓ(x) = p + R(q̂) o_ℓ`` where ``p`` is the position block of
+        ``state_mean``, ``q̂ = q / ||q||`` is the normalized quaternion read
+        from the heading block, and ``R(q̂)`` is the rotation matrix from
+        body to world.
+
+        - ``∂h_ℓ/∂p = I₃`` (each LED's position block is the identity).
+        - ``∂h_ℓ/∂q = (∂R/∂q̂ · o_ℓ) · ∂q̂/∂q`` where
+          ``∂q̂/∂q = (I₄ - q̂ q̂ᵀ) / ||q||``. The projection accounts for the
+          ``rotate_vector_body_to_world`` call inside ``predict`` normalizing
+          the quaternion before applying the rotation. At the unit-norm
+          manifold (``||q|| = 1``) the scaling factor is unity.
+        """
+
+        layout = self.layout
+        n = state_mean.shape[0]
+        dtype = state_mean.dtype
+
+        quat_idx = jnp.array(layout.heading_idx, dtype=jnp.int32)
+        q_raw = state_mean[quat_idx]
+        q_norm_sq = jnp.dot(q_raw, q_raw)
+        q_norm = jnp.sqrt(q_norm_sq)
+        # Match normalize_quaternion's eps-protected division so the
+        # analytic Jacobian behaves identically to predict when |q|≈0.
+        q_norm_safe = jnp.maximum(q_norm, jnp.asarray(1e-12, dtype=dtype))
+        q_hat = q_raw / q_norm_safe
+
+        # dq̂/dq = (I - q̂ q̂ᵀ) / ||q|| (chain rule for q / ||q||).
+        dq_hat_dq = (jnp.eye(4, dtype=dtype) - jnp.outer(q_hat, q_hat)) / q_norm_safe
+
+        # ∂R/∂q̂ evaluated at the normalized quaternion (shape (3, 3, 4)).
+        dR_dqhat = _drotation_dquaternion(q_hat).astype(dtype)
+
+        n_leds = self.led_offsets_body.shape[0]
+        H = jnp.zeros((self.meas_dim, n), dtype=dtype)
+
+        pos_indices = jnp.asarray(layout.pos_idx, dtype=jnp.int32)
+        quat_indices = jnp.asarray(layout.heading_idx, dtype=jnp.int32)
+        offsets = self.led_offsets_body.astype(dtype)
+
+        # ∂h_ℓ/∂position = I₃ in the position columns, stacked across LEDs.
+        # H[led*3 + i, pos_indices[i]] = 1 for every led, i.
+        led_rows = jnp.arange(n_leds)[:, None] * 3 + jnp.arange(3)[None, :]
+        H = H.at[led_rows, jnp.broadcast_to(pos_indices, (n_leds, 3))].set(1.0)
+
+        # ∂h_ℓ/∂q = (∂R/∂q̂ · o_ℓ) · ∂q̂/∂q gives a (3, 4) block per LED.
+        # Compute all blocks at once: einsum yields (n_leds, 3, 4).
+        d_R_o_dqhat = jnp.einsum("ijk,lj->lik", dR_dqhat, offsets)
+        d_R_o_dq = d_R_o_dqhat @ dq_hat_dq  # (n_leds, 3, 4)
+
+        # H[led*3 + i, quat_indices[k]] = d_R_o_dq[led, i, k] via advanced indexing.
+        quat_rows = led_rows[:, :, None]  # (n_leds, 3, 1)
+        quat_cols = jnp.broadcast_to(quat_indices, (n_leds, 3, 4))
+        H = H.at[jnp.broadcast_to(quat_rows, (n_leds, 3, 4)), quat_cols].set(d_R_o_dq)
+
+        return H
 
     def observed(self, frame_idx: int) -> jnp.ndarray:
         """Return flattened raw observations for one camera frame."""

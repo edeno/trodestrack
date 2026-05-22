@@ -13,6 +13,8 @@ runs a 5-30 s simulated session at 100 Hz IMU / 30 Hz camera.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -371,4 +373,75 @@ def test_ekf_3d_perfect_input_no_drift(simulate_3d) -> None:
     diag = covs.diagonal(axis1=1, axis2=2)
     assert float(diag.max()) < 1e-2, (
         f"Posterior covariance grew to {diag.max():.2e} on perfect input"
+    )
+
+
+@pytest.mark.slow
+def test_ekf_3d_iekf_converges_under_iteration(simulate_3d) -> None:
+    """``num_iter=3`` produces a tighter posterior than ``num_iter=1``.
+
+    The IEKF re-linearizes against the current iterate; multiple
+    iterations should produce a posterior consistent with itself
+    (contraction for well-conditioned problems). This directly
+    exercises the ``lax.scan`` carry semantics: if the carry-vs-output
+    indexing returned the second-to-last iterate instead of the final
+    one, ``num_iter=1`` and ``num_iter=3`` would diverge in unexpected
+    ways and the trace inequality below would flip.
+    """
+    sim = simulate_3d(
+        seed=42,
+        duration_s=5.0,
+        fs_imu=100.0,
+        motion="yaw_only",
+        yaw_rate_dps=10.0,
+        init_pitch_deg=2.0,
+        init_roll_deg=1.0,
+        gyro_bias_xyz=(0.001, -0.001, 0.005),
+        gyro_noise_std=5e-4,
+        accel_noise_std=5e-3,
+    )
+    layout = get_layout("3d_cam_6dof_imu")
+    Z_cam_leds, mask_cam_leds = _stack_leds(sim)
+
+    config1 = _default_3d_config()  # num_iter=1 (default)
+    config3 = replace(config1, num_iter=3)  # host-side dataclass replace
+
+    result1 = extended_kalman_filter_3d(
+        config1,
+        sim.t_imu,
+        sim.U_imu,
+        sim.t_cam,
+        Z_cam_leds,
+        sim.truth["led_offsets_body"],
+        mask_cam_leds=mask_cam_leds,
+    )
+    result3 = extended_kalman_filter_3d(
+        config3,
+        sim.t_imu,
+        sim.U_imu,
+        sim.t_cam,
+        Z_cam_leds,
+        sim.truth["led_offsets_body"],
+        mask_cam_leds=mask_cam_leds,
+    )
+
+    pos_idx = list(layout.pos_idx)
+    final_pos1 = np.asarray(result1.filtered_means[-1, pos_idx])
+    final_pos3 = np.asarray(result3.filtered_means[-1, pos_idx])
+    # IEKF is a contraction here — final positions should agree to well
+    # within the measurement-noise floor (5 mm sigma in the default cfg).
+    assert float(np.linalg.norm(final_pos3 - final_pos1)) < 0.01, (
+        f"num_iter=3 final position differs from num_iter=1 by "
+        f"{float(np.linalg.norm(final_pos3 - final_pos1)) * 100:.2f} cm"
+    )
+
+    # Critical: assert num_iter=3 covariance is not LARGER (in trace) than
+    # num_iter=1. If the scan returned a non-final iterate by mistake,
+    # the cov would reflect an earlier (worse) linearization and trip
+    # this inequality.
+    trace1 = float(jnp.trace(result1.filtered_covariances[-1]))
+    trace3 = float(jnp.trace(result3.filtered_covariances[-1]))
+    assert trace3 <= trace1 * 1.05, (
+        f"num_iter=3 covariance trace {trace3:.4e} exceeds num_iter=1 "
+        f"trace {trace1:.4e} by more than 5% — final iterate may be wrong"
     )

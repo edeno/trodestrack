@@ -251,17 +251,25 @@ def assemble_Q(
             vel_mult = jnp.asarray(jnp.where(has_vision, one, vel_mult), dtype=dtype)
             bias_mult = jnp.asarray(jnp.where(has_vision, one, bias_mult), dtype=dtype)
 
-            # Scale position diagonal elements
-            for idx in layout.pos_idx:
-                Q_rate = Q_rate.at[idx, idx].set(Q_rate[idx, idx] * pos_mult)
-
-            # Scale velocity diagonal elements
-            for idx in layout.vel_idx:
-                Q_rate = Q_rate.at[idx, idx].set(Q_rate[idx, idx] * vel_mult)
-
-            # Scale bias diagonal elements
-            for idx in list(layout.bias_gyro_idx) + list(layout.bias_accel_idx):
-                Q_rate = Q_rate.at[idx, idx].set(Q_rate[idx, idx] * bias_mult)
+            # Build a per-component diagonal multiplier and apply as an
+            # outer-product scaling. Mirrors ``freeze_bias_during_blackout``
+            # below. Q_rate is diagonal here so diag(Q) * (m_i * m_j) is
+            # equivalent to per-index ``Q[i, i] *= m_i`` for every i, but
+            # collapses 12+ separate ``.at[idx, idx].set()`` calls into a
+            # single broadcast multiply.
+            scaling = jnp.ones(n, dtype=dtype)
+            if layout.pos_idx:
+                scaling = scaling.at[jnp.asarray(layout.pos_idx)].set(
+                    jnp.sqrt(pos_mult)
+                )
+            if layout.vel_idx:
+                scaling = scaling.at[jnp.asarray(layout.vel_idx)].set(
+                    jnp.sqrt(vel_mult)
+                )
+            bias_indices = list(layout.bias_gyro_idx) + list(layout.bias_accel_idx)
+            if bias_indices:
+                scaling = scaling.at[jnp.asarray(bias_indices)].set(jnp.sqrt(bias_mult))
+            Q_rate = Q_rate * scaling[:, None] * scaling[None, :]
 
     # IMU input noise mapping
     Qu = (

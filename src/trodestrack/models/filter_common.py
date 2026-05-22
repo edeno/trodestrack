@@ -1631,7 +1631,7 @@ def build_quaternion_transition_jacobian(
     damping_coeff: float,
     layout: StateLayout,
     *,
-    u_imu: jnp.ndarray | None = None,
+    u_imu: jnp.ndarray,
     enable_experimental_accel_translation: bool = False,
 ) -> jnp.ndarray:
     """Build the first-order transition Jacobian for quaternion layouts.
@@ -1648,15 +1648,11 @@ def build_quaternion_transition_jacobian(
         Linear velocity damping coefficient.
     layout : StateLayout
         Quaternion state layout.
-    u_imu : jnp.ndarray or None, optional
-        IMU sample at this step (gyro in the first three channels). When
-        provided the quaternion-vs-quaternion block is set to the proper
-        first-order Jacobian ``I_4 + 0.5·dt·Ω_R(ω)`` of
-        ``q_next = q_prev ⊗ exp(ω_unbiased · dt)``. Without it the block
-        defaults to identity, which is only correct at exactly zero
-        rotation; passing ``None`` is supported for legacy callers but
-        makes covariance / gating / smoothing inconsistent with the mean
-        for non-zero gyro samples.
+    u_imu : jnp.ndarray
+        IMU sample at this step (gyro in the first three channels). The
+        quaternion-vs-quaternion block is set to the proper first-order
+        Jacobian ``I_4 + 0.5·dt·Ω_R(ω)`` of
+        ``q_next = q_prev ⊗ exp(ω_unbiased · dt)``.
     enable_experimental_accel_translation : bool, default False
         Whether accelerometer-driven translation is active.
 
@@ -1717,26 +1713,22 @@ def build_quaternion_transition_jacobian(
         projector @ bias_gyro_block_unnormalized
     )
 
-    quat_self_block = projector
-    if u_imu is not None:
-        gyro_meas = jnp.asarray(u_imu, dtype=dtype)[:3]
-        bias_gyro = linearization_mean[gyro_bias_idx]
-        omega_unbiased = gyro_meas - bias_gyro
-        wx, wy, wz = omega_unbiased[0], omega_unbiased[1], omega_unbiased[2]
-        omega_right_matrix = jnp.array(
-            [
-                [0.0, -wx, -wy, -wz],
-                [wx, 0.0, wz, -wy],
-                [wy, -wz, 0.0, wx],
-                [wz, wy, -wx, 0.0],
-            ],
-            dtype=dtype,
-        )
-        quat_self_unnormalized = (
-            jnp.eye(4, dtype=dtype) + 0.5 * dt_arr * omega_right_matrix
-        )
-        quat_self_block = projector @ quat_self_unnormalized
-        F_x = F_x.at[quat_idx[:, None], quat_idx[None, :]].set(quat_self_block)
+    gyro_meas = jnp.asarray(u_imu, dtype=dtype)[:3]
+    bias_gyro = linearization_mean[gyro_bias_idx]
+    omega_unbiased = gyro_meas - bias_gyro
+    wx, wy, wz = omega_unbiased[0], omega_unbiased[1], omega_unbiased[2]
+    omega_right_matrix = jnp.array(
+        [
+            [0.0, -wx, -wy, -wz],
+            [wx, 0.0, wz, -wy],
+            [wy, -wz, 0.0, wx],
+            [wz, wy, -wx, 0.0],
+        ],
+        dtype=dtype,
+    )
+    quat_self_unnormalized = jnp.eye(4, dtype=dtype) + 0.5 * dt_arr * omega_right_matrix
+    quat_self_block = projector @ quat_self_unnormalized
+    F_x = F_x.at[quat_idx[:, None], quat_idx[None, :]].set(quat_self_block)
 
     if enable_experimental_accel_translation:
         basis_body = jnp.eye(3, dtype=dtype)
@@ -1932,6 +1924,11 @@ def initialize_state(
     -----
     If all observations are invalid, initializes near the origin with large
     uncertainty, allowing prediction-only filtering to proceed.
+
+    This function is host-only and must not be called inside
+    ``jax.jit``. It uses Python-level branching on observation validity
+    that traces non-statically. Call from host code that resolves
+    initial state once before entering the JIT-compiled scan.
     """
 
     # Find frames with valid observation mask AND finite LED observations
@@ -2101,6 +2098,7 @@ def update_zupt(
     config: FilterCoreConfig,
     *,
     active: bool | jnp.ndarray = True,
+    layout: StateLayout,
 ) -> tuple[FilterState, jnp.ndarray]:
     """Apply zero-velocity pseudo-measurement when nearly stationary.
 
@@ -2114,6 +2112,10 @@ def update_zupt(
         Caller-side stationarity gate. Filters should pass measured
         stationarity evidence here (IMU quietness plus camera speed/context),
         not a predicate derived from the velocity state being updated.
+    layout : StateLayout
+        Explicit state layout used to construct the ZUPT measurement model.
+        Required so callers cannot rely on a brittle state-dimension lookup
+        that could silently miswire two layouts sharing the same ``n``.
 
     Returns
     -------
@@ -2129,28 +2131,11 @@ def update_zupt(
     from trodestrack.models.sensors.zupt import ZUPTModel
 
     mean, cov = state
-    n = mean.shape[0]
-
-    # Determine layout from state dimension. We look up in LAYOUT_REGISTRY
-    # (assumed unique per dimension in the codebase). If the dimension does
-    # not match any registered layout we raise: silently assuming `2d_full`
-    # used to mask genuine state-layout wiring bugs, producing numerically
-    # finite but semantically wrong ZUPT updates (wrong velocity indices,
-    # wrong measurement Jacobian).
-    from trodestrack.models.state_layout import LAYOUT_REGISTRY
-
-    layout = None
-    for mode_layout in LAYOUT_REGISTRY.values():
-        if mode_layout.n == n:
-            layout = mode_layout
-            break
-
-    if layout is None:
-        known = sorted({lay.n for lay in LAYOUT_REGISTRY.values()})
+    if mean.shape[0] != layout.n:
         raise ValueError(
-            f"update_zupt: state dimension n={n} does not match any registered "
-            f"StateLayout. Known dimensions: {known}. Check that the FilterState "
-            f"was built from the same state_mode the rest of the pipeline uses."
+            f"update_zupt: state has dim {mean.shape[0]} but layout.n={layout.n}. "
+            f"Check that the FilterState was built from the same state_mode the "
+            f"rest of the pipeline uses."
         )
 
     # Create ZUPT model (fully pure, no mutable state)
@@ -2428,19 +2413,11 @@ def gaussian_log_likelihood(
     jitter = 1e-8 * jnp.trace(covariance) / k
     S_stable = symmetrize(covariance) + jnp.eye(k) * jitter
 
-    # Log determinant using slogdet (more stable than det)
-    sign, logdet = jnp.linalg.slogdet(S_stable)
-
-    # Check for numerical issues (sign should be +1 for PSD matrix)
-    # If sign <= 0, increase jitter and recompute
-    def add_more_jitter():
-        jitter_large = 1e-6 * jnp.trace(covariance) / k
-        S_jittered = symmetrize(covariance) + jnp.eye(k) * jitter_large
-        _sign_j, logdet_j = jnp.linalg.slogdet(S_jittered)
-        return logdet_j
-
-    # Use original logdet if sign is positive, otherwise use jittered version
-    logdet_safe = lax.cond(sign > 0, lambda: logdet, add_more_jitter)
+    # Log determinant using slogdet (more stable than det). If sign <= 0
+    # after symmetrize + adaptive jitter, the matrix is genuinely
+    # indefinite — let slogdet's sign field propagate so callers see the
+    # issue rather than silently double-jittering.
+    _sign, logdet = jnp.linalg.slogdet(S_stable)
 
     # Mahalanobis distance: v^T S^{-1} v
     # psd_solve computes S^{-1} @ v, then we dot with v
@@ -2448,7 +2425,7 @@ def gaussian_log_likelihood(
     mahal = jnp.dot(innovation, S_inv_v)
 
     # Gaussian log-likelihood
-    log_prob = -0.5 * (k * jnp.log(2 * jnp.pi) + logdet_safe + mahal)
+    log_prob = -0.5 * (k * jnp.log(2 * jnp.pi) + logdet + mahal)
 
     return log_prob
 

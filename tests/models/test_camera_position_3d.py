@@ -240,3 +240,51 @@ def test_camera_3d_accepts_bool_and_zero_one_int_mask() -> None:
     int_mask = np.array([[1, 0]], dtype=np.int32)
     Camera3DPositionModel(**kwargs, mask_leds_all=bool_mask)
     Camera3DPositionModel(**kwargs, mask_leds_all=int_mask)
+
+
+def test_geometric_jacobian_matches_jacfwd() -> None:
+    """Analytic Jacobian agrees with ``jax.jacfwd`` on random unit-norm states.
+
+    Samples 50 random states with quaternion blocks normalized to the unit
+    sphere; asserts ``model.geometric_jacobian(state)`` matches
+    ``jax.jacfwd(model.predict)(state)`` within float32 numerical tolerance.
+
+    Tolerance is sized for cross-platform XLA float32 summation variance
+    (~10× single-precision eps). A genuine analytic-formula bug (missing
+    sign, missing chain-rule term, wrong index) produces O(1) differences,
+    well outside this bound.
+    """
+    import jax
+
+    layout = get_layout("3d_cam_6dof_imu")
+    led_offsets = jnp.array(
+        [
+            [-0.03, 0.0, 0.0],
+            [0.03, 0.0, 0.0],
+            [0.0, 0.025, 0.02],
+        ]
+    )
+    model = Camera3DPositionModel(
+        led_offsets_body=led_offsets,
+        measurement_noise_base=1e-4,
+        layout=layout,
+        z_leds_all=jnp.zeros((1, led_offsets.shape[0], 3)),
+    )
+
+    rng = np.random.default_rng(0)
+    quat_indices = list(layout.heading_idx)
+    for _ in range(50):
+        state_np = rng.standard_normal(layout.n).astype(np.float32)
+        q = state_np[quat_indices]
+        q = q / np.linalg.norm(q)
+        state_np[quat_indices] = q
+        state = jnp.asarray(state_np)
+
+        H_analytic = model.geometric_jacobian(state)
+        H_autodiff = jax.jacfwd(model.predict)(state)
+        np.testing.assert_allclose(
+            np.asarray(H_analytic),
+            np.asarray(H_autodiff),
+            rtol=1e-5,
+            atol=1e-7,
+        )

@@ -25,7 +25,7 @@ References:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import ClassVar, NamedTuple
 
 import jax
@@ -227,6 +227,20 @@ class UKFConfig(FilterCoreConfig):
 tree_util.register_pytree_node_class(UKFConfig)
 
 
+def _with_led_distance(config: UKFConfig, led_distance: float) -> UKFConfig:
+    """Shallow-clone config with a new led_distance, skipping re-validation.
+
+    The original config already passed ``__post_init__``; re-running the
+    full validation cascade for a single field update is wasted work.
+    The caller resolves ``led_distance`` once host-side per filter run,
+    so PyTree round-trip safety is not needed here.
+    """
+    new_cfg = object.__new__(type(config))
+    object.__setattr__(new_cfg, "__dict__", dict(config.__dict__))
+    object.__setattr__(new_cfg, "led_distance", led_distance)
+    return new_cfg
+
+
 UKFState = FilterState
 
 
@@ -365,7 +379,7 @@ def compute_weights(
 
 
 def _outer_product_batch(x: jnp.ndarray, y: jnp.ndarray) -> jnp.ndarray:
-    """Batched outer products for covariance reconstruction.
+    """Per-sample outer product: ``(N, n) × (N, m) → (N, n, m)``.
 
     Parameters
     ----------
@@ -377,9 +391,9 @@ def _outer_product_batch(x: jnp.ndarray, y: jnp.ndarray) -> jnp.ndarray:
     Returns
     -------
     jnp.ndarray
-        Outer products (N, n, m) with ``result[i] = x[i][:, None] @ y[i][None, :]``.
+        Outer products (N, n, m) with ``result[i] = jnp.outer(x[i], y[i])``.
     """
-    return vmap(lambda a, b: jnp.atleast_2d(a).T @ jnp.atleast_2d(b), 0, 0)(x, y)
+    return vmap(jnp.outer, in_axes=(0, 0))(x, y)
 
 
 # =============================================================================
@@ -899,6 +913,7 @@ def _unscented_kalman_filter_impl(
             state_after_heading,
             config_for_filter,
             active=has_seen_vision_next & imu_stationary & stationary_context_next,
+            layout=layout,
         )
 
         event_source_indices = event_indices_per_frame_jax[t_idx]
@@ -1094,7 +1109,7 @@ def unscented_kalman_filter(
             Z_cam_led1_jax, Z_cam_led2_jax, mask_cam_jax
         )
         # Create new config with estimated spacing (do NOT mutate original)
-        config_for_filter = replace(ukf_config, led_distance=estimated_led_distance)
+        config_for_filter = _with_led_distance(ukf_config, estimated_led_distance)
     else:
         config_for_filter = ukf_config
 

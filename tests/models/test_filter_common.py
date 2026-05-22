@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import jax.numpy as jnp
 import numpy as np
 import pytest
 
 from trodestrack.models.ekf import EKFConfig, EKFState
+from trodestrack.models.ekf import _with_led_distance as _with_led_distance_ekf
 from trodestrack.models.filter_common import (
     FilterCoreConfig,
     FilterState,
@@ -20,6 +23,7 @@ from trodestrack.models.filter_common import (
 )
 from trodestrack.models.state_layout import get_layout
 from trodestrack.models.ukf import UKFConfig, UKFState
+from trodestrack.models.ukf import _with_led_distance as _with_led_distance_ukf
 
 
 def test_filter_core_config_defaults_match_existing_configs() -> None:
@@ -112,14 +116,15 @@ def test_update_zupt_accepts_filter_configs() -> None:
     zeros = jnp.zeros(8)
     identity = jnp.eye(8)
     state = FilterState(mean=zeros, cov=identity)
+    layout = get_layout("2d_full")
 
     ekf_config = EKFConfig(enable_zupt=True, zupt_velocity_threshold=0.05)
-    state_ekf, log_lik_ekf = update_zupt(state, ekf_config)
+    state_ekf, log_lik_ekf = update_zupt(state, ekf_config, layout=layout)
     assert isinstance(state_ekf, FilterState)
     assert bool(jnp.isfinite(log_lik_ekf))
 
     ukf_config = UKFConfig(enable_zupt=True, zupt_velocity_threshold=0.05)
-    state_ukf, log_lik_ukf = update_zupt(state, ukf_config)
+    state_ukf, log_lik_ukf = update_zupt(state, ukf_config, layout=layout)
     assert isinstance(state_ukf, FilterState)
     assert bool(jnp.isfinite(log_lik_ukf))
 
@@ -132,6 +137,7 @@ def test_update_zupt_disabled_is_exact_noop_with_large_covariance() -> None:
     posterior, log_lik = update_zupt(
         state,
         EKFConfig(enable_zupt=False, state_mode="2d_full"),
+        layout=get_layout("2d_full"),
     )
 
     np.testing.assert_allclose(posterior.mean, mean)
@@ -148,6 +154,7 @@ def test_update_zupt_inactive_is_exact_noop_with_large_covariance() -> None:
         state,
         EKFConfig(enable_zupt=True, zupt_velocity_threshold=0.05, state_mode="2d_full"),
         active=False,
+        layout=get_layout("2d_full"),
     )
 
     np.testing.assert_allclose(posterior.mean, mean)
@@ -169,6 +176,7 @@ def test_update_zupt_active_corrects_large_velocity_state() -> None:
             zupt_velocity_threshold=0.02,
             state_mode="2d_full",
         ),
+        layout=get_layout("2d_full"),
     )
 
     assert np.linalg.norm(np.asarray(posterior.mean[2:4])) < 1e-3
@@ -485,3 +493,40 @@ def test_filter_core_config_rejects_invalid_zupt_visual_hold_frames() -> None:
 
     FilterCoreConfig(zupt_visual_context_hold_frames=0)
     FilterCoreConfig(zupt_visual_context_hold_frames=3)
+
+
+def test_with_led_distance_equivalence_to_dataclasses_replace() -> None:
+    """``_with_led_distance`` produces the same config as ``dataclasses.replace``.
+
+    The shallow-clone helper bypasses ``__post_init__`` for speed; the
+    field-copy contract must remain identical to the validated path so
+    that a future refactor dropping a field copy is caught directly,
+    not via downstream filter divergence. Asserts the two paths agree
+    for both ``EKFConfig`` and ``UKFConfig``, and that the shim really
+    does skip validation (a NaN slips through the shim but raises in
+    ``dataclasses.replace``).
+    """
+    # EKF equivalence on a valid value.
+    cfg_ekf = EKFConfig()
+    cloned_ekf = _with_led_distance_ekf(cfg_ekf, 0.05)
+    expected_ekf = replace(cfg_ekf, led_distance=0.05)
+    assert cloned_ekf.__dict__ == expected_ekf.__dict__
+    assert isinstance(cloned_ekf, EKFConfig)
+    assert cloned_ekf is not cfg_ekf  # not aliased
+    assert (
+        cfg_ekf.led_distance != 0.05 or cfg_ekf.led_distance is None
+    )  # original unchanged
+
+    # UKF equivalence on a valid value.
+    cfg_ukf = UKFConfig()
+    cloned_ukf = _with_led_distance_ukf(cfg_ukf, 0.05)
+    expected_ukf = replace(cfg_ukf, led_distance=0.05)
+    assert cloned_ukf.__dict__ == expected_ukf.__dict__
+    assert isinstance(cloned_ukf, UKFConfig)
+
+    # The shim must skip __post_init__: a NaN passes through (would be
+    # rejected by replace, which re-runs validation).
+    cloned_nan = _with_led_distance_ekf(cfg_ekf, float("nan"))
+    assert cloned_nan.led_distance != cloned_nan.led_distance  # NaN check
+    with pytest.raises(ValueError, match=r"led_distance"):
+        replace(cfg_ekf, led_distance=float("nan"))

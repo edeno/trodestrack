@@ -41,7 +41,7 @@ References:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import NamedTuple
 
 import jax
@@ -125,6 +125,20 @@ class EKFConfig(FilterCoreConfig):
 
 
 tree_util.register_pytree_node_class(EKFConfig)
+
+
+def _with_led_distance(config: EKFConfig, led_distance: float) -> EKFConfig:
+    """Shallow-clone config with a new led_distance, skipping re-validation.
+
+    The original config already passed ``__post_init__``; re-running the
+    full validation cascade for a single field update is wasted work.
+    The caller resolves ``led_distance`` once host-side per filter run,
+    so PyTree round-trip safety is not needed here.
+    """
+    new_cfg = object.__new__(type(config))
+    object.__setattr__(new_cfg, "__dict__", dict(config.__dict__))
+    object.__setattr__(new_cfg, "led_distance", led_distance)
+    return new_cfg
 
 
 EKFState = FilterState
@@ -345,6 +359,7 @@ def _extended_kalman_filter_impl(
             state_after_heading,
             config_for_filter,
             active=has_seen_vision_next & imu_stationary & stationary_context_next,
+            layout=layout,
         )
 
         event_source_indices = event_indices_per_frame_jax[t_idx]
@@ -1006,7 +1021,7 @@ def extended_kalman_filter(
             Z_cam_led1_jax, Z_cam_led2_jax, mask_cam_jax
         )
         # Create new config with estimated spacing (do NOT mutate original)
-        config_for_filter = replace(ekf_config, led_distance=estimated_led_distance)
+        config_for_filter = _with_led_distance(ekf_config, estimated_led_distance)
     else:
         config_for_filter = ekf_config
 
@@ -1323,6 +1338,7 @@ def _extended_kalman_filter_3d_core(
             state_cam,
             config_for_filter,
             active=has_seen_vision_next & imu_stationary & stationary_context_next,
+            layout=layout,
         )
         marginal_loglik = marginal_loglik_prev + log_lik_camera + log_lik_zupt
         outputs = (
@@ -1460,17 +1476,27 @@ def _update_camera_3d_scanned(
         return state, jnp.asarray(0.0, dtype=state.mean.dtype)
 
     def do_update(_: None) -> tuple[EKFState, jnp.ndarray]:
-        state_iter = state
-        innovation = jnp.zeros(camera_model.meas_dim, dtype=state.mean.dtype)
-        S = jnp.eye(camera_model.meas_dim, dtype=state.mean.dtype)
-        for _ in range(config.num_iter):
-            state_iter, innovation, S = _camera_3d_linear_update(
+        def iter_body(
+            carry: tuple[EKFState, jnp.ndarray, jnp.ndarray], _i: int
+        ) -> tuple[tuple[EKFState, jnp.ndarray, jnp.ndarray], None]:
+            state_iter, _innov, _S = carry
+            new_state, innov, S = _camera_3d_linear_update(
                 state,
                 state_iter.mean,
                 camera_model,
                 frame_idx,
                 layout,
             )
+            return (new_state, innov, S), None
+
+        init_carry = (
+            state,
+            jnp.zeros(camera_model.meas_dim, dtype=state.mean.dtype),
+            jnp.eye(camera_model.meas_dim, dtype=state.mean.dtype),
+        )
+        (state_iter, innovation, S), _ = lax.scan(
+            iter_body, init_carry, jnp.arange(config.num_iter)
+        )
 
         log_lik = gaussian_log_likelihood_masked(innovation, S, active_mask)
         if config.use_mahalanobis_gating:
