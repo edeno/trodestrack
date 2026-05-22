@@ -495,8 +495,18 @@ def test_report_command_with_custom_title_appears_in_pdf(
         pypdf = None
 
     if pypdf is not None:
+        import re as _re
+
         reader = pypdf.PdfReader(str(pdf_path))
         extracted = "".join(page.extract_text() or "" for page in reader.pages)
+        # Matplotlib on Windows emits text as /uniXXXXXXXX glyph references
+        # that pypdf does not auto-decode to Unicode. Decode them so the
+        # plain substring check works cross-platform.
+        extracted = _re.sub(
+            r"/uni([0-9A-Fa-f]{4,8})",
+            lambda m: chr(int(m.group(1), 16)),
+            extracted,
+        )
         assert title in extracted, (
             f"Title {title!r} not found in extracted PDF text; "
             f"first 500 chars: {extracted[:500]!r}"

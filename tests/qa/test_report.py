@@ -5,6 +5,7 @@ Following TDD: These tests are written BEFORE implementation to define the API.
 
 from __future__ import annotations
 
+import re
 import tempfile
 from pathlib import Path
 
@@ -21,6 +22,20 @@ from trodestrack.qa.report import (
 )
 from trodestrack.viz.styles import COLORS
 
+_UNI_GLYPH = re.compile(r"/uni([0-9A-Fa-f]{4,8})")
+
+
+def _decode_pdf_glyphs(text: str) -> str:
+    """Decode ``/uniXXXXXXXX`` matplotlib glyph references back to Unicode.
+
+    Matplotlib on Windows (and any platform when using non-default fonts)
+    encodes characters as ``/uniHHHHHHHH`` glyph references rather than
+    direct Unicode in the PDF text stream. pypdf returns those references
+    verbatim, so substring searches like ``"RESULT: PASS" in extracted``
+    fail even though the text is structurally present.
+    """
+    return _UNI_GLYPH.sub(lambda m: chr(int(m.group(1), 16)), text)
+
 
 def _extract_pdf_text(pdf_path: Path) -> str:
     """Return PDF text content, preferring pypdf and falling back to raw bytes.
@@ -28,6 +43,9 @@ def _extract_pdf_text(pdf_path: Path) -> str:
     Matplotlib PDFs typically keep text streams uncompressed, so a raw-byte
     search works in practice when pypdf isn't installed. The fallback mirrors
     the pattern used in ``tests/cli/test_report_command.py``.
+
+    The ``/uniXXXXXXXX`` glyph references emitted by matplotlib on Windows
+    are decoded back to Unicode so callers can do plain substring searches.
     """
     try:
         import pypdf  # type: ignore[import-not-found]
@@ -35,7 +53,8 @@ def _extract_pdf_text(pdf_path: Path) -> str:
         pypdf = None  # type: ignore[assignment]
     if pypdf is not None:
         reader = pypdf.PdfReader(str(pdf_path))
-        return "".join(page.extract_text() or "" for page in reader.pages)
+        raw = "".join(page.extract_text() or "" for page in reader.pages)
+        return _decode_pdf_glyphs(raw)
     return pdf_path.read_bytes().decode("latin-1", errors="replace")
 
 
