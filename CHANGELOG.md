@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - unreleased
+
+### Changed (internal — no behavior change, verified bit-exact against Phase 2 3D analytic tests)
+
+- 3D IEKF (`extended_kalman_filter_3d`) now uses `lax.scan` for the iterated-update loop, matching the 2D path. JIT compilation no longer unrolls the Python `for` linearly with `config.num_iter`; numerical output preserved to 0.000e+00 max delta on the 3D analytic suite.
+- `update_zupt` now requires an explicit `layout: StateLayout` parameter, removing the dimension-based `LAYOUT_REGISTRY` lookup. Two registered 16D layouts no longer collide silently; future layouts sharing a dimension can't miswire.
+- `build_quaternion_transition_jacobian` now requires `u_imu` (previously optional with a "mean inconsistent with covariance" warning); every real call site passed it.
+- `Camera3DPositionModel.geometric_jacobian` is now an analytic Jacobian (closed-form `∂R(q)/∂q` for scalar-first quaternions, chained through `q/||q||` normalization) instead of `jacfwd(self.predict)`. Agrees with `jacfwd` to `rtol=1e-6` on 50 random unit-norm states.
+- `process_noise.assemble_Q` per-component multipliers are now vectorized via outer-product scaling instead of 12+ per-index `.at[idx, idx].mul()` calls (mirrors the existing `freeze_bias_during_blackout` pattern).
+- `_outer_product_batch` in `models/ukf.py` simplified from `vmap(atleast_2d.T @ atleast_2d)` to `vmap(jnp.outer)`, matching the pattern in `runtime/offline.py`.
+- Dead `add_more_jitter` fallback removed from `gaussian_log_likelihood`. The leading adaptive jitter (`1e-8 * trace/k`) plus upstream `symmetrize` is sufficient on healthy inputs; a genuinely indefinite matrix now surfaces via `slogdet`'s sign field rather than silently double-jittering.
+- `extended_kalman_filter` and `unscented_kalman_filter` use a `_with_led_distance` helper that shallow-clones the config without re-running `FilterCoreConfig.__post_init__` (the original config already passed validation; re-running for a single field update is wasted work).
+
+### Documented
+
+- `initialize_state` docstring now states it is host-only; do not call inside `jax.jit`. It uses Python-level branching on observation validity that traces non-statically.
+
 ## [0.5.0] - unreleased
 
 ### Changed (breaking)
@@ -247,7 +264,8 @@ Initial public release of trodestrack: sensor-fused 2D rat tracking with JAX EKF
 Detailed session-by-session development notes are preserved in
 [CHANGELOG.dev-sessions.md](CHANGELOG.dev-sessions.md) for historical reference.
 
-[0.5.0]: https://github.com/edeno/trodestrack/compare/v0.4.0...HEAD
+[0.5.1]: https://github.com/edeno/trodestrack/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/edeno/trodestrack/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/edeno/trodestrack/compare/v0.2.2...v0.4.0
 [0.2.2]: https://github.com/edeno/trodestrack/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/edeno/trodestrack/compare/v0.2.0...v0.2.1
