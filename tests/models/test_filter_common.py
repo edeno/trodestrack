@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import jax.numpy as jnp
 import numpy as np
 import pytest
 
 from trodestrack.models.ekf import EKFConfig, EKFState
+from trodestrack.models.ekf import _with_led_distance as _with_led_distance_ekf
 from trodestrack.models.filter_common import (
     FilterCoreConfig,
     FilterState,
@@ -20,6 +23,7 @@ from trodestrack.models.filter_common import (
 )
 from trodestrack.models.state_layout import get_layout
 from trodestrack.models.ukf import UKFConfig, UKFState
+from trodestrack.models.ukf import _with_led_distance as _with_led_distance_ukf
 
 
 def test_filter_core_config_defaults_match_existing_configs() -> None:
@@ -489,3 +493,40 @@ def test_filter_core_config_rejects_invalid_zupt_visual_hold_frames() -> None:
 
     FilterCoreConfig(zupt_visual_context_hold_frames=0)
     FilterCoreConfig(zupt_visual_context_hold_frames=3)
+
+
+def test_with_led_distance_equivalence_to_dataclasses_replace() -> None:
+    """``_with_led_distance`` produces the same config as ``dataclasses.replace``.
+
+    The shallow-clone helper bypasses ``__post_init__`` for speed; the
+    field-copy contract must remain identical to the validated path so
+    that a future refactor dropping a field copy is caught directly,
+    not via downstream filter divergence. Asserts the two paths agree
+    for both ``EKFConfig`` and ``UKFConfig``, and that the shim really
+    does skip validation (a NaN slips through the shim but raises in
+    ``dataclasses.replace``).
+    """
+    # EKF equivalence on a valid value.
+    cfg_ekf = EKFConfig()
+    cloned_ekf = _with_led_distance_ekf(cfg_ekf, 0.05)
+    expected_ekf = replace(cfg_ekf, led_distance=0.05)
+    assert cloned_ekf.__dict__ == expected_ekf.__dict__
+    assert isinstance(cloned_ekf, EKFConfig)
+    assert cloned_ekf is not cfg_ekf  # not aliased
+    assert (
+        cfg_ekf.led_distance != 0.05 or cfg_ekf.led_distance is None
+    )  # original unchanged
+
+    # UKF equivalence on a valid value.
+    cfg_ukf = UKFConfig()
+    cloned_ukf = _with_led_distance_ukf(cfg_ukf, 0.05)
+    expected_ukf = replace(cfg_ukf, led_distance=0.05)
+    assert cloned_ukf.__dict__ == expected_ukf.__dict__
+    assert isinstance(cloned_ukf, UKFConfig)
+
+    # The shim must skip __post_init__: a NaN passes through (would be
+    # rejected by replace, which re-runs validation).
+    cloned_nan = _with_led_distance_ekf(cfg_ekf, float("nan"))
+    assert cloned_nan.led_distance != cloned_nan.led_distance  # NaN check
+    with pytest.raises(ValueError, match=r"led_distance"):
+        replace(cfg_ekf, led_distance=float("nan"))
