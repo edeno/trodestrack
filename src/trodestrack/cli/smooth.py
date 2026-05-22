@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -49,6 +50,7 @@ from trodestrack.cli.utils import (
 from trodestrack.io import write_session_diagnostics
 from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
 from trodestrack.models.filter_common import FilterCoreConfig
+from trodestrack.models.state_layout import STATE_MODES
 from trodestrack.runtime.offline import rts_smoother
 
 _FILTER_DEFAULTS = FilterCoreConfig()
@@ -107,7 +109,17 @@ producing lower-variance trajectories than forward filtering alone.
         "--imu-measurements",
         type=Path,
         required=False,
-        help="Path to IMU measurements file. Channel count depends on --state-mode: (N_imu, 3) [ω_z, f_x, f_y] for 2d_full / vision_only and the default 2d_cam_3d_imu (degenerate, vz idle); (N_imu, 4) [ω_z, f_x, f_y, f_z] for 2d_cam_3d_imu with 3D velocity; (N_imu, 6) [ω_x, ω_y, ω_z, f_x, f_y, f_z] for 2d_cam_6dof_imu_orientation. Units: rad/s and m/s².",
+        help=(
+            "Path to IMU measurements file. Default state mode "
+            "(2d_cam_3d_imu) expects shape (N_imu, 3) for "
+            "[gyro_z, accel_x, accel_y] in [rad/s, m/s², m/s²]. "
+            "Other state modes: 2d_full / vision_only / imu_only = "
+            "(N_imu, 3) with the same channel order; 2d_cam_3d_imu with "
+            "active vertical velocity = (N_imu, 4) for "
+            "[gyro_z, accel_x, accel_y, accel_z]; "
+            "2d_cam_6dof_imu_orientation = (N_imu, 6) for "
+            "[gyro_x, gyro_y, gyro_z, accel_x, accel_y, accel_z]."
+        ),
         metavar="FILE",
     )
     input_group.add_argument(
@@ -217,22 +229,31 @@ producing lower-variance trajectories than forward filtering alone.
         help="Expected LED spacing in meters (default: auto-detect via the median pairwise distance over frames where both LEDs are finite, with a hardcoded 0.04 m fallback when no such frames exist)",
     )
     filter_group.add_argument(
+        "--use-heading-measurement",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Use heading pseudo-measurement from dual LEDs (default: "
+            f"{_FILTER_DEFAULTS.use_heading_measurement}). Applies to the "
+            "forward EKF pass; the RTS smoother re-uses the resulting "
+            "filtered marginals."
+        ),
+    )
+    filter_group.add_argument(
         "--state-mode",
         type=str,
         default=None,
-        choices=(
-            "2d_full",
-            "vision_only",
-            "2d_cam_3d_imu",
-            "2d_cam_6dof_imu_orientation",
-        ),
+        choices=STATE_MODES,
         help=(
-            f"State layout (default: {_FILTER_DEFAULTS.state_mode}). "
-            "`2d_cam_6dof_imu_orientation` requires a 6-channel IMU input "
+            f"State vector layout (default: {_FILTER_DEFAULTS.state_mode}). "
+            "Defaults to 2d_cam_3d_imu, which expects a 3-channel IMU "
+            "[gyro_z, accel_x, accel_y]. Alternatives: 2d_full / "
+            "vision_only / imu_only also use the 3-channel IMU; "
+            "2d_cam_6dof_imu_orientation requires a 6-channel IMU "
             "[gyro_x, gyro_y, gyro_z, accel_x, accel_y, accel_z]; "
-            "`3d_cam_6dof_imu` requires the experimental "
-            "`extended_kalman_filter_3d` entry point. Use the Python API "
-            "for that 3D-camera mode."
+            "the 3D layouts (3d_euler / 3d_quat / 3d_cam_6dof_imu) "
+            "require the experimental `extended_kalman_filter_3d` "
+            "entry point and are not runnable through this CLI."
         ),
     )
 
@@ -243,12 +264,6 @@ producing lower-variance trajectories than forward filtering alone.
         type=int,
         default=1,
         help="Number of IEKS iterations (default: 1 = standard RTS, >1 = iterative relinearization)",
-    )
-    smoother_group.add_argument(
-        "--use-heading-measurement",
-        action=argparse.BooleanOptionalAction,
-        default=None,
-        help="Use heading pseudo-measurement from dual LEDs (default: True)",
     )
 
     parser.set_defaults(func=run_smooth)
@@ -269,7 +284,7 @@ def run_smooth(args: argparse.Namespace) -> None:
     args : argparse.Namespace
         Parsed command-line arguments.
     """
-    # Defer the banner until inputs are validated; see online.py for
+    # Defer the banner until inputs are validated; see filter.py for
     # the rationale.
     if args.config is not None:
         _run_smooth_from_config(args)
@@ -384,8 +399,18 @@ def run_smooth(args: argparse.Namespace) -> None:
     print(f"  Damping coefficient: {ekf_config.damping_coeff:.2f} s⁻¹")
     print(f"  LED heading measurement: {ekf_config.use_heading_measurement}")
 
-    # Run forward filter
+    # Run forward filter. Wrap with wall-clock timing so users see a total
+    # runtime line after the (otherwise silent) JAX scan returns. Per-frame
+    # progress would require chunked execution, which requires
+    # `extended_kalman_filter` to accept `initial_state` and return
+    # `final_state`; the current scan body deletes `final_state`, so chunking
+    # is deferred until the filter API supports per-chunk continuation.
     print("\nRunning Extended Kalman Filter (forward pass)...")
+    print(
+        "  Compiling JAX kernels and running filter (this may take a while "
+        "on the first call; subsequent runs reuse the compiled kernels)..."
+    )
+    _t0 = time.perf_counter()
     filter_result = extended_kalman_filter(
         ekf_config=ekf_config,
         t_imu=t_imu,
@@ -395,10 +420,18 @@ def run_smooth(args: argparse.Namespace) -> None:
         Z_cam_led2=Z_cam_led2,
         mask_cam=mask_cam,
     )
+    _dt_filter = time.perf_counter() - _t0
+    fps_filter = (n_cam / _dt_filter) if _dt_filter > 0 else float("inf")
+    print(
+        f"  Filter completed in {_dt_filter:.1f}s "
+        f"({n_cam} camera frames @ {fps_filter:.0f} fps; "
+        "includes JIT compilation)"
+    )
     print(f"  Marginal log-likelihood: {filter_result.marginal_loglik:.2f}")
 
-    # Run backward smoother
+    # Run backward smoother. Same timing rationale as the filter call.
     print(f"\nRunning RTS Smoother (backward pass, {args.num_iter} iteration(s))...")
+    _t0 = time.perf_counter()
     smoother_result = rts_smoother(
         filter_result=filter_result,
         ekf_config=ekf_config,
@@ -407,6 +440,13 @@ def run_smooth(args: argparse.Namespace) -> None:
         t_cam=t_cam,
         num_iter=args.num_iter,
         mask_cam=mask_cam,
+    )
+    _dt_smooth = time.perf_counter() - _t0
+    fps_smooth = (n_cam / _dt_smooth) if _dt_smooth > 0 else float("inf")
+    print(
+        f"  Smoother completed in {_dt_smooth:.1f}s "
+        f"({n_cam} camera frames @ {fps_smooth:.0f} fps; "
+        "includes JIT compilation)"
     )
     print("  Smoothing complete")
 

@@ -337,6 +337,47 @@ def _create_summary_page(
     fig = plt.figure(figsize=(8.5, 11))  # US Letter size
     fig.suptitle(title, fontsize=16, fontweight="bold", y=0.98)
 
+    # Compute PASS/FAIL verdict against project acceptance targets so the
+    # report leads with the bottom line. Heading is compared in degrees
+    # because ``TARGET_HEADING_MAE_DEG`` is degrees but ``heading_mae`` is
+    # radians (matching the convention used elsewhere in this function).
+    heading_mae_deg = float(np.rad2deg(heading_mae))
+    position_pass = pos_rmse <= TARGET_POSITION_RMSE_M
+    velocity_pass = vel_rmse <= TARGET_VELOCITY_RMSE_MS
+    heading_pass = heading_mae_deg <= TARGET_HEADING_MAE_DEG
+    all_pass = position_pass and velocity_pass and heading_pass
+    if all_pass:
+        verdict = "RESULT: PASS"
+        verdict_color = COLORS["verdict_pass"]
+    else:
+        failed = [
+            name
+            for name, ok in [
+                ("position", position_pass),
+                ("velocity", velocity_pass),
+                ("heading", heading_pass),
+            ]
+            if not ok
+        ]
+        verdict = f"RESULT: FAIL ({', '.join(failed)})"
+        verdict_color = COLORS["verdict_fail"]
+    fig.text(
+        0.5,
+        0.93,
+        verdict,
+        ha="center",
+        va="top",
+        fontsize=14,
+        fontweight="bold",
+        color="white",
+        bbox={
+            "facecolor": verdict_color,
+            "edgecolor": verdict_color,
+            "boxstyle": "round,pad=0.4",
+        },
+        transform=fig.transFigure,
+    )
+
     # Create text content
     text_lines = []
 
@@ -412,11 +453,12 @@ def _create_summary_page(
             text_lines.append(f"{key_str:45s} {value_str}")
         text_lines.append("")
 
-    # Render text on figure
+    # Render text on figure. Start below the verdict banner so it doesn't
+    # collide with the title or the PASS/FAIL block.
     text_content = "\n".join(text_lines)
     fig.text(
         0.1,
-        0.95,
+        0.88,
         text_content,
         verticalalignment="top",
         fontfamily="monospace",
@@ -465,22 +507,28 @@ def _create_trajectory_plot(
         label="Estimate",
     )
 
-    # Mark start and end
-    ax.plot(
+    # Mark start and end. Shapes (circle vs square) carry the start/end
+    # distinction; the Okabe-Ito blue/orange pair is colorblind-safe (the
+    # previous green/red pair was unreadable for deuteranopes).
+    ax.scatter(
         positions_true[0, 0],
         positions_true[0, 1],
-        "o",
-        color=COLORS["green"],
-        markersize=10,
+        marker="o",
+        s=80,
+        c=COLORS["okabe_ito_blue"],
+        edgecolor="black",
+        linewidth=1.5,
         label="Start",
         zorder=10,
     )
-    ax.plot(
+    ax.scatter(
         positions_true[-1, 0],
         positions_true[-1, 1],
-        "s",
-        color=COLORS["red"],
-        markersize=10,
+        marker="s",
+        s=80,
+        c=COLORS["okabe_ito_orange"],
+        edgecolor="black",
+        linewidth=1.5,
         label="End",
         zorder=10,
     )

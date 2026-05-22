@@ -435,3 +435,27 @@ class TestIntegration:
         # Cleanup
         for fig in [fig1, fig2, fig3, fig4, fig5]:
             plt.close(fig)
+
+
+class TestHistogramTitles:
+    """Regression tests for descriptive titles on the NEES/NIS histograms."""
+
+    def test_qa_report_nees_histogram_has_title(self) -> None:
+        """``plot_nees_histogram`` must label its consistency check."""
+        np.random.seed(0)
+        nees = np.random.chisquare(df=8, size=200)
+        fig, ax = plot_nees_histogram(nees, state_dim=8, confidence=0.95)
+        try:
+            assert "NEES" in ax.get_title()
+        finally:
+            plt.close(fig)
+
+    def test_qa_report_nis_histogram_has_title(self) -> None:
+        """``plot_nis_histogram`` must label its consistency check."""
+        np.random.seed(0)
+        nis = np.random.chisquare(df=4, size=200)
+        fig, ax = plot_nis_histogram(nis, measurement_dim=4, confidence=0.95)
+        try:
+            assert "NIS" in ax.get_title()
+        finally:
+            plt.close(fig)

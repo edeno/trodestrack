@@ -1,39 +1,10 @@
-"""CLI command for forward-only filtering of sensor-fused tracking data.
-
-This module implements the ``trodestrack online`` command, which runs the
-EKF in **forward filter only** mode (no backward smoothing) on IMU +
-camera data. "Online" here means "forward-pass / no future-frame
-dependence" — the command is *not* a streaming ingest loop. It loads the
-full IMU / camera / LED arrays from disk and calls
-``extended_kalman_filter`` once over the batch. Per-frame ingest would
-require driving ``trodestrack.models.ekf.predict_step`` /
-``trodestrack.models.ekf.update_step`` directly from Python; that is not
-exposed as a CLI today.
-
-Usage:
-    trodestrack online \\
-        --imu-timestamps t_imu.txt \\
-        --imu-measurements U_imu.txt \\
-        --camera-timestamps t_cam.txt \\
-        --led1-positions Z_cam_led1.txt \\
-        --led2-positions Z_cam_led2.txt \\
-        --output-dir run1/
-
-Output files:
-    run1/filtered_means.txt: Filter state estimates (N_cam, n)
-    run1/filtered_covariances.txt: Filter covariances (N_cam, n, n) flattened
-    run1/marginal_loglik.txt: Marginal log-likelihood (scalar)
-
-Note:
-    n is the state dimension (default: 10 for the "2d_cam_3d_imu" mode used
-    by EKFConfig() out of the box; pass --led-distance, --use-heading-measurement,
-    etc. to override individual filter parameters).
-"""
+"""CLI command for forward-only EKF filtering (no smoothing) on sensor-fused tracking data. Loads complete IMU/camera/LED arrays from disk and runs extended_kalman_filter once. Use trodestrack smooth for best accuracy when all data is available."""
 
 from __future__ import annotations
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -54,6 +25,7 @@ from trodestrack.cli.utils import (
 from trodestrack.io import write_session_diagnostics
 from trodestrack.models.ekf import EKFConfig, extended_kalman_filter
 from trodestrack.models.filter_common import FilterCoreConfig
+from trodestrack.models.state_layout import STATE_MODES
 
 _FILTER_DEFAULTS = FilterCoreConfig()
 _LEGACY_REQUIRED_ARGS = (
@@ -65,8 +37,8 @@ _LEGACY_REQUIRED_ARGS = (
 )
 
 
-def add_online_parser(subparsers: argparse._SubParsersAction) -> None:
-    """Add online subcommand parser.
+def add_filter_parser(subparsers: argparse._SubParsersAction) -> None:
+    """Add filter subcommand parser.
 
     Parameters
     ----------
@@ -74,17 +46,11 @@ def add_online_parser(subparsers: argparse._SubParsersAction) -> None:
         Subparsers object from argparse.
     """
     parser = subparsers.add_parser(
-        "online",
-        help="Run forward-only EKF filtering (no smoothing) over complete input files",
+        "filter",
+        help="Run forward-only EKF filtering (no smoothing) on input files",
         description="""
-Run Extended Kalman Filter on sensor-fused tracking data in forward-only
-("online") mode.
-
-Despite the name, this is a BATCH command: it loads complete IMU,
-camera, LED, and mask arrays from disk and runs the EKF once over the
-full session. There is no per-frame streaming ingest. "Online" here
-means "no backward smoother" / "no future-frame dependence", not
-"real-time per-frame".
+Run Extended Kalman Filter on sensor-fused tracking data as a
+forward-only batch pass (no backward smoother).
 
 What it does:
 1. Reads input arrays from --imu-timestamps, --imu-measurements,
@@ -93,17 +59,7 @@ What it does:
    via `extended_kalman_filter`.
 3. Writes filter outputs to --output-dir.
 
-Use this command for:
-- Producing forward-only estimates without smoother latency / lookahead.
-- Filtering datasets where future observations should not influence past
-  estimates (online-style analyses on archived data).
-
-For best accuracy when you do have access to all data, use
-`trodestrack smooth` instead.
-
-True per-frame / real-time streaming is not provided by this CLI; for
-that, drive `trodestrack.models.ekf.predict_step` /
-`trodestrack.models.ekf.update_step` directly via the Python API.
+For best accuracy when all data is available, use trodestrack smooth.
         """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -129,7 +85,17 @@ that, drive `trodestrack.models.ekf.predict_step` /
         "--imu-measurements",
         type=Path,
         required=False,
-        help="Path to IMU measurements file. Channel count depends on --state-mode: (N_imu, 3) [ω_z, f_x, f_y] for 2d_full / vision_only and the default 2d_cam_3d_imu (degenerate, vz idle); (N_imu, 4) [ω_z, f_x, f_y, f_z] for 2d_cam_3d_imu with 3D velocity; (N_imu, 6) [ω_x, ω_y, ω_z, f_x, f_y, f_z] for 2d_cam_6dof_imu_orientation. Units: rad/s and m/s².",
+        help=(
+            "Path to IMU measurements file. Default state mode "
+            "(2d_cam_3d_imu) expects shape (N_imu, 3) for "
+            "[gyro_z, accel_x, accel_y] in [rad/s, m/s², m/s²]. "
+            "Other state modes: 2d_full / vision_only / imu_only = "
+            "(N_imu, 3) with the same channel order; 2d_cam_3d_imu with "
+            "active vertical velocity = (N_imu, 4) for "
+            "[gyro_z, accel_x, accel_y, accel_z]; "
+            "2d_cam_6dof_imu_orientation = (N_imu, 6) for "
+            "[gyro_x, gyro_y, gyro_z, accel_x, accel_y, accel_z]."
+        ),
         metavar="FILE",
     )
     input_group.add_argument(
@@ -248,28 +214,26 @@ that, drive `trodestrack.models.ekf.predict_step` /
         "--state-mode",
         type=str,
         default=None,
-        choices=(
-            "2d_full",
-            "vision_only",
-            "2d_cam_3d_imu",
-            "2d_cam_6dof_imu_orientation",
-        ),
+        choices=STATE_MODES,
         help=(
-            f"State layout (default: {_FILTER_DEFAULTS.state_mode}). "
-            "`2d_cam_6dof_imu_orientation` requires a 6-channel IMU input "
+            f"State vector layout (default: {_FILTER_DEFAULTS.state_mode}). "
+            "Defaults to 2d_cam_3d_imu, which expects a 3-channel IMU "
+            "[gyro_z, accel_x, accel_y]. Alternatives: 2d_full / "
+            "vision_only / imu_only also use the 3-channel IMU; "
+            "2d_cam_6dof_imu_orientation requires a 6-channel IMU "
             "[gyro_x, gyro_y, gyro_z, accel_x, accel_y, accel_z]; "
-            "`3d_cam_6dof_imu` requires the experimental "
-            "`extended_kalman_filter_3d` entry point. Use the Python API "
-            "for that 3D-camera mode."
+            "the 3D layouts (3d_euler / 3d_quat / 3d_cam_6dof_imu) "
+            "require the experimental `extended_kalman_filter_3d` "
+            "entry point and are not runnable through this CLI."
         ),
     )
 
-    parser.set_defaults(func=run_online)
+    parser.set_defaults(func=run_filter)
 
 
 @friendly_cli_errors
-def run_online(args: argparse.Namespace) -> None:
-    """Execute the online command.
+def run_filter(args: argparse.Namespace) -> None:
+    """Execute the filter command.
 
     The :func:`friendly_cli_errors` decorator converts
     ``FileNotFoundError`` / ``ValueError`` raised by downstream
@@ -287,12 +251,12 @@ def run_online(args: argparse.Namespace) -> None:
     # appeared *under* a header advertising work that never started,
     # which read like the run had begun.
     if args.config is not None:
-        _run_online_from_config(args)
+        _run_filter_from_config(args)
         return
 
-    require_cli_inputs(args, _LEGACY_REQUIRED_ARGS, command="online")
+    require_cli_inputs(args, _LEGACY_REQUIRED_ARGS, command="filter")
     print("=" * 80)
-    print("trodestrack online — Forward-only EKF (batch over full input arrays)")
+    print("trodestrack filter — Forward-only EKF (batch over full input arrays)")
     print("=" * 80)
 
     # Load input data
@@ -399,8 +363,18 @@ def run_online(args: argparse.Namespace) -> None:
     print(f"  Damping coefficient: {ekf_config.damping_coeff:.2f} s⁻¹")
     print(f"  LED heading measurement: {ekf_config.use_heading_measurement}")
 
-    # Run forward filter
+    # Run forward filter. Wrap with wall-clock timing so users see a total
+    # runtime line after the (otherwise silent) JAX scan returns. Per-frame
+    # progress would require chunked execution, which requires
+    # `extended_kalman_filter` to accept `initial_state` and return
+    # `final_state`; the current scan body deletes `final_state`, so chunking
+    # is deferred until the filter API supports per-chunk continuation.
     print("\nRunning Extended Kalman Filter (forward pass only, no smoothing)...")
+    print(
+        "  Compiling JAX kernels and running filter (this may take a while "
+        "on the first call; subsequent runs reuse the compiled kernels)..."
+    )
+    _t0 = time.perf_counter()
     filter_result = extended_kalman_filter(
         ekf_config=ekf_config,
         t_imu=t_imu,
@@ -409,6 +383,12 @@ def run_online(args: argparse.Namespace) -> None:
         Z_cam_led1=Z_cam_led1,
         Z_cam_led2=Z_cam_led2,
         mask_cam=mask_cam,
+    )
+    _dt = time.perf_counter() - _t0
+    fps = (n_cam / _dt) if _dt > 0 else float("inf")
+    print(
+        f"  Filter completed in {_dt:.1f}s "
+        f"({n_cam} camera frames @ {fps:.0f} fps; includes JIT compilation)"
     )
     print(f"  Marginal log-likelihood: {filter_result.marginal_loglik:.2f}")
     print("  Filtering complete")
@@ -432,7 +412,7 @@ def run_online(args: argparse.Namespace) -> None:
     # Save metadata for reproducibility
     with open(output_dir / "metadata.txt", "w") as f:
         f.write(
-            "trodestrack online — Forward-only EKF Results (batch over full inputs)\n"
+            "trodestrack filter — Forward-only EKF Results (batch over full inputs)\n"
         )
         f.write("=" * 80 + "\n\n")
         f.write("Input Files:\n")
@@ -485,18 +465,18 @@ def run_online(args: argparse.Namespace) -> None:
     )
 
 
-def _run_online_from_config(args: argparse.Namespace) -> None:
+def _run_filter_from_config(args: argparse.Namespace) -> None:
     run = prepare_config_filter_run(args)
     save_filter_outputs(run)
     with open(run.output_dir / "marginal_loglik.txt", "w") as f:
         f.write(f"{run.filter_result.marginal_loglik:.6f}\n")
     write_config_metadata(
         run,
-        title="trodestrack online — Config-driven forward-only EKF",
+        title="trodestrack filter — Config-driven forward-only EKF",
         marginal_loglik=float(run.filter_result.marginal_loglik),
         state_dim=run.filter_result.filtered_means.shape[1],
     )
     if run.config.outputs.write_diagnostics:
         write_session_diagnostics(run.session, run.output_dir, run.safety_report)
 
-    print(f"\nSaved config-driven online outputs to {run.output_dir}/")
+    print(f"\nSaved config-driven filter outputs to {run.output_dir}/")

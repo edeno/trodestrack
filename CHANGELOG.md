@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - unreleased
+
+### Changed (breaking)
+
+- The `online` CLI subcommand has been renamed to `filter`. Update scripts: `trodestrack online ...` → `trodestrack filter ...`. The semantics are unchanged — the new name accurately reflects that the command runs a forward-only batch filter (not a streaming/real-time ingest loop).
+- `--state-mode` argparse `choices=` now uses `STATE_MODES` from `models.state_layout` (added in 0.4.0); the help text lists every registered mode automatically.
+
+### Added
+
+- `trodestrack report --from-run <dir>` accepts a `filter`/`smooth` output directory directly when paired with `--ground-truth-positions` and `--ground-truth-headings`. Previously, users had to manually construct a `qa_inputs/` directory before running `report`.
+- Progress messages during long filter / smoother runs: total wall-clock time + frames/second on completion, with a note that the first run includes JIT compilation cost. Chunked per-frame progress deferred (requires `extended_kalman_filter` API to thread `initial_state` in / `final_state` out; not implemented today).
+- QA report summary page now leads with a `RESULT: PASS` or `RESULT: FAIL (failing metrics)` verdict line based on project acceptance targets (`TARGET_POSITION_RMSE_M`, `TARGET_VELOCITY_RMSE_MS`, `TARGET_HEADING_MAE_DEG`).
+- NEES/NIS histograms now have descriptive titles ("NEES Histogram — Filter Consistency Check" and "NIS Histogram — Innovation Consistency Check").
+- `pypdf` added as a `[dev]` dependency so PDF-content tests can assert on text inside compressed page streams (matplotlib emits FlateDecode-compressed streams that raw byte search can't see).
+
+### Fixed
+
+- QA report trajectory plot start/end markers use Okabe-Ito colorblind-safe colors (`#0072B2` / `#E69F00`) instead of green/red. Shape difference (circle vs square) retained.
+- `cli/utils.load_data_file` error messages include the exception class name (e.g. `ValueError`, `IOError`) so numpy/IO parse errors are recognizable in bug reports.
+- `io.session._validate_time_vector` error messages now include the offending index, the timestamp values at that step, and common-cause recovery hints (sample-and-hold expansion, out-of-order concatenation).
+- `cli.smooth`'s `--use-heading-measurement` is now in the filter argparse group (it applies to the forward EKF pass, not the RTS backward pass).
+
+### Removed
+
+- README "Project Status" section moved to the CHANGELOG. Benchmark numbers (~38× realtime / ~0.41 ms per frame) now live in one place; the README on-ramp links to the CHANGELOG and plans directory.
+
 ## [0.4.0] - unreleased
 
 ### Changed (breaking)
@@ -221,7 +247,8 @@ Initial public release of trodestrack: sensor-fused 2D rat tracking with JAX EKF
 Detailed session-by-session development notes are preserved in
 [CHANGELOG.dev-sessions.md](CHANGELOG.dev-sessions.md) for historical reference.
 
-[0.4.0]: https://github.com/edeno/trodestrack/compare/v0.2.2...HEAD
+[0.5.0]: https://github.com/edeno/trodestrack/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/edeno/trodestrack/compare/v0.2.2...v0.4.0
 [0.2.2]: https://github.com/edeno/trodestrack/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/edeno/trodestrack/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/edeno/trodestrack/compare/v0.1.0...v0.2.0

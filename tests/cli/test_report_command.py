@@ -21,6 +21,28 @@ from trodestrack.cli.report import load_run_data
 
 
 @pytest.fixture
+def use_truetype_pdf_fonts():
+    """Force matplotlib to embed TrueType (Type 42) fonts in test PDFs.
+
+    The default ``pdf.fonttype = 3`` (Type 3) gives matplotlib a custom
+    per-document font subset whose ``/Encoding`` table pypdf cannot
+    decode reliably on Windows (characters come back as glyph indices
+    rather than Unicode). Type 42 fonts ship a proper Unicode map that
+    pypdf decodes consistently on every platform. Opt-in only — Type 42
+    embedding produces a slightly smaller PDF and some pre-existing
+    tests assert on absolute byte sizes.
+    """
+    import matplotlib
+
+    previous = matplotlib.rcParams["pdf.fonttype"]
+    matplotlib.rcParams["pdf.fonttype"] = 42
+    try:
+        yield
+    finally:
+        matplotlib.rcParams["pdf.fonttype"] = previous
+
+
+@pytest.fixture
 def mock_run_directory(tmp_path: Path) -> Path:
     """Create a mock run directory with filter results.
 
@@ -462,7 +484,7 @@ def test_load_run_data_returns_expected_keys_and_shapes(
 
 
 def test_report_command_with_custom_title_appears_in_pdf(
-    tmp_path: Path, build_qa_inputs_dir
+    tmp_path: Path, build_qa_inputs_dir, use_truetype_pdf_fonts
 ) -> None:
     """``--title`` must propagate through to the rendered PDF."""
     title = "Session 2024-10-11"
@@ -495,8 +517,18 @@ def test_report_command_with_custom_title_appears_in_pdf(
         pypdf = None
 
     if pypdf is not None:
+        import re as _re
+
         reader = pypdf.PdfReader(str(pdf_path))
         extracted = "".join(page.extract_text() or "" for page in reader.pages)
+        # Matplotlib on Windows emits text as /uniXXXXXXXX glyph references
+        # that pypdf does not auto-decode to Unicode. Decode them so the
+        # plain substring check works cross-platform.
+        extracted = _re.sub(
+            r"/uni([0-9A-Fa-f]{4,8})",
+            lambda m: chr(int(m.group(1), 16)),
+            extracted,
+        )
         assert title in extracted, (
             f"Title {title!r} not found in extracted PDF text; "
             f"first 500 chars: {extracted[:500]!r}"
@@ -621,3 +653,143 @@ def test_load_run_data_rejects_file_as_run_dir(tmp_path: Path) -> None:
     file_path.write_text("hello")
     with pytest.raises(NotADirectoryError, match="not a directory"):
         load_run_data(file_path)
+
+
+def _build_smooth_output_dir(
+    tmp_path: Path, *, n: int = 80, state_mode: str = "2d_cam_3d_imu"
+) -> tuple[Path, Path, Path]:
+    """Synthesize a filter/smooth output directory plus ground-truth files.
+
+    Builds ``run_dir/{smoothed,filtered}_means.txt`` and their flat
+    covariance siblings under the named ``state_mode``, with a positive-
+    definite covariance series and a smooth circular ground-truth
+    trajectory. Returns the run dir plus paths to the gt position and
+    heading text files.
+    """
+    from trodestrack.models.state_layout import get_layout
+
+    run_dir = tmp_path / "smooth_run"
+    run_dir.mkdir()
+
+    layout = get_layout(state_mode)
+    n_state = layout.n
+    rng = np.random.default_rng(0)
+
+    t_axis = np.linspace(0.0, n / 30.0, n)
+    radius = 0.3
+    angular_velocity = 0.4
+    theta = t_axis * angular_velocity
+    positions_true = np.column_stack([radius * np.cos(theta), radius * np.sin(theta)])
+    headings_true = theta + np.pi / 2
+
+    means = np.zeros((n, n_state))
+    pos_idx = list(layout.pos_idx)
+    vel_idx = list(layout.vel_idx[:2])
+    head_idx = int(layout.heading_idx)  # only 2D layouts are exercised here
+    means[:, pos_idx] = positions_true + rng.standard_normal((n, 2)) * 0.005
+    means[:, vel_idx] = (
+        np.column_stack(
+            [
+                -radius * angular_velocity * np.sin(theta),
+                radius * angular_velocity * np.cos(theta),
+            ]
+        )
+        + rng.standard_normal((n, 2)) * 0.01
+    )
+    means[:, head_idx] = headings_true + rng.standard_normal(n) * 0.05
+
+    # Diagonal covariance avoids any PSD pathology and gives compute_nees
+    # well-defined chi-squared(3) samples on the (x, y, heading) sub-state.
+    cov_diag = np.full(n_state, 1e-3)
+    covs = np.broadcast_to(np.diag(cov_diag), (n, n_state, n_state)).copy()
+
+    np.savetxt(run_dir / "smoothed_means.txt", means)
+    np.savetxt(
+        run_dir / "smoothed_covariances.txt",
+        covs.reshape(n, n_state * n_state),
+    )
+    np.savetxt(run_dir / "filtered_means.txt", means)
+    np.savetxt(
+        run_dir / "filtered_covariances.txt",
+        covs.reshape(n, n_state * n_state),
+    )
+    (run_dir / "metadata.txt").write_text(
+        "trodestrack smooth - test fixture\n"
+        + "=" * 40
+        + "\n\n"
+        + "Filter Configuration (effective values):\n"
+        + f"  State mode: {state_mode}\n"
+    )
+
+    gt_pos_path = tmp_path / "truth_pos.txt"
+    gt_head_path = tmp_path / "truth_head.txt"
+    np.savetxt(gt_pos_path, positions_true)
+    np.savetxt(gt_head_path, headings_true)
+
+    return run_dir, gt_pos_path, gt_head_path
+
+
+def test_report_from_run_synthesizes_qa_inputs_from_smooth_output(
+    tmp_path: Path,
+) -> None:
+    """``trodestrack report --from-run`` must render a PDF directly from
+    a filter/smooth output directory once ground truth is supplied."""
+    run_dir, gt_pos_path, gt_head_path = _build_smooth_output_dir(tmp_path, n=80)
+    pdf_path = tmp_path / "report.pdf"
+
+    with patch(
+        "sys.argv",
+        [
+            "trodestrack",
+            "report",
+            "--from-run",
+            str(run_dir),
+            "--ground-truth-positions",
+            str(gt_pos_path),
+            "--ground-truth-headings",
+            str(gt_head_path),
+            "--pdf",
+            str(pdf_path),
+        ],
+    ):
+        main()
+
+    assert pdf_path.exists(), f"Report PDF was not written to {pdf_path}"
+    assert pdf_path.stat().st_size > 1024, (
+        f"Report PDF is suspiciously small ({pdf_path.stat().st_size} bytes); "
+        "expected a multi-page report > 1 KB."
+    )
+
+
+def test_report_from_run_requires_ground_truth_args(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``--from-run`` without ground-truth flags must exit 1 with a clear error."""
+    run_dir, _, _ = _build_smooth_output_dir(tmp_path, n=80)
+    pdf_path = tmp_path / "report.pdf"
+
+    with (
+        patch(
+            "sys.argv",
+            [
+                "trodestrack",
+                "report",
+                "--from-run",
+                str(run_dir),
+                "--pdf",
+                str(pdf_path),
+            ],
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "--ground-truth-positions" in captured.err, (
+        f"Expected stderr to name the missing flag; got {captured.err!r}"
+    )
+    assert "--ground-truth-headings" in captured.err, (
+        f"Expected stderr to name the missing flag; got {captured.err!r}"
+    )
+    assert not pdf_path.exists()

@@ -32,26 +32,32 @@ Examples:
                      --camera-timestamps t_cam.txt --led1-positions led1.txt \\
                      --output-dir run1/
 
-  # Run online filtering only (faster, lower latency)
-  trodestrack online --imu-timestamps t_imu.txt --imu-measurements U_imu.txt \\
+  # Run forward-only filtering (no smoother lookahead)
+  trodestrack filter --imu-timestamps t_imu.txt --imu-measurements U_imu.txt \\
                      --camera-timestamps t_cam.txt --led1-positions led1.txt \\
                      --output-dir run1/
 
-  # Generate QA report (requires a separately-prepared QA directory containing
+  # Full pipeline: smooth -> report against ground truth
+  trodestrack smooth --config session.yaml --output-dir run1/
+  trodestrack report --from-run run1/ \\
+                     --ground-truth-positions truth_pos.txt \\
+                     --ground-truth-headings truth_head.txt \\
+                     --pdf run1/report.pdf
+
+  # Generate QA report from a separately-prepared QA directory containing
   # ground-truth-aligned timestamps.npy, positions_true.npy, positions_est.npy,
   # velocities_*.npy, headings_*.npy, nees.npy, and state_dim.txt; see
-  # examples/08_qa_report_generation.py and tests/cli/test_report_command.py).
+  # examples/08_qa_report_generation.py and tests/cli/test_report_command.py.
   trodestrack report --run qa_inputs/ --pdf report.pdf
 
   # Generate report with custom title
   trodestrack report --run qa_inputs/ --pdf report.pdf --title "Session 2024-10-11"
 
-Note: ``online`` and ``smooth`` write the raw filter state
+Note: ``filter`` and ``smooth`` write the raw filter state
 (filtered_means.txt, filtered_covariances.txt, marginal_loglik.txt) to
-``--output-dir``. The ``report`` command operates on a different,
-QA-prepared file layout that includes ground truth, so the two stages
-are not directly chained — generate ``report``'s inputs from your own
-analysis pipeline (see qa.metrics.compute_nees and qa.report.generate_qa_report).
+``--output-dir``. Use ``trodestrack report --from-run <dir>`` with
+ground-truth files to bridge directly into the QA pipeline, or prepare
+a ``qa_inputs/`` directory manually for the ``--run`` path.
 
 For more information, visit: https://github.com/edeno/trodestrack
         """,
@@ -72,13 +78,13 @@ For more information, visit: https://github.com/edeno/trodestrack
     )
 
     # Import and register subcommands
-    from trodestrack.cli.online import add_online_parser
+    from trodestrack.cli.filter import add_filter_parser
     from trodestrack.cli.report import add_report_parser
     from trodestrack.cli.smooth import add_smooth_parser
 
     add_report_parser(subparsers)
     add_smooth_parser(subparsers)
-    add_online_parser(subparsers)
+    add_filter_parser(subparsers)
 
     # Parse arguments
     args = parser.parse_args()

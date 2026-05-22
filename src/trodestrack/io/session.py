@@ -553,13 +553,35 @@ def _require_columns(df: pd.DataFrame, columns: object, *, source: str) -> None:
 def _validate_time_vector(t: np.ndarray, name: str) -> None:
     arr = np.asarray(t, dtype=float)
     if arr.ndim != 1:
-        raise ValueError(f"{name} must be a 1D array; got shape {arr.shape}.")
+        raise ValueError(
+            f"{name} must be a 1D array; got shape {arr.shape}. "
+            "Check that the file was read as a single column or that the "
+            "DataFrame column is not nested."
+        )
     if arr.size < 2:
-        raise ValueError(f"{name} must contain at least two samples.")
+        raise ValueError(
+            f"{name} must contain at least two samples (got {arr.size}). "
+            "The filter derives the sample period from np.diff(t)."
+        )
     if not np.all(np.isfinite(arr)):
-        raise ValueError(f"{name} contains non-finite values.")
-    if not np.all(np.diff(arr) > 0):
-        raise ValueError(f"{name} must be strictly increasing.")
+        n_bad = int(np.sum(~np.isfinite(arr)))
+        first_bad = int(np.argmax(~np.isfinite(arr)))
+        raise ValueError(
+            f"{name} contains {n_bad} non-finite value(s); first at index "
+            f"{first_bad}. Drop or interpolate dropped frames before passing "
+            "to the loader."
+        )
+    diffs = np.diff(arr)
+    if not np.all(diffs > 0):
+        first_bad = int(np.argmax(diffs <= 0))
+        raise ValueError(
+            f"{name} must be strictly increasing; first non-increasing step "
+            f"at index {first_bad + 1} (t[{first_bad}]={arr[first_bad]!r}, "
+            f"t[{first_bad + 1}]={arr[first_bad + 1]!r}, "
+            f"dt={diffs[first_bad]!r}). Common causes: duplicate timestamps "
+            "from sample-and-hold expansion, or out-of-order rows from a "
+            "concatenation."
+        )
 
 
 def _convert_imu_to_si(imu_df: pd.DataFrame, config: SessionConfig) -> np.ndarray:

@@ -92,14 +92,14 @@ def test_smooth_help_message():
 
 
 def test_smooth_command_creates_output_directory(
-    synthetic_data_files, temp_output_dir, smooth_online_io_args
+    synthetic_data_files, temp_output_dir, smooth_filter_io_args
 ):
     """Test that smooth command creates output directory structure."""
     output_dir = temp_output_dir / "run1"
     argv = [
         "trodestrack",
         "smooth",
-        *smooth_online_io_args(synthetic_data_files, output_dir),
+        *smooth_filter_io_args(synthetic_data_files, output_dir),
     ]
     with patch("sys.argv", argv):
         main()
@@ -110,14 +110,14 @@ def test_smooth_command_creates_output_directory(
 
 
 def test_smooth_command_saves_required_outputs(
-    synthetic_data_files, temp_output_dir, smooth_online_io_args
+    synthetic_data_files, temp_output_dir, smooth_filter_io_args
 ):
     """Test that smooth command saves all required output files."""
     output_dir = temp_output_dir / "run1"
     argv = [
         "trodestrack",
         "smooth",
-        *smooth_online_io_args(synthetic_data_files, output_dir),
+        *smooth_filter_io_args(synthetic_data_files, output_dir),
     ]
     with patch("sys.argv", argv):
         main()
@@ -139,7 +139,7 @@ def test_smooth_command_saves_required_outputs(
 def test_smooth_command_missing_input_file(temp_output_dir):
     """Test that smooth command handles missing input files gracefully.
 
-    Doesn't reuse ``smooth_online_io_args`` because that helper expects
+    Doesn't reuse ``smooth_filter_io_args`` because that helper expects
     a fully populated input directory; here we deliberately point flags
     at nonexistent paths so the CLI must reject them.
     """
@@ -221,7 +221,7 @@ def ten_second_session(temp_output_dir):
 def test_smooth_command_outputs_are_finite_and_psd(
     ten_second_session,
     temp_output_dir,
-    smooth_online_io_args,
+    smooth_filter_io_args,
     assert_outputs_are_finite_and_psd,
 ):
     """Smoothed means + covariances must stay finite and PSD across a 10 s run.
@@ -235,7 +235,7 @@ def test_smooth_command_outputs_are_finite_and_psd(
     argv = [
         "trodestrack",
         "smooth",
-        *smooth_online_io_args(ten_second_session, output_dir),
+        *smooth_filter_io_args(ten_second_session, output_dir),
     ]
     with patch("sys.argv", argv):
         main()
@@ -247,14 +247,14 @@ def test_smooth_command_outputs_are_finite_and_psd(
 
 
 def test_smooth_command_with_filter_config(
-    synthetic_data_files, temp_output_dir, smooth_online_io_args
+    synthetic_data_files, temp_output_dir, smooth_filter_io_args
 ):
     """Test smooth command with custom filter configuration."""
     output_dir = temp_output_dir / "run1"
     argv = [
         "trodestrack",
         "smooth",
-        *smooth_online_io_args(synthetic_data_files, output_dir),
+        *smooth_filter_io_args(synthetic_data_files, output_dir),
         "--process-noise-pos",
         "0.05",
         "--process-noise-vel",

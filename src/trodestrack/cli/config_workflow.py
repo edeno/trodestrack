@@ -155,7 +155,7 @@ def print_config_session_summary(
 
 
 def save_filter_outputs(run: ConfigFilterRun) -> None:
-    """Write forward-filter output files shared by online and smooth.
+    """Write forward-filter output files shared by filter and smooth.
 
     Writes the legacy text-format files (``filtered_means.txt``,
     ``filtered_covariances.txt``) plus the camera-frame side-data the

@@ -9,7 +9,7 @@ to hand-roll the same nine-file fixture each time. The layout mirrors
 
 The ``assert_outputs_are_finite_and_psd`` fixture is the shared
 finiteness + symmetry + positive-definiteness check that the smooth
-and online command tests both use against ``smoothed_*.txt`` /
+and filter command tests both use against ``smoothed_*.txt`` /
 ``filtered_*.txt`` outputs.
 """
 
@@ -68,7 +68,7 @@ def _build_qa_inputs_dir(tmp_path: Path, n: int = 100) -> Path:
     headings_est = headings_true + rng.standard_normal(n) * np.deg2rad(3)
 
     # state_dim=10 matches the default 2d_cam_3d_imu state used by
-    # the smooth/online commands; load_run_data uses it as the NEES
+    # the smooth/filter commands; load_run_data uses it as the NEES
     # chi-squared df, so a positive integer is the only contract.
     state_dim = 10
     nees = rng.chisquare(df=state_dim, size=n)
@@ -101,7 +101,7 @@ def build_qa_inputs_dir():
 def _assert_outputs_are_finite_and_psd(
     means_path: Path, cov_path: Path, *, rtol: float = 1e-8
 ) -> None:
-    """Shared finiteness + symmetry + PD check for smooth/online outputs.
+    """Shared finiteness + symmetry + PD check for smooth/filter outputs.
 
     Loads the flat covariance file ``(n_cam, state_dim**2)``, reshapes
     to ``(n_cam, state_dim, state_dim)``, then asserts:
@@ -142,12 +142,12 @@ def assert_outputs_are_finite_and_psd():
     return _assert_outputs_are_finite_and_psd
 
 
-def _smooth_online_io_args(input_dir: Path, output_dir: Path) -> list[str]:
-    """Build the standard input/output flag list for ``smooth`` / ``online``.
+def _smooth_filter_io_args(input_dir: Path, output_dir: Path) -> list[str]:
+    """Build the standard input/output flag list for ``smooth`` / ``filter``.
 
     Both subcommands take the same six input flags (IMU timestamps,
     IMU measurements, camera timestamps, two LED position files,
-    camera mask) and a single output-dir flag. The smooth and online
+    camera mask) and a single output-dir flag. The smooth and filter
     tests reproduce this 14-element list verbatim, so factor it out.
     """
     return [
@@ -169,6 +169,6 @@ def _smooth_online_io_args(input_dir: Path, output_dir: Path) -> list[str]:
 
 
 @pytest.fixture
-def smooth_online_io_args():
-    """Expose ``_smooth_online_io_args`` as a callable fixture."""
-    return _smooth_online_io_args
+def smooth_filter_io_args():
+    """Expose ``_smooth_filter_io_args`` as a callable fixture."""
+    return _smooth_filter_io_args

@@ -110,7 +110,10 @@ def load_data_file(
     try:
         data = np.loadtxt(path)
     except Exception as e:
-        print(f"Error loading {name} from {path}: {e}", file=sys.stderr)
+        print(
+            f"Error loading {name} from {path}: {type(e).__name__}: {e}",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     if expected_shape is not None and data.shape != expected_shape:

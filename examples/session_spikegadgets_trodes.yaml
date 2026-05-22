@@ -1,7 +1,7 @@
 # Example YAML config for SpikeGadgets IMU parquet + Trodes dual-LED parquet.
 #
 # Run:
-#   uv run trodestrack online --config examples/session_spikegadgets_trodes.yaml
+#   uv run trodestrack filter --config examples/session_spikegadgets_trodes.yaml
 #   uv run trodestrack smooth --config examples/session_spikegadgets_trodes.yaml
 #
 # Paths are resolved relative to this YAML file. Replace the inputs with your
