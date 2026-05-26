@@ -196,6 +196,74 @@ def test_smoother_determinism():
     assert smoother1.marginal_loglik == smoother2.marginal_loglik
 
 
+def test_full_cli_pipeline_is_deterministic(tmp_path):
+    """Same input files via the CLI surface must produce identical outputs.
+
+    The existing in-process determinism tests cover the filter and smoother
+    APIs. This test exercises the full pipeline — argparse → file load →
+    filter → save — because save/load roundtrips and CLI argument ordering
+    can introduce nondeterminism (float-formatting, hash-seed ordering,
+    parallel write races) that a pure in-process test would not see.
+    """
+    from unittest.mock import patch
+
+    from trodestrack import main
+
+    # Generate one set of input files; reuse them across both CLI runs.
+    cfg = SimpleSimConfig(duration_s=2.0, fs_imu=200.0, fs_cam=30.0)
+    sim = simulate_stationary(config=cfg, seed=42)
+
+    input_dir = tmp_path / "inputs"
+    input_dir.mkdir()
+    np.savetxt(input_dir / "t_imu.txt", sim["t_imu"])
+    np.savetxt(input_dir / "U_imu.txt", sim["U_imu"])
+    np.savetxt(input_dir / "t_cam.txt", sim["t_cam_exp"])
+    np.savetxt(input_dir / "Z_cam_led1.txt", sim["Z_cam_led1"])
+    np.savetxt(input_dir / "Z_cam_led2.txt", sim["Z_cam_led2"])
+    np.savetxt(input_dir / "mask_cam.txt", sim["mask_cam"], fmt="%d")
+
+    def _run(output_dir: Path) -> None:
+        argv = [
+            "trodestrack",
+            "filter",
+            "--imu-timestamps",
+            str(input_dir / "t_imu.txt"),
+            "--imu-measurements",
+            str(input_dir / "U_imu.txt"),
+            "--camera-timestamps",
+            str(input_dir / "t_cam.txt"),
+            "--led1-positions",
+            str(input_dir / "Z_cam_led1.txt"),
+            "--led2-positions",
+            str(input_dir / "Z_cam_led2.txt"),
+            "--camera-mask",
+            str(input_dir / "mask_cam.txt"),
+            "--output-dir",
+            str(output_dir),
+        ]
+        with patch("sys.argv", argv):
+            main()
+
+    out_a = tmp_path / "out_a"
+    out_b = tmp_path / "out_b"
+    _run(out_a)
+    _run(out_b)
+
+    # The two runs should produce identical filtered means, covariances,
+    # and marginal log-likelihood files.
+    for name in (
+        "filtered_means.txt",
+        "filtered_covariances.txt",
+        "marginal_loglik.txt",
+    ):
+        a = (out_a / name).read_bytes()
+        b = (out_b / name).read_bytes()
+        assert a == b, (
+            f"CLI output file {name} differs between two identical runs — "
+            f"pipeline is non-deterministic"
+        )
+
+
 def test_uv_lock_exists():
     """Verify that uv.lock exists for version pinning."""
     # Check from project root
