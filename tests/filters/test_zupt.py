@@ -21,16 +21,82 @@ class TestZUPTDetection:
         config = EKFConfig()
         assert config.enable_zupt is True
 
-    def test_zupt_detection_threshold_configurable(self):
-        """ZUPT velocity threshold should be configurable."""
-        config = EKFConfig(enable_zupt=True, zupt_velocity_threshold=0.08)
-        assert config.enable_zupt is True
-        assert config.zupt_velocity_threshold == 0.08
+    def test_zupt_velocity_threshold_changes_trigger_rate(self):
+        """A higher velocity threshold should let more samples be ZUPT-classified.
 
-    def test_zupt_measurement_noise_configurable(self):
-        """ZUPT measurement noise should be configurable."""
-        config = EKFConfig(enable_zupt=True, zupt_measurement_noise=0.02**2)
-        assert config.zupt_measurement_noise == 0.02**2
+        Tautological "config field round-trips" tests don't catch bugs where the
+        filter ignores the field. Instead, run the filter with a tight vs loose
+        threshold on the same stationary sim and verify the threshold actually
+        gates ZUPT behavior (looser threshold → more ZUPT-induced damping →
+        lower terminal velocity error).
+        """
+        from trodestrack.sim.simple import SimpleSimConfig
+
+        cfg = SimpleSimConfig(duration_s=5.0, fs_imu=400, fs_cam=30)
+        sim = simulate_stationary(
+            config=cfg, position=np.array([0.5, 0.5]), heading=0.0, seed=7
+        )
+
+        def _final_speed(threshold: float) -> float:
+            ekf_cfg = EKFConfig(
+                enable_zupt=True,
+                zupt_velocity_threshold=threshold,
+                zupt_measurement_noise=0.01**2,
+            )
+            result = extended_kalman_filter(
+                ekf_config=ekf_cfg,
+                t_imu=sim["t_imu"],
+                U_imu=sim["U_imu"],
+                t_cam=sim["t_cam_exp"],
+                Z_cam_led1=sim["Z_cam_led1"],
+                Z_cam_led2=sim["Z_cam_led2"],
+                mask_cam=sim["mask_cam"],
+            )
+            vel = np.asarray(result.filtered_means[-1, 2:4])
+            return float(np.linalg.norm(vel))
+
+        speed_tight = _final_speed(threshold=1e-6)  # effectively disables ZUPT
+        speed_loose = _final_speed(threshold=0.10)  # 10 cm/s, ZUPT trips broadly
+
+        assert speed_loose < speed_tight, (
+            f"Looser threshold should produce lower terminal speed via more ZUPT "
+            f"triggers: loose={speed_loose:.4e}, tight={speed_tight:.4e}"
+        )
+
+    def test_zupt_measurement_noise_affects_velocity_damping(self):
+        """Smaller ZUPT measurement noise should damp velocity more aggressively."""
+        from trodestrack.sim.simple import SimpleSimConfig
+
+        cfg = SimpleSimConfig(duration_s=5.0, fs_imu=400, fs_cam=30)
+        sim = simulate_stationary(
+            config=cfg, position=np.array([0.5, 0.5]), heading=0.0, seed=9
+        )
+
+        def _final_speed(noise_var: float) -> float:
+            ekf_cfg = EKFConfig(
+                enable_zupt=True,
+                zupt_velocity_threshold=0.10,
+                zupt_measurement_noise=noise_var,
+            )
+            result = extended_kalman_filter(
+                ekf_config=ekf_cfg,
+                t_imu=sim["t_imu"],
+                U_imu=sim["U_imu"],
+                t_cam=sim["t_cam_exp"],
+                Z_cam_led1=sim["Z_cam_led1"],
+                Z_cam_led2=sim["Z_cam_led2"],
+                mask_cam=sim["mask_cam"],
+            )
+            vel = np.asarray(result.filtered_means[-1, 2:4])
+            return float(np.linalg.norm(vel))
+
+        speed_tight = _final_speed(noise_var=0.001**2)  # trust ZUPT strongly
+        speed_loose = _final_speed(noise_var=1.0**2)  # essentially ignore ZUPT
+
+        assert speed_tight < speed_loose, (
+            f"Tighter ZUPT noise should damp terminal speed more: "
+            f"tight={speed_tight:.4e}, loose={speed_loose:.4e}"
+        )
 
 
 class TestZUPTStationary:
