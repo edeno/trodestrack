@@ -270,3 +270,154 @@ def test_filter_command_with_filter_config(
 
     # Should complete successfully
     assert (output_dir / "filtered_means.txt").exists()
+
+
+# --- CLI error-path coverage -------------------------------------------------
+#
+# The filter command has 482 LoC and very thin error-path coverage. These
+# tests probe the most likely user-visible failure modes that previously
+# would have gone silent or produced opaque tracebacks: NaN in IMU rows,
+# non-monotonic timestamps, mismatched-row inputs, wrong column count,
+# malformed YAML config, and YAML referencing missing input files.
+
+
+@pytest.fixture
+def malformed_data_files(synthetic_data_files):
+    """Re-yields the synthetic_data_files fixture for per-test mutation."""
+    return synthetic_data_files
+
+
+def _capture_filter_error(argv: list[str]) -> tuple[int, str]:
+    """Run the CLI and return (exit_code, captured_stderr)."""
+    import contextlib
+    import io
+
+    err_buf = io.StringIO()
+    code: int | None = None
+    with patch("sys.argv", argv), contextlib.redirect_stderr(err_buf):
+        try:
+            main()
+            code = 0
+        except SystemExit as exc:
+            code = int(exc.code) if isinstance(exc.code, int) else 1
+    assert code is not None
+    return code, err_buf.getvalue()
+
+
+def test_filter_command_rejects_nan_in_imu_measurements(
+    malformed_data_files, temp_output_dir, smooth_filter_io_args
+):
+    """A single NaN row in U_imu would poison every downstream state."""
+    U_imu = np.loadtxt(malformed_data_files / "U_imu.txt")
+    U_imu[42, 0] = np.nan
+    np.savetxt(malformed_data_files / "U_imu.txt", U_imu)
+
+    output_dir = temp_output_dir / "run_nan"
+    argv = [
+        "trodestrack",
+        "filter",
+        *smooth_filter_io_args(malformed_data_files, output_dir),
+    ]
+    code, err = _capture_filter_error(argv)
+    assert code != 0
+    assert "IMU measurements" in err and "non-finite" in err, err
+
+
+def test_filter_command_rejects_nonmonotonic_imu_timestamps(
+    malformed_data_files, temp_output_dir, smooth_filter_io_args
+):
+    """Non-monotonic timestamps would produce negative dt and NaN outputs."""
+    t_imu = np.loadtxt(malformed_data_files / "t_imu.txt")
+    t_imu[100] = t_imu[99] - 0.01  # decreasing step
+    np.savetxt(malformed_data_files / "t_imu.txt", t_imu)
+
+    output_dir = temp_output_dir / "run_nonmonotonic"
+    argv = [
+        "trodestrack",
+        "filter",
+        *smooth_filter_io_args(malformed_data_files, output_dir),
+    ]
+    code, err = _capture_filter_error(argv)
+    assert code != 0
+    assert "IMU timestamps" in err and "strictly increasing" in err, err
+
+
+def test_filter_command_rejects_wrong_imu_column_count(
+    malformed_data_files, temp_output_dir, smooth_filter_io_args
+):
+    """U_imu must have 3, 4, or 6 columns; anything else is a clear error."""
+    U_imu = np.loadtxt(malformed_data_files / "U_imu.txt")
+    # Strip to 2 columns (invalid layout).
+    np.savetxt(malformed_data_files / "U_imu.txt", U_imu[:, :2])
+
+    output_dir = temp_output_dir / "run_bad_cols"
+    argv = [
+        "trodestrack",
+        "filter",
+        *smooth_filter_io_args(malformed_data_files, output_dir),
+    ]
+    code, err = _capture_filter_error(argv)
+    assert code != 0
+    assert "IMU measurements" in err, err
+
+
+def test_filter_command_rejects_mismatched_led1_shape(
+    malformed_data_files, temp_output_dir, smooth_filter_io_args
+):
+    """LED1 row count must equal n_cam; mismatch is a clear error."""
+    led1 = np.loadtxt(malformed_data_files / "Z_cam_led1.txt")
+    # Drop the last 5 rows so shape no longer matches t_cam.
+    np.savetxt(malformed_data_files / "Z_cam_led1.txt", led1[:-5])
+
+    output_dir = temp_output_dir / "run_led1_mismatch"
+    argv = [
+        "trodestrack",
+        "filter",
+        *smooth_filter_io_args(malformed_data_files, output_dir),
+    ]
+    code, err = _capture_filter_error(argv)
+    assert code != 0
+    assert "LED1" in err and "shape" in err, err
+
+
+def test_filter_command_rejects_malformed_yaml_config(tmp_path: Path) -> None:
+    """A YAML config file with broken syntax must produce a clear error."""
+    config_path = tmp_path / "broken.yaml"
+    config_path.write_text("inputs: [unterminated\n  - foo\n")  # invalid YAML
+
+    output_dir = tmp_path / "out"
+    argv = [
+        "trodestrack",
+        "filter",
+        "--config",
+        str(config_path),
+        "--output-dir",
+        str(output_dir),
+    ]
+    code, err = _capture_filter_error(argv)
+    assert code != 0, err
+
+
+def test_filter_command_rejects_yaml_with_missing_input_file(tmp_path: Path) -> None:
+    """A YAML config referencing a nonexistent input file must error clearly."""
+    output_dir = tmp_path / "out"
+    config_path = tmp_path / "missing.yaml"
+    config_path.write_text(
+        f"""
+inputs:
+  format: prepared_arrays
+  imu_timestamps: {tmp_path.name}/does_not_exist_t_imu.txt
+  imu_measurements: {tmp_path.name}/does_not_exist_U_imu.txt
+  camera_timestamps: {tmp_path.name}/does_not_exist_t_cam.txt
+  led1_positions: {tmp_path.name}/does_not_exist_led1.txt
+  led2_positions: {tmp_path.name}/does_not_exist_led2.txt
+filter:
+  state_mode: vision_only
+outputs:
+  output_dir: {output_dir.name}
+""".lstrip()
+    )
+
+    argv = ["trodestrack", "filter", "--config", str(config_path)]
+    code, err = _capture_filter_error(argv)
+    assert code != 0, err
