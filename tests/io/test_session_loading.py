@@ -1305,3 +1305,121 @@ def test_add_imu_calibration_diagnostics_still_captures_verdict_errors(monkeypat
     assert "calibration verdict failed" in str(
         result.diagnostics["imu_calibration_error"]
     )
+
+
+# End-to-end smoke test: realistic-scale SpikeGadgets parquet input → load_session → filter.
+#
+# Existing SpikeGadgets loader tests use 3-5-sample inputs and assert shape only.
+# This test exercises ~5 seconds at SpikeGadgets-native rates (104 Hz IMU,
+# 30 Hz cam) end-to-end so silent breakage in the loader → filter integration
+# (sample-hold, time alignment, SI conversion, LED identity, IMU projection)
+# shows up. Catches regressions that pure unit tests miss because the unit
+# inputs are too small to expose any time-axis logic.
+
+
+@pytest.mark.slow
+def test_spikegadgets_loader_filter_smoke_on_realistic_scale_input(tmp_path):
+    """SpikeGadgets parquets → load_session → EKF should run to finite outputs."""
+    from trodestrack.models.ekf import extended_kalman_filter
+
+    rng = np.random.default_rng(0)
+    duration_s = 5.0
+    fs_imu = 104.0
+    fs_cam = 30.0
+    n_imu = int(duration_s * fs_imu)
+    n_cam = int(duration_s * fs_cam)
+    t_start_unix = 1000.0
+
+    t_imu_unix = t_start_unix + np.arange(n_imu) / fs_imu
+    t_cam_unix = t_start_unix + np.arange(n_cam) / fs_cam
+
+    # Stationary scenario: small white-noise IMU, zero specific force on x/y,
+    # gravity-only on z. Counts are arbitrary "raw" units that ``meters_per_pixel``
+    # / IMU SI conversion turn into SI.
+    gyro_z = rng.standard_normal(n_imu) * 0.5  # noisy, mean ~0
+    accel_x = rng.standard_normal(n_imu) * 5.0
+    accel_y = rng.standard_normal(n_imu) * 5.0
+    accel_z = 1000.0 + rng.standard_normal(n_imu) * 5.0  # ~1 g equivalent in counts
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    imu_path = data_dir / "imu.parquet"
+    pd.DataFrame(
+        {
+            "time": t_imu_unix,
+            "Headstage_GyroX": rng.standard_normal(n_imu) * 0.5,
+            "Headstage_GyroY": rng.standard_normal(n_imu) * 0.5,
+            "Headstage_GyroZ": gyro_z,
+            "Headstage_AccelX": accel_x,
+            "Headstage_AccelY": accel_y,
+            "Headstage_AccelZ": accel_z,
+        }
+    ).to_parquet(imu_path)
+
+    # LEDs ~4 cm apart (canonical led_distance default), centred at (0.5, 0.5) m
+    # in pixel coords (the loader converts via meters_per_pixel=0.01).
+    led1_x_px = 47.5 + rng.standard_normal(n_cam) * 0.1
+    led1_y_px = 50.0 + rng.standard_normal(n_cam) * 0.1
+    led2_x_px = 52.5 + rng.standard_normal(n_cam) * 0.1
+    led2_y_px = 50.0 + rng.standard_normal(n_cam) * 0.1
+    position_path = data_dir / "position.parquet"
+    pd.DataFrame(
+        {
+            "time": t_cam_unix,
+            "xloc": led1_x_px,
+            "yloc": led1_y_px,
+            "xloc2": led2_x_px,
+            "yloc2": led2_y_px,
+        }
+    ).to_parquet(position_path)
+
+    config_path = tmp_path / "session.yaml"
+    config_path.write_text(
+        """
+inputs:
+  format: spikegadgets_trodes
+  imu_file: data/imu.parquet
+  position_file: data/position.parquet
+imu:
+  run_calibration: false
+camera:
+  meters_per_pixel: 0.01
+filter:
+  state_mode: 2d_cam_3d_imu
+outputs:
+  run_safety_checks: false
+""".lstrip()
+    )
+
+    session = load_session(load_session_config(config_path))
+
+    # Loader output sanity checks at realistic scale.
+    assert session.t_imu.shape[0] >= 100, session.t_imu.shape
+    assert session.U_imu.shape == (session.t_imu.shape[0], 4)
+    assert session.Z_cam_led1.shape == (session.t_cam.shape[0], 2)
+    assert np.all(np.isfinite(session.t_imu))
+    assert np.all(np.isfinite(session.t_cam))
+    assert np.all(np.isfinite(session.U_imu))
+    assert session.t_imu[0] >= 0.0  # loader rebases timestamps from t_start
+
+    # Filter end-to-end on the loaded session — catches loader/filter
+    # interface regressions (channel projection, time alignment, mask shape).
+    cfg = EKFConfig(state_mode="2d_cam_3d_imu")
+    result = extended_kalman_filter(
+        ekf_config=cfg,
+        t_imu=session.t_imu,
+        U_imu=session.U_imu,
+        t_cam=session.t_cam,
+        Z_cam_led1=session.Z_cam_led1,
+        Z_cam_led2=session.Z_cam_led2,
+        mask_cam=session.mask_cam,
+    )
+    assert np.all(np.isfinite(np.asarray(result.filtered_means))), (
+        "Filter produced non-finite means on SpikeGadgets-loaded session"
+    )
+    assert np.all(np.isfinite(np.asarray(result.filtered_covariances)))
+    # Diagnostics should populate the loader block.
+    assert "loader" in session.diagnostics
+    loader_diag = session.diagnostics["loader"]
+    assert loader_diag["format"] == "spikegadgets_trodes"
+    assert loader_diag["imu_unique_samples"] >= 1
