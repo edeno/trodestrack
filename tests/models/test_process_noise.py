@@ -1,5 +1,6 @@
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 from trodestrack.models.ekf import EKFConfig
 
@@ -351,3 +352,148 @@ def test_assemble_Q_10d_freezes_all_biases_during_blackout():
     for idx in (6, 7, 8, 9):
         assert jnp.allclose(Q[idx, :], 0.0, atol=1e-10)
         assert jnp.allclose(Q[:, idx], 0.0, atol=1e-10)
+
+
+# Property-based regression guards for assemble_Q.
+#
+# These tests replace the deleted regression/test_q_refactor_parity.py and
+# regression/test_smoother_q_refactor_parity.py — both pinned to a 2024
+# snapshot of assemble_Q via a hand-rolled reference. Property tests
+# (symmetry, PSD, linear scaling in dt, monotonic in noise density) make
+# regression guarantees that survive future refactors without snapshot drift.
+
+
+def _assert_symmetric_psd(Q: jnp.ndarray, atol: float = 1e-6) -> None:
+    """assemble_Q output must be symmetric and positive semidefinite."""
+    assert jnp.allclose(Q, Q.T, atol=atol), "Q is not symmetric"
+    eigvals = jnp.linalg.eigvalsh(Q)
+    assert jnp.all(eigvals >= -atol), (
+        f"Q is not PSD (min eigval {float(eigvals.min())})"
+    )
+
+
+@pytest.mark.parametrize(
+    "n, state_mode",
+    [
+        (8, "2d_full"),
+        (10, "2d_cam_3d_imu"),
+    ],
+)
+@pytest.mark.parametrize("has_vision", [True, False])
+def test_assemble_Q_symmetric_and_psd(
+    n: int, state_mode: str, has_vision: bool
+) -> None:
+    from trodestrack.models.process_noise import assemble_Q
+
+    cfg = EKFConfig(state_mode=state_mode)
+    Q = assemble_Q(
+        cfg, theta=0.7, dt=0.005, n=n, has_vision=has_vision, dtype=jnp.float32
+    )
+    assert Q.shape == (n, n)
+    _assert_symmetric_psd(Q)
+
+
+def test_assemble_Q_scales_linearly_with_dt_when_imu_noise_off() -> None:
+    """With IMU input noise mapping off (G=0 contribution), Q ∝ dt.
+
+    The base diagonal process diffusion Q_proc is constructed as
+    cfg.process_noise_* * dt, so doubling dt doubles Q_proc exactly. The
+    G·Qu·G^T term scales differently (G has dt factors and Qu has 1/dt),
+    so we suppress it via tiny gyro/accel densities to isolate the
+    process diffusion term.
+    """
+    from trodestrack.models.process_noise import assemble_Q
+
+    cfg = EKFConfig(
+        adaptive_q_during_dropout=False,
+        reduce_imu_noise_during_blackout=False,
+        freeze_bias_during_blackout=False,
+        imu_gyro_noise_density=1e-12,
+        imu_accel_noise_density=1e-12,
+    )
+    dt1 = 0.005
+    dt2 = 0.010
+
+    Q1 = assemble_Q(cfg, theta=0.0, dt=dt1, n=8, has_vision=True, dtype=jnp.float32)
+    Q2 = assemble_Q(cfg, theta=0.0, dt=dt2, n=8, has_vision=True, dtype=jnp.float32)
+
+    # Q2 ≈ 2 * Q1 on the diagonal positions/biases (process diffusion path)
+    process_diag_indices = (0, 1, 2, 3, 4, 5, 6, 7)
+    for idx in process_diag_indices:
+        ratio = float(Q2[idx, idx]) / float(Q1[idx, idx])
+        assert abs(ratio - 2.0) < 1e-4, (
+            f"Q[{idx},{idx}] should scale linearly with dt: ratio={ratio:.6f}"
+        )
+
+
+@pytest.mark.parametrize("which", ["gyro", "accel"])
+def test_assemble_Q_monotonic_in_imu_noise_density(which: str) -> None:
+    """Doubling an IMU noise density must not decrease the corresponding Q block."""
+    from trodestrack.models.process_noise import assemble_Q
+
+    kwargs_low = {"imu_gyro_noise_density": 1e-3, "imu_accel_noise_density": 1e-3}
+    kwargs_high = dict(kwargs_low)
+    if which == "gyro":
+        kwargs_high["imu_gyro_noise_density"] = 1e-2
+    else:
+        kwargs_high["imu_accel_noise_density"] = 1e-2
+
+    cfg_low = EKFConfig(
+        adaptive_q_during_dropout=False,
+        reduce_imu_noise_during_blackout=False,
+        freeze_bias_during_blackout=False,
+        **kwargs_low,
+    )
+    cfg_high = EKFConfig(
+        adaptive_q_during_dropout=False,
+        reduce_imu_noise_during_blackout=False,
+        freeze_bias_during_blackout=False,
+        **kwargs_high,
+    )
+
+    Q_low = assemble_Q(
+        cfg_low, theta=0.5, dt=0.01, n=8, has_vision=True, dtype=jnp.float32
+    )
+    Q_high = assemble_Q(
+        cfg_high, theta=0.5, dt=0.01, n=8, has_vision=True, dtype=jnp.float32
+    )
+
+    diag_low = jnp.diag(Q_low)
+    diag_high = jnp.diag(Q_high)
+    # Q_high must be ≥ Q_low element-wise on the diagonal (more noise → more uncertainty).
+    assert bool(jnp.all(diag_high >= diag_low - 1e-8)), (
+        "Doubling noise density must not decrease diagonal Q"
+    )
+    # And at least one element strictly increased (otherwise the density param was ignored).
+    assert bool(jnp.any(diag_high > diag_low + 1e-8)), (
+        f"No diagonal Q element increased when {which} noise density doubled"
+    )
+
+
+def test_assemble_Q_rotation_invariant_for_diagonal_process_terms() -> None:
+    """Pure diagonal process noise must not depend on heading theta.
+
+    The process diffusion Q_proc has no rotation; only G(theta) varies with
+    theta. With IMU input noise suppressed, Q should be identical across
+    theta values.
+    """
+    from trodestrack.models.process_noise import assemble_Q
+
+    cfg = EKFConfig(
+        adaptive_q_during_dropout=False,
+        reduce_imu_noise_during_blackout=False,
+        freeze_bias_during_blackout=False,
+        imu_gyro_noise_density=1e-12,
+        imu_accel_noise_density=1e-12,
+    )
+
+    Q0 = assemble_Q(cfg, theta=0.0, dt=0.01, n=8, has_vision=True, dtype=jnp.float32)
+    Q_pi4 = assemble_Q(
+        cfg, theta=jnp.pi / 4, dt=0.01, n=8, has_vision=True, dtype=jnp.float32
+    )
+    Q_pi = assemble_Q(
+        cfg, theta=jnp.pi, dt=0.01, n=8, has_vision=True, dtype=jnp.float32
+    )
+
+    assert jnp.allclose(Q0, Q_pi4, atol=1e-8)
+    assert jnp.allclose(Q0, Q_pi, atol=1e-8)
