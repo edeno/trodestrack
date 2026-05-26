@@ -1,11 +1,7 @@
-"""Tests for QA report generation.
-
-Following TDD: These tests are written BEFORE implementation to define the API.
-"""
+"""Tests for QA report generation."""
 
 from __future__ import annotations
 
-import re
 import tempfile
 from pathlib import Path
 
@@ -17,71 +13,30 @@ from trodestrack.qa.report import (
     TARGET_HEADING_MAE_DEG,
     TARGET_POSITION_RMSE_M,
     TARGET_VELOCITY_RMSE_MS,
+    _create_summary_page,
     _create_trajectory_plot,
     generate_qa_report,
 )
 from trodestrack.viz.styles import COLORS
 
-_UNI_GLYPH = re.compile(r"/uni([0-9A-Fa-f]{4,8})")
 
+def _summary_verdict_text(fig: plt.Figure) -> str:
+    """Return the verdict banner text from a summary-page Figure.
 
-@pytest.fixture
-def use_truetype_pdf_fonts():
-    """Force matplotlib to embed TrueType (Type 42) fonts in test PDFs.
-
-    The default ``pdf.fonttype = 3`` (Type 3) gives matplotlib a custom
-    per-document font subset with a non-standard ``/Encoding`` table —
-    pypdf returns the raw glyph indices (e.g. ``/uniHHHHHHHH`` references
-    or simply ASCII shifted by the font's ``/FirstChar`` offset) rather
-    than the original Unicode. Type 42 fonts ship a proper Unicode map
-    that pypdf decodes correctly on every platform.
-
-    Opt-in (not autouse) because Type 42 embedding produces a slightly
-    smaller PDF and some pre-existing tests assert on absolute byte
-    sizes; only the tests that extract PDF text need this fixture.
+    The verdict is set via ``fig.text(...)`` at fixed coordinates (0.5, 0.93)
+    above the title and renders the PASS/FAIL block. Inspecting ``fig.texts``
+    directly avoids matplotlib's PDF Type-3 font / glyph-encoding fragility
+    that previously required ``pypdf`` and a ``/uniXXXXXXXX`` glyph decoder
+    just to recover the same string.
     """
-    import matplotlib
-
-    previous = matplotlib.rcParams["pdf.fonttype"]
-    matplotlib.rcParams["pdf.fonttype"] = 42
-    try:
-        yield
-    finally:
-        matplotlib.rcParams["pdf.fonttype"] = previous
-
-
-def _decode_pdf_glyphs(text: str) -> str:
-    """Decode ``/uniXXXXXXXX`` matplotlib glyph references back to Unicode.
-
-    Matplotlib on Windows (and any platform when using non-default fonts)
-    encodes characters as ``/uniHHHHHHHH`` glyph references rather than
-    direct Unicode in the PDF text stream. pypdf returns those references
-    verbatim, so substring searches like ``"RESULT: PASS" in extracted``
-    fail even though the text is structurally present. Kept as a defense
-    in depth alongside the ``pdf.fonttype = 42`` fixture above.
-    """
-    return _UNI_GLYPH.sub(lambda m: chr(int(m.group(1), 16)), text)
-
-
-def _extract_pdf_text(pdf_path: Path) -> str:
-    """Return PDF text content, preferring pypdf and falling back to raw bytes.
-
-    Matplotlib PDFs typically keep text streams uncompressed, so a raw-byte
-    search works in practice when pypdf isn't installed. The fallback mirrors
-    the pattern used in ``tests/cli/test_report_command.py``.
-
-    The ``/uniXXXXXXXX`` glyph references emitted by matplotlib on Windows
-    are decoded back to Unicode so callers can do plain substring searches.
-    """
-    try:
-        import pypdf  # type: ignore[import-not-found]
-    except ImportError:
-        pypdf = None  # type: ignore[assignment]
-    if pypdf is not None:
-        reader = pypdf.PdfReader(str(pdf_path))
-        raw = "".join(page.extract_text() or "" for page in reader.pages)
-        return _decode_pdf_glyphs(raw)
-    return pdf_path.read_bytes().decode("latin-1", errors="replace")
+    for txt in fig.texts:
+        body = txt.get_text()
+        if body.startswith("RESULT:"):
+            return body
+    raise AssertionError(
+        "Summary figure did not contain a 'RESULT:' verdict banner; "
+        f"found texts: {[t.get_text() for t in fig.texts]}"
+    )
 
 
 class TestGenerateQAReport:
@@ -383,94 +338,84 @@ class TestGenerateQAReport:
 
 
 class TestSummaryVerdictBanner:
-    """The summary page leads with a PASS/FAIL verdict against project targets."""
+    """The summary page leads with a PASS/FAIL verdict against project targets.
+
+    Verdict tests inspect the Figure directly instead of round-tripping
+    through PDF. The previous approach needed a ``/uniXXXXXXXX`` glyph
+    decoder and a ``pdf.fonttype = 42`` opt-in fixture to survive
+    matplotlib's Type-3 font subsetting — both eliminated by reading
+    ``fig.texts`` from the in-memory summary page.
+    """
 
     @staticmethod
-    def _render(
-        pdf_path: Path,
-        *,
-        pos_offset: float,
-        vel_offset: float,
-        heading_offset_rad: float,
-    ) -> None:
-        """Generate a report with deterministic per-metric error magnitudes."""
-        np.random.seed(0)
-        N = 200
-        t = np.linspace(0.0, 10.0, N)
-        pos_true = np.column_stack([t * 0.1, np.zeros(N)])
-        # Constant offset in x => RMSE == abs(offset) exactly.
-        pos_est = pos_true + np.array([pos_offset, 0.0])
-        vel_true = np.column_stack([np.ones(N) * 0.1, np.zeros(N)])
-        vel_est = vel_true + np.array([vel_offset, 0.0])
-        heading_true = np.zeros(N)
-        heading_est = np.full(N, heading_offset_rad)
-        nees = np.random.chisquare(df=8, size=N)
-        generate_qa_report(
-            pdf_path=pdf_path,
-            t=t,
-            positions_true=pos_true,
-            positions_est=pos_est,
-            velocities_true=vel_true,
-            velocities_est=vel_est,
-            headings_true=heading_true,
-            headings_est=heading_est,
-            nees=nees,
-            state_dim=8,
+    def _make_summary(
+        *, pos_rmse: float, vel_rmse: float, heading_mae_rad: float
+    ) -> plt.Figure:
+        nees_stats = {
+            "mean": 8.0,
+            "std": 1.0,
+            "min": 4.0,
+            "max": 14.0,
+            "chi2_lower": 2.18,
+            "chi2_upper": 17.5,
+            "pct_in_bounds": 95.0,
+            "confidence": 0.95,
+        }
+        return _create_summary_page(
+            title="Verdict-banner test",
+            pos_rmse=pos_rmse,
+            vel_rmse=vel_rmse,
+            heading_mae=heading_mae_rad,
+            heading_rmse=heading_mae_rad,
+            nees_stats=nees_stats,
+            nis_stats=None,
+            config=None,
         )
 
-    def test_qa_report_summary_page_shows_pass_for_passing_metrics(
-        self, use_truetype_pdf_fonts
-    ) -> None:
-        """All metrics inside their targets should render a PASS banner."""
-        # Use half the target as the per-metric offset so each RMSE/MAE is
-        # comfortably under the threshold (and the test follows if the
-        # constants move).
-        pos_offset = TARGET_POSITION_RMSE_M / 2.0
-        vel_offset = TARGET_VELOCITY_RMSE_MS / 2.0
-        heading_offset_rad = float(np.deg2rad(TARGET_HEADING_MAE_DEG / 2.0))
-
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
-            pdf_path = Path(f.name)
-
+    def test_summary_page_shows_pass_when_all_metrics_inside_targets(self) -> None:
+        """All metrics inside their targets => PASS banner."""
+        fig = self._make_summary(
+            pos_rmse=TARGET_POSITION_RMSE_M / 2.0,
+            vel_rmse=TARGET_VELOCITY_RMSE_MS / 2.0,
+            heading_mae_rad=float(np.deg2rad(TARGET_HEADING_MAE_DEG / 2.0)),
+        )
         try:
-            self._render(
-                pdf_path,
-                pos_offset=pos_offset,
-                vel_offset=vel_offset,
-                heading_offset_rad=heading_offset_rad,
-            )
-            text = _extract_pdf_text(pdf_path)
-            assert "RESULT: PASS" in text, text[:500]
+            verdict = _summary_verdict_text(fig)
+            assert verdict == "RESULT: PASS", verdict
         finally:
-            if pdf_path.exists():
-                pdf_path.unlink()
+            plt.close(fig)
 
-    def test_qa_report_summary_page_shows_fail_with_failing_metric_names(
-        self, use_truetype_pdf_fonts
-    ) -> None:
-        """A failing position metric must produce a FAIL banner naming position."""
-        # Position offset clearly exceeds the target; velocity and heading stay
-        # inside theirs so the verdict cites only "position".
-        pos_offset = TARGET_POSITION_RMSE_M * 5.0
-        vel_offset = TARGET_VELOCITY_RMSE_MS / 2.0
-        heading_offset_rad = float(np.deg2rad(TARGET_HEADING_MAE_DEG / 2.0))
-
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
-            pdf_path = Path(f.name)
-
+    def test_summary_page_shows_fail_naming_position(self) -> None:
+        """A failing position metric => FAIL banner naming only 'position'."""
+        fig = self._make_summary(
+            pos_rmse=TARGET_POSITION_RMSE_M * 5.0,
+            vel_rmse=TARGET_VELOCITY_RMSE_MS / 2.0,
+            heading_mae_rad=float(np.deg2rad(TARGET_HEADING_MAE_DEG / 2.0)),
+        )
         try:
-            self._render(
-                pdf_path,
-                pos_offset=pos_offset,
-                vel_offset=vel_offset,
-                heading_offset_rad=heading_offset_rad,
-            )
-            text = _extract_pdf_text(pdf_path)
-            assert "RESULT: FAIL" in text, text[:500]
-            assert "position" in text, text[:500]
+            verdict = _summary_verdict_text(fig)
+            assert verdict.startswith("RESULT: FAIL"), verdict
+            assert "position" in verdict, verdict
+            assert "velocity" not in verdict, verdict
+            assert "heading" not in verdict, verdict
         finally:
-            if pdf_path.exists():
-                pdf_path.unlink()
+            plt.close(fig)
+
+    def test_summary_page_shows_fail_naming_all_failing_metrics(self) -> None:
+        """Multiple failing metrics => FAIL banner names each of them."""
+        fig = self._make_summary(
+            pos_rmse=TARGET_POSITION_RMSE_M * 5.0,
+            vel_rmse=TARGET_VELOCITY_RMSE_MS * 5.0,
+            heading_mae_rad=float(np.deg2rad(TARGET_HEADING_MAE_DEG * 5.0)),
+        )
+        try:
+            verdict = _summary_verdict_text(fig)
+            assert verdict.startswith("RESULT: FAIL"), verdict
+            assert "position" in verdict, verdict
+            assert "velocity" in verdict, verdict
+            assert "heading" in verdict, verdict
+        finally:
+            plt.close(fig)
 
 
 class TestTrajectoryMarkers:
