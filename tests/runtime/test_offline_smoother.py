@@ -382,3 +382,117 @@ class TestSigmaPointSmoother:
             rtol=1e-10,
             atol=1e-12,
         )
+
+
+# Strict-improvement smoother regression guards.
+#
+# The stationary improvement tests above use a low-noise sim where the
+# filter is already near-optimal and a buggy smoother could degrade RMSE
+# by 100-150 microns and still pass. The tests below run on circular
+# motion where any correct smoother MUST strictly improve position RMSE
+# by a large margin — locally observed ~36% improvement, so a 5% floor
+# leaves room for upstream noise tweaks but catches 10-20% regressions.
+
+
+@pytest.fixture(scope="module")
+def circular_sim_for_smoother() -> SimOut:
+    """Circular motion with default sim noise.
+
+    Default cam_noise_std=2 mm with circular motion gives the smoother
+    enough information to strictly improve over the forward filter,
+    while the filter itself remains well-behaved (no divergence). This
+    is the regime where smoother regressions show up clearly.
+    """
+    return simulate_circular(seed=42)
+
+
+@pytest.mark.slow
+def test_rts_smoother_strictly_improves_circular(
+    circular_sim_for_smoother: SimOut,
+) -> None:
+    """RTS smoother must strictly reduce position RMSE on circular motion."""
+    sim = circular_sim_for_smoother
+    cfg = EKFConfig()
+    filter_result = extended_kalman_filter(
+        ekf_config=cfg,
+        t_imu=sim["t_imu"],
+        U_imu=sim["U_imu"],
+        t_cam=sim["t_cam_exp"],
+        Z_cam_led1=sim["Z_cam_led1"],
+        Z_cam_led2=sim["Z_cam_led2"],
+        mask_cam=sim["mask_cam"],
+    )
+    smoother_result = rts_smoother(
+        filter_result=filter_result,
+        ekf_config=cfg,
+        t_imu=sim["t_imu"],
+        U_imu=sim["U_imu"],
+        t_cam=sim["t_cam_exp"],
+    )
+
+    cam_times = sim["t_cam_exp"]
+    truth_x = np.interp(cam_times, sim["t_imu"], sim["X_truth"][:, 0])
+    truth_y = np.interp(cam_times, sim["t_imu"], sim["X_truth"][:, 1])
+    truth_pos = np.column_stack([truth_x, truth_y])
+
+    rmse_filter = compute_position_rmse(
+        np.array(filter_result.filtered_means[:, :2]), truth_pos
+    )
+    rmse_smoother = compute_position_rmse(
+        np.array(smoother_result.smoothed_means[:, :2]), truth_pos
+    )
+
+    assert rmse_smoother < rmse_filter, (
+        f"Smoother RMSE {rmse_smoother:.6f} must be strictly < "
+        f"filter RMSE {rmse_filter:.6f} on circular sim"
+    )
+    assert rmse_smoother < rmse_filter * 0.95, (
+        f"Smoother improvement < 5% on circular sim: "
+        f"filter={rmse_filter:.6f}, smoother={rmse_smoother:.6f}"
+    )
+
+
+@pytest.mark.slow
+def test_sigma_point_smoother_strictly_improves_circular(
+    circular_sim_for_smoother: SimOut,
+) -> None:
+    """Sigma-point smoother must strictly reduce position RMSE on circular motion."""
+    sim = circular_sim_for_smoother
+    cfg = UKFConfig()
+    filter_result = unscented_kalman_filter(
+        ukf_config=cfg,
+        t_imu=sim["t_imu"],
+        U_imu=sim["U_imu"],
+        t_cam=sim["t_cam_exp"],
+        Z_cam_led1=sim["Z_cam_led1"],
+        Z_cam_led2=sim["Z_cam_led2"],
+        mask_cam=sim["mask_cam"],
+    )
+    smoother_result = sigma_point_smoother(
+        filter_result=filter_result,
+        ukf_config=cfg,
+        t_imu=sim["t_imu"],
+        U_imu=sim["U_imu"],
+        t_cam=sim["t_cam_exp"],
+    )
+
+    cam_times = sim["t_cam_exp"]
+    truth_x = np.interp(cam_times, sim["t_imu"], sim["X_truth"][:, 0])
+    truth_y = np.interp(cam_times, sim["t_imu"], sim["X_truth"][:, 1])
+    truth_pos = np.column_stack([truth_x, truth_y])
+
+    rmse_filter = compute_position_rmse(
+        np.array(filter_result.filtered_means[:, :2]), truth_pos
+    )
+    rmse_smoother = compute_position_rmse(
+        np.array(smoother_result.smoothed_means[:, :2]), truth_pos
+    )
+
+    assert rmse_smoother < rmse_filter, (
+        f"Smoother RMSE {rmse_smoother:.6f} must be strictly < "
+        f"filter RMSE {rmse_filter:.6f} on circular sim"
+    )
+    assert rmse_smoother < rmse_filter * 0.95, (
+        f"Smoother improvement < 5% on circular sim: "
+        f"filter={rmse_filter:.6f}, smoother={rmse_smoother:.6f}"
+    )
