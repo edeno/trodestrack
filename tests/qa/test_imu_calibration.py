@@ -4,12 +4,19 @@ import numpy as np
 import pytest
 
 from trodestrack.qa.imu_calibration import (
+    AxisSignDiagnostic,
+    ImuCalibrationReport,
+    LagFit,
     camera_body_acceleration,
+    camera_midpoint,
     compute_led_heading,
     diagnose_accel_axis_signs,
     estimate_accel_gravity_body,
     estimate_gyro_bias,
     estimate_stationary_mask,
+    finite_difference,
+    format_imu_calibration_report,
+    interpolate_columns,
     lagged_linear_fit,
     run_imu_calibration_diagnostics,
     smooth_time_series,
@@ -373,3 +380,147 @@ def test_smooth_time_series_rejects_wrong_shape_mask() -> None:
     # Clean (n_time,) bool / 0-1-int still works.
     smooth_time_series(t, values, sigma_s=0.1, valid_mask=np.ones(5, dtype=bool))
     smooth_time_series(t, values, sigma_s=0.1, valid_mask=np.ones(5, dtype=np.int32))
+
+
+# Direct tests for previously transitive helpers.
+#
+# These functions are reachable only via larger integration calls in the
+# existing tests, which means a sign error, off-by-one, or shape bug would
+# be hidden by downstream filtering. Test them directly.
+
+
+class TestFiniteDifference:
+    def test_derivative_of_linear_function_is_constant_slope(self) -> None:
+        t = np.linspace(0.0, 1.0, 101)
+        slope = 3.7
+        values = slope * t + 1.2
+        deriv = finite_difference(t, values)
+        np.testing.assert_allclose(deriv, slope, rtol=1e-10, atol=1e-10)
+
+    def test_derivative_of_quadratic_function_matches_analytic(self) -> None:
+        t = np.linspace(0.0, 2.0, 201)
+        values = t**2  # d/dt = 2t
+        deriv = finite_difference(t, values)
+        # np.gradient with edge_order=2 is exact on quadratics for uniform spacing.
+        np.testing.assert_allclose(deriv, 2.0 * t, rtol=1e-9, atol=1e-9)
+
+    def test_handles_2d_values_column_wise(self) -> None:
+        t = np.linspace(0.0, 1.0, 51)
+        # Column 0: slope 2.0; column 1: slope -5.0
+        values = np.column_stack([2.0 * t, -5.0 * t + 7.0])
+        deriv = finite_difference(t, values)
+        np.testing.assert_allclose(deriv[:, 0], 2.0, atol=1e-10)
+        np.testing.assert_allclose(deriv[:, 1], -5.0, atol=1e-10)
+
+    def test_rejects_nonincreasing_timestamps(self) -> None:
+        t = np.array([0.0, 0.1, 0.1, 0.3])
+        values = np.zeros_like(t)
+        with pytest.raises(ValueError, match="strictly increasing"):
+            finite_difference(t, values)
+
+    def test_rejects_nonfinite_timestamps(self) -> None:
+        t = np.array([0.0, 0.1, np.inf, 0.3])
+        values = np.zeros_like(t)
+        with pytest.raises(ValueError, match="non-finite"):
+            finite_difference(t, values)
+
+
+class TestCameraMidpoint:
+    def test_midpoint_of_symmetric_leds(self) -> None:
+        led1 = np.array([[0.0, 0.0], [1.0, 1.0]])
+        led2 = np.array([[2.0, 0.0], [3.0, 3.0]])
+        mid = camera_midpoint(led1, led2)
+        np.testing.assert_allclose(mid, np.array([[1.0, 0.0], [2.0, 2.0]]))
+
+    def test_rejects_mismatched_shapes(self) -> None:
+        led1 = np.zeros((10, 2))
+        led2 = np.zeros((10, 3))
+        with pytest.raises(ValueError):
+            camera_midpoint(led1, led2)
+
+    def test_does_not_broadcast_scalar_led_silently(self) -> None:
+        """A 1D led2 would silently broadcast across time without the guard."""
+        led1 = np.zeros((5, 2))
+        led2 = np.array([0.5, 0.5])  # shape (2,) not (5, 2)
+        with pytest.raises(ValueError):
+            camera_midpoint(led1, led2)
+
+
+class TestInterpolateColumns:
+    def test_1d_interp_matches_numpy_interp(self) -> None:
+        t_src = np.array([0.0, 1.0, 2.0])
+        values = np.array([10.0, 20.0, 30.0])
+        t_dst = np.array([0.5, 1.5])
+        result = interpolate_columns(t_src, values, t_dst)
+        np.testing.assert_allclose(result, np.array([15.0, 25.0]))
+
+    def test_2d_interp_handles_each_column_independently(self) -> None:
+        t_src = np.array([0.0, 1.0, 2.0])
+        values = np.column_stack([[10.0, 20.0, 30.0], [100.0, 50.0, 0.0]])
+        t_dst = np.array([0.5, 1.5])
+        result = interpolate_columns(t_src, values, t_dst)
+        assert result.shape == (2, 2)
+        np.testing.assert_allclose(result[:, 0], np.array([15.0, 25.0]))
+        np.testing.assert_allclose(result[:, 1], np.array([75.0, 25.0]))
+
+    def test_rejects_3d_input(self) -> None:
+        t_src = np.array([0.0, 1.0])
+        values = np.zeros((2, 2, 2))
+        t_dst = np.array([0.5])
+        with pytest.raises(ValueError, match="1D or 2D"):
+            interpolate_columns(t_src, values, t_dst)
+
+
+class TestFormatImuCalibrationReport:
+    def _make_report(self) -> ImuCalibrationReport:
+        return ImuCalibrationReport(
+            gyro_bias_z=0.012345,
+            accel_gravity_body=np.array([0.1, 0.2, -9.81]),
+            stationary_fraction=0.482,
+            stationary_samples=1234,
+            yaw_rate_fit=LagFit(
+                lag_s=-0.020,
+                correlation=0.987,
+                slope=1.05,
+                intercept=0.001,
+                r2=0.974,
+                n_samples=600,
+            ),
+            accel_axis_diagnostics=(
+                AxisSignDiagnostic(
+                    target_axis="forward",
+                    imu_axis="x",
+                    sign=+1,
+                    lag_s=0.005,
+                    correlation=0.91,
+                    n_samples=500,
+                ),
+                AxisSignDiagnostic(
+                    target_axis="lateral",
+                    imu_axis="y",
+                    sign=-1,
+                    lag_s=-0.010,
+                    correlation=0.85,
+                    n_samples=500,
+                ),
+            ),
+        )
+
+    def test_includes_all_top_level_fields(self) -> None:
+        text = format_imu_calibration_report(self._make_report())
+        assert "gyro_bias_z: 0.012345" in text
+        assert "accel_gravity_body: [0.100000, 0.200000, -9.810000]" in text
+        assert "stationary_samples: 1234" in text
+        assert "stationary_fraction: 0.482" in text
+
+    def test_renders_signed_axis_diagnostics(self) -> None:
+        text = format_imu_calibration_report(self._make_report())
+        # Positive sign rendered as "+", negative as "-".
+        assert "forward: +imu_x" in text
+        assert "lateral: -imu_y" in text
+
+    def test_returns_single_string_block(self) -> None:
+        text = format_imu_calibration_report(self._make_report())
+        assert isinstance(text, str)
+        # No accidental list-of-lines return.
+        assert "\n" in text
